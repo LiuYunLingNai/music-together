@@ -8,7 +8,9 @@ import pLimit from 'p-limit'
 import ncmApi from '@neteasecloudmusicapienhanced/api'
 import * as kugouAuth from './kugouAuthService.js'
 import * as tencentAuth from './tencentAuthService.js'
+import { parseCookieString } from '../utils/cookieUtils.js'
 import { logger } from '../utils/logger.js'
+import crypto from 'node:crypto'
 
 /** AMLL LyricLine 格式（与 @applemusic-like-lyrics/core 一致，避免引入 client 依赖） */
 interface AmllLyricLine {
@@ -281,10 +283,80 @@ class MusicProvider {
   // ---------------------------------------------------------------------------
 
   /**
+   * Search Kugou using the native mobile API.
+   * The legacy Meting API returns empty results, so we use the direct API.
+   */
+  private async searchKugou(keyword: string, limit = 20, page = 1): Promise<Track[]> {
+    if (!keyword.trim()) return []
+
+    try {
+      const url = `http://mobilecdn.kugou.com/api/v3/search/song?api_ver=1&area_code=1&correct=1&pagesize=${limit}&plat=2&tag=1&sver=5&showtype=10&page=${page}&keyword=${encodeURIComponent(keyword)}&version=8990`
+
+      const response = await withTimeout(fetch(url).then((res) => res.json()))
+
+      if (!response || response.errcode !== 0 || !response.data?.info) {
+        logger.warn(`Kugou search failed: errcode=${response?.errcode}`)
+        return []
+      }
+
+      const songList = response.data.info as Array<Record<string, any>>
+
+      const tracks: Track[] = []
+      for (const song of songList) {
+        const hash = String(song.hash || '')
+        if (!hash) continue
+
+        const filename = String(song.filename || song.songname || '')
+        const parts = filename.split(' - ')
+        let trackName = filename
+        const artists: string[] = []
+        if (parts.length >= 2) {
+          for (const a of parts[0].split(/[、,，&]/)) {
+            const trimmed = a.trim()
+            if (trimmed) artists.push(trimmed)
+          }
+          trackName = parts.slice(1).join(' - ')
+        }
+
+        let duration = Number(song.duration ?? song.timelen ?? 0)
+        if (duration > 100000) duration = Math.floor(duration / 1000)
+
+        const imgurl = String(song.imgurl || '').replace('{size}', '300')
+
+        const privilege = Number(song.privilege ?? song.pay_type ?? 0)
+        const isVip = (privilege & 8) !== 0 || privilege > 0
+
+        tracks.push({
+          id: nanoid(),
+          source: 'kugou',
+          sourceId: hash,
+          title: trackName || 'Unknown',
+          artist: artists.length > 0 ? artists : ['Unknown'],
+          album: String(song.album_name || ''),
+          duration,
+          cover: imgurl,
+          urlId: hash,
+          lyricId: hash,
+          picId: hash,
+          vip: isVip,
+        })
+      }
+
+      this.registerTracks(tracks)
+
+      logger.info(`Search "${keyword}" on kugou: ${tracks.length} results`)
+      return tracks
+    } catch (error) {
+      logger.error('Kugou search failed:', error)
+      return []
+    }
+  }
+
+  /**
    * Search Tencent (QQ 音乐) using the new Desktop API.
    * The legacy Meting API returns empty results, so we use the direct API.
    */
-  private async searchTencent(keyword: string, limit = 20, page = 1): Promise<Track[]> {
+  private async searchTencent(keyword: string, limit = 20, page = 1, cookie?: string | null): Promise<Track[]> {
     // Early Exit: empty keyword
     if (!keyword.trim()) return []
 
@@ -309,14 +381,19 @@ class MusicProvider {
         },
       }
 
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Referer: 'https://y.qq.com',
+        'User-Agent': 'QQ%E9%9F%B3%E4%B9%90/73222',
+      }
+      if (cookie) {
+        headers['Cookie'] = cookie
+      }
+
       const response = await withTimeout(
         fetch(url, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Referer: 'https://y.qq.com',
-            'User-Agent': 'QQ%E9%9F%B3%E4%B9%90/73222',
-          },
+          headers,
           body: JSON.stringify(payload),
         }).then((res) => res.json() as Promise<TencentSearchResponse>),
       )
@@ -372,7 +449,7 @@ class MusicProvider {
   /**
    * Search for albums. Returns a list of Playlist objects.
    */
-  async searchAlbum(source: MusicSource, keyword: string, limit = 20, page = 1): Promise<import('@music-together/shared').Playlist[]> {
+  async searchAlbum(source: MusicSource, keyword: string, limit = 20, page = 1, cookie?: string | null): Promise<import('@music-together/shared').Playlist[]> {
     if (!keyword.trim()) return []
 
     try {
@@ -387,14 +464,19 @@ class MusicProvider {
           },
         }
 
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          Referer: 'https://y.qq.com',
+          'User-Agent': 'QQ%E9%9F%B3%E4%B9%90/73222',
+        }
+        if (cookie) {
+          headers['Cookie'] = cookie
+        }
+
         const response = await withTimeout(
           fetch(url, {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Referer: 'https://y.qq.com',
-              'User-Agent': 'QQ%E9%9F%B3%E4%B9%90/73222',
-            },
+            headers,
             body: JSON.stringify(payload),
           }).then((res) => res.json())
         )
@@ -466,7 +548,7 @@ class MusicProvider {
   /**
    * Search for playlists. Returns a list of Playlist objects.
    */
-  async searchPlaylist(source: MusicSource, keyword: string, limit = 20, page = 1): Promise<import('@music-together/shared').Playlist[]> {
+  async searchPlaylist(source: MusicSource, keyword: string, limit = 20, page = 1, cookie?: string | null): Promise<import('@music-together/shared').Playlist[]> {
     if (!keyword.trim()) return []
 
     try {
@@ -481,14 +563,19 @@ class MusicProvider {
           },
         }
 
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          Referer: 'https://y.qq.com',
+          'User-Agent': 'QQ%E9%9F%B3%E4%B9%90/73222',
+        }
+        if (cookie) {
+          headers['Cookie'] = cookie
+        }
+
         const response = await withTimeout(
           fetch(url, {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Referer: 'https://y.qq.com',
-              'User-Agent': 'QQ%E9%9F%B3%E4%B9%90/73222',
-            },
+            headers,
             body: JSON.stringify(payload),
           }).then((res) => res.json())
         )
@@ -560,7 +647,7 @@ class MusicProvider {
     }
   }
 
-  async search(source: MusicSource, keyword: string, limit = 20, page = 1): Promise<Track[]> {
+  async search(source: MusicSource, keyword: string, limit = 20, page = 1, cookie?: string | null): Promise<Track[]> {
     const cacheKey = `${source}:${keyword}:${limit}:${page}`
 
     // Check reference index
@@ -579,8 +666,17 @@ class MusicProvider {
     try {
       // QQ 音乐使用新版搜索 API (Meting API 已失效)
       if (source === 'tencent') {
-        const tracks = await this.searchTencent(keyword, limit, page)
-        // Update search index (cacheKey already defined above)
+        const tracks = await this.searchTencent(keyword, limit, page, cookie)
+        this.searchIndex.set(cacheKey, {
+          source,
+          ids: tracks.map((t) => t.sourceId),
+        })
+        return tracks
+      }
+
+      // 酷狗使用原生搜索 API (Meting API 已失效)
+      if (source === 'kugou') {
+        const tracks = await this.searchKugou(keyword, limit, page)
         this.searchIndex.set(cacheKey, {
           source,
           ids: tracks.map((t) => t.sourceId),
@@ -632,8 +728,203 @@ class MusicProvider {
   }
 
   // ---------------------------------------------------------------------------
-  // Public API — Stream URL, Lyric, Cover (unchanged from original)
-  // ---------------------------------------------------------------------------
+// Public API — Stream URL, Lyric, Cover (unchanged from original)
+// ---------------------------------------------------------------------------
+
+  private static readonly KUGOU_WEB_SIGNATURE_SALT = 'NVPh5oo715z5DIWAeQlhMDsWXXQV4hwt'
+
+  private static kugouWebSignature(params: Record<string, string>): string {
+    const sorted = Object.keys(params)
+      .map((k) => `${k}=${params[k]}`)
+      .sort()
+      .join('')
+    return crypto
+      .createHash('md5')
+      .update(MusicProvider.KUGOU_WEB_SIGNATURE_SALT + sorted + MusicProvider.KUGOU_WEB_SIGNATURE_SALT)
+      .digest('hex')
+  }
+
+  private static buildKugouSonginfoUrl(params: Record<string, string>): string {
+    const sig = MusicProvider.kugouWebSignature(params)
+    const qs = Object.entries(params)
+      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+      .join('&')
+    return `https://wwwapi.kugou.com/play/songinfo?${qs}&signature=${sig}`
+  }
+
+  private async getKugouStreamUrl(hash: string, bitrate: number, cookie?: string): Promise<string | null> {
+    const cookieObj = cookie ? parseCookieString(cookie) : {}
+    const token = cookieObj['token'] || ''
+    const userid = cookieObj['userid'] || ''
+
+    const hasValidAuth = !!token && !!userid
+
+    if (!hasValidAuth) {
+      logger.warn('Kugou URL: no valid VIP cookie, VIP songs will fail')
+    }
+
+    const mid = cookieObj['mid'] || cookieObj['kg_mid'] || crypto.createHash('md5').update(hash).digest('hex')
+    const uuid = cookieObj['uuid'] || mid
+    const dfid = cookieObj['dfid'] || cookieObj['kg_dfid'] || ''
+
+    const timeStr = String(Date.now())
+
+    // Step 1: Get encode_album_audio_id from hash
+    const params1: Record<string, string> = {
+      srcappid: '2919',
+      clientver: '20000',
+      clienttime: timeStr,
+      mid,
+      uuid,
+      dfid,
+      appid: '1014',
+      platid: '4',
+      hash,
+      token,
+      userid,
+    }
+
+    const headers: Record<string, string> = {
+      'User-Agent': 'iPhone-8990-searchSong',
+      'UNI-UserAgent': 'iOS11.4-Phone8990-1009-0-WiFi',
+    }
+
+    try {
+      const url1 = MusicProvider.buildKugouSonginfoUrl(params1)
+      const raw1 = await withTimeout<Record<string, unknown> | string>(
+        fetch(url1, { headers }).then(async (res) => {
+          const text = await res.text()
+          try { return JSON.parse(text) as Record<string, unknown> } catch { return text }
+        }),
+        10_000,
+      )
+      if (!raw1) {
+        logger.warn('Kugou URL step1: timeout fetching songinfo')
+        return this.getKugouStreamUrlLegacy(hash, bitrate)
+      }
+
+      const data1 = raw1 as Record<string, any>
+      const encodeAlbumAudioId = data1?.data?.encode_album_audio_id
+      if (!encodeAlbumAudioId) {
+        logger.warn('Kugou URL step1: no encode_album_audio_id in response', data1?.err_code)
+        return this.getKugouStreamUrlLegacy(hash, bitrate)
+      }
+
+      // Step 2: Get play URL using encode_album_audio_id
+      const timeStr2 = String(Date.now())
+      const params2: Record<string, string> = {
+        srcappid: '2919',
+        clientver: '20000',
+        clienttime: timeStr2,
+        mid,
+        uuid,
+        dfid,
+        appid: '1014',
+        platid: '4',
+        encode_album_audio_id: String(encodeAlbumAudioId),
+        token,
+        userid,
+      }
+
+      const url2 = MusicProvider.buildKugouSonginfoUrl(params2)
+      const raw2 = await withTimeout<Record<string, unknown> | string>(
+        fetch(url2, { headers }).then(async (res) => {
+          const text = await res.text()
+          try { return JSON.parse(text) as Record<string, unknown> } catch { return text }
+        }),
+        10_000,
+      )
+      if (!raw2) {
+        logger.warn('Kugou URL step2: timeout fetching play URL')
+        return this.getKugouStreamUrlLegacy(hash, bitrate)
+      }
+
+      const data2 = raw2 as Record<string, any>
+      const playData = data2?.data
+      if (!playData) {
+        logger.warn('Kugou URL step2: no play data', data2?.err_code)
+        return this.getKugouStreamUrlLegacy(hash, bitrate)
+      }
+
+      const playUrl = playData.play_url || playData.play_backup_url || ''
+      if (playUrl) {
+        const url = String(playUrl).startsWith('http://')
+          ? String(playUrl).replace(/^http:\/\//, 'https://')
+          : String(playUrl)
+        logger.info(`Kugou native URL resolved: ${url.substring(0, 80)}`)
+        return url
+      }
+
+      // Fallback: try legacy path
+      logger.warn('Kugou URL step2: no play_url in response')
+      return this.getKugouStreamUrlLegacy(hash, bitrate)
+    } catch (err) {
+      logger.error('Kugou native URL error:', err)
+      return this.getKugouStreamUrlLegacy(hash, bitrate)
+    }
+  }
+
+  private async getKugouStreamUrlLegacy(hash: string, bitrate: number): Promise<string | null> {
+    try {
+      const body = {
+        relate: 1,
+        userid: '0',
+        vip: 0,
+        appid: 1000,
+        token: '',
+        behavior: 'download',
+        area_code: '1',
+        clientver: '8990',
+        resource: [{ id: 0, type: 'audio', hash }],
+      }
+
+      const res = await withTimeout(
+        fetch('http://media.store.kugou.com/v1/get_res_privilege', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }).then((r) => r.json()),
+        8_000,
+      )
+
+      if (!res) return null
+
+      const resourceList = (res as any)?.data?.[0]?.relate_goods
+      if (!Array.isArray(resourceList)) return null
+
+      // Find the best bitrate match
+      let bestItem: any = null
+      for (const item of resourceList) {
+        if (item.info?.bitrate && item.info.bitrate <= bitrate && (!bestItem || item.info.bitrate > bestItem.info.bitrate)) {
+          bestItem = item
+        }
+      }
+
+      if (!bestItem) return null
+
+      // Get play URL from trackercdn
+      const key = crypto.createHash('md5').update(bestItem.hash + 'kgcloudv2').digest('hex')
+      const cdnUrl = `http://trackercdn.kugou.com/i/v2/?hash=${bestItem.hash}&key=${key}&pid=3&behavior=play&cmd=25&version=8990`
+
+      const cdnRes = await withTimeout(fetch(cdnUrl).then((r) => r.json()), 8_000)
+      if (!cdnRes || cdnRes.status !== 2) {
+        logger.warn('Kugou legacy CDN: no URL (status=' + cdnRes?.status + ')')
+        return null
+      }
+
+      const url = Array.isArray(cdnRes.url) ? cdnRes.url[0] : cdnRes.url
+      if (!url) return null
+
+      const urlStr = String(url).startsWith('http://')
+        ? String(url).replace(/^http:\/\//, 'https://')
+        : String(url)
+      logger.info(`Kugou legacy URL resolved: ${urlStr.substring(0, 80)}`)
+      return urlStr
+    } catch (err) {
+      logger.error('Kugou legacy URL error:', err)
+      return null
+    }
+  }
 
   /**
    * Get stream URL for a track. Optionally inject a cookie for VIP access.
@@ -653,6 +944,18 @@ class MusicProvider {
     }
 
     try {
+      // Kugou: use native API that properly handles VIP authentication
+      if (source === 'kugou') {
+        const url = await this.getKugouStreamUrl(urlId, bitrate, cookie)
+        if (url) {
+          if (!cookie) {
+            this.streamUrlCache.set(`${source}:${urlId}:${bitrate}`, url)
+          }
+          return url
+        }
+        return null
+      }
+
       let meting: MetingInstance
       if (cookie) {
         // Fresh instance with cookie — don't pollute the shared one

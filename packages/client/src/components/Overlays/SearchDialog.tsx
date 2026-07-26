@@ -47,6 +47,7 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
   const sourceContainerRef = useRef<HTMLDivElement>(null)
   const [pillStyle, setPillStyle] = useState({ left: 0, width: 0 })
   const queue = useRoomStore((s) => s.room?.queue ?? EMPTY_QUEUE)
+  const roomId = useRoomStore((s) => s.room?.id)
   const queueKeys = useMemo(() => new Set(queue.map(trackKey)), [queue])
   const { socket } = useSocketContext()
 
@@ -62,7 +63,7 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
     loadMoreTracks,
   } = usePlaylist()
 
-  const { results, loading, loadingMore, hasMore, hasSearched, search, loadMore, resetState } = useSearch(source, searchType)
+  const { results, loading, loadingMore, hasMore, hasSearched, search, loadMore, resetState } = useSearch(source, searchType, roomId)
 
   // Auto re-search when source or type changes
   const prevSourceRef = useRef(source)

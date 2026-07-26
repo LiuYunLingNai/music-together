@@ -118,6 +118,7 @@ export const searchQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(LIMITS.SEARCH_PAGE_SIZE_MAX).default(20),
   page: z.coerce.number().int().min(1).max(LIMITS.SEARCH_PAGE_MAX).default(1),
   type: z.enum(['song', 'album', 'playlist']).optional().default('song'),
+  roomId: z.string().min(1).max(10).optional(),
 })
 
 export const urlQuerySchema = z.object({

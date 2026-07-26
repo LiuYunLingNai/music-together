@@ -2,7 +2,7 @@ import { useSocketContext } from '@/providers/SocketProvider'
 import { useRoomStore } from '@/stores/roomStore'
 import { storage } from '@/lib/storage'
 import { ERROR_CODE, EVENTS } from '@music-together/shared'
-import type { AudioQuality, RoomAutoFallbackEvent, RoomState, User, UserRole } from '@music-together/shared'
+import type { AudioQuality, MusicSource, RoomAutoFallbackEvent, RoomState, User, UserRole } from '@music-together/shared'
 import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -80,7 +80,13 @@ export function useRoomState() {
       store.updateRoom({ users: updatedUsers })
     }
 
-    const sourceLabel = (source: 'netease' | 'tencent') => (source === 'netease' ? '网易云' : 'QQ音乐')
+    const sourceLabel = (source: MusicSource) => {
+      switch (source) {
+        case 'netease': return '网易云'
+        case 'tencent': return 'QQ音乐'
+        case 'kugou': return '酷狗音乐'
+      }
+    }
 
     const onAutoFallback = (data: RoomAutoFallbackEvent) => {
       const id = `auto-fallback:${data.attemptId}`

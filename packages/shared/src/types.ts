@@ -30,8 +30,8 @@ export interface RoomAutoFallbackEvent {
   /** Correlates trying/success/failed toasts */
   attemptId: string
   status: AutoFallbackStatus
-  fromSource: Exclude<MusicSource, 'kugou'>
-  toSource: Exclude<MusicSource, 'kugou'>
+  fromSource: MusicSource
+  toSource: MusicSource
   trackTitle: string
   reasonType?: AutoFallbackReasonType
   /** Safe, short detail suitable for UI (no URLs/cookies/stack traces). */

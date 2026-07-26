@@ -41,15 +41,27 @@ function validated<T>(
 router.get(
   '/search',
   validated(searchQuerySchema, 'Search', async (data, _req, res) => {
-    const { source, keyword, limit: pageSize, page: pageNum, type } = data
+    const { source, keyword, limit: pageSize, page: pageNum, type, roomId } = data
+
+    let cookie: string | null = null
+    if (roomId) {
+      const identityUserId = _req.identityUserId
+      if (identityUserId) {
+        const room = roomRepo.get(roomId)
+        if (room && room.users.some((u) => u.id === identityUserId)) {
+          cookie = authService.getUserCookie(identityUserId, source, roomId)
+        }
+      }
+    }
+
     if (type === 'album') {
-      const albums = await musicProvider.searchAlbum(source, keyword, pageSize, pageNum)
+      const albums = await musicProvider.searchAlbum(source, keyword, pageSize, pageNum, cookie)
       res.json({ tracks: albums, page: pageNum, hasMore: albums.length >= pageSize })
     } else if (type === 'playlist') {
-      const playlists = await musicProvider.searchPlaylist(source, keyword, pageSize, pageNum)
+      const playlists = await musicProvider.searchPlaylist(source, keyword, pageSize, pageNum, cookie)
       res.json({ tracks: playlists, page: pageNum, hasMore: playlists.length >= pageSize })
     } else {
-      const tracks = await musicProvider.search(source, keyword, pageSize, pageNum)
+      const tracks = await musicProvider.search(source, keyword, pageSize, pageNum, cookie)
       res.json({ tracks, page: pageNum, hasMore: tracks.length >= pageSize })
     }
   }),

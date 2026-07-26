@@ -156,7 +156,7 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
         // -------------------------------------------------------------------
         if (
           config.autoFallback.enabled &&
-          (resolved.source === 'netease' || resolved.source === 'tencent') &&
+          (resolved.source === 'netease' || resolved.source === 'tencent' || resolved.source === 'kugou') &&
           canAutoFallback(roomId, resolved.id)
         ) {
           // Prevent repeated fallback attempts for this queue item

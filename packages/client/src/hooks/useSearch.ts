@@ -14,6 +14,7 @@ type SearchResult = Track | Playlist
 export function useSearch(
   source: MusicSource,
   type: 'song' | 'album' | 'playlist' = 'song',
+  roomId?: string,
 ) {
   const [results, setResults] = useState<SearchResult[]>([])
   const [loading, setLoading] = useState(false)
@@ -42,8 +43,16 @@ export function useSearch(
       signal: AbortSignal,
       searchType: 'song' | 'album' | 'playlist'
     ): Promise<{ tracks: SearchResult[]; hasMore: boolean }> => {
+      const params = new URLSearchParams({
+        source: searchSource,
+        keyword: searchKeyword,
+        limit: String(PAGE_SIZE),
+        page: String(searchPage),
+        type: searchType,
+      })
+      if (roomId) params.set('roomId', roomId)
       const res = await fetch(
-        `${SERVER_URL}/api/music/search?source=${searchSource}&keyword=${encodeURIComponent(searchKeyword)}&limit=${PAGE_SIZE}&page=${searchPage}&type=${searchType}`,
+        `${SERVER_URL}/api/music/search?${params.toString()}`,
         { signal, credentials: 'include' },
       )
       if (!res.ok) throw new Error('Search failed')
@@ -51,7 +60,7 @@ export function useSearch(
       const tracks = data.tracks || []
       return { tracks, hasMore: data.hasMore ?? tracks.length >= PAGE_SIZE }
     },
-    [],
+    [roomId],
   )
 
   const search = useCallback(
