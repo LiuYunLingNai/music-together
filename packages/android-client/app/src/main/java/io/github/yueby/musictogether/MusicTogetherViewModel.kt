@@ -658,7 +658,13 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
 
             if (_state.value.room?.currentTrack?.id != track.id) return@launch
             val message = error ?: if (lines.isEmpty()) "暂无歌词" else null
-            AppLogger.info("Lyrics", "loaded track=${track.id} source=$source lines=${lines.size} error=${message.orEmpty()}")
+            AppLogger.info(
+                "Lyrics",
+                "loaded track=${track.id} source=$source lines=${lines.size} " +
+                    "interludes=${lines.count { it.isInterlude }} " +
+                    "firstMs=${lines.firstOrNull()?.startTimeMs ?: -1} " +
+                    "lastMs=${lines.lastOrNull()?.endTimeMs ?: -1} error=${message.orEmpty()}",
+            )
             _state.value = _state.value.copy(
                 lyrics = LyricsState(
                     trackId = track.id,

@@ -40,8 +40,8 @@ class LyricsParserTest {
             <?xml version="1.0" encoding="UTF-8"?>
             <tt xmlns="http://www.w3.org/ns/ttml">
               <body><div>
-                <p begin="00:00:26.650" end="00:00:30.976"><span>第一句</span></p>
-                <p begin="00:00:33.020" end="00:00:36.403"><span>第二句</span></p>
+                <p begin="00:26.650" end="00:30.976"><span>第一句</span></p>
+                <p begin="00:33.020" end="00:36.403"><span>第二句</span></p>
               </div></body>
             </tt>
         """.trimIndent()

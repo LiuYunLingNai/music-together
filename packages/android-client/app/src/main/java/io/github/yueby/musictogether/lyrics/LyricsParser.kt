@@ -245,10 +245,10 @@ object LyricsParser {
         if (value.endsWith("ms")) return value.removeSuffix("ms").toDoubleOrNull()?.toLong() ?: 0
         if (value.endsWith("s")) return ((value.removeSuffix("s").toDoubleOrNull() ?: 0.0) * 1000).toLong()
         val parts = value.split(':')
-        if (parts.size != 3) return 0
-        val hours = parts[0].toDoubleOrNull() ?: 0.0
-        val minutes = parts[1].toDoubleOrNull() ?: 0.0
-        val seconds = parts[2].toDoubleOrNull() ?: 0.0
+        if (parts.size !in 2..3) return 0
+        val hours = if (parts.size == 3) parts[0].toDoubleOrNull() ?: return 0 else 0.0
+        val minutes = parts[parts.size - 2].toDoubleOrNull() ?: return 0
+        val seconds = parts.last().toDoubleOrNull() ?: return 0
         return ((hours * 3600 + minutes * 60 + seconds) * 1000).toLong()
     }
 
