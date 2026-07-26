@@ -88,6 +88,7 @@ data class LyricLine(
     val endTimeMs: Long,
     val isBackground: Boolean = false,
     val isDuet: Boolean = false,
+    val isInterlude: Boolean = false,
 ) {
     val text: String get() = words.joinToString("") { it.text }
 }

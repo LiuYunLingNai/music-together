@@ -26,6 +26,7 @@ object Events {
     const val PLAYER_SET_MODE = "player:set_mode"
 
     const val QUEUE_ADD = "queue:add"
+    const val QUEUE_INSERT_AFTER_CURRENT = "queue:insert_after_current"
     const val QUEUE_REMOVE = "queue:remove"
     const val QUEUE_CLEAR = "queue:clear"
     const val QUEUE_REORDER = "queue:reorder"

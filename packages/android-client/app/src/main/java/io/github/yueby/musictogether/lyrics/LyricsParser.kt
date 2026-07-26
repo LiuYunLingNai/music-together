@@ -13,17 +13,20 @@ import kotlin.math.abs
 
 object LyricsParser {
     private const val TTM_NS = "http://www.w3.org/ns/ttml#metadata"
+    private const val INTERLUDE_MIN_GAP_MS = 2_000L
+
+    private data class LrcEntry(val timeMs: Long, val text: String)
 
     fun parseServerResponse(data: JSONObject): Pair<List<LyricLine>, String> {
         val translation = data.optString("tlyric")
         val roman = data.optString("romalrc")
         val wordByWord = data.optJSONArray("wordByWord")?.let(::parseWordByWord).orEmpty()
         if (wordByWord.isNotEmpty()) {
-            return mergeAuxiliary(wordByWord, translation, roman) to "wordByWord"
+            return addInterludes(mergeAuxiliary(wordByWord, translation, roman)) to "wordByWord"
         }
         val yrc = parseYrc(data.optString("yrc"))
         if (yrc.isNotEmpty()) {
-            return mergeAuxiliary(yrc, translation, roman) to "yrc"
+            return addInterludes(mergeAuxiliary(yrc, translation, roman)) to "yrc"
         }
         return mergeLrc(data.optString("lyric"), translation, roman) to "lrc"
     }
@@ -101,7 +104,7 @@ object LyricsParser {
                 )
             }
         }
-        return result.sortedWith(compareBy<LyricLine> { it.startTimeMs }.thenBy { it.isBackground })
+        return addInterludes(result)
     }
 
     private fun parseWordContainer(element: Element, fallbackStart: Long, fallbackEnd: Long): List<LyricWord> {
@@ -165,20 +168,22 @@ object LyricsParser {
     }
 
     private fun mergeLrc(original: String, translated: String, roman: String): List<LyricLine> {
-        val source = parseLrc(original)
+        val timeline = parseLrcTimeline(original)
+        val source = timeline.filter { it.text.isNotBlank() }
         if (source.isEmpty()) return emptyList()
         val translationMap = parseLrcMap(translated)
         val romanMap = parseLrcMap(roman)
-        return source.mapIndexed { index, (time, text) ->
-            val end = source.getOrNull(index + 1)?.first ?: time + 5_000
+        val lines = source.map { entry ->
+            val end = timeline.firstOrNull { it.timeMs > entry.timeMs }?.timeMs ?: entry.timeMs + 5_000
             LyricLine(
-                words = listOf(LyricWord(text, time, end)),
-                translatedLyric = nearest(translationMap, time),
-                romanLyric = nearest(romanMap, time),
-                startTimeMs = time,
+                words = listOf(LyricWord(entry.text, entry.timeMs, end)),
+                translatedLyric = nearest(translationMap, entry.timeMs),
+                romanLyric = nearest(romanMap, entry.timeMs),
+                startTimeMs = entry.timeMs,
                 endTimeMs = end,
             )
         }
+        return addInterludes(lines)
     }
 
     private fun mergeAuxiliary(lines: List<LyricLine>, translated: String, roman: String): List<LyricLine> {
@@ -192,7 +197,7 @@ object LyricsParser {
         }
     }
 
-    private fun parseLrc(value: String): List<Pair<Long, String>> {
+    private fun parseLrcTimeline(value: String): List<LrcEntry> {
         val regex = Regex("\\[(\\d{1,3}):(\\d{2})(?:\\.(\\d{1,3}))?](.*)")
         return value.lineSequence().mapNotNull { line ->
             val match = regex.find(line) ?: return@mapNotNull null
@@ -200,11 +205,37 @@ object LyricsParser {
             val seconds = match.groupValues[2].toLongOrNull() ?: return@mapNotNull null
             val fraction = match.groupValues[3].padEnd(3, '0').take(3).toLongOrNull() ?: 0L
             val text = match.groupValues[4].trim()
-            if (text.isBlank()) null else ((minutes * 60 + seconds) * 1000 + fraction) to text
-        }.sortedBy { it.first }.toList()
+            LrcEntry((minutes * 60 + seconds) * 1000 + fraction, text)
+        }.sortedBy { it.timeMs }.toList()
     }
 
-    private fun parseLrcMap(value: String): List<Pair<Long, String>> = parseLrc(value)
+    private fun parseLrcMap(value: String): List<Pair<Long, String>> =
+        parseLrcTimeline(value).filter { it.text.isNotBlank() }.map { it.timeMs to it.text }
+
+    private fun addInterludes(lines: List<LyricLine>): List<LyricLine> {
+        val sorted = lines
+            .filterNot { it.isInterlude }
+            .sortedWith(compareBy<LyricLine> { it.startTimeMs }.thenBy { it.isBackground })
+        val foreground = sorted.filterNot { it.isBackground }
+        if (foreground.isEmpty()) return sorted
+
+        val interludes = mutableListOf<LyricLine>()
+        var coveredUntil = 0L
+        foreground.forEach { line ->
+            if (line.startTimeMs - coveredUntil >= INTERLUDE_MIN_GAP_MS) {
+                interludes += LyricLine(
+                    words = emptyList(),
+                    startTimeMs = coveredUntil,
+                    endTimeMs = line.startTimeMs,
+                    isInterlude = true,
+                )
+            }
+            coveredUntil = maxOf(coveredUntil, line.endTimeMs, line.words.maxOfOrNull { it.endTimeMs } ?: 0L)
+        }
+
+        return (sorted + interludes)
+            .sortedWith(compareBy<LyricLine> { it.startTimeMs }.thenBy { it.isBackground })
+    }
 
     private fun nearest(values: List<Pair<Long, String>>, target: Long): String =
         values.minByOrNull { abs(it.first - target) }?.takeIf { abs(it.first - target) <= 500 }?.second.orEmpty()

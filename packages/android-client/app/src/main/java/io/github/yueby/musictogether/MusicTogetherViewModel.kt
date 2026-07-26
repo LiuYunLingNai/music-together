@@ -46,6 +46,8 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 class MusicTogetherViewModel(application: Application) : AndroidViewModel(application), SocketEvents {
+    private data class PendingQueueAction(val title: String, val pinned: Boolean)
+
     private val preferences = application.getSharedPreferences("music_together", Context.MODE_PRIVATE)
     private val okHttp = OkHttpClient.Builder()
         .cookieJar(PersistentCookieJar(application))
@@ -77,6 +79,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private var lastRtt: Long? = null
     private var waitingForJoinRoomState = false
     private var recoveredTrackId: String? = null
+    private val pendingQueueActions = linkedMapOf<String, PendingQueueAction>()
 
     init {
         PlaybackCommandBridge.listener = object : PlaybackCommandBridge.Listener {
@@ -168,6 +171,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         desiredRoomPassword = null
         nativePlayer.stop()
         recoveredTrackId = null
+        pendingQueueActions.clear()
         waitingForJoinRoomState = false
         _state.value = _state.value.copy(room = null, messages = emptyList(), activeVote = null)
     }
@@ -204,7 +208,13 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         )
     }
 
-    fun addTrack(track: Track) = socket.emit(Events.QUEUE_ADD, JSONObject().put("track", track.toJson()))
+    fun addTrack(track: Track) {
+        emitSearchQueueAction(track, pinned = false)
+    }
+
+    fun insertAfterCurrent(track: Track) {
+        emitSearchQueueAction(track, pinned = true)
+    }
 
     fun playTrack(track: Track) {
         if (canControl()) {
@@ -328,6 +338,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             stopPeriodicJobs()
             clock.reset()
             recoveredTrackId = null
+            pendingQueueActions.clear()
             _state.value = _state.value.copy(connectionStatus = ConnectionStatus.Disconnected)
             if (shouldReconnect) scheduleReconnect()
         }
@@ -396,11 +407,28 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             }
             Events.ROOM_ERROR -> {
                 waitingForJoinRoomState = false
-                setError((data as? JSONObject)?.optString("message") ?: "房间操作失败")
+                val message = (data as? JSONObject)?.optString("message") ?: "房间操作失败"
+                if (pendingQueueActions.isNotEmpty()) {
+                    pendingQueueActions.clear()
+                    setError("点歌失败：$message")
+                } else {
+                    setError(message)
+                }
             }
             Events.QUEUE_UPDATED -> {
                 val queueJson = (data as? JSONObject)?.optJSONArray("queue") ?: JSONArray()
-                updateRoom { it.copy(queue = List(queueJson.length()) { index -> queueJson.getJSONObject(index).toTrack() }) }
+                val queue = List(queueJson.length()) { index -> queueJson.getJSONObject(index).toTrack() }
+                updateRoom { it.copy(queue = queue) }
+                val completed = pendingQueueActions.filterKeys { id -> queue.any { it.id == id } }
+                if (completed.isNotEmpty()) {
+                    completed.keys.forEach(pendingQueueActions::remove)
+                    val action = completed.values.last()
+                    _state.value = _state.value.copy(
+                        notice = UiNotice(
+                            text = if (action.pinned) "已置顶点歌：《${action.title}》" else "点歌成功：《${action.title}》",
+                        ),
+                    )
+                }
             }
             Events.PLAYER_PLAY -> {
                 val value = data as? JSONObject ?: return
@@ -556,6 +584,19 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 isError = !sent,
             ),
         )
+    }
+
+    private fun emitSearchQueueAction(track: Track, pinned: Boolean) {
+        val event = if (pinned) Events.QUEUE_INSERT_AFTER_CURRENT else Events.QUEUE_ADD
+        val sent = socket.emit(event, JSONObject().put("track", track.toJson()))
+        AppLogger.info("Queue", "search action=${if (pinned) "pin" else "add"} track=${track.id} sent=$sent")
+        if (sent) {
+            pendingQueueActions[track.id] = PendingQueueAction(track.title, pinned)
+        } else {
+            _state.value = _state.value.copy(
+                notice = UiNotice(text = "点歌失败：消息未发送，请检查连接", isError = true),
+            )
+        }
     }
 
     private fun startVote(action: String, payload: JSONObject? = null) {

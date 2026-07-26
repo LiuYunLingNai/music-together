@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -32,6 +33,7 @@ import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.FileUpload
@@ -447,12 +449,20 @@ private fun SearchPane(state: AppState, viewModel: MusicTogetherViewModel) {
                 contentPadding = PaddingValues(vertical = 8.dp),
             ) {
                 items(state.searchResults, key = { it.id }) { track ->
+                    val isAdded = state.room?.queue?.any { it.id == track.id } == true
                     TrackRow(
                         track = track,
                         subtitle = "${track.artist.joinToString(" / ")} · ${track.album}",
-                        primaryAction = { viewModel.addTrack(track) },
+                        primaryAction = null,
                         primaryIcon = Icons.AutoMirrored.Filled.PlaylistAdd,
-                        onClick = { viewModel.addTrack(track) },
+                        onClick = if (isAdded) null else ({ viewModel.addTrack(track) }),
+                        trailingContent = {
+                            SearchTrackActions(
+                                isAdded = isAdded,
+                                onAdd = { viewModel.addTrack(track) },
+                                onPin = { viewModel.insertAfterCurrent(track) },
+                            )
+                        },
                     )
                     HorizontalDivider()
                 }
@@ -480,6 +490,24 @@ private fun SearchPane(state: AppState, viewModel: MusicTogetherViewModel) {
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchTrackActions(isAdded: Boolean, onAdd: () -> Unit, onPin: () -> Unit) {
+    Row {
+        IconButton(onClick = onAdd, enabled = !isAdded) {
+            Icon(
+                if (isAdded) Icons.Default.Check else Icons.AutoMirrored.Filled.PlaylistAdd,
+                if (isAdded) "已添加" else "添加到播放列表",
+                tint = if (isAdded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        if (!isAdded) {
+            IconButton(onClick = onPin) {
+                Icon(Icons.Default.VerticalAlignTop, "置顶到当前播放下方")
             }
         }
     }
@@ -649,6 +677,10 @@ private fun LyricsPanel(lyrics: LyricsState, positionSeconds: Double) {
 
 @Composable
 private fun LyricLineItem(line: LyricLine, positionMs: Long, active: Boolean) {
+    if (line.isInterlude) {
+        InterludeDots(line, positionMs, active)
+        return
+    }
     val alignment = if (line.isDuet) Alignment.End else Alignment.Start
     val textAlign = if (line.isDuet) TextAlign.End else TextAlign.Start
     Column(
@@ -678,6 +710,28 @@ private fun LyricLineItem(line: LyricLine, positionMs: Long, active: Boolean) {
         }
         line.romanLyric.takeIf { it.isNotBlank() }?.let {
             Text(it, Modifier.fillMaxWidth(), textAlign = textAlign, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun InterludeDots(line: LyricLine, positionMs: Long, active: Boolean) {
+    val duration = (line.endTimeMs - line.startTimeMs).coerceAtLeast(1L)
+    val progress = ((positionMs - line.startTimeMs).toFloat() / duration).coerceIn(0f, 0.999f)
+    val highlightedDot = (progress * 3).toInt().coerceIn(0, 2)
+    Row(
+        modifier = Modifier.fillMaxWidth().height(31.dp).alpha(if (active) 1f else 0.45f),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        repeat(3) { index ->
+            val highlighted = active && index == highlightedDot
+            Box(
+                Modifier
+                    .size(if (highlighted) 10.dp else 7.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = if (highlighted) 1f else 0.55f)),
+            )
         }
     }
 }

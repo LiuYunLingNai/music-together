@@ -33,4 +33,44 @@ class LyricsParserTest {
         assertTrue(lines[1].isDuet)
         assertEquals(4_000L, lines[1].startTimeMs)
     }
+
+    @Test
+    fun insertsInterludesForLongTtmlGaps() {
+        val xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <tt xmlns="http://www.w3.org/ns/ttml">
+              <body><div>
+                <p begin="00:00:26.650" end="00:00:30.976"><span>第一句</span></p>
+                <p begin="00:00:33.020" end="00:00:36.403"><span>第二句</span></p>
+              </div></body>
+            </tt>
+        """.trimIndent()
+
+        val lines = LyricsParser.parseTtml(xml)
+
+        assertEquals(4, lines.size)
+        assertTrue(lines[0].isInterlude)
+        assertEquals(0L, lines[0].startTimeMs)
+        assertEquals(26_650L, lines[0].endTimeMs)
+        assertTrue(lines[2].isInterlude)
+        assertEquals(30_976L, lines[2].startTimeMs)
+        assertEquals(33_020L, lines[2].endTimeMs)
+    }
+
+    @Test
+    fun usesBlankLrcTimestampsAsInterludeBoundaries() {
+        val data = org.json.JSONObject().put(
+            "lyric",
+            "[00:26.67]第一句\n[00:30.83]\n[00:33.16]第二句",
+        )
+
+        val (lines, source) = LyricsParser.parseServerResponse(data)
+
+        assertEquals("lrc", source)
+        assertTrue(lines[0].isInterlude)
+        assertEquals(26_670L, lines[0].endTimeMs)
+        assertEquals(30_830L, lines[1].endTimeMs)
+        assertTrue(lines[2].isInterlude)
+        assertEquals(33_160L, lines[2].endTimeMs)
+    }
 }
