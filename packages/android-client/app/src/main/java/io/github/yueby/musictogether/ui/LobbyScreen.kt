@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.People
@@ -67,6 +68,9 @@ fun LobbyScreen(state: AppState, contentPadding: PaddingValues, viewModel: Music
                 }
                 IconButton(onClick = { AppLogger.export(context) }) {
                     Icon(Icons.Default.FileUpload, "导出日志")
+                }
+                IconButton(onClick = viewModel::clearLogs) {
+                    Icon(Icons.Default.DeleteSweep, "清空日志")
                 }
             }
         }

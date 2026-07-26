@@ -12,6 +12,12 @@ import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
+data class SearchPage(
+    val tracks: List<Track>,
+    val page: Int,
+    val hasMore: Boolean,
+)
+
 class MusicTogetherApi(private val client: OkHttpClient) {
     suspend fun bootstrapIdentity(server: ServerAddress): String = withContext(Dispatchers.IO) {
         val request = Request.Builder()
@@ -27,20 +33,25 @@ class MusicTogetherApi(private val client: OkHttpClient) {
         }
     }
 
-    suspend fun search(server: ServerAddress, keyword: String, source: String, roomId: String?): List<Track> =
+    suspend fun search(server: ServerAddress, keyword: String, source: String, roomId: String?, page: Int): SearchPage =
         withContext(Dispatchers.IO) {
             val url = server.api("music", "search").newBuilder()
                 .addQueryParameter("source", source)
                 .addQueryParameter("keyword", keyword)
                 .addQueryParameter("limit", "20")
-                .addQueryParameter("page", "1")
+                .addQueryParameter("page", page.toString())
                 .addQueryParameter("type", "song")
                 .apply { if (!roomId.isNullOrBlank()) addQueryParameter("roomId", roomId) }
                 .build()
             val json = executeJson(url, "search:$source")
-            json.optJSONArray("tracks")?.let { array ->
+            val tracks = json.optJSONArray("tracks")?.let { array ->
                 List(array.length()) { array.getJSONObject(it).toTrack() }
             }.orEmpty()
+            SearchPage(
+                tracks = tracks,
+                page = json.optInt("page", page),
+                hasMore = json.optBoolean("hasMore", tracks.size >= 20),
+            )
         }
 
     suspend fun lyrics(server: ServerAddress, track: Track): JSONObject? = withContext(Dispatchers.IO) {

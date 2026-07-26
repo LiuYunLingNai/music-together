@@ -40,6 +40,14 @@ class NativePlayer(
     private val clock: ClockSync,
     private val onTrackEnded: () -> Unit,
 ) {
+    private data class PendingLoad(
+        val trackId: String,
+        val basePositionMs: Long,
+        val serverTimestamp: Long,
+        val executeAt: Long?,
+        val autoPlay: Boolean,
+    )
+
     private val appContext = context.applicationContext
     private val controllerFuture = MediaController.Builder(
         appContext,
@@ -53,6 +61,7 @@ class NativePlayer(
     private var progressJob: Job? = null
     private var hardSeekConfirmations = 0
     private var trackLoadedAtMs = 0L
+    private var pendingLoad: PendingLoad? = null
 
     init {
         controllerFuture.addListener({
@@ -84,6 +93,7 @@ class NativePlayer(
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             publish()
+            if (playbackState == Player.STATE_READY) finishPendingLoad()
             if (playbackState == Player.STATE_ENDED) onTrackEnded()
         }
 
@@ -99,11 +109,20 @@ class NativePlayer(
             return
         }
         scheduledAction?.cancel()
+        pendingLoad = null
         hardSeekConfirmations = 0
-        trackLoadedAtMs = System.currentTimeMillis()
         _state.value = PlayerUiState(track = track, connectedToMediaSession = player != null)
-        val elapsed = if (playState.isPlaying) max(0.0, (clock.serverTime() - playState.serverTimestamp) / 1000.0) else 0.0
+        val elapsed = if (playState.isPlaying && playState.serverTimestamp > 0) {
+            max(0.0, (clock.serverTime() - playState.serverTimestamp) / 1000.0)
+        } else 0.0
         val positionMs = ((playState.currentTime + elapsed) * 1000).toLong().coerceAtLeast(0)
+        pendingLoad = PendingLoad(
+            trackId = track.id,
+            basePositionMs = (playState.currentTime * 1000).toLong().coerceAtLeast(0),
+            serverTimestamp = playState.serverTimestamp,
+            executeAt = playState.serverTimeToExecute,
+            autoPlay = playState.isPlaying,
+        )
         AppLogger.info(
             "Player",
             "load track=${track.id} source=${track.source} positionMs=$positionMs scheduled=${playState.serverTimeToExecute}",
@@ -115,19 +134,16 @@ class NativePlayer(
                 .setAlbumTitle(track.album)
                 .setArtworkUri(track.cover.takeIf { it.isNotBlank() }?.let(Uri::parse))
                 .build()
-            controller.setMediaItem(
-                MediaItem.Builder()
+            val mediaItem = MediaItem.Builder()
                     .setMediaId(track.id)
                     .setUri(streamUrl)
                     .setMediaMetadata(metadata)
-                    .build(),
-            )
-            controller.prepare()
-            controller.seekTo(positionMs)
+                    .build()
             controller.playWhenReady = false
             controller.playbackParameters = PlaybackParameters.DEFAULT
+            controller.setMediaItem(mediaItem, positionMs)
+            controller.prepare()
         }
-        if (playState.isPlaying) schedule(playState.serverTimeToExecute) { it.play() }
     }
 
     fun recover(track: Track, playState: PlayState) {
@@ -152,19 +168,6 @@ class NativePlayer(
         it.playbackParameters = PlaybackParameters.DEFAULT
     }
 
-    fun applyInitialSync(expectedSeconds: Double, serverIsPlaying: Boolean) {
-        scheduledAction?.cancel()
-        hardSeekConfirmations = 0
-        val positionMs = (expectedSeconds * 1000).toLong().coerceAtLeast(0)
-        AppLogger.info("Sync", "apply initial sync positionMs=$positionMs playing=$serverIsPlaying")
-        withPlayer { controller ->
-            controller.playbackParameters = PlaybackParameters.DEFAULT
-            controller.seekTo(positionMs)
-            if (serverIsPlaying) controller.play() else controller.pause()
-        }
-        publish()
-    }
-
     /**
      * Android decoders may audibly glitch when playback speed is changed every few seconds.
      * We therefore keep 1.0x speed and only hard-seek after a large, sustained drift.
@@ -172,7 +175,7 @@ class NativePlayer(
     fun correctDrift(expectedSeconds: Double, serverIsPlaying: Boolean, adaptiveThresholdMs: Long) {
         val controller = player ?: return
         if (!controller.isPlaying || !serverIsPlaying || controller.playbackState != Player.STATE_READY) return
-        if (System.currentTimeMillis() - trackLoadedAtMs < 10_000) return
+        if (System.currentTimeMillis() - trackLoadedAtMs < 3_000) return
         val current = controller.currentPosition / 1000.0
         val drift = current - expectedSeconds
         val threshold = max(1_200L, adaptiveThresholdMs) / 1000.0
@@ -180,7 +183,7 @@ class NativePlayer(
         controller.playbackParameters = PlaybackParameters.DEFAULT
         if (abs(drift) > threshold) {
             hardSeekConfirmations++
-            if (hardSeekConfirmations >= 3) {
+            if (hardSeekConfirmations >= 2) {
                 AppLogger.warn("Sync", "hard seek from=${controller.currentPosition} to=${(expectedSeconds * 1000).toLong()}")
                 controller.seekTo((expectedSeconds * 1000).toLong().coerceAtLeast(0))
                 hardSeekConfirmations = 0
@@ -194,6 +197,7 @@ class NativePlayer(
 
     fun stop() {
         scheduledAction?.cancel()
+        pendingLoad = null
         withPlayer {
             it.stop()
             it.clearMediaItems()
@@ -204,6 +208,7 @@ class NativePlayer(
     fun release() {
         progressJob?.cancel()
         scheduledAction?.cancel()
+        pendingLoad = null
         player?.removeListener(playerListener)
         MediaController.releaseFuture(controllerFuture)
         player = null
@@ -217,6 +222,36 @@ class NativePlayer(
             } else 0
             if (waitMs > 0) delay(waitMs)
             withPlayer(action)
+            publish()
+        }
+    }
+
+    private fun finishPendingLoad() {
+        val pending = pendingLoad ?: return
+        val controller = player ?: return
+        if (controller.currentMediaItem?.mediaId != pending.trackId) return
+        pendingLoad = null
+        scheduledAction?.cancel()
+        scheduledAction = scope.launch {
+            val waitMs = if (pending.autoPlay && pending.executeAt != null && clock.calibrated) {
+                (pending.executeAt - clock.serverTime()).coerceAtLeast(0)
+            } else 0
+            if (waitMs > 0) delay(waitMs)
+
+            val elapsedMs = if (pending.autoPlay && pending.serverTimestamp > 0) {
+                (clock.serverTime() - pending.serverTimestamp).coerceAtLeast(0)
+            } else 0
+            val expectedPositionMs = (pending.basePositionMs + elapsedMs).coerceAtLeast(0)
+            AppLogger.info(
+                "Player",
+                "ready track=${pending.trackId} seekMs=$expectedPositionMs loadWaitMs=$waitMs playing=${pending.autoPlay}",
+            )
+            withPlayer {
+                it.playbackParameters = PlaybackParameters.DEFAULT
+                it.seekTo(expectedPositionMs)
+                if (pending.autoPlay) it.play() else it.pause()
+            }
+            trackLoadedAtMs = System.currentTimeMillis()
             publish()
         }
     }

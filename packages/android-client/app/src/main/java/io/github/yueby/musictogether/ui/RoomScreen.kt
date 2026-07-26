@@ -31,6 +31,7 @@ import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.FileUpload
@@ -71,6 +72,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -146,6 +148,9 @@ fun RoomScreen(
                 actions = {
                     IconButton(onClick = { AppLogger.export(context) }) {
                         Icon(Icons.Default.FileUpload, "导出日志")
+                    }
+                    IconButton(onClick = viewModel::clearLogs) {
+                        Icon(Icons.Default.DeleteSweep, "清空日志")
                     }
                     if (room.hasPassword) Icon(Icons.Default.Lock, "密码房间", Modifier.padding(12.dp))
                 },
@@ -388,6 +393,22 @@ private fun QueuePane(room: RoomState, viewModel: MusicTogetherViewModel) {
 private fun SearchPane(state: AppState, viewModel: MusicTogetherViewModel) {
     var keyword by remember { mutableStateOf("") }
     var source by remember { mutableStateOf("netease") }
+    val listState = rememberLazyListState()
+    val shouldLoadMore by remember(
+        listState,
+        state.searchResults.size,
+        state.searchHasMore,
+        state.searchLoadingMore,
+    ) {
+        derivedStateOf {
+            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            state.searchHasMore && !state.searchLoadingMore &&
+                state.searchResults.isNotEmpty() && lastVisible >= state.searchResults.lastIndex - 3
+        }
+    }
+    LaunchedEffect(shouldLoadMore, state.searchResults.size) {
+        if (shouldLoadMore) viewModel.loadMoreSearch()
+    }
     Column(Modifier.fillMaxSize().padding(12.dp)) {
         Text("搜索并点歌", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(8.dp))
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -411,7 +432,7 @@ private fun SearchPane(state: AppState, viewModel: MusicTogetherViewModel) {
         )
         if (state.searchLoading) {
             Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-        } else if (state.searchError != null) {
+        } else if (state.searchError != null && state.searchResults.isEmpty()) {
             Text(
                 "搜索失败：${state.searchError}",
                 modifier = Modifier.padding(20.dp),
@@ -420,7 +441,11 @@ private fun SearchPane(state: AppState, viewModel: MusicTogetherViewModel) {
         } else if (state.searchHasSearched && state.searchResults.isEmpty()) {
             Text("未找到结果，请尝试其他关键词或音乐源。", Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
-            LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(vertical = 8.dp)) {
+            LazyColumn(
+                Modifier.weight(1f),
+                state = listState,
+                contentPadding = PaddingValues(vertical = 8.dp),
+            ) {
                 items(state.searchResults, key = { it.id }) { track ->
                     TrackRow(
                         track = track,
@@ -430,6 +455,30 @@ private fun SearchPane(state: AppState, viewModel: MusicTogetherViewModel) {
                         onClick = { viewModel.addTrack(track) },
                     )
                     HorizontalDivider()
+                }
+                if (state.searchLoadingMore) {
+                    item {
+                        Box(Modifier.fillMaxWidth().padding(20.dp), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                        }
+                    }
+                } else if (state.searchError != null) {
+                    item {
+                        Text(
+                            "加载下一页失败：${state.searchError}",
+                            modifier = Modifier.padding(20.dp),
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                } else if (!state.searchHasMore && state.searchResults.isNotEmpty()) {
+                    item {
+                        Text(
+                            "已经到底了",
+                            modifier = Modifier.fillMaxWidth().padding(20.dp),
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }

@@ -55,6 +55,17 @@ object AppLogger {
         context.startActivity(Intent.createChooser(intent, "导出客户端日志"))
     }
 
+    fun clear(): Boolean = synchronized(lock) {
+        val current = logFile ?: return@synchronized false
+        val previous = File(current.parentFile, "music-together-android.previous.log")
+        runCatching {
+            if (current.exists()) current.delete()
+            if (previous.exists()) previous.delete()
+            current.writeText("")
+            true
+        }.getOrDefault(false)
+    }
+
     private fun write(level: String, tag: String, message: String) {
         synchronized(lock) {
             val file = logFile ?: return

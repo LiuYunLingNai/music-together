@@ -73,11 +73,10 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private var clockJob: Job? = null
     private var syncJob: Job? = null
     private var lyricJob: Job? = null
+    private var searchJob: Job? = null
     private var lastRtt: Long? = null
-    private var awaitingInitialSyncTrackId: String? = null
-    private var initialSyncPlayEventSeen = false
-    private var initialSyncSnapshot: Pair<Double, Boolean>? = null
     private var waitingForJoinRoomState = false
+    private var recoveredTrackId: String? = null
 
     init {
         PlaybackCommandBridge.listener = object : PlaybackCommandBridge.Listener {
@@ -168,42 +167,41 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         desiredRoomId = null
         desiredRoomPassword = null
         nativePlayer.stop()
-        resetInitialSync()
+        recoveredTrackId = null
         waitingForJoinRoomState = false
         _state.value = _state.value.copy(room = null, messages = emptyList(), activeVote = null)
     }
 
     fun search(keyword: String, source: String) {
-        val server = activeServer ?: return
         if (keyword.isBlank()) return
         val query = keyword.trim().take(100)
+        searchJob?.cancel()
         _state.value = _state.value.copy(
             searchLoading = true,
+            searchLoadingMore = false,
             searchHasSearched = true,
+            searchHasMore = false,
+            searchPage = 0,
+            searchKeyword = query,
+            searchSource = source,
             searchError = null,
             searchResults = emptyList(),
         )
-        AppLogger.info("Search", "start source=$source keywordLength=${query.length}")
-        viewModelScope.launch {
-            runCatching { api.search(server, query, source, _state.value.room?.id) }
-                .onSuccess { tracks ->
-                    AppLogger.info("Search", "complete source=$source results=${tracks.size}")
-                    _state.value = _state.value.copy(
-                        searchResults = tracks,
-                        searchLoading = false,
-                        searchError = null,
-                    )
-                }
-                .onFailure {
-                    val message = it.message ?: "搜索失败"
-                    AppLogger.error("Search", "failed source=$source", it)
-                    _state.value = _state.value.copy(
-                        searchLoading = false,
-                        searchError = message,
-                        searchResults = emptyList(),
-                    )
-                }
-        }
+        requestSearchPage(query, source, page = 1, append = false)
+    }
+
+    fun loadMoreSearch() {
+        val current = _state.value
+        if (
+            current.searchLoading || current.searchLoadingMore || !current.searchHasMore ||
+            current.searchKeyword.isBlank()
+        ) return
+        requestSearchPage(
+            current.searchKeyword,
+            current.searchSource,
+            page = current.searchPage + 1,
+            append = true,
+        )
     }
 
     fun addTrack(track: Track) = socket.emit(Events.QUEUE_ADD, JSONObject().put("track", track.toJson()))
@@ -295,6 +293,17 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         _state.value = _state.value.copy(notice = null)
     }
 
+    fun clearLogs() {
+        val cleared = AppLogger.clear()
+        _state.value = _state.value.copy(
+            notice = UiNotice(
+                text = if (cleared) "客户端日志已清空" else "清空日志失败",
+                isError = !cleared,
+            ),
+        )
+        if (cleared) AppLogger.info("App", "log cleared by user")
+    }
+
     fun currentRole(): String? {
         val state = _state.value
         return state.room?.users?.firstOrNull { it.id == state.userId }?.role
@@ -318,7 +327,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             AppLogger.warn("WebSocket", "disconnected reason=${reason.orEmpty()}")
             stopPeriodicJobs()
             clock.reset()
-            resetInitialSync()
+            recoveredTrackId = null
             _state.value = _state.value.copy(connectionStatus = ConnectionStatus.Disconnected)
             if (shouldReconnect) scheduleReconnect()
         }
@@ -345,24 +354,17 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 desiredRoomId = room.id
                 _state.value = _state.value.copy(room = room)
                 if (room.currentTrack == null) {
-                    resetInitialSync()
+                    recoveredTrackId = null
                     lyricJob?.cancel()
                     _state.value = _state.value.copy(lyrics = LyricsState())
                     nativePlayer.stop()
                 } else {
-                    if (isJoinSnapshot && room.hostId != _state.value.userId && room.currentTrack.streamUrl != null) {
-                        awaitingInitialSyncTrackId = room.currentTrack.id
-                        initialSyncPlayEventSeen = false
-                        initialSyncSnapshot = null
-                        nativePlayer.load(
-                            room.currentTrack,
-                            room.playState.copy(isPlaying = false, serverTimeToExecute = null),
-                        )
-                        AppLogger.info("Sync", "request initial sync track=${room.currentTrack.id}")
-                        socket.emit(Events.PLAYER_SYNC_REQUEST)
-                    } else {
-                        resetInitialSync()
-                        room.currentTrack.takeIf { it.streamUrl != null }?.let { nativePlayer.recover(it, room.playState) }
+                    val needsRecovery = room.currentTrack.streamUrl != null &&
+                        nativePlayer.state.value.track?.id != room.currentTrack.id
+                    if (needsRecovery) {
+                        recoveredTrackId = if (isJoinSnapshot) room.currentTrack.id else null
+                        AppLogger.info("Sync", "recover immediately from room state track=${room.currentTrack.id}")
+                        nativePlayer.load(room.currentTrack, room.playState)
                     }
                     if (_state.value.lyrics.trackId != room.currentTrack.id) loadLyrics(room.currentTrack)
                 }
@@ -406,18 +408,9 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 val playState = value.optJSONObject("playState")?.toPlayState() ?: PlayState()
                 updateRoom { it.copy(currentTrack = track, playState = playState) }
                 if (_state.value.lyrics.trackId != track.id) loadLyrics(track)
-                if (awaitingInitialSyncTrackId == track.id && _state.value.room?.hostId != _state.value.userId) {
-                    initialSyncPlayEventSeen = true
-                    if (nativePlayer.state.value.track?.id != track.id) {
-                        nativePlayer.load(track, playState.copy(isPlaying = false, serverTimeToExecute = null))
-                    }
-                    val snapshot = initialSyncSnapshot
-                    if (snapshot != null) {
-                        nativePlayer.applyInitialSync(snapshot.first, snapshot.second)
-                        resetInitialSync()
-                    } else {
-                        socket.emit(Events.PLAYER_SYNC_REQUEST)
-                    }
+                if (recoveredTrackId == track.id && nativePlayer.state.value.track?.id == track.id) {
+                    AppLogger.info("Sync", "skip duplicate join PLAYER_PLAY track=${track.id}")
+                    recoveredTrackId = null
                 } else {
                     nativePlayer.load(track, playState)
                 }
@@ -431,16 +424,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 val serverTimestamp = value.optLong("serverTimestamp")
                 val networkDelay = ((clock.serverTime() - serverTimestamp) / 1000.0).coerceIn(0.0, 5.0)
                 val expected = value.optDouble("currentTime") + if (value.optBoolean("isPlaying")) networkDelay else 0.0
-                if (awaitingInitialSyncTrackId == _state.value.room?.currentTrack?.id) {
-                    val playing = value.optBoolean("isPlaying")
-                    initialSyncSnapshot = expected to playing
-                    if (nativePlayer.state.value.track?.id == awaitingInitialSyncTrackId) {
-                        nativePlayer.applyInitialSync(expected, playing)
-                        if (initialSyncPlayEventSeen) resetInitialSync()
-                    }
-                } else {
-                    nativePlayer.correctDrift(expected, value.optBoolean("isPlaying"), (lastRtt ?: 0) * 2 + 500)
-                }
+                nativePlayer.correctDrift(expected, value.optBoolean("isPlaying"), (lastRtt ?: 0) + 100)
             }
             Events.CHAT_HISTORY -> {
                 val array = data as? JSONArray ?: JSONArray()
@@ -494,6 +478,54 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     private fun rejoinKey(roomId: String): String = "rejoin:${activeServer?.displayUrl}:$roomId"
+
+    private fun requestSearchPage(keyword: String, source: String, page: Int, append: Boolean) {
+        val server = activeServer ?: run {
+            _state.value = _state.value.copy(
+                searchLoading = false,
+                searchLoadingMore = false,
+                searchError = "尚未连接服务端",
+            )
+            return
+        }
+        _state.value = _state.value.copy(
+            searchLoading = !append,
+            searchLoadingMore = append,
+            searchError = null,
+        )
+        AppLogger.info("Search", "start source=$source page=$page keywordLength=${keyword.length}")
+        searchJob = viewModelScope.launch {
+            runCatching { api.search(server, keyword, source, _state.value.room?.id, page) }
+                .onFailure { if (it is CancellationException) throw it }
+                .onSuccess { result ->
+                    val oldTracks = if (append) _state.value.searchResults else emptyList()
+                    val merged = (oldTracks + result.tracks).distinctBy { it.id }
+                    AppLogger.info(
+                        "Search",
+                        "complete source=$source page=${result.page} pageResults=${result.tracks.size} total=${merged.size} hasMore=${result.hasMore}",
+                    )
+                    _state.value = _state.value.copy(
+                        searchResults = merged,
+                        searchLoading = false,
+                        searchLoadingMore = false,
+                        searchHasMore = result.hasMore,
+                        searchPage = result.page,
+                        searchError = null,
+                    )
+                }
+                .onFailure {
+                    val message = it.message ?: "搜索失败"
+                    AppLogger.error("Search", "failed source=$source page=$page", it)
+                    _state.value = _state.value.copy(
+                        searchLoading = false,
+                        searchLoadingMore = false,
+                        searchHasMore = false,
+                        searchError = message,
+                        searchResults = if (append) _state.value.searchResults else emptyList(),
+                    )
+                }
+        }
+    }
 
     private fun handleScheduledState(data: Any?, action: (PlayState) -> Unit) {
         val playState = (data as? JSONObject)?.optJSONObject("playState")?.toPlayState() ?: return
@@ -632,7 +664,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         }
         syncJob = viewModelScope.launch {
             while (isActive) {
-                delay(5_000)
+                delay(2_000)
                 val room = _state.value.room ?: continue
                 if (room.hostId == _state.value.userId && nativePlayer.state.value.playing) {
                     socket.emit(Events.PLAYER_SYNC, JSONObject().apply {
@@ -653,12 +685,6 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         syncJob = null
     }
 
-    private fun resetInitialSync() {
-        awaitingInitialSyncTrackId = null
-        initialSyncPlayEventSeen = false
-        initialSyncSnapshot = null
-    }
-
     private fun onTrackEnded() {
         val room = _state.value.room
         if (room?.hostId == _state.value.userId) socket.emit(Events.PLAYER_NEXT)
@@ -667,6 +693,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     override fun onCleared() {
         shouldReconnect = false
         lyricJob?.cancel()
+        searchJob?.cancel()
         PlaybackCommandBridge.listener = null
         socket.disconnect()
         nativePlayer.release()
