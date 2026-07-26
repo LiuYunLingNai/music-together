@@ -101,6 +101,60 @@ data class LyricsState(
     val error: String? = null,
 )
 
+data class PlatformAuthStatus(
+    val platform: String,
+    val loggedInCount: Int,
+    val hasVip: Boolean,
+    val maxVipType: Int,
+)
+
+data class MyPlatformAuth(
+    val platform: String,
+    val loggedIn: Boolean,
+    val nickname: String? = null,
+    val vipType: Int = 0,
+)
+
+data class Playlist(
+    val id: String,
+    val name: String,
+    val cover: String,
+    val trackCount: Int,
+    val source: String,
+    val creator: String? = null,
+    val description: String? = null,
+)
+
+data class QrLoginState(
+    val open: Boolean = false,
+    val platform: String = "netease",
+    val key: String? = null,
+    val imageData: String? = null,
+    val status: Int? = null,
+    val message: String? = null,
+    val loading: Boolean = false,
+)
+
+data class PlatformHubState(
+    val authStatus: List<PlatformAuthStatus> = emptyList(),
+    val myAuth: List<MyPlatformAuth> = emptyList(),
+    val statusLoaded: Boolean = false,
+    val qr: QrLoginState = QrLoginState(),
+    val playlists: Map<String, List<Playlist>> = mapOf(
+        "netease" to emptyList(),
+        "tencent" to emptyList(),
+        "kugou" to emptyList(),
+    ),
+    val playlistsLoading: Set<String> = emptySet(),
+    val selectedPlaylist: Playlist? = null,
+    val playlistTracks: List<Track> = emptyList(),
+    val playlistTotal: Int = 0,
+    val playlistHasMore: Boolean = false,
+    val playlistLoading: Boolean = false,
+    val playlistLoadingMore: Boolean = false,
+    val playlistError: String? = null,
+)
+
 data class UiNotice(
     val id: Long = System.nanoTime(),
     val text: String,
@@ -132,6 +186,7 @@ data class AppState(
     val searchError: String? = null,
     val activeVote: VoteState? = null,
     val lyrics: LyricsState = LyricsState(),
+    val platformHub: PlatformHubState = PlatformHubState(),
     val notice: UiNotice? = null,
     val error: String? = null,
 )

@@ -10,6 +10,9 @@ import io.github.yueby.musictogether.model.AppState
 import io.github.yueby.musictogether.model.ChatMessage
 import io.github.yueby.musictogether.model.ConnectionStatus
 import io.github.yueby.musictogether.model.LyricsState
+import io.github.yueby.musictogether.model.PlatformHubState
+import io.github.yueby.musictogether.model.Playlist
+import io.github.yueby.musictogether.model.QrLoginState
 import io.github.yueby.musictogether.model.PlayState
 import io.github.yueby.musictogether.model.Track
 import io.github.yueby.musictogether.model.UiNotice
@@ -23,6 +26,9 @@ import io.github.yueby.musictogether.network.SocketEvents
 import io.github.yueby.musictogether.network.stringOrNull
 import io.github.yueby.musictogether.network.toChatMessage
 import io.github.yueby.musictogether.network.toPlayState
+import io.github.yueby.musictogether.network.toPlaylist
+import io.github.yueby.musictogether.network.toPlatformAuthStatus
+import io.github.yueby.musictogether.network.toMyPlatformAuth
 import io.github.yueby.musictogether.network.toRoomList
 import io.github.yueby.musictogether.network.toRoomState
 import io.github.yueby.musictogether.network.toTrack
@@ -47,6 +53,14 @@ import java.util.concurrent.TimeUnit
 
 class MusicTogetherViewModel(application: Application) : AndroidViewModel(application), SocketEvents {
     private data class PendingQueueAction(val title: String, val pinned: Boolean)
+    private data class PlaylistContext(val source: String, val id: String, val roomId: String)
+
+    private companion object {
+        const val QR_EXPIRED = 800
+        const val QR_WAITING_SCAN = 801
+        const val QR_SUCCESS = 803
+        const val MAX_QUEUE_SIZE = 200
+    }
 
     private val preferences = application.getSharedPreferences("music_together", Context.MODE_PRIVATE)
     private val okHttp = OkHttpClient.Builder()
@@ -76,10 +90,18 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private var syncJob: Job? = null
     private var lyricJob: Job? = null
     private var searchJob: Job? = null
+    private var qrPollJob: Job? = null
+    private var qrCloseJob: Job? = null
+    private var playlistJob: Job? = null
+    private var playlistContext: PlaylistContext? = null
+    private var restoredAuthRoomId: String? = null
     private var lastRtt: Long? = null
     private var waitingForJoinRoomState = false
     private var recoveredTrackId: String? = null
     private val pendingQueueActions = linkedMapOf<String, PendingQueueAction>()
+    private val autoRestoringPlatforms = mutableSetOf<String>()
+    private val loadedPlaylistPlatforms = mutableSetOf<String>()
+    private val supportedPlatforms = listOf("netease", "tencent", "kugou")
 
     init {
         PlaybackCommandBridge.listener = object : PlaybackCommandBridge.Listener {
@@ -116,6 +138,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             desiredRoomId = null
             desiredRoomPassword = null
             nativePlayer.stop()
+            resetPlatformRoomState()
         }
         preferences.edit().putString("server_url", parsed.displayUrl).apply()
         _state.value = _state.value.copy(
@@ -143,6 +166,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         shouldReconnect = false
         reconnectJob?.cancel()
         stopPeriodicJobs()
+        resetPlatformRoomState()
         socket.disconnect()
         _state.value = _state.value.copy(connectionStatus = ConnectionStatus.Disconnected)
     }
@@ -172,6 +196,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         nativePlayer.stop()
         recoveredTrackId = null
         pendingQueueActions.clear()
+        resetPlatformRoomState()
         waitingForJoinRoomState = false
         _state.value = _state.value.copy(room = null, messages = emptyList(), activeVote = null)
     }
@@ -214,6 +239,158 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
 
     fun insertAfterCurrent(track: Track) {
         emitSearchQueueAction(track, pinned = true)
+    }
+
+    fun requestPlatformStatus() {
+        socket.emit(Events.AUTH_GET_STATUS)
+    }
+
+    fun requestQrLogin(platform: String) {
+        if (platform !in supportedPlatforms) return
+        qrPollJob?.cancel()
+        qrCloseJob?.cancel()
+        _state.value = _state.value.copy(
+            platformHub = _state.value.platformHub.copy(
+                qr = QrLoginState(open = true, platform = platform, loading = true),
+            ),
+        )
+        val sent = socket.emit(Events.AUTH_REQUEST_QR, JSONObject().put("platform", platform))
+        AppLogger.info("Auth", "request QR platform=$platform sent=$sent")
+        if (!sent) {
+            _state.value = _state.value.copy(
+                platformHub = _state.value.platformHub.copy(
+                    qr = QrLoginState(
+                        open = true,
+                        platform = platform,
+                        status = QR_EXPIRED,
+                        message = "二维码请求未发送，请检查连接",
+                    ),
+                ),
+            )
+        }
+    }
+
+    fun closeQrLogin() {
+        qrPollJob?.cancel()
+        qrCloseJob?.cancel()
+        _state.value = _state.value.copy(
+            platformHub = _state.value.platformHub.copy(qr = QrLoginState()),
+        )
+    }
+
+    fun loginWithPlatformCookie(platform: String, cookie: String) {
+        val safeCookie = cookie.trim()
+        if (platform !in supportedPlatforms || safeCookie.isBlank()) return
+        val sent = socket.emit(
+            Events.AUTH_SET_COOKIE,
+            JSONObject().put("platform", platform).put("cookie", safeCookie),
+        )
+        AppLogger.info("Auth", "manual cookie login platform=$platform sent=$sent")
+        if (!sent) setNotice("登录请求未发送，请检查连接", isError = true)
+    }
+
+    fun logoutPlatform(platform: String) {
+        if (platform !in supportedPlatforms) return
+        removeStoredPlatformCookie(platform)
+        loadedPlaylistPlatforms.remove(platform)
+        socket.emit(Events.AUTH_LOGOUT, JSONObject().put("platform", platform))
+        val hub = _state.value.platformHub
+        _state.value = _state.value.copy(
+            platformHub = hub.copy(
+                myAuth = hub.myAuth.filterNot { it.platform == platform },
+                playlists = hub.playlists + (platform to emptyList()),
+            ),
+            notice = UiNotice(text = "已退出${platformLabel(platform)}账号"),
+        )
+        AppLogger.info("Auth", "logout platform=$platform")
+    }
+
+    fun fetchMyPlaylists(platform: String) {
+        if (platform !in supportedPlatforms) return
+        val hub = _state.value.platformHub
+        if (platform in hub.playlistsLoading) return
+        _state.value = _state.value.copy(
+            platformHub = hub.copy(playlistsLoading = hub.playlistsLoading + platform),
+        )
+        val sent = socket.emit(Events.PLAYLIST_GET_MY, JSONObject().put("platform", platform))
+        AppLogger.info("Playlist", "get my platform=$platform sent=$sent")
+        if (!sent) {
+            _state.value = _state.value.copy(
+                platformHub = _state.value.platformHub.copy(
+                    playlistsLoading = _state.value.platformHub.playlistsLoading - platform,
+                ),
+            )
+            setNotice("歌单请求未发送，请检查连接", isError = true)
+        }
+    }
+
+    fun openPlaylist(playlist: Playlist) {
+        val room = _state.value.room ?: return
+        val server = activeServer ?: return
+        playlistJob?.cancel()
+        playlistContext = PlaylistContext(playlist.source, playlist.id, room.id)
+        _state.value = _state.value.copy(
+            platformHub = _state.value.platformHub.copy(
+                selectedPlaylist = playlist,
+                playlistTracks = emptyList(),
+                playlistTotal = 0,
+                playlistHasMore = false,
+                playlistLoading = true,
+                playlistLoadingMore = false,
+                playlistError = null,
+            ),
+        )
+        requestPlaylistPage(server, playlist, room.id, offset = 0, append = false)
+    }
+
+    fun closePlaylist() {
+        playlistJob?.cancel()
+        playlistContext = null
+        _state.value = _state.value.copy(
+            platformHub = _state.value.platformHub.copy(
+                selectedPlaylist = null,
+                playlistTracks = emptyList(),
+                playlistTotal = 0,
+                playlistHasMore = false,
+                playlistLoading = false,
+                playlistLoadingMore = false,
+                playlistError = null,
+            ),
+        )
+    }
+
+    fun loadMorePlaylistTracks() {
+        val hub = _state.value.platformHub
+        val playlist = hub.selectedPlaylist ?: return
+        val context = playlistContext ?: return
+        val server = activeServer ?: return
+        if (hub.playlistLoading || hub.playlistLoadingMore || !hub.playlistHasMore) return
+        requestPlaylistPage(server, playlist, context.roomId, hub.playlistTracks.size, append = true)
+    }
+
+    fun addPlaylistTracksToQueue(playlist: Playlist) {
+        val room = _state.value.room ?: return
+        val queueIds = room.queue.mapTo(mutableSetOf()) { it.id }
+        val available = (MAX_QUEUE_SIZE - room.queue.size).coerceAtLeast(0)
+        val tracks = _state.value.platformHub.playlistTracks
+            .filterNot { it.id in queueIds }
+            .distinctBy { it.id }
+            .take(available)
+        if (tracks.isEmpty()) {
+            setNotice(if (available == 0) "播放队列已满" else "当前已加载歌曲都在队列中")
+            return
+        }
+        val sent = socket.emit(
+            Events.QUEUE_ADD_BATCH,
+            JSONObject()
+                .put("tracks", JSONArray(tracks.map { it.toJson() }))
+                .put("playlistName", playlist.name),
+        )
+        AppLogger.info("Queue", "playlist batch=${tracks.size} source=${playlist.source} sent=$sent")
+        setNotice(
+            if (sent) "已提交 ${tracks.size} 首歌曲到播放队列" else "批量点歌发送失败，请检查连接",
+            isError = !sent,
+        )
     }
 
     fun playTrack(track: Track) {
@@ -339,6 +516,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             clock.reset()
             recoveredTrackId = null
             pendingQueueActions.clear()
+            resetPlatformRoomState()
             _state.value = _state.value.copy(connectionStatus = ConnectionStatus.Disconnected)
             if (shouldReconnect) scheduleReconnect()
         }
@@ -364,6 +542,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 waitingForJoinRoomState = false
                 desiredRoomId = room.id
                 _state.value = _state.value.copy(room = room)
+                restorePlatformAccounts(room.id)
                 if (room.currentTrack == null) {
                     recoveredTrackId = null
                     lyricJob?.cancel()
@@ -391,6 +570,16 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     .apply()
             }
             Events.ROOM_LIST_UPDATE -> _state.value = _state.value.copy(rooms = (data as? JSONArray)?.toRoomList().orEmpty())
+            Events.ROOM_SETTINGS -> {
+                val value = data as? JSONObject ?: return
+                updateRoom {
+                    it.copy(
+                        name = value.optString("name", it.name),
+                        hasPassword = value.optBoolean("hasPassword", it.hasPassword),
+                        audioQuality = value.optInt("audioQuality", it.audioQuality),
+                    )
+                }
+            }
             Events.ROOM_USER_JOINED -> updateUsers { users ->
                 val value = data as? JSONObject ?: return@updateUsers users
                 users.filterNot { it.id == value.optString("id") } + User(
@@ -484,6 +673,103 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     notice = UiNotice(text = resultText, isError = !passed),
                 )
             }
+            Events.AUTH_QR_GENERATED -> {
+                val value = data as? JSONObject ?: return
+                val key = value.optString("key")
+                val image = value.optString("qrimg")
+                if (key.isBlank() || image.isBlank()) return
+                val current = _state.value.platformHub.qr
+                _state.value = _state.value.copy(
+                    platformHub = _state.value.platformHub.copy(
+                        qr = current.copy(
+                            key = key,
+                            imageData = image,
+                            status = QR_WAITING_SCAN,
+                            message = "等待扫码",
+                            loading = false,
+                        ),
+                    ),
+                )
+                startQrPolling(current.platform, key)
+                AppLogger.info("Auth", "QR generated platform=${current.platform}")
+            }
+            Events.AUTH_QR_STATUS -> {
+                val value = data as? JSONObject ?: return
+                val status = value.optInt("status")
+                val current = _state.value.platformHub.qr
+                _state.value = _state.value.copy(
+                    platformHub = _state.value.platformHub.copy(
+                        qr = current.copy(
+                            status = status,
+                            message = value.optString("message"),
+                            loading = false,
+                        ),
+                    ),
+                )
+                AppLogger.info("Auth", "QR status platform=${current.platform} status=$status")
+                if (status == QR_EXPIRED || status == QR_SUCCESS) qrPollJob?.cancel()
+                if (status == QR_SUCCESS) {
+                    qrCloseJob?.cancel()
+                    qrCloseJob = viewModelScope.launch {
+                        delay(1_000)
+                        closeQrLogin()
+                    }
+                }
+            }
+            Events.AUTH_SET_COOKIE_RESULT -> {
+                val value = data as? JSONObject ?: return
+                val platform = value.stringOrNull("platform")
+                val success = value.optBoolean("success")
+                val automatic = platform != null && autoRestoringPlatforms.remove(platform)
+                if (!success && platform == null) autoRestoringPlatforms.clear()
+                if (success && platform != null) {
+                    value.stringOrNull("cookie")?.let { storePlatformCookie(platform, it) }
+                    loadedPlaylistPlatforms.remove(platform)
+                    socket.emit(Events.AUTH_GET_STATUS)
+                }
+                val message = value.optString("message", if (success) "登录成功" else "登录失败")
+                AppLogger.info(
+                    "Auth",
+                    "cookie result platform=${platform.orEmpty()} success=$success automatic=$automatic reason=${value.optString("reason")}",
+                )
+                if (!automatic || !success) setNotice(message, isError = !success)
+            }
+            Events.AUTH_STATUS_UPDATE -> {
+                val array = data as? JSONArray ?: JSONArray()
+                val statuses = List(array.length()) { array.getJSONObject(it).toPlatformAuthStatus() }
+                _state.value = _state.value.copy(
+                    platformHub = _state.value.platformHub.copy(authStatus = statuses),
+                )
+            }
+            Events.AUTH_MY_STATUS -> {
+                val array = data as? JSONArray ?: JSONArray()
+                val myAuth = List(array.length()) { array.getJSONObject(it).toMyPlatformAuth() }
+                _state.value = _state.value.copy(
+                    platformHub = _state.value.platformHub.copy(myAuth = myAuth, statusLoaded = true),
+                )
+                myAuth.filter { it.loggedIn }.forEach { auth ->
+                    if (
+                        auth.platform !in loadedPlaylistPlatforms &&
+                        auth.platform !in _state.value.platformHub.playlistsLoading
+                    ) fetchMyPlaylists(auth.platform)
+                }
+            }
+            Events.PLAYLIST_MY_LIST -> {
+                val value = data as? JSONObject ?: return
+                val platform = value.optString("platform")
+                if (platform !in supportedPlatforms) return
+                val array = value.optJSONArray("playlists") ?: JSONArray()
+                val playlists = List(array.length()) { array.getJSONObject(it).toPlaylist() }
+                loadedPlaylistPlatforms += platform
+                val hub = _state.value.platformHub
+                _state.value = _state.value.copy(
+                    platformHub = hub.copy(
+                        playlists = hub.playlists + (platform to playlists),
+                        playlistsLoading = hub.playlistsLoading - platform,
+                    ),
+                )
+                AppLogger.info("Playlist", "my list platform=$platform count=${playlists.size}")
+            }
             Events.NTP_PONG -> {
                 val value = data as? JSONObject ?: return
                 lastRtt = clock.processPong(value.optLong("clientPingId"), value.optLong("serverTime")) ?: lastRtt
@@ -506,6 +792,140 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     private fun rejoinKey(roomId: String): String = "rejoin:${activeServer?.displayUrl}:$roomId"
+
+    private fun restorePlatformAccounts(roomId: String) {
+        if (restoredAuthRoomId == roomId) return
+        restoredAuthRoomId = roomId
+        autoRestoringPlatforms.clear()
+        loadedPlaylistPlatforms.clear()
+        _state.value = _state.value.copy(
+            platformHub = PlatformHubState(statusLoaded = false),
+        )
+        supportedPlatforms.forEach { platform ->
+            val cookie = storedPlatformCookie(platform) ?: return@forEach
+            autoRestoringPlatforms += platform
+            socket.emit(
+                Events.AUTH_SET_COOKIE,
+                JSONObject().put("platform", platform).put("cookie", cookie),
+            )
+        }
+        socket.emit(Events.AUTH_GET_STATUS)
+        AppLogger.info("Auth", "restore room=$roomId accounts=${autoRestoringPlatforms.size}")
+    }
+
+    private fun startQrPolling(platform: String, key: String) {
+        qrPollJob?.cancel()
+        qrPollJob = viewModelScope.launch {
+            while (isActive) {
+                delay(2_000)
+                val qr = _state.value.platformHub.qr
+                if (!qr.open || qr.platform != platform || qr.key != key) break
+                if (qr.status == QR_EXPIRED || qr.status == QR_SUCCESS) break
+                socket.emit(
+                    Events.AUTH_CHECK_QR,
+                    JSONObject().put("key", key).put("platform", platform),
+                )
+            }
+        }
+    }
+
+    private fun requestPlaylistPage(
+        server: ServerAddress,
+        playlist: Playlist,
+        roomId: String,
+        offset: Int,
+        append: Boolean,
+    ) {
+        val expected = PlaylistContext(playlist.source, playlist.id, roomId)
+        _state.value = _state.value.copy(
+            platformHub = _state.value.platformHub.copy(
+                playlistLoading = !append,
+                playlistLoadingMore = append,
+                playlistError = null,
+            ),
+        )
+        AppLogger.info("Playlist", "load source=${playlist.source} id=${playlist.id} offset=$offset")
+        playlistJob = viewModelScope.launch {
+            runCatching {
+                api.playlist(
+                    server = server,
+                    source = playlist.source,
+                    id = playlist.id,
+                    roomId = roomId,
+                    offset = offset,
+                    total = playlist.trackCount.takeIf { it > 0 },
+                )
+            }
+                .onFailure { if (it is CancellationException) throw it }
+                .onSuccess { page ->
+                    if (playlistContext != expected) return@onSuccess
+                    val old = if (append) _state.value.platformHub.playlistTracks else emptyList()
+                    val merged = (old + page.tracks).distinctBy { it.id }
+                    _state.value = _state.value.copy(
+                        platformHub = _state.value.platformHub.copy(
+                            playlistTracks = merged,
+                            playlistTotal = page.total,
+                            playlistHasMore = page.hasMore,
+                            playlistLoading = false,
+                            playlistLoadingMore = false,
+                            playlistError = null,
+                        ),
+                    )
+                    AppLogger.info(
+                        "Playlist",
+                        "loaded source=${playlist.source} page=${page.tracks.size} total=${page.total} hasMore=${page.hasMore}",
+                    )
+                }
+                .onFailure {
+                    if (playlistContext != expected) return@onFailure
+                    AppLogger.error("Playlist", "load failed source=${playlist.source} offset=$offset", it)
+                    _state.value = _state.value.copy(
+                        platformHub = _state.value.platformHub.copy(
+                            playlistLoading = false,
+                            playlistLoadingMore = false,
+                            playlistError = it.message ?: "歌单加载失败",
+                        ),
+                    )
+                }
+        }
+    }
+
+    private fun resetPlatformRoomState() {
+        qrPollJob?.cancel()
+        qrCloseJob?.cancel()
+        playlistJob?.cancel()
+        playlistContext = null
+        restoredAuthRoomId = null
+        autoRestoringPlatforms.clear()
+        loadedPlaylistPlatforms.clear()
+        _state.value = _state.value.copy(platformHub = PlatformHubState())
+    }
+
+    private fun platformCookieKey(platform: String): String =
+        "platform_auth:${activeServer?.displayUrl.orEmpty()}:$platform"
+
+    private fun storedPlatformCookie(platform: String): String? =
+        preferences.getString(platformCookieKey(platform), null)?.takeIf { it.isNotBlank() }
+
+    private fun storePlatformCookie(platform: String, cookie: String) {
+        preferences.edit().putString(platformCookieKey(platform), cookie).apply()
+        AppLogger.info("Auth", "stored platform credential platform=$platform server=${activeServer?.displayUrl.orEmpty()}")
+    }
+
+    private fun removeStoredPlatformCookie(platform: String) {
+        preferences.edit().remove(platformCookieKey(platform)).apply()
+    }
+
+    private fun setNotice(message: String, isError: Boolean = false) {
+        _state.value = _state.value.copy(notice = UiNotice(text = message, isError = isError))
+    }
+
+    private fun platformLabel(platform: String): String = when (platform) {
+        "netease" -> "网易云音乐"
+        "tencent" -> "QQ 音乐"
+        "kugou" -> "酷狗音乐"
+        else -> platform
+    }
 
     private fun requestSearchPage(keyword: String, source: String, page: Int, append: Boolean) {
         val server = activeServer ?: run {

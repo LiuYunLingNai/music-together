@@ -12,6 +12,7 @@ object Events {
     const val ROOM_LIST = "room:list"
     const val ROOM_LIST_UPDATE = "room:list_update"
     const val ROOM_ERROR = "room:error"
+    const val ROOM_SETTINGS = "room:settings"
     const val ROOM_ROLE_CHANGED = "room:role_changed"
 
     const val PLAYER_PLAY = "player:play"
@@ -39,6 +40,22 @@ object Events {
     const val VOTE_STARTED = "vote:started"
     const val VOTE_CAST = "vote:cast"
     const val VOTE_RESULT = "vote:result"
+
+    const val AUTH_REQUEST_QR = "auth:request_qr"
+    const val AUTH_QR_GENERATED = "auth:qr_generated"
+    const val AUTH_CHECK_QR = "auth:check_qr"
+    const val AUTH_QR_STATUS = "auth:qr_status"
+    const val AUTH_SET_COOKIE = "auth:set_cookie"
+    const val AUTH_SET_COOKIE_RESULT = "auth:set_cookie_result"
+    const val AUTH_LOGOUT = "auth:logout"
+    const val AUTH_STATUS_UPDATE = "auth:status_update"
+    const val AUTH_MY_STATUS = "auth:my_status"
+    const val AUTH_GET_STATUS = "auth:get_status"
+
+    const val PLAYLIST_GET_MY = "playlist:get_my"
+    const val PLAYLIST_MY_LIST = "playlist:my_list"
+
+    const val QUEUE_ADD_BATCH = "queue:add_batch"
 
     const val NTP_PING = "ntp:ping"
     const val NTP_PONG = "ntp:pong"

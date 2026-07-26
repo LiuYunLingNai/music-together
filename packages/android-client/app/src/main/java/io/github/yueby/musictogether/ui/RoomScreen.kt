@@ -34,6 +34,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.FileUpload
@@ -113,7 +114,7 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 private enum class RoomTab(val label: String) {
-    Player("播放"), Queue("队列"), Search("点歌"), Chat("聊天")
+    Player("播放"), Queue("队列"), Search("点歌"), Account("账号"), Chat("聊天")
 }
 
 private enum class PlayerVisual(val label: String) {
@@ -170,6 +171,7 @@ fun RoomScreen(
                                     RoomTab.Player -> Icons.Default.MusicNote
                                     RoomTab.Queue -> Icons.AutoMirrored.Filled.QueueMusic
                                     RoomTab.Search -> Icons.Default.Search
+                                    RoomTab.Account -> Icons.Default.AccountCircle
                                     RoomTab.Chat -> Icons.AutoMirrored.Filled.Chat
                                 },
                                 null,
@@ -186,6 +188,7 @@ fun RoomScreen(
                 RoomTab.Player -> PlayerPane(room, appState.userId, appState.lyrics, playerState, viewModel)
                 RoomTab.Queue -> QueuePane(room, viewModel)
                 RoomTab.Search -> SearchPane(appState, viewModel)
+                RoomTab.Account -> PlatformPane(appState, viewModel)
                 RoomTab.Chat -> ChatPane(appState.messages, viewModel)
             }
             appState.activeVote?.let { vote ->

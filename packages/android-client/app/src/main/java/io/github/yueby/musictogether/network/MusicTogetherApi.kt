@@ -18,6 +18,12 @@ data class SearchPage(
     val hasMore: Boolean,
 )
 
+data class PlaylistPage(
+    val tracks: List<Track>,
+    val total: Int,
+    val hasMore: Boolean,
+)
+
 class MusicTogetherApi(private val client: OkHttpClient) {
     suspend fun bootstrapIdentity(server: ServerAddress): String = withContext(Dispatchers.IO) {
         val request = Request.Builder()
@@ -61,6 +67,35 @@ class MusicTogetherApi(private val client: OkHttpClient) {
             .addQueryParameter("lyricId", lyricId)
             .build()
         executeJson(url, "lyrics:${track.source}")
+    }
+
+    suspend fun playlist(
+        server: ServerAddress,
+        source: String,
+        id: String,
+        roomId: String,
+        offset: Int,
+        total: Int?,
+        limit: Int = 1000,
+    ): PlaylistPage = withContext(Dispatchers.IO) {
+        val url = server.api("music", "playlist").newBuilder()
+            .addQueryParameter("source", source)
+            .addQueryParameter("id", id)
+            .addQueryParameter("limit", limit.toString())
+            .addQueryParameter("offset", offset.toString())
+            .addQueryParameter("roomId", roomId)
+            .addQueryParameter("type", "playlist")
+            .apply { total?.takeIf { it > 0 }?.let { addQueryParameter("total", it.toString()) } }
+            .build()
+        val json = executeJson(url, "playlist:$source")
+        val tracks = json.optJSONArray("tracks")?.let { array ->
+            List(array.length()) { array.getJSONObject(it).toTrack() }
+        }.orEmpty()
+        PlaylistPage(
+            tracks = tracks,
+            total = json.optInt("total", tracks.size),
+            hasMore = json.optBoolean("hasMore", false),
+        )
     }
 
     suspend fun ttml(track: Track): String? = withContext(Dispatchers.IO) {

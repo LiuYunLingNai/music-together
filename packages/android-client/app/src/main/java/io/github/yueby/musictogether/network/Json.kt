@@ -2,6 +2,9 @@ package io.github.yueby.musictogether.network
 
 import io.github.yueby.musictogether.model.ChatMessage
 import io.github.yueby.musictogether.model.PlayState
+import io.github.yueby.musictogether.model.Playlist
+import io.github.yueby.musictogether.model.PlatformAuthStatus
+import io.github.yueby.musictogether.model.MyPlatformAuth
 import io.github.yueby.musictogether.model.RoomListItem
 import io.github.yueby.musictogether.model.RoomState
 import io.github.yueby.musictogether.model.Track
@@ -119,4 +122,28 @@ internal fun JSONObject.toVoteState(): VoteState = VoteState(
     payload = optJSONObject("payload")?.let { value ->
         value.keys().asSequence().associateWith { value.optString(it) }
     }.orEmpty(),
+)
+
+internal fun JSONObject.toPlatformAuthStatus(): PlatformAuthStatus = PlatformAuthStatus(
+    platform = optString("platform"),
+    loggedInCount = optInt("loggedInCount"),
+    hasVip = optBoolean("hasVip"),
+    maxVipType = optInt("maxVipType"),
+)
+
+internal fun JSONObject.toMyPlatformAuth(): MyPlatformAuth = MyPlatformAuth(
+    platform = optString("platform"),
+    loggedIn = optBoolean("loggedIn"),
+    nickname = stringOrNull("nickname"),
+    vipType = optInt("vipType"),
+)
+
+internal fun JSONObject.toPlaylist(): Playlist = Playlist(
+    id = optString("id"),
+    name = optString("name", "未命名歌单"),
+    cover = optString("cover"),
+    trackCount = optInt("trackCount"),
+    source = optString("source"),
+    creator = stringOrNull("creator"),
+    description = stringOrNull("description"),
 )
