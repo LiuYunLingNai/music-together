@@ -112,6 +112,7 @@ Push to main triggers GitHub Actions to build and push the image. See [Architect
 
 ```
 packages/
+  android-client/ -- Native Android client (Kotlin + Compose + Media3)
   client/   -- Frontend React application
   server/   -- Backend Node.js service
   shared/   -- Shared types, constants, and permission definitions

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Custom LAN/self-hosted servers often use plain HTTP. Prefer HTTPS on public networks. -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

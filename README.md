@@ -112,6 +112,7 @@ push 到 main 后 GitHub Actions 自动构建镜像。详见 [架构文档](docs
 
 ```
 packages/
+  android-client/ -- 原生 Android 客户端（Kotlin + Compose + Media3）
   client/   -- 前端 React 应用
   server/   -- 后端 Node.js 服务
   shared/   -- 共享类型、常量与权限定义

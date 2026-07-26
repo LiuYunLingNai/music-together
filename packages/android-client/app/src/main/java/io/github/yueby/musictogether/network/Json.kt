@@ -1,0 +1,110 @@
+package io.github.yueby.musictogether.network
+
+import io.github.yueby.musictogether.model.ChatMessage
+import io.github.yueby.musictogether.model.PlayState
+import io.github.yueby.musictogether.model.RoomListItem
+import io.github.yueby.musictogether.model.RoomState
+import io.github.yueby.musictogether.model.Track
+import io.github.yueby.musictogether.model.User
+import io.github.yueby.musictogether.model.VoteState
+import org.json.JSONArray
+import org.json.JSONObject
+
+internal fun JSONObject.stringOrNull(name: String): String? =
+    if (has(name) && !isNull(name)) optString(name).takeIf { it.isNotBlank() } else null
+
+internal fun JSONObject.toTrack(): Track {
+    val artists = optJSONArray("artist") ?: JSONArray()
+    return Track(
+        id = optString("id"),
+        title = optString("title", "未知歌曲"),
+        artist = List(artists.length()) { artists.optString(it) },
+        album = optString("album"),
+        duration = optDouble("duration", 0.0),
+        cover = optString("cover"),
+        source = optString("source", "netease"),
+        sourceId = optString("sourceId"),
+        urlId = optString("urlId"),
+        lyricId = stringOrNull("lyricId"),
+        picId = stringOrNull("picId"),
+        streamUrl = stringOrNull("streamUrl"),
+        vip = optBoolean("vip", false),
+        requestedBy = stringOrNull("requestedBy"),
+    )
+}
+
+internal fun Track.toJson(): JSONObject = JSONObject().apply {
+    put("id", id)
+    put("title", title)
+    put("artist", JSONArray(artist))
+    put("album", album)
+    put("duration", duration)
+    put("cover", cover)
+    put("source", source)
+    put("sourceId", sourceId)
+    put("urlId", urlId)
+    lyricId?.let { put("lyricId", it) }
+    picId?.let { put("picId", it) }
+    streamUrl?.let { put("streamUrl", it) }
+    put("vip", vip)
+    requestedBy?.let { put("requestedBy", it) }
+}
+
+internal fun JSONObject.toPlayState(): PlayState = PlayState(
+    isPlaying = optBoolean("isPlaying", false),
+    currentTime = optDouble("currentTime", 0.0),
+    serverTimestamp = optLong("serverTimestamp", 0L),
+    serverTimeToExecute = if (has("serverTimeToExecute")) optLong("serverTimeToExecute") else null,
+)
+
+internal fun JSONObject.toRoomState(): RoomState {
+    val usersJson = optJSONArray("users") ?: JSONArray()
+    val queueJson = optJSONArray("queue") ?: JSONArray()
+    val current = optJSONObject("currentTrack")
+    return RoomState(
+        id = optString("id"),
+        name = optString("name", "Music Together"),
+        creatorId = optString("creatorId"),
+        hostId = optString("hostId"),
+        hasPassword = optBoolean("hasPassword", false),
+        audioQuality = optInt("audioQuality", 320),
+        users = List(usersJson.length()) { i ->
+            val item = usersJson.getJSONObject(i)
+            User(item.optString("id"), item.optString("nickname"), item.optString("role", "member"))
+        },
+        queue = List(queueJson.length()) { queueJson.getJSONObject(it).toTrack() },
+        currentTrack = current?.toTrack(),
+        playState = (optJSONObject("playState") ?: JSONObject()).toPlayState(),
+        playMode = optString("playMode", "sequential"),
+    )
+}
+
+internal fun JSONArray.toRoomList(): List<RoomListItem> = List(length()) { i ->
+    val item = getJSONObject(i)
+    RoomListItem(
+        id = item.optString("id"),
+        name = item.optString("name", "未命名房间"),
+        hasPassword = item.optBoolean("hasPassword"),
+        userCount = item.optInt("userCount"),
+        currentTrackTitle = item.stringOrNull("currentTrackTitle"),
+        currentTrackArtist = item.stringOrNull("currentTrackArtist"),
+    )
+}
+
+internal fun JSONObject.toChatMessage(): ChatMessage = ChatMessage(
+    id = optString("id"),
+    userId = optString("userId"),
+    nickname = optString("nickname"),
+    content = optString("content"),
+    timestamp = optLong("timestamp"),
+    type = optString("type", "user"),
+)
+
+internal fun JSONObject.toVoteState(): VoteState = VoteState(
+    id = optString("id"),
+    action = optString("action"),
+    initiatorNickname = optString("initiatorNickname"),
+    requiredVotes = optInt("requiredVotes"),
+    totalUsers = optInt("totalUsers"),
+    expiresAt = optLong("expiresAt"),
+)

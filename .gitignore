@@ -11,3 +11,9 @@ Thumbs.db
 .omc
 .trae
 /.sanshu-memory
+
+# Android
+packages/android-client/.gradle/
+packages/android-client/local.properties
+packages/android-client/**/build/
+*.apk
