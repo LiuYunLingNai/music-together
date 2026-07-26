@@ -28,6 +28,59 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  release_info:
+    name: Detect Android version change
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.variant == 'release')
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      should_build: ${{ steps.version.outputs.should_build }}
+      should_publish: ${{ steps.version.outputs.should_publish }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect version change
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          version_file="packages/android-client/app/build.gradle.kts"
+          current_version="$(sed -nE 's/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' "$version_file" | head -n 1)"
+
+          if [ -z "$current_version" ]; then
+            echo "::error::Unable to read versionName from $version_file"
+            exit 1
+          fi
+
+          should_build=false
+          should_publish=false
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            should_build=true
+          else
+            previous_version=""
+            if [ -n "${BEFORE_SHA:-}" ] && ! printf '%s' "$BEFORE_SHA" | grep -Eq '^0+$'; then
+              previous_version="$(git show "$BEFORE_SHA:$version_file" 2>/dev/null | sed -nE 's/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' | head -n 1 || true)"
+            fi
+
+            if [ "$current_version" != "$previous_version" ]; then
+              should_build=true
+              should_publish=true
+            fi
+
+            echo "Android version: ${previous_version:-none} -> $current_version"
+          fi
+
+          echo "version=$current_version" >> "$GITHUB_OUTPUT"
+          echo "should_build=$should_build" >> "$GITHUB_OUTPUT"
+          echo "should_publish=$should_publish" >> "$GITHUB_OUTPUT"
+
   debug:
     name: Debug test build
     if: github.event_name != 'workflow_dispatch' || inputs.variant == 'debug'
@@ -77,8 +130,11 @@ jobs:
 
   release:
     name: Signed Release build
-    if: github.event_name == 'workflow_dispatch' && inputs.variant == 'release'
+    needs: release_info
+    if: needs.release_info.outputs.should_build == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     defaults:
       run:
         working-directory: packages/android-client
@@ -135,22 +191,44 @@ jobs:
         run: |
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
 
-      - name: Create Release checksums
+      - name: Prepare named Release files and checksums
+        env:
+          VERSION: ${{ needs.release_info.outputs.version }}
         run: |
-          sha256sum app/build/outputs/apk/release/app-release.apk > app/build/outputs/apk/release/app-release.apk.sha256
-          sha256sum app/build/outputs/bundle/release/app-release.aab > app/build/outputs/bundle/release/app-release.aab.sha256
+          set -euo pipefail
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk "dist/music-together-v${VERSION}.apk"
+          cp app/build/outputs/bundle/release/app-release.aab "dist/music-together-v${VERSION}.aab"
+          cd dist
+          sha256sum "music-together-v${VERSION}.apk" > "music-together-v${VERSION}.apk.sha256"
+          sha256sum "music-together-v${VERSION}.aab" > "music-together-v${VERSION}.aab.sha256"
 
       - name: Upload signed Release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: music-together-android-release-${{ github.run_number }}
-          path: |
-            packages/android-client/app/build/outputs/apk/release/app-release.apk
-            packages/android-client/app/build/outputs/apk/release/app-release.apk.sha256
-            packages/android-client/app/build/outputs/bundle/release/app-release.aab
-            packages/android-client/app/build/outputs/bundle/release/app-release.aab.sha256
+          name: music-together-android-release-v${{ needs.release_info.outputs.version }}
+          path: packages/android-client/dist/*
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish GitHub Release
+        if: needs.release_info.outputs.should_publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.release_info.outputs.version }}
+        run: |
+          set -euo pipefail
+          tag="v${VERSION}"
+
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$tag" dist/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "Music Together Android v${VERSION}" \
+              --generate-notes
+          fi
 
       - name: Remove signing material
         if: always()
