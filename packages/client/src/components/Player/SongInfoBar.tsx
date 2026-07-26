@@ -7,7 +7,7 @@ import { usePlayerStore } from '@/stores/playerStore'
 import { MessageSquare, Volume2, VolumeX } from 'lucide-react'
 import { motion } from 'motion/react'
 import { memo, useCallback, useLayoutEffect, useRef, useState } from 'react'
-import { LAYOUT_TRANSITION, SPRING } from './constants'
+import { SONG_INFO_TRANSITION } from './constants'
 
 /** Must match PlayerControls.DESIGN_WIDTH so zoom factors are identical */
 const DESIGN_WIDTH = 300
@@ -97,20 +97,18 @@ export const SongInfoBar = memo(function SongInfoBar({ onOpenChat, chatUnreadCou
     <div ref={wrapperRef} className="w-full">
       <div ref={innerRef} className="flex w-full items-end gap-2" style={{ width: DESIGN_WIDTH }}>
         {/* Left: song title + artist — layoutId pairs with NowPlaying compact for shared animation */}
-        <motion.div layoutId="song-info" transition={LAYOUT_TRANSITION} className="min-w-0 flex-1">
+        <motion.div
+          layoutId="song-info"
+          transition={SONG_INFO_TRANSITION}
+          className="min-w-0 flex-1 will-change-transform"
+        >
           <motion.div
-            initial={{ fontSize: 18 }}
-            animate={{ fontSize: 20 }}
-            transition={SPRING}
-            className="font-bold leading-tight text-white/90"
+            className="text-xl font-bold leading-tight text-white/90"
           >
             <MarqueeText>{currentTrack?.title ?? '暂无歌曲'}</MarqueeText>
           </motion.div>
           <motion.div
-            initial={{ fontSize: 16 }}
-            animate={{ fontSize: 14 }}
-            transition={SPRING}
-            className="text-white/50"
+            className="text-sm text-white/50"
           >
             <MarqueeText>{currentTrack ? currentTrack.artist.join(' / ') : '点击搜索添加歌曲到队列'}</MarqueeText>
           </motion.div>

@@ -8,7 +8,7 @@ import { useSettingsStore } from '@/stores/settingsStore'
 
 import { BackgroundRender } from '@applemusic-like-lyrics/react'
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { VoteBanner } from '../Vote/VoteBanner'
 import { LyricDisplay } from './LyricDisplay'
 import { NowPlaying } from './NowPlaying'
@@ -16,6 +16,9 @@ import { PlayerControls } from './PlayerControls'
 import { SongInfoBar } from './SongInfoBar'
 
 const FULL_SIZE_STYLE = { width: '100%', height: '100%' } as const
+
+const MOBILE_LYRIC_AUTO_EXPAND_DELAY_MS = 900
+const SMOOTH_EASE = [0.22, 1, 0.36, 1] as const
 
 const LYRIC_MASK_STYLE = {
   maskImage: 'linear-gradient(to bottom, transparent 0%, black 8%, black 92%, transparent 100%)',
@@ -83,6 +86,20 @@ export function AudioPlayer({
 
   // Mobile: toggle between cover view and lyric view
   const [lyricExpanded, setLyricExpanded] = useState(false)
+  const hasAutoExpandedLyrics = useRef(false)
+
+  // Let the cover render first, then automatically enter the mobile lyric view
+  // through the same shared-layout transition used by a cover tap.
+  useEffect(() => {
+    if (!isPortrait || hasAutoExpandedLyrics.current) return
+
+    const timer = window.setTimeout(() => {
+      hasAutoExpandedLyrics.current = true
+      setLyricExpanded(true)
+    }, MOBILE_LYRIC_AUTO_EXPAND_DELAY_MS)
+
+    return () => window.clearTimeout(timer)
+  }, [isPortrait])
 
   // Measure cover area to constrain info/controls width (paused during lyric mode)
   const { ref: coverAreaRef, coverWidth } = useCoverWidth(lyricExpanded)
@@ -149,10 +166,10 @@ export function AudioPlayer({
                   {lyricExpanded && (
                     <motion.div
                       key="lyrics"
-                      initial={{ opacity: 0, y: 20 }}
+                      initial={{ opacity: 0, y: 32 }}
                       animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: 20 }}
-                      transition={{ duration: 0.3, ease: 'easeOut' }}
+                      exit={{ opacity: 0, y: 24 }}
+                      transition={{ duration: 0.65, ease: SMOOTH_EASE, delay: 0.08 }}
                       className="min-h-0 w-full flex-1 overflow-hidden"
                       style={LYRIC_MASK_STYLE}
                     >

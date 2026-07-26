@@ -4,7 +4,7 @@ import { usePlayerStore } from '@/stores/playerStore'
 import { Disc3 } from 'lucide-react'
 import { motion } from 'motion/react'
 import { useEffect, useState } from 'react'
-import { LAYOUT_TRANSITION, SPRING } from './constants'
+import { LAYOUT_TRANSITION, SONG_INFO_TRANSITION } from './constants'
 
 interface NowPlayingProps {
   /** Compact mode: small cover + song info in a single row (lyric view top bar) */
@@ -61,22 +61,16 @@ export function NowPlaying({ compact = false, onCoverClick }: NowPlayingProps) {
         </motion.div>
         <motion.div
           layoutId={ready ? 'song-info' : undefined}
-          transition={LAYOUT_TRANSITION}
-          className="min-w-0 flex-1"
+          transition={SONG_INFO_TRANSITION}
+          className="min-w-0 flex-1 will-change-transform"
         >
           <motion.div
-            initial={{ fontSize: 20 }}
-            animate={{ fontSize: 22 }}
-            transition={SPRING}
-            className="font-semibold leading-tight text-white/90"
+            className="text-[22px] font-semibold leading-tight text-white/90"
           >
             <MarqueeText>{currentTrack?.title ?? '暂无歌曲'}</MarqueeText>
           </motion.div>
           <motion.div
-            initial={{ fontSize: 14 }}
-            animate={{ fontSize: 16 }}
-            transition={SPRING}
-            className="text-white/50"
+            className="text-base text-white/50"
           >
             <MarqueeText>{currentTrack ? currentTrack.artist.join(' / ') : '...'}</MarqueeText>
           </motion.div>
