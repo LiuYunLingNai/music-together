@@ -23,7 +23,7 @@
 
 ## 字体
 
-- **主字体**：Plus Jakarta Sans（通过 `<link>` 在 `index.html` 加载）
+- **主字体**：Plus Jakarta Sans（通过 `@fontsource/plus-jakarta-sans` 本地打包）
 - **回退**：system-ui, -apple-system, sans-serif
 
 ## 圆角

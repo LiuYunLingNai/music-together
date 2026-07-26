@@ -1,8 +1,13 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
+@import '@fontsource/plus-jakarta-sans/300.css';
+@import '@fontsource/plus-jakarta-sans/400.css';
+@import '@fontsource/plus-jakarta-sans/500.css';
+@import '@fontsource/plus-jakarta-sans/600.css';
+@import '@fontsource/plus-jakarta-sans/700.css';
 
-/* Fonts are loaded via <link> in index.html */
+/* Plus Jakarta Sans is bundled locally by Vite. */
 
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
