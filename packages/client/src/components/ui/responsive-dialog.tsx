@@ -39,17 +39,19 @@ function ResponsiveDialog({
   open,
   onOpenChange,
   children,
+  mobileRepositionInputs,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   children: React.ReactNode
+  mobileRepositionInputs?: boolean
 }) {
   const isMobile = useIsMobile()
 
   return (
     <ResponsiveDialogContext.Provider value={isMobile}>
       {isMobile ? (
-        <Drawer open={open} onOpenChange={onOpenChange}>
+        <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={mobileRepositionInputs}>
           {children}
         </Drawer>
       ) : (
@@ -74,7 +76,11 @@ function ResponsiveDialogContent({
   const isMobile = useIsResponsiveMobile()
 
   if (isMobile) {
-    return <DrawerContent className={className}>{children}</DrawerContent>
+    return (
+      <DrawerContent className={className} {...props}>
+        {children}
+      </DrawerContent>
+    )
   }
 
   return (

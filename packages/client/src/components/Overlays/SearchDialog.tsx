@@ -14,6 +14,7 @@ import { cn, trackKey } from '@/lib/utils'
 import { useRoomStore } from '@/stores/roomStore'
 import { useSearch } from '@/hooks/useSearch'
 import { usePlaylist } from '@/hooks/usePlaylist'
+import { useIsMobile } from '@/hooks/useIsMobile'
 import { useSocketContext } from '@/providers/SocketProvider'
 import { EVENTS } from '@music-together/shared'
 import type { MusicSource, Track, Playlist } from '@music-together/shared'
@@ -44,12 +45,50 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
   const [keyword, setKeyword] = useState('')
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set())
   const listRef = useRef<VirtualTrackListRef>(null)
+  const dialogContentRef = useRef<HTMLDivElement>(null)
   const sourceContainerRef = useRef<HTMLDivElement>(null)
   const [pillStyle, setPillStyle] = useState({ left: 0, width: 0 })
   const queue = useRoomStore((s) => s.room?.queue ?? EMPTY_QUEUE)
   const roomId = useRoomStore((s) => s.room?.id)
   const queueKeys = useMemo(() => new Set(queue.map(trackKey)), [queue])
   const { socket } = useSocketContext()
+  const isMobile = useIsMobile()
+
+  // Mobile browsers can pan the visual viewport when the keyboard focuses the
+  // search input, which moves even fixed drawers above the visible screen.
+  // Keep this search drawer pinned to the actual visible viewport instead.
+  useLayoutEffect(() => {
+    if (!open || !isMobile) return
+
+    const content = dialogContentRef.current
+    const viewport = window.visualViewport
+    if (!content || !viewport) return
+
+    let frame = 0
+    const syncToVisualViewport = () => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        content.style.setProperty('top', `${Math.max(0, viewport.offsetTop)}px`, 'important')
+        content.style.setProperty('bottom', 'auto', 'important')
+        content.style.setProperty('height', `${viewport.height}px`, 'important')
+        content.style.setProperty('max-height', `${viewport.height}px`, 'important')
+      })
+    }
+
+    syncToVisualViewport()
+    viewport.addEventListener('resize', syncToVisualViewport)
+    viewport.addEventListener('scroll', syncToVisualViewport)
+
+    return () => {
+      cancelAnimationFrame(frame)
+      viewport.removeEventListener('resize', syncToVisualViewport)
+      viewport.removeEventListener('scroll', syncToVisualViewport)
+      content.style.removeProperty('top')
+      content.style.removeProperty('bottom')
+      content.style.removeProperty('height')
+      content.style.removeProperty('max-height')
+    }
+  }, [open, isMobile])
 
   // Album Detail view state
   const [selectedAlbum, setSelectedAlbum] = useState<Playlist | null>(null)
@@ -171,8 +210,11 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
   }
 
   return (
-    <ResponsiveDialog open={open} onOpenChange={onOpenChange}>
-      <ResponsiveDialogContent className="flex h-[70vh] flex-col overflow-hidden sm:h-auto sm:max-h-[80vh] sm:max-w-2xl">
+    <ResponsiveDialog open={open} onOpenChange={onOpenChange} mobileRepositionInputs={false}>
+      <ResponsiveDialogContent
+        ref={dialogContentRef}
+        className="flex h-dvh max-h-dvh flex-col overflow-hidden sm:h-auto sm:max-h-[80vh] sm:max-w-2xl"
+      >
         <ResponsiveDialogHeader>
           <div className="flex items-center gap-3">
             <ResponsiveDialogTitle className="shrink-0">
