@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.People
@@ -36,10 +37,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import io.github.yueby.musictogether.MusicTogetherViewModel
+import io.github.yueby.musictogether.logging.AppLogger
 import io.github.yueby.musictogether.model.AppState
 import io.github.yueby.musictogether.model.ConnectionStatus
 import io.github.yueby.musictogether.model.RoomListItem
@@ -48,6 +51,7 @@ import io.github.yueby.musictogether.model.RoomListItem
 fun LobbyScreen(state: AppState, contentPadding: PaddingValues, viewModel: MusicTogetherViewModel) {
     var createDialog by remember { mutableStateOf(false) }
     var joinTarget by remember { mutableStateOf<RoomListItem?>(null) }
+    val context = LocalContext.current
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(contentPadding),
@@ -55,11 +59,14 @@ fun LobbyScreen(state: AppState, contentPadding: PaddingValues, viewModel: Music
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Icon(Icons.Default.MusicNote, null, tint = MaterialTheme.colorScheme.primary)
-                Column {
+                Column(Modifier.weight(1f)) {
                     Text("Music Together", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                     Text("原生 Android 客户端", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                IconButton(onClick = { AppLogger.export(context) }) {
+                    Icon(Icons.Default.FileUpload, "导出日志")
                 }
             }
         }

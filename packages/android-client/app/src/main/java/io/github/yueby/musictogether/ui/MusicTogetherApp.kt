@@ -23,6 +23,13 @@ fun MusicTogetherApp(viewModel: MusicTogetherViewModel) {
         }
     }
 
+    LaunchedEffect(state.notice?.id) {
+        state.notice?.let {
+            snackbarHostState.showSnackbar(it.text)
+            viewModel.clearNotice()
+        }
+    }
+
     Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { padding ->
         if (state.room == null) {
             LobbyScreen(state, padding, viewModel)

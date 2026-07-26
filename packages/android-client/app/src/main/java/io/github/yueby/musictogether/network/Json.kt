@@ -14,11 +14,16 @@ internal fun JSONObject.stringOrNull(name: String): String? =
     if (has(name) && !isNull(name)) optString(name).takeIf { it.isNotBlank() } else null
 
 internal fun JSONObject.toTrack(): Track {
-    val artists = optJSONArray("artist") ?: JSONArray()
+    val artists = optJSONArray("artist")
+    val artistList = when {
+        artists != null -> List(artists.length()) { artists.optString(it) }
+        stringOrNull("artist") != null -> listOfNotNull(stringOrNull("artist"))
+        else -> emptyList()
+    }
     return Track(
         id = optString("id"),
         title = optString("title", "未知歌曲"),
-        artist = List(artists.length()) { artists.optString(it) },
+        artist = artistList,
         album = optString("album"),
         duration = optDouble("duration", 0.0),
         cover = optString("cover"),
@@ -103,8 +108,15 @@ internal fun JSONObject.toChatMessage(): ChatMessage = ChatMessage(
 internal fun JSONObject.toVoteState(): VoteState = VoteState(
     id = optString("id"),
     action = optString("action"),
+    initiatorId = optString("initiatorId"),
     initiatorNickname = optString("initiatorNickname"),
+    votes = optJSONObject("votes")?.let { value ->
+        value.keys().asSequence().associateWith { value.optBoolean(it) }
+    }.orEmpty(),
     requiredVotes = optInt("requiredVotes"),
     totalUsers = optInt("totalUsers"),
     expiresAt = optLong("expiresAt"),
+    payload = optJSONObject("payload")?.let { value ->
+        value.keys().asSequence().associateWith { value.optString(it) }
+    }.orEmpty(),
 )

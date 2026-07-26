@@ -28,6 +28,7 @@ object Events {
     const val QUEUE_ADD = "queue:add"
     const val QUEUE_REMOVE = "queue:remove"
     const val QUEUE_CLEAR = "queue:clear"
+    const val QUEUE_REORDER = "queue:reorder"
     const val QUEUE_UPDATED = "queue:updated"
 
     const val CHAT_MESSAGE = "chat:message"

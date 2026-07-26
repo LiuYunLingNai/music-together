@@ -14,7 +14,7 @@ class ClockSync {
     private var anchorElapsed = SystemClock.elapsedRealtime()
     private var anchorServerTime = System.currentTimeMillis().toDouble()
 
-    val calibrated: Boolean get() = samples.size >= 5
+    val calibrated: Boolean get() = samples.size >= 20
     val medianRtt: Long
         get() = samples.map { it.rtt }.sorted().let { if (it.isEmpty()) 0 else it[it.size / 2] }
 

@@ -65,10 +65,45 @@ data class ChatMessage(
 data class VoteState(
     val id: String,
     val action: String,
+    val initiatorId: String,
     val initiatorNickname: String,
+    val votes: Map<String, Boolean>,
     val requiredVotes: Int,
     val totalUsers: Int,
     val expiresAt: Long,
+    val payload: Map<String, String> = emptyMap(),
+)
+
+data class LyricWord(
+    val text: String,
+    val startTimeMs: Long,
+    val endTimeMs: Long,
+)
+
+data class LyricLine(
+    val words: List<LyricWord>,
+    val translatedLyric: String = "",
+    val romanLyric: String = "",
+    val startTimeMs: Long,
+    val endTimeMs: Long,
+    val isBackground: Boolean = false,
+    val isDuet: Boolean = false,
+) {
+    val text: String get() = words.joinToString("") { it.text }
+}
+
+data class LyricsState(
+    val trackId: String? = null,
+    val lines: List<LyricLine> = emptyList(),
+    val loading: Boolean = false,
+    val source: String? = null,
+    val error: String? = null,
+)
+
+data class UiNotice(
+    val id: Long = System.nanoTime(),
+    val text: String,
+    val isError: Boolean = false,
 )
 
 enum class ConnectionStatus {
@@ -87,6 +122,10 @@ data class AppState(
     val messages: List<ChatMessage> = emptyList(),
     val searchResults: List<Track> = emptyList(),
     val searchLoading: Boolean = false,
+    val searchHasSearched: Boolean = false,
+    val searchError: String? = null,
     val activeVote: VoteState? = null,
+    val lyrics: LyricsState = LyricsState(),
+    val notice: UiNotice? = null,
     val error: String? = null,
 )

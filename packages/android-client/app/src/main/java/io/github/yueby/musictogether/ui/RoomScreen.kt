@@ -1,5 +1,7 @@
 package io.github.yueby.musictogether.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,11 +12,13 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,17 +33,24 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.VerticalAlignTop
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
@@ -47,6 +58,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -67,16 +79,27 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import io.github.yueby.musictogether.MusicTogetherViewModel
+import io.github.yueby.musictogether.logging.AppLogger
 import io.github.yueby.musictogether.model.AppState
 import io.github.yueby.musictogether.model.ChatMessage
+import io.github.yueby.musictogether.model.LyricLine
+import io.github.yueby.musictogether.model.LyricsState
 import io.github.yueby.musictogether.model.RoomState
 import io.github.yueby.musictogether.model.Track
 import io.github.yueby.musictogether.player.PlayerUiState
@@ -89,6 +112,10 @@ private enum class RoomTab(val label: String) {
     Player("播放"), Queue("队列"), Search("点歌"), Chat("聊天")
 }
 
+private enum class PlayerVisual(val label: String) {
+    Cover("封面"), Lyrics("歌词")
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RoomScreen(
@@ -99,6 +126,7 @@ fun RoomScreen(
 ) {
     val room = appState.room ?: return
     var selectedTab by remember { mutableStateOf(RoomTab.Player) }
+    val context = LocalContext.current
 
     Scaffold(
         modifier = Modifier.padding(outerPadding),
@@ -116,6 +144,9 @@ fun RoomScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { AppLogger.export(context) }) {
+                        Icon(Icons.Default.FileUpload, "导出日志")
+                    }
                     if (room.hasPassword) Icon(Icons.Default.Lock, "密码房间", Modifier.padding(12.dp))
                 },
             )
@@ -145,19 +176,33 @@ fun RoomScreen(
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             when (selectedTab) {
-                RoomTab.Player -> PlayerPane(room, appState.userId, playerState, viewModel)
+                RoomTab.Player -> PlayerPane(room, appState.userId, appState.lyrics, playerState, viewModel)
                 RoomTab.Queue -> QueuePane(room, viewModel)
                 RoomTab.Search -> SearchPane(appState, viewModel)
                 RoomTab.Chat -> ChatPane(appState.messages, viewModel)
             }
             appState.activeVote?.let { vote ->
+                val hasVoted = appState.userId?.let(vote.votes::containsKey) == true
+                val approveCount = vote.votes.values.count { it }
+                val rejectCount = vote.votes.values.count { !it }
                 Card(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(12.dp)) {
                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("${vote.initiatorNickname} 发起了“${voteActionLabel(vote.action)}”投票", fontWeight = FontWeight.SemiBold)
-                        Text("需要 ${vote.requiredVotes} 票 · 共 ${vote.totalUsers} 人", style = MaterialTheme.typography.bodySmall)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = { viewModel.castVote(true) }) { Text("同意") }
-                            OutlinedButton(onClick = { viewModel.castVote(false) }) { Text("反对") }
+                        vote.payload["trackTitle"]?.takeIf { it.isNotBlank() }?.let {
+                            Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Text("赞成 $approveCount · 反对 $rejectCount · 需要 ${vote.requiredVotes} 票", style = MaterialTheme.typography.bodySmall)
+                        if (hasVoted) {
+                            Text(
+                                if (vote.initiatorId == appState.userId) "你发起了投票，已自动计入赞成票" else "你已投票",
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        } else {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(onClick = { viewModel.castVote(true) }) { Text("同意") }
+                                OutlinedButton(onClick = { viewModel.castVote(false) }) { Text("反对") }
+                            }
                         }
                     }
                 }
@@ -167,10 +212,17 @@ fun RoomScreen(
 }
 
 @Composable
-private fun PlayerPane(room: RoomState, userId: String?, player: PlayerUiState, viewModel: MusicTogetherViewModel) {
+private fun PlayerPane(
+    room: RoomState,
+    userId: String?,
+    lyrics: LyricsState,
+    player: PlayerUiState,
+    viewModel: MusicTogetherViewModel,
+) {
     val track = player.track ?: room.currentTrack
     var dragging by remember { mutableStateOf(false) }
     var sliderValue by remember { mutableDoubleStateOf(player.positionSeconds) }
+    var visual by remember { mutableStateOf(PlayerVisual.Cover) }
     LaunchedEffect(player.positionSeconds) { if (!dragging) sliderValue = player.positionSeconds }
 
     LazyColumn(
@@ -179,17 +231,35 @@ private fun PlayerPane(room: RoomState, userId: String?, player: PlayerUiState, 
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item {
-            if (track != null) {
-                AsyncImage(
-                    model = track.cover,
-                    contentDescription = track.title,
-                    modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(24.dp)),
-                    contentScale = ContentScale.Crop,
-                )
-            } else {
-                Card(Modifier.fillMaxWidth().aspectRatio(1f)) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Default.LibraryMusic, null, Modifier.size(72.dp), tint = MaterialTheme.colorScheme.primary)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                PlayerVisual.entries.forEach { option ->
+                    AssistChip(
+                        onClick = { visual = option },
+                        label = { Text(option.label) },
+                        leadingIcon = if (visual == option) {
+                            { Icon(if (option == PlayerVisual.Cover) Icons.Default.LibraryMusic else Icons.Default.MusicNote, null, Modifier.size(16.dp)) }
+                        } else null,
+                    )
+                    Spacer(Modifier.size(6.dp))
+                }
+            }
+        }
+        item {
+            Box(Modifier.fillMaxWidth().heightIn(min = 320.dp, max = 460.dp)) {
+                if (visual == PlayerVisual.Lyrics && track != null) {
+                    LyricsPanel(lyrics, player.positionSeconds)
+                } else if (track != null) {
+                    AsyncImage(
+                        model = track.cover,
+                        contentDescription = track.title,
+                        modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(24.dp)),
+                        contentScale = ContentScale.Crop,
+                    )
+                } else {
+                    Card(Modifier.fillMaxWidth().aspectRatio(1f)) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.LibraryMusic, null, Modifier.size(72.dp), tint = MaterialTheme.colorScheme.primary)
+                        }
                     }
                 }
             }
@@ -257,7 +327,12 @@ private fun PlayerPane(room: RoomState, userId: String?, player: PlayerUiState, 
 
 @Composable
 private fun QueuePane(room: RoomState, viewModel: MusicTogetherViewModel) {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp)) {
+    val listState = rememberLazyListState()
+    val currentIndex = room.queue.indexOfFirst { it.id == room.currentTrack?.id }
+    LaunchedEffect(room.currentTrack?.id, room.queue.size) {
+        if (currentIndex >= 0) listState.animateScrollToItem((currentIndex - 2).coerceAtLeast(0) + 1)
+    }
+    LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(12.dp)) {
         item {
             Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -272,14 +347,37 @@ private fun QueuePane(room: RoomState, viewModel: MusicTogetherViewModel) {
         if (room.queue.isEmpty()) {
             item { Text("队列为空，去点歌页添加歌曲。", Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
-        items(room.queue, key = { it.id }) { track ->
+        itemsIndexed(room.queue, key = { index, track -> "${track.id}:$index" }) { index, track ->
+            val isCurrent = track.id == room.currentTrack?.id
+            val canReorder = viewModel.canControl()
             TrackRow(
                 track = track,
-                subtitle = track.requestedBy?.let { "${track.artist.joinToString(" / ")} · $it 点歌" } ?: track.artist.joinToString(" / "),
-                primaryAction = if (viewModel.canControl()) ({ viewModel.playTrack(track) }) else null,
-                secondaryAction = if (viewModel.canControl()) ({ viewModel.removeTrack(track) }) else null,
+                subtitle = buildString {
+                    append(track.artist.joinToString(" / "))
+                    track.requestedBy?.let { append(" · $it 点歌") }
+                    if (isCurrent) append(" · 当前播放")
+                },
+                primaryAction = if (canReorder) null else ({ viewModel.playTrack(track) }),
+                secondaryAction = if (canReorder) null else ({ viewModel.removeTrack(track) }),
                 primaryIcon = Icons.Default.PlayArrow,
                 secondaryIcon = Icons.Default.Delete,
+                onClick = { viewModel.playTrack(track) },
+                highlighted = isCurrent,
+                trailingContent = if (canReorder) {
+                    {
+                        QueueControlMenu(
+                            track = track,
+                            canMoveUp = index > 0,
+                            canMoveDown = index < room.queue.lastIndex,
+                            canPin = !isCurrent,
+                            onPlay = { viewModel.playTrack(track) },
+                            onMoveUp = { viewModel.moveTrack(track, -1) },
+                            onMoveDown = { viewModel.moveTrack(track, 1) },
+                            onPin = { viewModel.pinTrack(track) },
+                            onRemove = { viewModel.removeTrack(track) },
+                        )
+                    }
+                } else null,
             )
             HorizontalDivider()
         }
@@ -313,6 +411,14 @@ private fun SearchPane(state: AppState, viewModel: MusicTogetherViewModel) {
         )
         if (state.searchLoading) {
             Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        } else if (state.searchError != null) {
+            Text(
+                "搜索失败：${state.searchError}",
+                modifier = Modifier.padding(20.dp),
+                color = MaterialTheme.colorScheme.error,
+            )
+        } else if (state.searchHasSearched && state.searchResults.isEmpty()) {
+            Text("未找到结果，请尝试其他关键词或音乐源。", Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
             LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(vertical = 8.dp)) {
                 items(state.searchResults, key = { it.id }) { track ->
@@ -321,6 +427,7 @@ private fun SearchPane(state: AppState, viewModel: MusicTogetherViewModel) {
                         subtitle = "${track.artist.joinToString(" / ")} · ${track.album}",
                         primaryAction = { viewModel.addTrack(track) },
                         primaryIcon = Icons.AutoMirrored.Filled.PlaylistAdd,
+                        onClick = { viewModel.addTrack(track) },
                     )
                     HorizontalDivider()
                 }
@@ -378,8 +485,15 @@ private fun TrackRow(
     primaryIcon: androidx.compose.ui.graphics.vector.ImageVector,
     secondaryAction: (() -> Unit)? = null,
     secondaryIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    onClick: (() -> Unit)? = null,
+    highlighted: Boolean = false,
+    trailingContent: (@Composable () -> Unit)? = null,
 ) {
     ListItem(
+        modifier = if (onClick != null) Modifier.fillMaxWidth().clickable(onClick = onClick) else Modifier.fillMaxWidth(),
+        colors = ListItemDefaults.colors(
+            containerColor = if (highlighted) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+        ),
         leadingContent = {
             AsyncImage(
                 model = track.cover,
@@ -391,14 +505,132 @@ private fun TrackRow(
         headlineContent = { Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent = { Text(subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         trailingContent = {
-            Row {
-                primaryAction?.let { IconButton(onClick = it) { Icon(primaryIcon, null) } }
-                if (secondaryAction != null && secondaryIcon != null) {
-                    IconButton(onClick = secondaryAction) { Icon(secondaryIcon, null) }
+            if (trailingContent != null) {
+                trailingContent()
+            } else {
+                Row {
+                    primaryAction?.let { IconButton(onClick = it) { Icon(primaryIcon, "播放或投票播放") } }
+                    if (secondaryAction != null && secondaryIcon != null) {
+                        IconButton(onClick = secondaryAction) { Icon(secondaryIcon, "移除或投票移除") }
+                    }
                 }
             }
         },
     )
+}
+
+@Composable
+private fun QueueControlMenu(
+    track: Track,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
+    canPin: Boolean,
+    onPlay: () -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
+    onPin: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { expanded = true }) { Icon(Icons.Default.MoreVert, "队列操作") }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text("播放") },
+                leadingIcon = { Icon(Icons.Default.PlayArrow, null) },
+                onClick = { expanded = false; onPlay() },
+            )
+            DropdownMenuItem(
+                text = { Text("上移") },
+                leadingIcon = { Icon(Icons.Default.KeyboardArrowUp, null) },
+                enabled = canMoveUp,
+                onClick = { expanded = false; onMoveUp() },
+            )
+            DropdownMenuItem(
+                text = { Text("下移") },
+                leadingIcon = { Icon(Icons.Default.KeyboardArrowDown, null) },
+                enabled = canMoveDown,
+                onClick = { expanded = false; onMoveDown() },
+            )
+            DropdownMenuItem(
+                text = { Text("置顶到当前播放下方") },
+                leadingIcon = { Icon(Icons.Default.VerticalAlignTop, null) },
+                enabled = canPin,
+                onClick = { expanded = false; onPin() },
+            )
+            DropdownMenuItem(
+                text = { Text("移除") },
+                leadingIcon = { Icon(Icons.Default.Delete, null) },
+                onClick = { expanded = false; onRemove() },
+            )
+        }
+    }
+}
+
+@Composable
+private fun LyricsPanel(lyrics: LyricsState, positionSeconds: Double) {
+    val positionMs = (positionSeconds * 1000).toLong().coerceAtLeast(0)
+    val lines = lyrics.lines
+    val activeIndex = lines.indexOfLast {
+        !it.isBackground && positionMs >= it.startTimeMs && positionMs < it.endTimeMs
+    }.takeIf { it >= 0 } ?: lines.indexOfLast { !it.isBackground && positionMs >= it.startTimeMs }
+    val listState = rememberLazyListState()
+    LaunchedEffect(activeIndex, lines.size) {
+        if (activeIndex >= 0) listState.animateScrollToItem((activeIndex - 2).coerceAtLeast(0))
+    }
+
+    when {
+        lyrics.loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        lines.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(lyrics.error ?: "暂无歌词", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        else -> LazyColumn(
+            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceContainer),
+            state = listState,
+            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 120.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            itemsIndexed(lines, key = { index, line -> "${line.startTimeMs}:$index" }) { index, line ->
+                val overlapsPlayback = positionMs >= line.startTimeMs && positionMs < line.endTimeMs
+                LyricLineItem(line, positionMs, index == activeIndex || overlapsPlayback)
+            }
+        }
+    }
+}
+
+@Composable
+private fun LyricLineItem(line: LyricLine, positionMs: Long, active: Boolean) {
+    val alignment = if (line.isDuet) Alignment.End else Alignment.Start
+    val textAlign = if (line.isDuet) TextAlign.End else TextAlign.Start
+    Column(
+        modifier = Modifier.fillMaxWidth().alpha(if (active) 1f else if (line.isBackground) 0.55f else 0.68f),
+        horizontalAlignment = alignment,
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        Text(
+            text = buildAnnotatedString {
+                line.words.forEach { word ->
+                    withStyle(
+                        SpanStyle(
+                            color = if (positionMs >= word.startTimeMs) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            fontWeight = if (active && positionMs >= word.startTimeMs) FontWeight.Bold else FontWeight.Medium,
+                        ),
+                    ) { append(word.text) }
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            textAlign = textAlign,
+            fontSize = if (active) 24.sp else if (line.isBackground) 16.sp else 19.sp,
+            lineHeight = if (active) 31.sp else 25.sp,
+            fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+        )
+        line.translatedLyric.takeIf { it.isNotBlank() }?.let {
+            Text(it, Modifier.fillMaxWidth(), textAlign = textAlign, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        line.romanLyric.takeIf { it.isNotBlank() }?.let {
+            Text(it, Modifier.fillMaxWidth(), textAlign = textAlign, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
 }
 
 private fun formatTime(seconds: Double): String {
