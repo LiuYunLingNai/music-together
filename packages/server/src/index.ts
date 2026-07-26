@@ -25,9 +25,7 @@ const httpServer = createServer(app)
 // dev (localhost) and LAN access working consistently.
 app.use(
   cors({
-    origin: config.explicitOrigins.length > 0
-      ? config.explicitOrigins
-      : (true as const),
+    origin: config.explicitOrigins.length > 0 ? config.explicitOrigins : (true as const),
     credentials: true,
   }),
 )
@@ -79,9 +77,9 @@ if (fs.existsSync(indexHtml)) {
     res.setHeader('Cache-Control', 'no-cache, must-revalidate')
     res.sendFile(indexHtml)
   })
-  logger.info(`Serving client SPA from ${clientDist}`)
+  logger.info('客户端静态页面已加载', { clientDist })
 } else {
-  logger.info('Client dist not found, skipping static file serving (dev mode)')
+  logger.info('未发现客户端构建产物，已跳过静态页面托管（开发模式）')
 }
 
 // Socket.IO with typed events
@@ -105,21 +103,26 @@ httpServer.on('error', (err: NodeJS.ErrnoException) => {
 })
 
 httpServer.listen(config.port, () => {
-  logger.info(`Server running on http://localhost:${config.port}`)
+  logger.info(`服务器已启动，监听端口 ${config.port}`, {
+    event: 'server.started',
+    port: config.port,
+    environment: config.isProd ? 'production' : 'development',
+    version: config.version,
+  })
   logger.info(
     config.explicitOrigins.length > 0
-      ? `Accepting connections from explicit origins: ${config.explicitOrigins.join(', ')}`
-      : 'Accepting connections from all origins (auto mode)',
+      ? `仅允许以下来源连接：${config.explicitOrigins.join(', ')}`
+      : '当前允许所有来源连接（自动模式）',
   )
 })
 
 // Graceful shutdown
 function shutdown(signal: string) {
-  logger.info(`Received ${signal}, shutting down gracefully...`)
+  logger.info(`收到 ${signal} 信号，正在安全关闭服务器……`)
   clearAllTimers()
   io.close(() => {
     httpServer.close(() => {
-      logger.info('Server closed')
+      logger.info('服务器已关闭')
       process.exit(0)
     })
   })

@@ -162,7 +162,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
   // ---- Leave room (explicit user action) ----
   socket.on(EVENTS.ROOM_LEAVE, () => {
     try {
-      logger.info(`ROOM_LEAVE event from ${socket.id}`, { socketId: socket.id })
+      logger.debug('收到用户主动离开房间请求', { socketId: socket.id })
       handleLeave(io, socket, undefined, true)
     } catch (err) {
       logger.error('ROOM_LEAVE handler error', err, { socketId: socket.id })
@@ -205,7 +205,18 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
       // 给房间内其他成员发送不含密码的设置
       ctx.socket.to(ctx.roomId).emit(EVENTS.ROOM_SETTINGS, baseSettings)
 
-      logger.info(`Room ${ctx.roomId} settings updated`, { roomId: ctx.roomId })
+      logger.info(`房间 ${ctx.roomId} 的设置已更新`, {
+        event: 'room.settings_updated',
+        roomId: ctx.roomId,
+        operatorId: ctx.user.id,
+        operator: ctx.user.nickname,
+        roomName: updatedRoom.name,
+        audioQuality: updatedRoom.audioQuality,
+        passwordProtected: updatedRoom.password !== null,
+        changedFields: Object.keys(parsed.data).filter(
+          (key) => parsed.data[key as keyof typeof parsed.data] !== undefined,
+        ),
+      })
 
       // 密码变更也要刷新大厅列表
       roomService.broadcastRoomList(io)
@@ -239,14 +250,21 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         ctx.socket.emit(EVENTS.ROOM_STATE, roomService.toPublicRoomStateForOwner(ctx.room))
         ctx.socket.to(ctx.roomId).emit(EVENTS.ROOM_STATE, roomService.toPublicRoomState(ctx.room))
       }
-      logger.info(`Role changed: ${userId} -> ${role} in room ${ctx.roomId}`, { roomId: ctx.roomId })
+      logger.info(`房间 ${ctx.roomId} 的用户角色已调整为 ${role}`, {
+        event: 'room.role_changed',
+        roomId: ctx.roomId,
+        operatorId: ctx.user.id,
+        targetUserId: userId,
+        role,
+        conductorChanged: result.hostChanged,
+      })
     }),
   )
 
   // ---- Disconnect ----
   socket.on('disconnect', (reason) => {
     try {
-      logger.info(`Client disconnected: ${socket.id}, reason: ${reason}`, { socketId: socket.id })
+      logger.debug('客户端连接已断开', { socketId: socket.id, reason })
       handleLeave(io, socket)
       // Safety net: always clean up socket mapping, RTT data, and rate limiter.
       // handleLeave only cleans up if the socket was in a room, but
@@ -315,6 +333,6 @@ function handleLeave(io: TypedServer, socket: TypedSocket, reason?: string, revo
   roomService.broadcastRoomList(io)
 
   if (reason) {
-    logger.info(`${reason}: left room ${roomId} for socket ${socket.id}`, { roomId, socketId: socket.id })
+    logger.debug('连接因切换操作离开原房间', { roomId, socketId: socket.id, reason })
   }
 }

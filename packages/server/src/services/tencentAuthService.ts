@@ -269,13 +269,13 @@ export async function generateQrCode(): Promise<{ key: string; qrimg: string } |
     // 缓存完整 cookie 字符串（供 checkQrStatus 使用）
     const fullCookie = cookieParts.join('; ')
     qrSessionMap.set(qrsig, fullCookie)
-    logger.info(`QQ QR: session cookies cached (${cookieParts.length} parts)`)
+    logger.debug('QQ 音乐扫码登录会话已缓存', { cookieParts: cookieParts.length })
 
     // 将二维码图片转为 base64
     const imageBuffer = Buffer.from(await response.arrayBuffer())
     const qrimg = `data:image/png;base64,${imageBuffer.toString('base64')}`
 
-    logger.info('QQ Music QR code generated successfully')
+    logger.info('QQ 音乐登录二维码已生成')
     return { key: qrsig, qrimg }
   } catch (err) {
     logger.error('QQ QR generation failed', err)
@@ -370,7 +370,7 @@ export async function checkQrStatus(qrsig: string): Promise<{
 
     // 当登录成功（code=0）时输出原始响应方便调试
     if (text.startsWith("ptuiCB('0'")) {
-      logger.info(`QQ QR: raw ptqrlogin response: ${text.slice(0, 500)}`)
+      logger.debug('QQ 音乐扫码状态原始响应', { response: text.slice(0, 500) })
     }
 
     // ptuiCB 格式不固定，可能 6~8 个参数，用宽松正则匹配
@@ -383,9 +383,11 @@ export async function checkQrStatus(qrsig: string): Promise<{
     const [, code, , checkSigUrl, , msg, nickname] = match
     const mapped = STATUS_MESSAGES[code] ?? { status: 800, message: `未知状态 (${code})` }
 
-    logger.info(
-      `QQ QR poll: code=${code}, checkSigUrl=${checkSigUrl?.slice(0, 80) || '(empty)'}, nickname=${nickname || '(none)'}`,
-    )
+    logger.debug('QQ 音乐扫码状态轮询完成', {
+      code,
+      hasCheckSigUrl: Boolean(checkSigUrl),
+      nickname: nickname || undefined,
+    })
 
     // 登录成功 — 通过 check_sig 获取 p_skey/skey 并换取 OAuth musickey
     if (code === '0') {
@@ -401,7 +403,7 @@ export async function checkQrStatus(qrsig: string): Promise<{
         }
 
         // 第3步：请求 ptlogin2 的 check_sig 换取 p_skey 和其他全套环境 Cookie
-        logger.info('QQ QR: step 3 - fetching p_skey from check_sig')
+        logger.debug('QQ 音乐扫码登录：正在获取 p_skey')
         const fullCookie = await doCheckSig(uinStr, ptsigx, mergedCookie)
 
         if (!fullCookie) {
@@ -417,7 +419,7 @@ export async function checkQrStatus(qrsig: string): Promise<{
         }
 
         // 第4步：携带包含 p_skey，pt4_token 的全套鉴权上下文发 POST 获取 auth code
-        logger.info('QQ QR: step 4 - fetching OAuth code')
+        logger.debug('QQ 音乐扫码登录：正在获取 OAuth 授权码')
         const authCode = await fetchOAuthCode(pSkey, fullCookie)
 
         if (!authCode) {
@@ -432,11 +434,14 @@ export async function checkQrStatus(qrsig: string): Promise<{
         }
 
         // 第5步：用获得的 auth code 及 zzc 签名请求换取音乐平台的核心加密票据
-        logger.info('QQ QR: step 5 - exchanging code for musickey')
+        logger.debug('QQ 音乐扫码登录：正在换取 musickey')
         const finalCookie = await fetchMusicKeySession(authCode)
 
         if (finalCookie) {
-          logger.info(`QQ Music QR login success: ${nickname || uinStr} (got zzc-signed musickey)`)
+          logger.info(`QQ 音乐扫码登录成功：${nickname || uinStr}`, {
+            event: 'auth.qq_qr_login_succeeded',
+            nickname: nickname || undefined,
+          })
           return { status: 803, message: mapped.message, cookie: finalCookie }
         }
 
@@ -516,7 +521,7 @@ export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
         cookie,
         param: {},
       })
-      logger.info(`QQ VIP Data (vip_login_base): ${JSON.stringify(vipData)}`)
+      logger.debug('QQ 音乐 VIP 信息响应', { vipData })
       // vip_login_base 返回的格式中含有 identity.vip 及 identity.svip
       const isVip = vipData?.identity?.svip ? 2 : vipData?.identity?.vip ? 1 : 0
       vipType = isVip
@@ -714,7 +719,7 @@ export async function getUserPlaylists(cookie: string): Promise<Playlist[]> {
 
       const vPlaylist = createdData?.v_playlist || []
 
-      logger.info('QQ Debug Created Playlist Item [0]: \n' + JSON.stringify(vPlaylist[0], null, 2))
+      logger.debug('QQ 音乐创建歌单响应样例', { playlist: vPlaylist[0] })
 
       for (const p of vPlaylist) {
         playlists.push({
@@ -746,7 +751,7 @@ export async function getUserPlaylists(cookie: string): Promise<Playlist[]> {
 
         const vFavList = favData?.v_playlist || []
 
-        logger.info('QQ Debug Fav Playlist favData parent: \n' + JSON.stringify(favData, null, 2))
+        logger.debug('QQ 音乐收藏歌单响应', { favData })
 
         for (const p of vFavList) {
           playlists.push({
@@ -762,7 +767,11 @@ export async function getUserPlaylists(cookie: string): Promise<Playlist[]> {
       logger.error('QQ getUserPlaylists (Favored) failed', err)
     }
 
-    logger.info(`QQ getUserPlaylists: fetched ${playlists.length} playlists for user ${uin}`)
+    logger.info(`已获取 QQ 音乐用户的 ${playlists.length} 个歌单`, {
+      platform: 'tencent',
+      userId: uin,
+      count: playlists.length,
+    })
     return playlists
   } catch (err) {
     logger.error('QQ getUserPlaylists failed catastrophically', err)

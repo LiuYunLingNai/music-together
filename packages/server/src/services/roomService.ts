@@ -143,7 +143,16 @@ export function createRoom(
   chatRepo.createRoom(roomId)
   roomRepo.setSocketMapping(socketId, roomId, userId)
 
-  logger.info(`Room created: ${roomId} by ${nickname}`, { roomId })
+  logger.info(`房间已创建：${room.name}（${roomId}），房主：${nickname}`, {
+    event: 'room.created',
+    roomId,
+    roomName: room.name,
+    userId,
+    nickname,
+    audioQuality: room.audioQuality,
+    playMode: room.playMode,
+    passwordProtected: room.password !== null,
+  })
   return { room, user }
 }
 
@@ -191,7 +200,15 @@ export function joinRoom(
   // Re-elect conductor (owner joining takes priority over current conductor)
   const hostChanged = electConductor(room)
 
-  logger.info(`User ${nickname} joined room ${roomId} as ${role}`, { roomId })
+  logger.info(`用户“${nickname}”加入房间 ${roomId}`, {
+    event: 'room.user_joined',
+    roomId,
+    userId,
+    nickname,
+    role,
+    onlineUsers: room.users.length,
+    conductorId: room.hostId,
+  })
   return { room, user, hostChanged, roleChanged }
 }
 
@@ -222,7 +239,7 @@ export function leaveRoom(
   // only clean up the stale mapping without removing the user from the room.
   if (roomRepo.hasOtherSocketForUser(roomId, userId, socketId)) {
     roomRepo.deleteSocketMapping(socketId)
-    logger.info(`Stale disconnect for user ${userId} in room ${roomId} — newer socket exists`, { roomId })
+    logger.debug('忽略用户旧连接的断开事件（已有新连接）', { roomId, userId, socketId })
     return { roomId, user, room, hostChanged: false, roleChanged: false, voteUpdated: false, staleSocketOnly: true }
   }
 
@@ -244,7 +261,16 @@ export function leaveRoom(
   // Update active vote threshold so it doesn't become impossible to pass
   const voteUpdated = updateVoteThreshold(roomId, room.users.length, user.id)
 
-  logger.info(`User ${user.nickname} left room ${roomId}`, { roomId })
+  logger.info(`用户“${user.nickname}”离开房间 ${roomId}`, {
+    event: 'room.user_left',
+    roomId,
+    userId: user.id,
+    nickname: user.nickname,
+    role: user.role,
+    onlineUsers: room.users.length,
+    conductorChanged: hostChanged,
+    roleChanged,
+  })
   return { roomId, user, room, hostChanged, roleChanged, voteUpdated, staleSocketOnly: false }
 }
 

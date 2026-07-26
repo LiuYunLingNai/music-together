@@ -1,4 +1,11 @@
-import { EVENTS, ERROR_CODE, defineAbilityFor, playerSeekSchema, playerSetModeSchema, playerSyncSchema } from '@music-together/shared'
+import {
+  EVENTS,
+  ERROR_CODE,
+  defineAbilityFor,
+  playerSeekSchema,
+  playerSetModeSchema,
+  playerSyncSchema,
+} from '@music-together/shared'
 import type { TypedServer, TypedSocket } from '../middleware/types.js'
 import { createWithPermission } from '../middleware/withControl.js'
 import { createWithRoom } from '../middleware/withRoom.js'
@@ -80,8 +87,12 @@ export function registerPlayerController(io: TypedServer, socket: TypedSocket) {
       ctx.room.playMode = parsed.data.mode
       // Broadcast updated room state so all clients see the new play mode
       ctx.io.to(ctx.roomId).emit(EVENTS.ROOM_STATE, roomService.toPublicRoomState(ctx.room))
-      logger.info(`Play mode set to ${parsed.data.mode}`, {
+      logger.info(`房间 ${ctx.roomId} 的播放模式已切换为 ${parsed.data.mode}`, {
+        event: 'player.mode_changed',
         roomId: ctx.roomId,
+        playMode: parsed.data.mode,
+        operatorId: ctx.user.id,
+        operator: ctx.user.nickname,
       })
     }),
   )

@@ -93,7 +93,12 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
             platform,
             cookie: result.cookie,
           })
-          logger.info(`${platform} QR login success: ${userInfo.nickname} (vipType=${userInfo.vipType})`)
+          logger.info(`${platform} 扫码登录成功：${userInfo.nickname}`, {
+            event: 'auth.qr_login_succeeded',
+            platform,
+            nickname: userInfo.nickname,
+            vipType: userInfo.vipType,
+          })
         } else {
           socket.emit(EVENTS.AUTH_SET_COOKIE_RESULT, {
             success: false,
@@ -150,7 +155,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
       const provider = AUTH_PROVIDERS[platform]
       let infoResult = await provider.getUserInfo(cookie)
       if (!infoResult.ok) {
-        logger.info(`${platform} getUserInfo failed (${infoResult.reason}), retrying once...`)
+        logger.debug(`${platform} 用户信息获取失败，正在重试一次`, { platform, reason: infoResult.reason })
         await new Promise((r) => setTimeout(r, 1500))
         infoResult = await provider.getUserInfo(cookie)
       }

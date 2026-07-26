@@ -38,7 +38,7 @@ export function identityHttpMiddleware(req: Request, res: Response, next: NextFu
     req.identityUserId = identity.userId
     const issued = issueIdentityCookie(req, res, identity.userId)
     if (shouldLogRenewal(identity.userId)) {
-      logger.info('Identity cookie renewed', {
+      logger.debug('客户端身份凭据已续期', {
         userId: identity.userId,
         method: req.method,
         path: req.path,

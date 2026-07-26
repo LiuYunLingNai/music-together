@@ -60,7 +60,16 @@ export function createVote(
   }
 
   activeVotes.set(roomId, vote)
-  logger.info(`Vote created: ${action} in room ${roomId} by ${initiator.nickname}`, { roomId })
+  logger.info(`用户“${initiator.nickname}”在房间 ${roomId} 发起投票：${action}`, {
+    event: 'vote.created',
+    roomId,
+    voteId: vote.id,
+    action,
+    initiatorId: initiator.id,
+    initiator: initiator.nickname,
+    requiredVotes,
+    totalUsers,
+  })
   return vote
 }
 
@@ -118,7 +127,11 @@ export function updateVoteThreshold(roomId: string, currentUserCount: number, de
   const newRequired = Math.floor(currentUserCount / 2) + 1
   vote.requiredVotes = newRequired
   vote.totalUsers = currentUserCount
-  logger.info(`Vote threshold updated: ${newRequired} required (${currentUserCount} users)`, { roomId })
+  logger.debug('房间人数变化，投票通过门槛已更新', {
+    roomId,
+    requiredVotes: newRequired,
+    totalUsers: currentUserCount,
+  })
   return true
 }
 

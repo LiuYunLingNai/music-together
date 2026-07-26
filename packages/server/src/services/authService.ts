@@ -59,7 +59,14 @@ export function addCookie(
   const idx = entries.findIndex((e) => e.cookie === cookie || e.userId === userId)
   if (idx !== -1) entries.splice(idx, 1)
   entries.push({ cookie, userId, nickname, vipType })
-  logger.info(`Auth: ${nickname} added cookie for ${platform} in room ${roomId} (vipType=${vipType})`)
+  logger.info(`用户“${nickname}”已在房间 ${roomId} 登录 ${platform}`, {
+    event: 'auth.account_added',
+    roomId,
+    userId,
+    nickname,
+    platform,
+    vipType,
+  })
 }
 
 export function removeCookie(roomId: string, platform: MusicSource, userId: string): boolean {
@@ -70,7 +77,13 @@ export function removeCookie(roomId: string, platform: MusicSource, userId: stri
   const idx = entries.findIndex((e) => e.userId === userId)
   if (idx === -1) return false
   const removed = entries.splice(idx, 1)[0]
-  logger.info(`Auth: removed cookie for ${platform} from user ${removed.nickname} in room ${roomId}`)
+  logger.info(`用户“${removed.nickname}”已在房间 ${roomId} 退出 ${platform}`, {
+    event: 'auth.account_removed',
+    roomId,
+    userId,
+    nickname: removed.nickname,
+    platform,
+  })
   return true
 }
 
@@ -79,7 +92,7 @@ export function removeCookie(roomId: string, platform: MusicSource, userId: stri
  */
 export function cleanupRoom(roomId: string): void {
   if (roomCookiePool.delete(roomId)) {
-    logger.info(`Auth: cleaned up cookie pool for destroyed room ${roomId}`)
+    logger.debug('已清理销毁房间的账号凭据池', { roomId })
   }
 }
 

@@ -86,6 +86,39 @@ const BITRATE_FALLBACKS: Record<AudioQuality, AudioQuality[]> = {
   128: [],
 }
 
+interface ResolvedStreamUrl {
+  url: string
+  /** Quality tier attempted by our fallback chain. */
+  attemptedBitrate: AudioQuality
+  /** Bitrate actually reported/selected by the upstream provider. */
+  actualBitrate: number | null
+  fromCache: boolean
+}
+
+const SOURCE_LABELS: Record<MusicSource, string> = {
+  netease: '网易云音乐',
+  tencent: 'QQ 音乐',
+  kugou: '酷狗音乐',
+}
+
+function formatAudioQuality(bitrate: number | null): string {
+  if (bitrate === null) return '未知（上游未返回）'
+  if (bitrate >= 900) return `无损（${bitrate} kbps 档）`
+  return `${bitrate} kbps`
+}
+
+function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '未知'
+  const minutes = Math.floor(seconds / 60)
+  const remainingSeconds = Math.floor(seconds % 60)
+  return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`
+}
+
+function isQualityDowngraded(requested: AudioQuality, stream: ResolvedStreamUrl): boolean {
+  if (stream.actualBitrate !== null) return stream.actualBitrate < requested
+  return stream.attemptedBitrate < requested
+}
+
 /**
  * Try to get a stream URL at the requested bitrate. If it fails, try each
  * lower tier in order until one succeeds or all options are exhausted.
@@ -95,16 +128,22 @@ async function resolveStreamUrl(
   urlId: string,
   bitrate: AudioQuality,
   cookie?: string,
-): Promise<string | null> {
-  const url = await musicProvider.getStreamUrl(source, urlId, bitrate, cookie)
-  if (url) return url
+): Promise<ResolvedStreamUrl | null> {
+  const result = await musicProvider.getStreamInfo(source, urlId, bitrate, cookie)
+  if (result) return { ...result, attemptedBitrate: bitrate }
 
   // Fallback to lower bitrates
   for (const fallback of BITRATE_FALLBACKS[bitrate]) {
-    const fallbackUrl = await musicProvider.getStreamUrl(source, urlId, fallback, cookie)
-    if (fallbackUrl) {
-      logger.info(`Bitrate fallback: ${bitrate} -> ${fallback} for ${source}/${urlId}`)
-      return fallbackUrl
+    const fallbackResult = await musicProvider.getStreamInfo(source, urlId, fallback, cookie)
+    if (fallbackResult) {
+      logger.warn('音质自动降级后获取到可播放资源', {
+        source,
+        urlId,
+        requestedBitrate: bitrate,
+        attemptedBitrate: fallback,
+        actualBitrate: fallbackResult.actualBitrate,
+      })
+      return { ...fallbackResult, attemptedBitrate: fallback }
     }
   }
 
@@ -137,19 +176,32 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
   const room = roomRepo.get(roomId)
   if (!room) return false
 
-  const resolved = { ...track }
+  // Never trust/reuse a client-provided URL here. Resolving on the server is
+  // what lets us record the provider's actual bitrate and refresh expired URLs.
+  const resolved: Track = { ...track, streamUrl: undefined }
+  let streamResolution: ResolvedStreamUrl | null = null
+  let usedAuthenticatedAccount = false
 
-  // Fetch stream URL if missing
+  // Always resolve on the server so the URL is fresh and actual quality is known.
   if (!resolved.streamUrl) {
     try {
       // Get cookie from the room's pool for this platform (enables VIP access)
       const cookie = authService.getAnyCookie(resolved.source, roomId)
       const url = await resolveStreamUrl(resolved.source, resolved.urlId, room.audioQuality, cookie ?? undefined)
+      if (url) usedAuthenticatedAccount = Boolean(cookie)
 
       if (!url) {
         const isVip = resolved.vip
         const hint = isVip && !cookie ? '（VIP 歌曲，需要有用户登录 VIP 账号）' : ''
-        logger.warn(`Cannot get stream URL for "${resolved.title}"${hint}, removing from queue`, { roomId })
+        logger.warn('无法获取歌曲播放地址，准备尝试跨平台匹配', {
+          roomId,
+          trackId: resolved.id,
+          title: resolved.title,
+          source: resolved.source,
+          requestedBitrate: room.audioQuality,
+          vip: Boolean(isVip),
+          authenticated: Boolean(cookie),
+        })
 
         // -------------------------------------------------------------------
         // Auto fallback (netease <-> tencent)
@@ -191,8 +243,10 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
                     ...best.track,
                     id: resolved.id, // keep stable id so queue/current references remain consistent
                     requestedBy: resolved.requestedBy,
-                    streamUrl: url2,
+                    streamUrl: url2.url,
                   }
+                  streamResolution = url2
+                  usedAuthenticatedAccount = Boolean(cookie2)
 
                   // Replace in queue (if present) before playing
                   const roomBefore = roomRepo.get(roomId)
@@ -224,7 +278,7 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
                 }
               }
             } catch (fallbackErr) {
-              logger.error('Auto fallback failed', fallbackErr, { roomId })
+              logger.error('跨平台自动匹配歌曲失败', fallbackErr, { roomId, trackId: resolved.id })
             }
 
             if (!resolved.streamUrl) {
@@ -253,9 +307,15 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
           return false
         }
       }
-      resolved.streamUrl = url ?? resolved.streamUrl
+      if (url) streamResolution = url
+      resolved.streamUrl = url?.url ?? resolved.streamUrl
     } catch (err) {
-      logger.error(`getStreamUrl failed for ${resolved.urlId}`, err, { roomId })
+      logger.error('解析歌曲播放地址时发生异常', err, {
+        roomId,
+        trackId: resolved.id,
+        source: resolved.source,
+        urlId: resolved.urlId,
+      })
       // Auto-remove on unexpected failure too
       queueService.removeTrack(roomId, resolved.id)
       const room2 = roomRepo.get(roomId)
@@ -263,6 +323,8 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
       return false
     }
   }
+
+  if (!resolved.streamUrl || !streamResolution) return false
 
   // Fetch cover if missing
   if (!resolved.cover && resolved.picId) {
@@ -292,7 +354,34 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
   // 通知大厅用户当前播放曲目变化
   broadcastRoomList(io)
 
-  logger.info(`Playing: ${resolved.title} in room ${roomId}`, { roomId })
+  const artistLabel = resolved.artist.filter(Boolean).join(' / ') || '未知歌手'
+  const requestedQuality = formatAudioQuality(room.audioQuality)
+  const actualQuality = formatAudioQuality(streamResolution.actualBitrate)
+  const qualityDowngraded = isQualityDowngraded(room.audioQuality, streamResolution)
+  const qualityDetail = qualityDowngraded ? `${actualQuality}（房间期望 ${requestedQuality}，已降级）` : actualQuality
+
+  logger.info(
+    `开始播放《${resolved.title}》 - ${artistLabel}｜平台：${SOURCE_LABELS[resolved.source]}｜实际音质：${qualityDetail}`,
+    {
+      event: 'player.track_started',
+      roomId,
+      trackId: resolved.id,
+      source: resolved.source,
+      urlId: resolved.urlId,
+      title: resolved.title,
+      artists: resolved.artist,
+      album: resolved.album || '未知专辑',
+      duration: formatDuration(resolved.duration),
+      requestedBy: resolved.requestedBy ?? '未知',
+      requestedBitrate: room.audioQuality,
+      attemptedBitrate: streamResolution.attemptedBitrate,
+      actualBitrate: streamResolution.actualBitrate,
+      qualityDowngraded,
+      streamUrlFromCache: streamResolution.fromCache,
+      authenticated: usedAuthenticatedAccount,
+      scheduledDelayMs: Math.max(0, scheduleTime - Date.now()),
+    },
+  )
   return true
 }
 

@@ -19,7 +19,7 @@ export function attachSocketIdentity(io: TypedServer): void {
       return
     }
     socket.data.identityUserId = identity.userId
-    logger.info('Socket identity verified', {
+    logger.debug('实时连接身份验证通过', {
       socketId: socket.id,
       userId: identity.userId,
     })

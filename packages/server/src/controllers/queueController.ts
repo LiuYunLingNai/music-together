@@ -47,7 +47,16 @@ export function registerQueueController(io: TypedServer, socket: TypedSocket) {
       // triggering playback.
       await playerService.autoPlayIfEmpty(io, ctx.roomId, track)
 
-      logger.info(`Track added: ${track.title}`, { roomId: ctx.roomId })
+      logger.info(`“${ctx.user.nickname}”点歌：《${track.title}》`, {
+        event: 'queue.track_added',
+        roomId: ctx.roomId,
+        trackId: track.id,
+        title: track.title,
+        artists: track.artist,
+        source: track.source,
+        requestedBy: ctx.user.nickname,
+        queueSize: ctx.room.queue.length,
+      })
     }),
   )
 
@@ -76,7 +85,16 @@ export function registerQueueController(io: TypedServer, socket: TypedSocket) {
       // If nothing was playing, auto-play this track.
       await playerService.autoPlayIfEmpty(io, ctx.roomId, track)
 
-      logger.info(`Track inserted after current: ${track.title}`, { roomId: ctx.roomId })
+      logger.info(`“${ctx.user.nickname}”置顶下一首：《${track.title}》`, {
+        event: 'queue.track_inserted_next',
+        roomId: ctx.roomId,
+        trackId: track.id,
+        title: track.title,
+        artists: track.artist,
+        source: track.source,
+        requestedBy: ctx.user.nickname,
+        queueSize: ctx.room.queue.length,
+      })
     }),
   )
 
@@ -111,7 +129,15 @@ export function registerQueueController(io: TypedServer, socket: TypedSocket) {
         await playerService.autoPlayIfEmpty(io, ctx.roomId, tracks[0])
       }
 
-      logger.info(`Batch added ${addedCount} tracks from playlist`, { roomId: ctx.roomId })
+      logger.info(`“${ctx.user.nickname}”从歌单批量加入 ${addedCount} 首歌曲`, {
+        event: 'queue.batch_added',
+        roomId: ctx.roomId,
+        playlistName: playlistName ?? '未命名歌单',
+        requestedCount: rawTracks.length,
+        addedCount,
+        requestedBy: ctx.user.nickname,
+        queueSize: ctx.room.queue.length,
+      })
     }),
   )
 
@@ -124,6 +150,7 @@ export function registerQueueController(io: TypedServer, socket: TypedSocket) {
         return
       }
       const { trackId } = parsed.data
+      const removedTrack = ctx.room.queue.find((track) => track.id === trackId)
       const isCurrentTrack = ctx.room.currentTrack?.id === trackId
 
       queueService.removeTrack(ctx.roomId, trackId)
@@ -136,7 +163,16 @@ export function registerQueueController(io: TypedServer, socket: TypedSocket) {
         await playerService.playNextTrackInRoom(io, ctx.roomId, ctx.room.playMode, { skipDebounce: true })
       }
 
-      logger.info(`Track removed`, { roomId: ctx.roomId })
+      logger.info(`已从播放队列移除《${removedTrack?.title ?? trackId}》`, {
+        event: 'queue.track_removed',
+        roomId: ctx.roomId,
+        trackId,
+        title: removedTrack?.title,
+        operatorId: ctx.user.id,
+        operator: ctx.user.nickname,
+        wasPlaying: isCurrentTrack,
+        queueSize: ctx.room.queue.length,
+      })
     }),
   )
 
@@ -151,7 +187,13 @@ export function registerQueueController(io: TypedServer, socket: TypedSocket) {
       const { trackIds } = parsed.data
       queueService.reorderTracks(ctx.roomId, trackIds)
       io.to(ctx.roomId).emit(EVENTS.QUEUE_UPDATED, { queue: ctx.room.queue })
-      logger.info(`Queue reordered`, { roomId: ctx.roomId })
+      logger.info(`房间 ${ctx.roomId} 的播放队列顺序已调整`, {
+        event: 'queue.reordered',
+        roomId: ctx.roomId,
+        operatorId: ctx.user.id,
+        operator: ctx.user.nickname,
+        queueSize: ctx.room.queue.length,
+      })
     }),
   )
 
@@ -165,7 +207,12 @@ export function registerQueueController(io: TypedServer, socket: TypedSocket) {
       // concurrent autoPlayIfEmpty from a simultaneous QUEUE_ADD.
       await playerService.stopPlaybackSafe(io, ctx.roomId)
 
-      logger.info(`Queue cleared`, { roomId: ctx.roomId })
+      logger.info(`“${ctx.user.nickname}”清空了房间 ${ctx.roomId} 的播放队列`, {
+        event: 'queue.cleared',
+        roomId: ctx.roomId,
+        operatorId: ctx.user.id,
+        operator: ctx.user.nickname,
+      })
     }),
   )
 }

@@ -32,7 +32,7 @@ export async function generateQrCode(): Promise<{ key: string; qrimg: string } |
       return null
     }
 
-    logger.info('Netease QR code generated')
+    logger.info('网易云音乐登录二维码已生成')
     return { key, qrimg }
   } catch (err) {
     logger.error('Netease QR generation failed', err)
@@ -148,7 +148,11 @@ export async function getUserPlaylists(cookie: string): Promise<Playlist[]> {
       description: String(p.description || ''),
     }))
 
-    logger.info(`Fetched ${mapped.length} playlists for netease user ${userInfo.nickname}`)
+    logger.info(`已获取网易云用户“${userInfo.nickname}”的 ${mapped.length} 个歌单`, {
+      platform: 'netease',
+      nickname: userInfo.nickname,
+      count: mapped.length,
+    })
     return mapped
   } catch (err) {
     logger.error('Netease getUserPlaylists failed', err)

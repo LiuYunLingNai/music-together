@@ -1,13 +1,25 @@
 import pino from 'pino'
 
 const isDev = process.env.NODE_ENV !== 'production'
+const useJson = process.env.LOG_FORMAT?.toLowerCase() === 'json'
 
 const baseLogger = pino({
   level: process.env.LOG_LEVEL || 'info',
-  ...(isDev && {
+  base: undefined,
+  redact: {
+    paths: ['password', 'cookie', 'authorization', 'token', '*.password', '*.cookie', '*.authorization', '*.token'],
+    censor: '[已隐藏]',
+  },
+  ...(!useJson && {
     transport: {
       target: 'pino-pretty',
-      options: { colorize: true, translateTime: 'SYS:HH:MM:ss' },
+      options: {
+        colorize: isDev,
+        translateTime: 'SYS:yyyy-mm-dd HH:MM:ss.l',
+        singleLine: true,
+        levelFirst: true,
+        hideObject: false,
+      },
     },
   }),
 })
@@ -17,11 +29,15 @@ const baseLogger = pino({
  * All existing call sites (10+ files) need zero changes.
  *
  * Signatures:
+ *   logger.debug(message, context?)
  *   logger.info(message, context?)
  *   logger.warn(message, context?)
  *   logger.error(message, err?, context?)
  */
 export const logger = {
+  debug(message: string, context?: Record<string, unknown>) {
+    baseLogger.debug(context ?? {}, message)
+  },
   info(message: string, context?: Record<string, unknown>) {
     baseLogger.info(context ?? {}, message)
   },

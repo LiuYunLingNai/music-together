@@ -46,10 +46,11 @@ export function scheduleDeletion(roomId: string, io?: TypedServer): void {
   // Prevent duplicate timers if called multiple times for the same room
   cancelDeletionTimer(roomId)
 
-  logger.info(
-    `Room ${roomId} is empty, will be deleted in ${config.room.gracePeriodMs / 1000}s unless someone rejoins`,
-    { roomId },
-  )
+  logger.info(`房间 ${roomId} 已空置，将在 ${config.room.gracePeriodMs / 1000} 秒后删除`, {
+    event: 'room.deletion_scheduled',
+    roomId,
+    gracePeriodMs: config.room.gracePeriodMs,
+  })
   const timer = setTimeout(() => {
     const r = roomRepo.get(roomId)
     if (r && r.users.length === 0) {
@@ -60,7 +61,7 @@ export function scheduleDeletion(roomId: string, io?: TypedServer): void {
       cleanupAuthRoom(roomId)
       cleanupRoomRejoinTickets(roomId)
       roomDeletionTimers.delete(roomId)
-      logger.info(`Room ${roomId} deleted after grace period`, { roomId })
+      logger.info(`空置房间 ${roomId} 已删除`, { event: 'room.deleted', roomId })
       // Notify lobby users that the room is gone
       if (io) broadcastRoomList(io)
     }
@@ -73,7 +74,7 @@ export function cancelDeletionTimer(roomId: string): void {
   if (timer) {
     clearTimeout(timer)
     roomDeletionTimers.delete(roomId)
-    logger.info(`Room ${roomId} deletion cancelled — user rejoined`, { roomId })
+    logger.info(`用户重新加入，已取消删除房间 ${roomId}`, { event: 'room.deletion_cancelled', roomId })
   }
 }
 
@@ -115,5 +116,5 @@ export function clearAllTimers(): void {
   }
   pendingIO = null
 
-  logger.info('All roomLifecycleService timers cleared')
+  logger.debug('房间生命周期定时器已全部清理')
 }

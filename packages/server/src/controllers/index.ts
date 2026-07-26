@@ -10,7 +10,7 @@ import type { TypedServer } from '../middleware/types.js'
 
 export function initializeSocket(io: TypedServer) {
   io.on('connection', (socket) => {
-    logger.info(`Client connected: ${socket.id}`, { socketId: socket.id })
+    logger.debug('客户端已连接', { socketId: socket.id })
 
     // 新连接默认加入 lobby 频道（首页房间列表推送）
     socket.join('lobby')
@@ -24,5 +24,5 @@ export function initializeSocket(io: TypedServer) {
     registerPlaylistController(io, socket)
   })
 
-  logger.info('Socket.IO initialized with typed events')
+  logger.info('实时通信服务已初始化')
 }

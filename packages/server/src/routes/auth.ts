@@ -15,7 +15,7 @@ router.post('/identity/bootstrap', (req: Request, res: Response) => {
   res.setHeader('Access-Control-Expose-Headers', 'X-Identity-UserId, X-Identity-Expires-At')
   res.setHeader('X-Identity-UserId', issued.userId)
   res.setHeader('X-Identity-Expires-At', String(issued.expiresAt))
-  logger.info('Identity bootstrap issued', {
+  logger.debug('已签发客户端身份凭据', {
     userId: issued.userId,
     reusedIdentity: hasExistingIdentity,
     expiresAt: issued.expiresAt,

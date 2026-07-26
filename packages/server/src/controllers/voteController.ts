@@ -18,6 +18,16 @@ import * as roomService from '../services/roomService.js'
 import { logger } from '../utils/logger.js'
 import type { TypedServer, TypedSocket } from '../middleware/types.js'
 
+const ACTION_LABELS: Record<VoteAction, string> = {
+  pause: '暂停播放',
+  resume: '继续播放',
+  next: '播放下一首',
+  prev: '播放上一首',
+  'set-mode': '切换播放模式',
+  'play-track': '播放指定歌曲',
+  'remove-track': '移除歌曲',
+}
+
 /**
  * Execute the voted action on the player.
  * No initiatorSocket — broadcast to everyone since this is a collective decision.
@@ -54,7 +64,11 @@ async function executeAction(
       if (!room) break
       room.playMode = parsed.data.mode
       io.to(roomId).emit(EVENTS.ROOM_STATE, roomService.toPublicRoomState(room))
-      logger.info(`Play mode set to ${parsed.data.mode} via vote`, { roomId })
+      logger.info(`投票通过：房间 ${roomId} 的播放模式已切换为 ${parsed.data.mode}`, {
+        event: 'player.mode_changed_by_vote',
+        roomId,
+        playMode: parsed.data.mode,
+      })
       break
     }
     case 'play-track': {
@@ -68,7 +82,7 @@ async function executeAction(
       const track = room.queue.find((t) => t.id === trackId)
       if (track) {
         await playerService.playTrackInRoom(io, roomId, track)
-        logger.info(`Play-track executed for track ${trackId}`, { roomId })
+        logger.debug('投票操作已触发指定歌曲播放', { roomId, trackId })
       } else {
         io.to(roomId).emit(EVENTS.ROOM_ERROR, { code: ERROR_CODE.INVALID_INPUT, message: '歌曲不在播放列表中' })
       }
@@ -88,7 +102,12 @@ async function executeAction(
       if (isCurrentTrack) {
         await playerService.playNextTrackInRoom(io, roomId, room.playMode, { skipDebounce: true })
       }
-      logger.info(`Remove-track executed for track ${trackId}`, { roomId })
+      logger.info(`投票操作已从队列移除歌曲 ${trackId}`, {
+        event: 'queue.track_removed_by_vote',
+        roomId,
+        trackId,
+        wasPlaying: isCurrentTrack,
+      })
       break
     }
   }
@@ -125,8 +144,11 @@ export function registerVoteController(io: TypedServer, socket: TypedSocket) {
       const permSubject = perm?.subject ?? 'Player'
       if (ability.can(permAction as Actions, permSubject as Subjects)) {
         await executeAction(io, ctx.roomId, action, payload)
-        logger.info(`Direct-executed ${action} for privileged user ${ctx.user.nickname} (role: ${ctx.user.role})`, {
+        logger.debug(`有权限的用户“${ctx.user.nickname}”直接执行：${ACTION_LABELS[action]}`, {
           roomId: ctx.roomId,
+          userId: ctx.user.id,
+          role: ctx.user.role,
+          action,
         })
         return
       }
@@ -159,7 +181,11 @@ export function registerVoteController(io: TypedServer, socket: TypedSocket) {
       vote.timeoutHandle = setTimeout(() => {
         io.to(ctx.roomId).emit(EVENTS.VOTE_RESULT, { passed: false, action, reason: 'timeout' })
         voteService.cancelVote(ctx.roomId)
-        logger.info(`Vote timed out: ${action} in room ${ctx.roomId}`, { roomId: ctx.roomId })
+        logger.info(`房间 ${ctx.roomId} 的“${ACTION_LABELS[action]}”投票已超时`, {
+          event: 'vote.timed_out',
+          roomId: ctx.roomId,
+          action,
+        })
       }, TIMING.VOTE_TIMEOUT_MS)
 
       // Broadcast vote started

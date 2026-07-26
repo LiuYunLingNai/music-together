@@ -230,7 +230,7 @@ export async function generateQrCode(): Promise<{ key: string; qrimg: string } |
     const qrUrl = `https://h5.kugou.com/apps/loginQRCode/html/index.html?qrcode=${key}`
     const qrimg = await QRCode.toDataURL(qrUrl, { width: 280, margin: 2 })
 
-    logger.info('Kugou QR code generated')
+    logger.info('酷狗音乐登录二维码已生成')
     return { key, qrimg }
   } catch (err) {
     logger.error('Kugou QR generation failed', err)
@@ -325,7 +325,7 @@ async function fetchUserDetail(cookie: Record<string, string>): Promise<string |
     const d = body?.data as Record<string, unknown> | undefined
     const nickname = String(d?.nick_name || d?.nickname || d?.userName || '')
     if (nickname) {
-      logger.info(`Kugou user detail: nickname=${nickname}`)
+      logger.debug('已获取酷狗用户资料', { nickname })
     } else {
       logger.warn('Kugou user detail: no nickname found in response', { keys: Object.keys(d || {}) })
     }
@@ -443,7 +443,7 @@ export async function getUserPlaylists(cookie: string): Promise<Playlist[]> {
       source: 'kugou' as const,
     }))
 
-    logger.info(`Fetched ${mapped.length} playlists for kugou user ${userid}`)
+    logger.info(`已获取酷狗用户的 ${mapped.length} 个歌单`, { platform: 'kugou', userId: userid, count: mapped.length })
     return mapped
   } catch (err) {
     logger.error('Kugou getUserPlaylists failed', err)

@@ -67,6 +67,16 @@ type MetingInstance = InstanceType<typeof Meting>
 /** Parsed JSON from Meting API responses */
 type MetingJson = Record<string, unknown>
 
+/** Stream metadata returned by the upstream provider. */
+export interface StreamUrlResult {
+  url: string
+  /** Actual bitrate reported/selected by the provider, in kbps. */
+  actualBitrate: number | null
+  fromCache: boolean
+}
+
+type CachedStreamUrl = Omit<StreamUrlResult, 'fromCache'>
+
 /** Loosely typed ncmApi response (the library has no TS declarations). */
 interface NcmApiResponse {
   body?: {
@@ -148,7 +158,9 @@ async function withTimeout<T>(promise: Promise<T>, ms = API_TIMEOUT_MS): Promise
 
 /** Normalize cover URLs returned by Kugou's mobile APIs. */
 function normalizeKugouCoverUrl(value: unknown, size = 300): string {
-  let url = String(value || '').trim().replace(/\{size\}/g, String(size))
+  let url = String(value || '')
+    .trim()
+    .replace(/\{size\}/g, String(size))
   if (!url) return ''
   if (url.startsWith('//')) url = `https:${url}`
   if (url.startsWith('http://')) url = url.replace(/^http:\/\//, 'https://')
@@ -156,6 +168,13 @@ function normalizeKugouCoverUrl(value: unknown, size = 300): string {
   // imgessl is already handled by the client's cover proxy and is equivalent
   // to the older imge host returned in trans_param.union_cover.
   return url.replace(/^https:\/\/imge\.kugou\.com/i, 'https://imgessl.kugou.com')
+}
+
+/** Normalize provider bitrate values (some APIs use bps, others use kbps). */
+function normalizeBitrate(value: unknown): number | null {
+  const bitrate = Number(value)
+  if (!Number.isFinite(bitrate) || bitrate <= 0) return null
+  return Math.round(bitrate >= 10_000 ? bitrate / 1000 : bitrate)
 }
 
 // Path to song list in raw (non-formatted) API response per platform
@@ -212,7 +231,7 @@ class MusicProvider {
   })
 
   // Layer 3: Resource Caches — scalar values for stream URLs, covers, lyrics.
-  private streamUrlCache = new LRUCache<string, string>({ max: 500, ttl: 1 * HOUR })
+  private streamUrlCache = new LRUCache<string, CachedStreamUrl>({ max: 500, ttl: 1 * HOUR })
   private coverCache = new LRUCache<string, string>({ max: 1000, ttl: 24 * HOUR })
   private lyricCache = new LRUCache<
     string,
@@ -334,10 +353,7 @@ class MusicProvider {
         if (duration > 100000) duration = Math.floor(duration / 1000)
 
         const cover = normalizeKugouCoverUrl(
-          song.trans_param?.union_cover ||
-            song.audio_info?.trans_param?.union_cover ||
-            song.imgurl ||
-            song.album_img,
+          song.trans_param?.union_cover || song.audio_info?.trans_param?.union_cover || song.imgurl || song.album_img,
         )
 
         const privilege = Number(song.privilege ?? song.pay_type ?? 0)
@@ -361,7 +377,12 @@ class MusicProvider {
 
       this.registerTracks(tracks)
 
-      logger.info(`Search "${keyword}" on kugou: ${tracks.length} results`)
+      logger.info(`在酷狗音乐搜索“${keyword}”，找到 ${tracks.length} 条结果`, {
+        event: 'music.search_completed',
+        source: 'kugou',
+        keyword,
+        resultCount: tracks.length,
+      })
       return tracks
     } catch (error) {
       logger.error('Kugou search failed:', error)
@@ -450,7 +471,12 @@ class MusicProvider {
       // Register into track registry and search index
       this.registerTracks(tracks)
 
-      logger.info(`Search "${keyword}" on tencent: ${tracks.length} results`)
+      logger.info(`在 QQ 音乐搜索“${keyword}”，找到 ${tracks.length} 条结果`, {
+        event: 'music.search_completed',
+        source: 'tencent',
+        keyword,
+        resultCount: tracks.length,
+      })
       return tracks
     } catch (error) {
       logger.error('Tencent search failed:', error)
@@ -462,11 +488,17 @@ class MusicProvider {
    * Search for tracks. Uses format(false) to get raw API data including duration,
    * then batch-resolves cover URLs.
    */
-  
+
   /**
    * Search for albums. Returns a list of Playlist objects.
    */
-  async searchAlbum(source: MusicSource, keyword: string, limit = 20, page = 1, cookie?: string | null): Promise<import('@music-together/shared').Playlist[]> {
+  async searchAlbum(
+    source: MusicSource,
+    keyword: string,
+    limit = 20,
+    page = 1,
+    cookie?: string | null,
+  ): Promise<import('@music-together/shared').Playlist[]> {
     if (!keyword.trim()) return []
 
     try {
@@ -495,7 +527,7 @@ class MusicProvider {
             method: 'POST',
             headers,
             body: JSON.stringify(payload),
-          }).then((res) => res.json())
+          }).then((res) => res.json()),
         )
 
         if (!response) return []
@@ -515,10 +547,10 @@ class MusicProvider {
 
       if (source === 'kugou') {
         const url = `http://mobilecdn.kugou.com/api/v3/search/album?api_ver=1&area_code=1&correct=1&pagesize=${limit}&plat=2&tag=1&sver=5&showtype=10&page=${page}&keyword=${encodeURIComponent(keyword)}&version=8990`
-        const response = await withTimeout(fetch(url).then(res => res.json()))
-        
+        const response = await withTimeout(fetch(url).then((res) => res.json()))
+
         if (!response || response.errcode !== 0 || !response.data?.info) return []
-        
+
         return response.data.info.map((album: any) => ({
           id: String(album.albumid),
           name: album.albumname || 'Unknown Album',
@@ -565,7 +597,13 @@ class MusicProvider {
   /**
    * Search for playlists. Returns a list of Playlist objects.
    */
-  async searchPlaylist(source: MusicSource, keyword: string, limit = 20, page = 1, cookie?: string | null): Promise<import('@music-together/shared').Playlist[]> {
+  async searchPlaylist(
+    source: MusicSource,
+    keyword: string,
+    limit = 20,
+    page = 1,
+    cookie?: string | null,
+  ): Promise<import('@music-together/shared').Playlist[]> {
     if (!keyword.trim()) return []
 
     try {
@@ -594,7 +632,7 @@ class MusicProvider {
             method: 'POST',
             headers,
             body: JSON.stringify(payload),
-          }).then((res) => res.json())
+          }).then((res) => res.json()),
         )
 
         if (!response) return []
@@ -615,10 +653,10 @@ class MusicProvider {
 
       if (source === 'kugou') {
         const url = `http://mobilecdn.kugou.com/api/v3/search/special?api_ver=1&area_code=1&correct=1&pagesize=${limit}&plat=2&tag=1&sver=5&showtype=10&page=${page}&keyword=${encodeURIComponent(keyword)}&version=8990`
-        const response = await withTimeout(fetch(url).then(res => res.json()))
-        
+        const response = await withTimeout(fetch(url).then((res) => res.json()))
+
         if (!response || response.errcode !== 0 || !response.data?.info) return []
-        
+
         return response.data.info.map((playlist: any) => ({
           id: String(playlist.specialid),
           name: playlist.specialname || 'Unknown Playlist',
@@ -672,12 +710,12 @@ class MusicProvider {
     if (indexed) {
       const hydrated = this.hydrateFromRegistry(indexed.source, indexed.ids)
       if (hydrated) {
-        logger.info(`Search cache hit: "${keyword}" on ${source} (page ${page})`)
+        logger.debug('命中音乐搜索缓存', { source, keyword, page, resultCount: hydrated.length })
         return hydrated
       }
       // Registry eviction — stale index, fall through to re-fetch
       this.searchIndex.delete(cacheKey)
-      logger.info(`Search index stale (registry eviction): "${keyword}" on ${source}`)
+      logger.debug('音乐搜索索引已过期，正在重新查询', { source, keyword, page })
     }
 
     try {
@@ -736,7 +774,13 @@ class MusicProvider {
         ids: tracks.map((t) => t.sourceId),
       })
 
-      logger.info(`Search "${keyword}" on ${source}: ${tracks.length} results`)
+      logger.info(`在 ${source} 搜索“${keyword}”，找到 ${tracks.length} 条结果`, {
+        event: 'music.search_completed',
+        source,
+        keyword,
+        resultCount: tracks.length,
+        page,
+      })
       return tracks
     } catch (err) {
       logger.error(`Search failed for ${source}:`, err)
@@ -745,8 +789,8 @@ class MusicProvider {
   }
 
   // ---------------------------------------------------------------------------
-// Public API — Stream URL, Lyric, Cover (unchanged from original)
-// ---------------------------------------------------------------------------
+  // Public API — Stream URL, Lyric, Cover (unchanged from original)
+  // ---------------------------------------------------------------------------
 
   private static readonly KUGOU_APP_ID = 1005
   private static readonly KUGOU_TRACKER_CLIENT_VERSION = 11430
@@ -785,18 +829,18 @@ class MusicProvider {
     hash: string,
     bitrate: number,
     songInfo: Record<string, any> | null,
-  ): { hash: string; quality: '128' | '320' | 'flac' } {
+  ): { hash: string; quality: '128' | '320' | 'flac'; actualBitrate: number } {
     const extra = songInfo?.extra ?? {}
     const hash128 = String(extra['128hash'] || songInfo?.hash || hash).trim()
     const hash320 = String(extra['320hash'] || '').trim()
     const hashFlac = String(extra.sqhash || '').trim()
 
-    if (bitrate >= 999 && hashFlac) return { hash: hashFlac, quality: 'flac' }
-    if (bitrate >= 320 && hash320) return { hash: hash320, quality: '320' }
-    return { hash: hash128 || hash, quality: '128' }
+    if (bitrate >= 999 && hashFlac) return { hash: hashFlac, quality: 'flac', actualBitrate: 999 }
+    if (bitrate >= 320 && hash320) return { hash: hash320, quality: '320', actualBitrate: 320 }
+    return { hash: hash128 || hash, quality: '128', actualBitrate: 128 }
   }
 
-  private async getKugouStreamUrl(hash: string, bitrate: number, cookie?: string): Promise<string | null> {
+  private async getKugouStreamUrl(hash: string, bitrate: number, cookie?: string): Promise<CachedStreamUrl | null> {
     const cookieObj = cookie ? parseCookieString(cookie) : {}
     const token = cookieObj['token'] || ''
     const userid = cookieObj['userid'] || ''
@@ -872,7 +916,7 @@ class MusicProvider {
       )
 
       if (!response) {
-        logger.warn('Kugou tracker URL request timed out')
+        logger.warn('酷狗音源接口请求超时，尝试备用接口', { source: 'kugou', urlId: hash })
         return this.getKugouStreamUrlLegacy(hash, bitrate)
       }
 
@@ -898,15 +942,21 @@ class MusicProvider {
       }
 
       const url = playUrl.startsWith('http://') ? playUrl.replace(/^http:\/\//, 'https://') : playUrl
-      logger.info(`Kugou tracker URL resolved (${selected.quality}): ${url.substring(0, 80)}`)
-      return url
+      const actualBitrate = normalizeBitrate(response.bitrate ?? response.bitRate) ?? selected.actualBitrate
+      logger.debug('酷狗播放地址解析成功', {
+        source: 'kugou',
+        urlId: hash,
+        actualBitrate,
+        quality: selected.quality,
+      })
+      return { url, actualBitrate }
     } catch (err) {
       logger.error('Kugou tracker URL error:', err)
       return this.getKugouStreamUrlLegacy(hash, bitrate)
     }
   }
 
-  private async getKugouStreamUrlLegacy(hash: string, bitrate: number): Promise<string | null> {
+  private async getKugouStreamUrlLegacy(hash: string, bitrate: number): Promise<CachedStreamUrl | null> {
     try {
       const body = {
         relate: 1,
@@ -937,7 +987,11 @@ class MusicProvider {
       // Find the best bitrate match
       let bestItem: any = null
       for (const item of resourceList) {
-        if (item.info?.bitrate && item.info.bitrate <= bitrate && (!bestItem || item.info.bitrate > bestItem.info.bitrate)) {
+        if (
+          item.info?.bitrate &&
+          item.info.bitrate <= bitrate &&
+          (!bestItem || item.info.bitrate > bestItem.info.bitrate)
+        ) {
           bestItem = item
         }
       }
@@ -945,10 +999,16 @@ class MusicProvider {
       if (!bestItem) return null
 
       // Get play URL from trackercdn
-      const key = crypto.createHash('md5').update(bestItem.hash + 'kgcloudv2').digest('hex')
+      const key = crypto
+        .createHash('md5')
+        .update(bestItem.hash + 'kgcloudv2')
+        .digest('hex')
       const cdnUrl = `http://trackercdn.kugou.com/i/v2/?hash=${bestItem.hash}&key=${key}&pid=3&behavior=play&cmd=25&version=8990`
 
-      const cdnRes = await withTimeout(fetch(cdnUrl).then((r) => r.json()), 8_000)
+      const cdnRes = await withTimeout(
+        fetch(cdnUrl).then((r) => r.json()),
+        8_000,
+      )
       if (!cdnRes || cdnRes.status !== 2) {
         logger.warn('Kugou legacy CDN: no URL (status=' + cdnRes?.status + ')')
         return null
@@ -957,11 +1017,10 @@ class MusicProvider {
       const url = Array.isArray(cdnRes.url) ? cdnRes.url[0] : cdnRes.url
       if (!url) return null
 
-      const urlStr = String(url).startsWith('http://')
-        ? String(url).replace(/^http:\/\//, 'https://')
-        : String(url)
-      logger.info(`Kugou legacy URL resolved: ${urlStr.substring(0, 80)}`)
-      return urlStr
+      const urlStr = String(url).startsWith('http://') ? String(url).replace(/^http:\/\//, 'https://') : String(url)
+      const actualBitrate = normalizeBitrate(cdnRes.bitRate) ?? normalizeBitrate(bestItem.info?.bitrate)
+      logger.debug('酷狗备用播放地址解析成功', { source: 'kugou', urlId: hash, actualBitrate })
+      return { url: urlStr, actualBitrate }
     } catch (err) {
       logger.error('Kugou legacy URL error:', err)
       return null
@@ -969,31 +1028,40 @@ class MusicProvider {
   }
 
   /**
-   * Get stream URL for a track. Optionally inject a cookie for VIP access.
-   * When cookie is provided, a fresh Meting instance is created to avoid
-   * polluting the shared cached instance — and the result is NOT cached
-   * because VIP URLs are user-specific.
+   * Get a stream URL and the bitrate actually reported/selected upstream.
+   * This can be lower than the requested room quality. Cookie-backed VIP
+   * results use a fresh Meting instance and are intentionally not cached.
    */
-  async getStreamUrl(source: MusicSource, urlId: string, bitrate = 320, cookie?: string): Promise<string | null> {
+  async getStreamInfo(
+    source: MusicSource,
+    urlId: string,
+    bitrate = 320,
+    cookie?: string,
+  ): Promise<StreamUrlResult | null> {
     // Skip cache when cookie is provided (VIP URLs are user-specific)
     if (!cookie) {
       const cacheKey = `${source}:${urlId}:${bitrate}`
       const cached = this.streamUrlCache.get(cacheKey)
       if (cached) {
-        logger.info(`Stream URL cache hit: ${source}/${urlId}`)
-        return cached
+        logger.debug('命中播放地址缓存', {
+          source,
+          urlId,
+          requestedBitrate: bitrate,
+          actualBitrate: cached.actualBitrate,
+        })
+        return { ...cached, fromCache: true }
       }
     }
 
     try {
       // Kugou: use native API that properly handles VIP authentication
       if (source === 'kugou') {
-        const url = await this.getKugouStreamUrl(urlId, bitrate, cookie)
-        if (url) {
+        const result = await this.getKugouStreamUrl(urlId, bitrate, cookie)
+        if (result) {
           if (!cookie) {
-            this.streamUrlCache.set(`${source}:${urlId}:${bitrate}`, url)
+            this.streamUrlCache.set(`${source}:${urlId}:${bitrate}`, result)
           }
-          return url
+          return { ...result, fromCache: false }
         }
         return null
       }
@@ -1024,16 +1092,26 @@ class MusicProvider {
         url = url.replace(/^http:\/\//, 'https://')
       }
 
-      // Only cache non-cookie & successful results (null = transient failure, retry next time)
-      if (!cookie && url) {
-        this.streamUrlCache.set(`${source}:${urlId}:${bitrate}`, url)
+      if (!url) return null
+
+      const result: CachedStreamUrl = {
+        url,
+        actualBitrate: normalizeBitrate(data.br),
       }
 
-      return url
+      // Only cache non-cookie & successful results (null = transient failure, retry next time)
+      if (!cookie) this.streamUrlCache.set(`${source}:${urlId}:${bitrate}`, result)
+
+      return { ...result, fromCache: false }
     } catch (err) {
-      logger.error(`Get URL failed for ${source}:`, err)
+      logger.error('获取播放地址失败', err, { source, urlId, requestedBitrate: bitrate })
       return null
     }
+  }
+
+  /** Backwards-compatible URL-only helper used by the public REST endpoint. */
+  async getStreamUrl(source: MusicSource, urlId: string, bitrate = 320, cookie?: string): Promise<string | null> {
+    return (await this.getStreamInfo(source, urlId, bitrate, cookie))?.url ?? null
   }
 
   async getLyric(
@@ -1043,7 +1121,7 @@ class MusicProvider {
     const cacheKey = `${source}:${lyricId}`
     const cached = this.lyricCache.get(cacheKey)
     if (cached) {
-      logger.info(`Lyric cache hit: ${source}/${lyricId}`)
+      logger.debug('命中歌词缓存', { source, lyricId })
       return cached
     }
 
@@ -1069,7 +1147,7 @@ class MusicProvider {
           yrc: (body.yrc?.lyric as string) || '',
         }
         if (result.yrc) {
-          logger.info(`YRC lyric found for netease:${lyricId}`)
+          logger.debug('已获取网易云逐字歌词', { source: 'netease', lyricId })
         }
       } else if (source === 'kugou') {
         // 酷狗：Meting 获取 LRC + kugou-lrc 获取 KRC 逐字歌词
@@ -1095,7 +1173,7 @@ class MusicProvider {
           const krcInfo = await withTimeout(kugouLrcGet({ hash: lyricId, fmt: Format.krc }))
           if (krcInfo?.items?.length) {
             result.wordByWord = krcToAmllLines(krcInfo)
-            logger.info(`KRC lyric found for kugou:${lyricId}`)
+            logger.debug('已获取酷狗逐字歌词', { source: 'kugou', lyricId })
           }
         } catch {
           /* 静默回退到 LRC */
@@ -1173,7 +1251,7 @@ class MusicProvider {
     playlistId: string,
     playlistTotal?: number,
     cookie?: string | null,
-    type: 'playlist' | 'album' = 'playlist'
+    type: 'playlist' | 'album' = 'playlist',
   ): Promise<{ ids: string[]; total: number }> {
     const cacheKey = `${source}:${playlistId}`
 
@@ -1182,11 +1260,11 @@ class MusicProvider {
     if (indexed) {
       const allPresent = indexed.ids.every((id) => this.trackRegistry.get(`${indexed.source}:${id}`) !== undefined)
       if (allPresent) {
-        logger.info(`Playlist index hit: ${source}/${playlistId} (${indexed.ids.length} tracks)`)
+        logger.debug('命中歌单索引缓存', { source, playlistId, trackCount: indexed.ids.length })
         return { ids: indexed.ids, total: indexed.ids.length }
       }
       this.playlistIndex.delete(cacheKey)
-      logger.info(`Playlist index stale (registry eviction): ${source}/${playlistId}`)
+      logger.debug('歌单索引已过期，正在重新获取', { source, playlistId })
     }
 
     // Netease: use ncmApi.playlist_track_all to bypass Meting's 1000-track limit
@@ -1205,7 +1283,7 @@ class MusicProvider {
       }
       const result = await this.fetchKugouPlaylist(playlistId, cacheKey, cookie)
       if (result.total > 0) return result
-      logger.info(`Kugou native API returned empty for ${playlistId}, falling back to Meting`)
+      logger.debug('酷狗原生歌单接口返回空结果，尝试备用接口', { source: 'kugou', playlistId })
     }
 
     // Tencent: use new native API (supports fav & custom lists)
@@ -1215,7 +1293,7 @@ class MusicProvider {
       }
       const result = await this.fetchTencentPlaylist(playlistId, cacheKey, cookie)
       if (result.total > 0) return result
-      logger.info(`Tencent native API returned empty for ${playlistId}, falling back to Meting`)
+      logger.debug('QQ 音乐原生歌单接口返回空结果，尝试备用接口', { source: 'tencent', playlistId })
     }
 
     // Fallback: use Meting raw mode
@@ -1226,12 +1304,9 @@ class MusicProvider {
    * Fetch full Netease playlist via ncmApi.playlist_track_all.
    * No 1000-track limit; returns full song data including duration/album/artist.
    */
-  
+
   /** Fetch Netease album using ncmApi.album */
-  private async fetchNeteaseAlbum(
-    albumId: string,
-    cacheKey: string,
-  ): Promise<{ ids: string[]; total: number }> {
+  private async fetchNeteaseAlbum(albumId: string, cacheKey: string): Promise<{ ids: string[]; total: number }> {
     try {
       const res = await withTimeout(ncmApi.album({ id: albumId, timestamp: Date.now() }), 30_000)
       if (res === null) {
@@ -1245,14 +1320,18 @@ class MusicProvider {
       }
 
       const allTracks = songs.map((song: any) => this.rawToTrack(song, 'netease'))
-      
+
       for (const t of allTracks) this.enrichFromRegistry(t)
       this.registerTracks(allTracks)
 
       const ids = allTracks.map((t) => t.sourceId)
       this.playlistIndex.set(cacheKey, { source: 'netease', ids })
 
-      logger.info(`Netease album ${albumId}: ${ids.length} tracks`)
+      logger.info(`已获取网易云专辑 ${albumId}，共 ${ids.length} 首歌曲`, {
+        source: 'netease',
+        albumId,
+        trackCount: ids.length,
+      })
       return { ids, total: ids.length }
     } catch (err) {
       logger.error(`Netease album failed: ${albumId}`, err)
@@ -1309,9 +1388,12 @@ class MusicProvider {
       const ids = allTracks.map((t) => t.sourceId)
       this.playlistIndex.set(cacheKey, { source: 'netease', ids })
 
-      logger.info(
-        `Netease playlist ${playlistId}: ${ids.length} tracks (via ncmApi, ${Math.ceil(ids.length / CHUNK_SIZE)} chunks)`,
-      )
+      logger.info(`已获取网易云歌单 ${playlistId}，共 ${ids.length} 首歌曲`, {
+        source: 'netease',
+        playlistId,
+        trackCount: ids.length,
+        chunks: Math.ceil(ids.length / CHUNK_SIZE),
+      })
       return { ids, total: ids.length }
     } catch (err) {
       logger.error(`Netease playlist_track_all failed: ${playlistId}`, err)
@@ -1358,7 +1440,12 @@ class MusicProvider {
       const ids = allTracks.map((t) => t.sourceId)
       this.playlistIndex.set(cacheKey, { source: 'kugou', ids })
 
-      logger.info(`Kugou playlist ${playlistId}: ${ids.length} tracks (via native API, ${page} pages)`)
+      logger.info(`已获取酷狗歌单 ${playlistId}，共 ${ids.length} 首歌曲`, {
+        source: 'kugou',
+        playlistId,
+        trackCount: ids.length,
+        pages: page,
+      })
       return { ids, total: ids.length }
     } catch (err) {
       logger.error(`Kugou playlist fetch failed: ${playlistId}`, err)
@@ -1404,7 +1491,12 @@ class MusicProvider {
       const ids = allTracks.map((t) => t.sourceId)
       this.playlistIndex.set(cacheKey, { source: 'tencent', ids })
 
-      logger.info(`Tencent playlist ${playlistId}: ${ids.length} tracks (via native API, ${page} pages)`)
+      logger.info(`已获取 QQ 音乐歌单 ${playlistId}，共 ${ids.length} 首歌曲`, {
+        source: 'tencent',
+        playlistId,
+        trackCount: ids.length,
+        pages: page,
+      })
       return { ids, total: ids.length }
     } catch (err) {
       logger.error(`Tencent playlist fetch failed: ${playlistId}`, err)
@@ -1451,10 +1543,7 @@ class MusicProvider {
       album: String(song_.album_name || song_.remark || ''),
       duration,
       cover: normalizeKugouCoverUrl(
-        song_.trans_param?.union_cover ||
-          song_.audio_info?.trans_param?.union_cover ||
-          song_.imgurl ||
-          song_.album_img,
+        song_.trans_param?.union_cover || song_.audio_info?.trans_param?.union_cover || song_.imgurl || song_.album_img,
       ),
       lyricId: hash,
       urlId: hash,
@@ -1471,7 +1560,7 @@ class MusicProvider {
     source: MusicSource,
     playlistId: string,
     cacheKey: string,
-    type: 'playlist' | 'album' = 'playlist'
+    type: 'playlist' | 'album' = 'playlist',
   ): Promise<{ ids: string[]; total: number }> {
     try {
       const meting = new Meting(source)
@@ -1505,7 +1594,12 @@ class MusicProvider {
       const ids = tracks.map((t) => t.sourceId)
       this.playlistIndex.set(cacheKey, { source, ids })
 
-      logger.info(`Playlist ${playlistId} on ${source}: ${tracks.length} tracks (raw mode)`)
+      logger.info(`已获取 ${source} 歌单 ${playlistId}，共 ${tracks.length} 首歌曲`, {
+        source,
+        playlistId,
+        trackCount: tracks.length,
+        mode: 'raw',
+      })
       return { ids, total: ids.length }
     } catch (err) {
       logger.error(`Get playlist failed for ${source}:`, err)
@@ -1525,7 +1619,7 @@ class MusicProvider {
     offset: number,
     playlistTotal?: number,
     cookie?: string | null,
-    type: 'playlist' | 'album' = 'playlist'
+    type: 'playlist' | 'album' = 'playlist',
   ): Promise<{ tracks: Track[]; total: number; hasMore: boolean }> {
     const { ids, total } = await this.fetchFullPlaylist(source, playlistId, playlistTotal, cookie, type)
     if (total === 0) return { tracks: [], total: 0, hasMore: false }
