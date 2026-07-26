@@ -1,5 +1,6 @@
 package io.github.yueby.musictogether.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -74,6 +75,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -132,6 +134,17 @@ fun RoomScreen(
     val room = appState.room ?: return
     var selectedTab by remember { mutableStateOf(RoomTab.Player) }
     val context = LocalContext.current
+    val navigateBack = {
+        if (selectedTab == RoomTab.Player) viewModel.leaveRoom() else selectedTab = RoomTab.Player
+    }
+
+    BackHandler(onBack = navigateBack)
+    LaunchedEffect(selectedTab) {
+        viewModel.setChatVisible(selectedTab == RoomTab.Chat)
+    }
+    DisposableEffect(Unit) {
+        onDispose { viewModel.setChatVisible(false) }
+    }
 
     Scaffold(
         modifier = Modifier.padding(outerPadding),
@@ -144,8 +157,11 @@ fun RoomScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = viewModel::leaveRoom) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "离开房间")
+                    IconButton(onClick = navigateBack) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            if (selectedTab == RoomTab.Player) "离开房间" else "返回播放界面",
+                        )
                     }
                 },
                 actions = {

@@ -34,6 +34,7 @@ import io.github.yueby.musictogether.network.toRoomState
 import io.github.yueby.musictogether.network.toTrack
 import io.github.yueby.musictogether.network.toVoteState
 import io.github.yueby.musictogether.network.toJson
+import io.github.yueby.musictogether.notifications.ChatNotificationManager
 import io.github.yueby.musictogether.player.ClockSync
 import io.github.yueby.musictogether.player.NativePlayer
 import io.github.yueby.musictogether.player.PlaybackCommandBridge
@@ -70,6 +71,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         .build()
     private val api = MusicTogetherApi(okHttp)
     private val socket = MusicTogetherSocket(okHttp, this)
+    private val chatNotifications = ChatNotificationManager(application)
     private val clock = ClockSync()
     private val _state = MutableStateFlow(
         AppState(
@@ -95,6 +97,8 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private var playlistJob: Job? = null
     private var playlistContext: PlaylistContext? = null
     private var restoredAuthRoomId: String? = null
+    private var appInForeground = true
+    private var chatVisible = false
     private var lastRtt: Long? = null
     private var waitingForJoinRoomState = false
     private var recoveredTrackId: String? = null
@@ -196,6 +200,8 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         nativePlayer.stop()
         recoveredTrackId = null
         pendingQueueActions.clear()
+        chatVisible = false
+        chatNotifications.clear()
         resetPlatformRoomState()
         waitingForJoinRoomState = false
         _state.value = _state.value.copy(room = null, messages = emptyList(), activeVote = null)
@@ -470,6 +476,16 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         if (safe.isNotEmpty()) socket.emit(Events.CHAT_MESSAGE, JSONObject().put("content", safe))
     }
 
+    fun setAppForeground(foreground: Boolean) {
+        appInForeground = foreground
+        if (foreground && chatVisible) chatNotifications.clear()
+    }
+
+    fun setChatVisible(visible: Boolean) {
+        chatVisible = visible
+        if (visible) chatNotifications.clear()
+    }
+
     fun castVote(approve: Boolean) = socket.emit(Events.VOTE_CAST, JSONObject().put("approve", approve))
 
     fun clearError() {
@@ -650,6 +666,13 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             Events.CHAT_MESSAGE -> {
                 val message = (data as? JSONObject)?.toChatMessage() ?: return
                 _state.value = _state.value.copy(messages = (_state.value.messages + message).takeLast(200))
+                if (
+                    message.type == "user" &&
+                    message.userId != _state.value.userId &&
+                    (!appInForeground || !chatVisible)
+                ) {
+                    chatNotifications.show(_state.value.room?.name ?: "Music Together", message)
+                }
             }
             Events.VOTE_STARTED -> {
                 val vote = (data as? JSONObject)?.toVoteState() ?: return
