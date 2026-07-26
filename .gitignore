@@ -16,4 +16,6 @@ Thumbs.db
 packages/android-client/.gradle/
 packages/android-client/local.properties
 packages/android-client/**/build/
+packages/android-client/keystore.properties
+packages/android-client/keystore/
 *.apk

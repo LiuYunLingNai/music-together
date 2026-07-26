@@ -16,6 +16,7 @@ object AppLogger {
     private val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
 
     fun initialize(context: Context) {
+        if (!BuildConfig.DEBUG) return
         synchronized(lock) {
             val directory = File(context.filesDir, "logs").apply { mkdirs() }
             logFile = File(directory, "music-together-android.log")
@@ -32,6 +33,7 @@ object AppLogger {
     }
 
     fun export(context: Context) {
+        if (!BuildConfig.DEBUG) return
         val source = synchronized(lock) { logFile } ?: return
         val exportFile = File(context.cacheDir, "music-together-android-log.txt")
         synchronized(lock) {
@@ -55,18 +57,22 @@ object AppLogger {
         context.startActivity(Intent.createChooser(intent, "导出客户端日志"))
     }
 
-    fun clear(): Boolean = synchronized(lock) {
-        val current = logFile ?: return@synchronized false
-        val previous = File(current.parentFile, "music-together-android.previous.log")
-        runCatching {
-            if (current.exists()) current.delete()
-            if (previous.exists()) previous.delete()
-            current.writeText("")
-            true
-        }.getOrDefault(false)
+    fun clear(): Boolean {
+        if (!BuildConfig.DEBUG) return false
+        return synchronized(lock) {
+            val current = logFile ?: return@synchronized false
+            val previous = File(current.parentFile, "music-together-android.previous.log")
+            runCatching {
+                if (current.exists()) current.delete()
+                if (previous.exists()) previous.delete()
+                current.writeText("")
+                true
+            }.getOrDefault(false)
+        }
     }
 
     private fun write(level: String, tag: String, message: String) {
+        if (!BuildConfig.DEBUG) return
         synchronized(lock) {
             val file = logFile ?: return
             runCatching {

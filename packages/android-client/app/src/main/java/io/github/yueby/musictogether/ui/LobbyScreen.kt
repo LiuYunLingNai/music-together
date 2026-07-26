@@ -42,6 +42,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import io.github.yueby.musictogether.BuildConfig
 import io.github.yueby.musictogether.MusicTogetherViewModel
 import io.github.yueby.musictogether.logging.AppLogger
 import io.github.yueby.musictogether.model.AppState
@@ -66,11 +67,13 @@ fun LobbyScreen(state: AppState, contentPadding: PaddingValues, viewModel: Music
                     Text("Music Together", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                     Text("原生 Android 客户端", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                IconButton(onClick = { AppLogger.export(context) }) {
-                    Icon(Icons.Default.FileUpload, "导出日志")
-                }
-                IconButton(onClick = viewModel::clearLogs) {
-                    Icon(Icons.Default.DeleteSweep, "清空日志")
+                if (BuildConfig.DEBUG) {
+                    IconButton(onClick = { AppLogger.export(context) }) {
+                        Icon(Icons.Default.FileUpload, "导出日志")
+                    }
+                    IconButton(onClick = viewModel::clearLogs) {
+                        Icon(Icons.Default.DeleteSweep, "清空日志")
+                    }
                 }
             }
         }

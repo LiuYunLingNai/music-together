@@ -101,6 +101,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import io.github.yueby.musictogether.BuildConfig
 import io.github.yueby.musictogether.MusicTogetherViewModel
 import io.github.yueby.musictogether.logging.AppLogger
 import io.github.yueby.musictogether.model.AppState
@@ -165,11 +166,13 @@ fun RoomScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { AppLogger.export(context) }) {
-                        Icon(Icons.Default.FileUpload, "导出日志")
-                    }
-                    IconButton(onClick = viewModel::clearLogs) {
-                        Icon(Icons.Default.DeleteSweep, "清空日志")
+                    if (BuildConfig.DEBUG) {
+                        IconButton(onClick = { AppLogger.export(context) }) {
+                            Icon(Icons.Default.FileUpload, "导出日志")
+                        }
+                        IconButton(onClick = viewModel::clearLogs) {
+                            Icon(Icons.Default.DeleteSweep, "清空日志")
+                        }
                     }
                     if (room.hasPassword) Icon(Icons.Default.Lock, "密码房间", Modifier.padding(12.dp))
                 },
