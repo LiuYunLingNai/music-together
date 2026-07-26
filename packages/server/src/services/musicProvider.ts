@@ -146,6 +146,18 @@ async function withTimeout<T>(promise: Promise<T>, ms = API_TIMEOUT_MS): Promise
   }
 }
 
+/** Normalize cover URLs returned by Kugou's mobile APIs. */
+function normalizeKugouCoverUrl(value: unknown, size = 300): string {
+  let url = String(value || '').trim().replace(/\{size\}/g, String(size))
+  if (!url) return ''
+  if (url.startsWith('//')) url = `https:${url}`
+  if (url.startsWith('http://')) url = url.replace(/^http:\/\//, 'https://')
+
+  // imgessl is already handled by the client's cover proxy and is equivalent
+  // to the older imge host returned in trans_param.union_cover.
+  return url.replace(/^https:\/\/imge\.kugou\.com/i, 'https://imgessl.kugou.com')
+}
+
 // Path to song list in raw (non-formatted) API response per platform
 const SEARCH_PATHS: Record<MusicSource, string> = {
   netease: 'result.songs',
@@ -321,7 +333,12 @@ class MusicProvider {
         let duration = Number(song.duration ?? song.timelen ?? 0)
         if (duration > 100000) duration = Math.floor(duration / 1000)
 
-        const imgurl = String(song.imgurl || '').replace('{size}', '300')
+        const cover = normalizeKugouCoverUrl(
+          song.trans_param?.union_cover ||
+            song.audio_info?.trans_param?.union_cover ||
+            song.imgurl ||
+            song.album_img,
+        )
 
         const privilege = Number(song.privilege ?? song.pay_type ?? 0)
         const isVip = (privilege & 8) !== 0 || privilege > 0
@@ -334,7 +351,7 @@ class MusicProvider {
           artist: artists.length > 0 ? artists : ['Unknown'],
           album: String(song.album_name || ''),
           duration,
-          cover: imgurl,
+          cover,
           urlId: hash,
           lyricId: hash,
           picId: hash,
@@ -505,7 +522,7 @@ class MusicProvider {
         return response.data.info.map((album: any) => ({
           id: String(album.albumid),
           name: album.albumname || 'Unknown Album',
-          cover: (album.imgurl || '').replace('{size}', '400'),
+          cover: normalizeKugouCoverUrl(album.imgurl, 400),
           trackCount: album.songcount || 0,
           source: 'kugou',
           creator: album.singername || '',
@@ -605,7 +622,7 @@ class MusicProvider {
         return response.data.info.map((playlist: any) => ({
           id: String(playlist.specialid),
           name: playlist.specialname || 'Unknown Playlist',
-          cover: (playlist.imgurl || '').replace('{size}', '400'),
+          cover: normalizeKugouCoverUrl(playlist.imgurl, 400),
           trackCount: playlist.songcount || 0,
           source: 'kugou',
           creator: playlist.nickname || '',
@@ -731,25 +748,52 @@ class MusicProvider {
 // Public API — Stream URL, Lyric, Cover (unchanged from original)
 // ---------------------------------------------------------------------------
 
-  private static readonly KUGOU_WEB_SIGNATURE_SALT = 'NVPh5oo715z5DIWAeQlhMDsWXXQV4hwt'
+  private static readonly KUGOU_APP_ID = 1005
+  private static readonly KUGOU_TRACKER_CLIENT_VERSION = 11430
+  private static readonly KUGOU_ANDROID_SIGNATURE_SALT = 'OIlwieks28dk2k092lksi2UIkp'
+  private static readonly KUGOU_TRACKER_KEY_SALT = '57ae12eb6890223e355ccfcb74edf70d'
 
-  private static kugouWebSignature(params: Record<string, string>): string {
-    const sorted = Object.keys(params)
-      .map((k) => `${k}=${params[k]}`)
-      .sort()
-      .join('')
-    return crypto
-      .createHash('md5')
-      .update(MusicProvider.KUGOU_WEB_SIGNATURE_SALT + sorted + MusicProvider.KUGOU_WEB_SIGNATURE_SALT)
-      .digest('hex')
+  private static md5(value: string): string {
+    return crypto.createHash('md5').update(value).digest('hex')
   }
 
-  private static buildKugouSonginfoUrl(params: Record<string, string>): string {
-    const sig = MusicProvider.kugouWebSignature(params)
-    const qs = Object.entries(params)
-      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
-      .join('&')
-    return `https://wwwapi.kugou.com/play/songinfo?${qs}&signature=${sig}`
+  private static kugouAndroidSignature(params: Record<string, string | number>): string {
+    const joined = Object.keys(params)
+      .sort()
+      .map((key) => `${key}=${params[key]}`)
+      .join('')
+    return MusicProvider.md5(
+      `${MusicProvider.KUGOU_ANDROID_SIGNATURE_SALT}${joined}${MusicProvider.KUGOU_ANDROID_SIGNATURE_SALT}`,
+    )
+  }
+
+  private async getKugouSongInfo(hash: string): Promise<Record<string, any> | null> {
+    const params = new URLSearchParams({ cmd: 'playInfo', hash })
+    const raw = await withTimeout<Record<string, any>>(
+      fetch(`https://m.kugou.com/app/i/getSongInfo.php?${params}`, {
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+      }).then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        return res.json() as Promise<Record<string, any>>
+      }),
+      8_000,
+    )
+    return raw
+  }
+
+  private static selectKugouQuality(
+    hash: string,
+    bitrate: number,
+    songInfo: Record<string, any> | null,
+  ): { hash: string; quality: '128' | '320' | 'flac' } {
+    const extra = songInfo?.extra ?? {}
+    const hash128 = String(extra['128hash'] || songInfo?.hash || hash).trim()
+    const hash320 = String(extra['320hash'] || '').trim()
+    const hashFlac = String(extra.sqhash || '').trim()
+
+    if (bitrate >= 999 && hashFlac) return { hash: hashFlac, quality: 'flac' }
+    if (bitrate >= 320 && hash320) return { hash: hash320, quality: '320' }
+    return { hash: hash128 || hash, quality: '128' }
   }
 
   private async getKugouStreamUrl(hash: string, bitrate: number, cookie?: string): Promise<string | null> {
@@ -757,109 +801,107 @@ class MusicProvider {
     const token = cookieObj['token'] || ''
     const userid = cookieObj['userid'] || ''
 
-    const hasValidAuth = !!token && !!userid
-
-    if (!hasValidAuth) {
+    if (!token || !userid) {
       logger.warn('Kugou URL: no valid VIP cookie, VIP songs will fail')
     }
 
-    const mid = cookieObj['mid'] || cookieObj['kg_mid'] || crypto.createHash('md5').update(hash).digest('hex')
-    const uuid = cookieObj['uuid'] || mid
-    const dfid = cookieObj['dfid'] || cookieObj['kg_dfid'] || ''
-
-    const timeStr = String(Date.now())
-
-    // Step 1: Get encode_album_audio_id from hash
-    const params1: Record<string, string> = {
-      srcappid: '2919',
-      clientver: '20000',
-      clienttime: timeStr,
-      mid,
-      uuid,
-      dfid,
-      appid: '1014',
-      platid: '4',
-      hash,
-      token,
-      userid,
-    }
-
-    const headers: Record<string, string> = {
-      'User-Agent': 'iPhone-8990-searchSong',
-      'UNI-UserAgent': 'iOS11.4-Phone8990-1009-0-WiFi',
-    }
-
     try {
-      const url1 = MusicProvider.buildKugouSonginfoUrl(params1)
-      const raw1 = await withTimeout<Record<string, unknown> | string>(
-        fetch(url1, { headers }).then(async (res) => {
-          const text = await res.text()
-          try { return JSON.parse(text) as Record<string, unknown> } catch { return text }
-        }),
-        10_000,
-      )
-      if (!raw1) {
-        logger.warn('Kugou URL step1: timeout fetching songinfo')
-        return this.getKugouStreamUrlLegacy(hash, bitrate)
-      }
+      // KuGouMusicApi resolves album_audio_id and the quality-specific hash
+      // before calling trackercdn. /play/songinfo rejects a raw hash with 30020.
+      const songInfo = await this.getKugouSongInfo(hash)
+      const selected = MusicProvider.selectKugouQuality(hash, bitrate, songInfo)
+      const mid = cookieObj['mid'] || cookieObj['kg_mid'] || kugouAuth.getDeviceMid()
+      // A dfid must either be issued by Kugou's device-registration endpoint or
+      // be the official anonymous sentinel. A locally generated random dfid is
+      // rejected with error 20028 (device verification required).
+      const dfid = cookieObj['dfid'] || cookieObj['kg_dfid'] || '-'
+      const clienttime = Math.floor(Date.now() / 1000)
+      const numericUserId = Number(userid || 0)
 
-      const data1 = raw1 as Record<string, any>
-      const encodeAlbumAudioId = data1?.data?.encode_album_audio_id
-      if (!encodeAlbumAudioId) {
-        logger.warn('Kugou URL step1: no encode_album_audio_id in response', data1?.err_code)
-        return this.getKugouStreamUrlLegacy(hash, bitrate)
-      }
-
-      // Step 2: Get play URL using encode_album_audio_id
-      const timeStr2 = String(Date.now())
-      const params2: Record<string, string> = {
-        srcappid: '2919',
-        clientver: '20000',
-        clienttime: timeStr2,
-        mid,
-        uuid,
+      const params: Record<string, string | number> = {
         dfid,
-        appid: '1014',
-        platid: '4',
-        encode_album_audio_id: String(encodeAlbumAudioId),
-        token,
-        userid,
+        mid,
+        uuid: '-',
+        appid: MusicProvider.KUGOU_APP_ID,
+        clientver: MusicProvider.KUGOU_TRACKER_CLIENT_VERSION,
+        clienttime,
+        album_id: Number(songInfo?.albumid ?? songInfo?.req_albumid ?? 0),
+        area_code: 1,
+        hash: selected.hash.toLowerCase(),
+        ssa_flag: 'is_fromtrack',
+        version: MusicProvider.KUGOU_TRACKER_CLIENT_VERSION,
+        page_id: 151369488,
+        quality: selected.quality,
+        album_audio_id: Number(songInfo?.album_audio_id ?? 0),
+        behavior: 'play',
+        pid: 2,
+        cmd: 26,
+        pidversion: 3001,
+        IsFreePart: 0,
+        ppage_id: '463467626,350369493,788954147',
+        cdnBackup: 1,
+        module: '',
       }
+      if (token) params.token = token
+      if (userid) params.userid = userid
 
-      const url2 = MusicProvider.buildKugouSonginfoUrl(params2)
-      const raw2 = await withTimeout<Record<string, unknown> | string>(
-        fetch(url2, { headers }).then(async (res) => {
-          const text = await res.text()
-          try { return JSON.parse(text) as Record<string, unknown> } catch { return text }
+      params.key = MusicProvider.md5(
+        `${params.hash}${MusicProvider.KUGOU_TRACKER_KEY_SALT}${MusicProvider.KUGOU_APP_ID}${mid}${numericUserId}`,
+      )
+      params.signature = MusicProvider.kugouAndroidSignature(params)
+
+      const query = new URLSearchParams(Object.entries(params).map(([key, value]) => [key, String(value)]))
+      const response = await withTimeout<Record<string, any>>(
+        fetch(`https://gateway.kugou.com/v5/url?${query}`, {
+          headers: {
+            'User-Agent': 'Android15-1070-11083-46-0-DiscoveryDRADProtocol-wifi',
+            'x-router': 'trackercdn.kugou.com',
+            dfid,
+            clienttime: String(clienttime),
+            mid,
+            'kg-rc': '1',
+            'kg-thash': '5d816a0',
+            'kg-rec': '1',
+            'kg-rf': 'B9EDA08A64250DEFFBCADDEE00F8F25F',
+          },
+        }).then(async (res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          return res.json() as Promise<Record<string, any>>
         }),
         10_000,
       )
-      if (!raw2) {
-        logger.warn('Kugou URL step2: timeout fetching play URL')
+
+      if (!response) {
+        logger.warn('Kugou tracker URL request timed out')
         return this.getKugouStreamUrlLegacy(hash, bitrate)
       }
 
-      const data2 = raw2 as Record<string, any>
-      const playData = data2?.data
-      if (!playData) {
-        logger.warn('Kugou URL step2: no play data', data2?.err_code)
+      const candidates = [response.url, response.backupUrl, response.backup_url]
+      let playUrl = ''
+      for (const candidate of candidates) {
+        if (Array.isArray(candidate)) {
+          playUrl = String(candidate.find(Boolean) || '')
+        } else if (candidate) {
+          playUrl = String(candidate)
+        }
+        if (playUrl) break
+      }
+
+      if (!playUrl) {
+        logger.warn('Kugou tracker returned no playable URL', {
+          status: response.status,
+          errorCode: response.error_code ?? response.errcode,
+          error: response.error ?? response.message,
+          quality: selected.quality,
+        })
         return this.getKugouStreamUrlLegacy(hash, bitrate)
       }
 
-      const playUrl = playData.play_url || playData.play_backup_url || ''
-      if (playUrl) {
-        const url = String(playUrl).startsWith('http://')
-          ? String(playUrl).replace(/^http:\/\//, 'https://')
-          : String(playUrl)
-        logger.info(`Kugou native URL resolved: ${url.substring(0, 80)}`)
-        return url
-      }
-
-      // Fallback: try legacy path
-      logger.warn('Kugou URL step2: no play_url in response')
-      return this.getKugouStreamUrlLegacy(hash, bitrate)
+      const url = playUrl.startsWith('http://') ? playUrl.replace(/^http:\/\//, 'https://') : playUrl
+      logger.info(`Kugou tracker URL resolved (${selected.quality}): ${url.substring(0, 80)}`)
+      return url
     } catch (err) {
-      logger.error('Kugou native URL error:', err)
+      logger.error('Kugou tracker URL error:', err)
       return this.getKugouStreamUrlLegacy(hash, bitrate)
     }
   }
@@ -1408,7 +1450,12 @@ class MusicProvider {
       artist: artists,
       album: String(song_.album_name || song_.remark || ''),
       duration,
-      cover: '',
+      cover: normalizeKugouCoverUrl(
+        song_.trans_param?.union_cover ||
+          song_.audio_info?.trans_param?.union_cover ||
+          song_.imgurl ||
+          song_.album_img,
+      ),
       lyricId: hash,
       urlId: hash,
       picId: hash,
@@ -1591,7 +1638,9 @@ class MusicProvider {
           artist: artists.length > 0 ? artists : ['Unknown'],
           album: s.album_name || '',
           duration: s.duration || 0, // seconds
-          cover: '', // resolved via pic() (requires API call)
+          cover: normalizeKugouCoverUrl(
+            s.trans_param?.union_cover || s.audio_info?.trans_param?.union_cover || s.imgurl || s.album_img,
+          ),
           source,
           sourceId: String(s.hash),
           urlId: String(s.hash),

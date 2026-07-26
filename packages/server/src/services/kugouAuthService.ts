@@ -97,6 +97,16 @@ function calculateMid(str: string): string {
 const GUID = md5(getGuid())
 const MID = calculateMid(GUID)
 
+/**
+ * Return the process-scoped device MID used by Kugou requests.
+ * Playback requests must reuse the same device identity as login/auth calls;
+ * generating a per-track MID causes Kugou's tracker API to reject valid VIP
+ * credentials.
+ */
+export function getDeviceMid(): string {
+  return MID
+}
+
 // ---------------------------------------------------------------------------
 // HTTP request helper
 // ---------------------------------------------------------------------------
