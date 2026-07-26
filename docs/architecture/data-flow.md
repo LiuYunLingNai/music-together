@@ -227,6 +227,7 @@ Conductor（当前 `hostId` 对应用户）**自适应频率**上报当前播放
 | 无损 SQ | 999 kbps | 无损音质，通常需要 VIP 账号 |
 
 - **仅房主**可在房间设置中切换音质
+- 任一用户成功登录经平台确认的 **VIP 账号**后，房间会自动切换到最高音质（无损 SQ），并在聊天区发送系统消息
 - 音质切换仅对**下一首歌**生效，当前播放不中断
 - 服务端 `playerService.playTrackInRoom()` 从 `room.audioQuality` 读取 bitrate，通过 `resolveStreamUrl()` 请求流 URL
 - **降级策略**：如果请求的 bitrate 获取不到（VIP 限制或平台不支持），自动逐级降低 bitrate 重试（999 → 320 → 192 → 128）

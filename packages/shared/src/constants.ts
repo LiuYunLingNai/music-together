@@ -1,3 +1,5 @@
+import type { AudioQuality } from './types.js'
+
 export const LIMITS = {
   ROOM_PASSWORD_MAX_LENGTH: 32,
   ROOM_NAME_MAX_LENGTH: 30,
@@ -12,6 +14,9 @@ export const LIMITS = {
   SEARCH_PAGE_MAX: 100,
   PLAYLIST_ID_MAX_LENGTH: 200,
 } as const
+
+/** 房间可选择的最高音质档位（无损 SQ） */
+export const HIGHEST_AUDIO_QUALITY: AudioQuality = 999
 
 export const TIMING = {
   ROOM_GRACE_PERIOD_MS: 60_000,

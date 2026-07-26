@@ -1,7 +1,9 @@
-import { EVENTS, QR_STATUS } from '@music-together/shared'
+import { EVENTS, HIGHEST_AUDIO_QUALITY, QR_STATUS } from '@music-together/shared'
 import type { MusicSource } from '@music-together/shared'
 import * as authService from '../services/authService.js'
 import { AUTH_PROVIDERS } from '../services/authProvider.js'
+import * as chatService from '../services/chatService.js'
+import * as roomService from '../services/roomService.js'
 import { roomRepo } from '../repositories/roomRepository.js'
 import { logger } from '../utils/logger.js'
 import type { TypedServer, TypedSocket } from '../middleware/types.js'
@@ -85,6 +87,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
               userInfo.nickname,
               userInfo.vipType,
             )
+            upgradeRoomAudioQualityForVip(io, mapping.roomId, platform, userInfo.nickname, userInfo.vipType)
             broadcastAuthStatus(io, socket, mapping)
           }
           socket.emit(EVENTS.AUTH_SET_COOKIE_RESULT, {
@@ -165,6 +168,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
         const userInfo = infoResult.data
         if (mapping && mapping.roomId) {
           authService.addCookie(mapping.roomId, platform, mapping.userId, cookie, userInfo.nickname, userInfo.vipType)
+          upgradeRoomAudioQualityForVip(io, mapping.roomId, platform, userInfo.nickname, userInfo.vipType)
         }
         socket.emit(EVENTS.AUTH_SET_COOKIE_RESULT, {
           success: true,
@@ -255,4 +259,40 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
 function broadcastAuthStatus(io: TypedServer, socket: TypedSocket, mapping: { roomId: string; userId: string }) {
   socket.emit(EVENTS.AUTH_MY_STATUS, authService.getUserAuthStatus(mapping.userId, mapping.roomId))
   io.to(mapping.roomId).emit(EVENTS.AUTH_STATUS_UPDATE, authService.getAllPlatformStatus(mapping.roomId))
+}
+
+/** VIP 账号登录成功后，将房间音质自动提升到最高档。 */
+function upgradeRoomAudioQualityForVip(
+  io: TypedServer,
+  roomId: string,
+  platform: MusicSource,
+  nickname: string,
+  vipType: number,
+): void {
+  if (vipType <= 0) return
+
+  const room = roomRepo.get(roomId)
+  if (!room || room.audioQuality === HIGHEST_AUDIO_QUALITY) return
+
+  const previousAudioQuality = room.audioQuality
+  roomService.updateSettings(roomId, { audioQuality: HIGHEST_AUDIO_QUALITY })
+
+  io.to(roomId).emit(EVENTS.ROOM_SETTINGS, {
+    name: room.name,
+    hasPassword: room.password !== null,
+    audioQuality: room.audioQuality,
+  })
+
+  const message = chatService.createSystemMessage(roomId, '系统检测到 VIP 账号，已自动升级到无损 SQ 音质')
+  io.to(roomId).emit(EVENTS.CHAT_MESSAGE, message)
+
+  logger.info(`检测到用户“${nickname}”登录 VIP 账号，房间 ${roomId} 已自动升级为最高音质`, {
+    event: 'room.audio_quality_auto_upgraded',
+    roomId,
+    platform,
+    nickname,
+    vipType,
+    previousAudioQuality,
+    audioQuality: room.audioQuality,
+  })
 }
