@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import { createServer } from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { Server } from 'socket.io'
+import { TypedServer } from './wss.js'
 import { config } from './config.js'
 import { initializeSocket } from './controllers/index.js'
 import { identityHttpMiddleware } from './middleware/identityHttp.js'
@@ -82,14 +82,8 @@ if (fs.existsSync(indexHtml)) {
   logger.info('未发现客户端构建产物，已跳过静态页面托管（开发模式）')
 }
 
-// Socket.IO with typed events
-const io = new Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>(httpServer, {
-  cors: {
-    origin: config.explicitOrigins.length > 0 ? config.explicitOrigins : true,
-    methods: ['GET', 'POST'],
-    credentials: true,
-  },
-})
+// WebSocket server with typed events
+const io = new TypedServer<ClientToServerEvents, ServerToClientEvents, SocketData>(httpServer)
 
 attachSocketIdentity(io)
 initializeSocket(io)

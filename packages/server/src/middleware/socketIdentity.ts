@@ -7,12 +7,13 @@ import { logger } from '../utils/logger.js'
  * mt_identity cookie signed by the server.
  */
 export function attachSocketIdentity(io: TypedServer): void {
-  io.use((socket: TypedSocket, next: (err?: Error) => void) => {
-    const identity = getIdentityFromCookieHeader(socket.handshake.headers.cookie)
+  io.use((socket, next) => {
+    const cookieHeader = socket.handshake.headers.cookie
+    const identity = getIdentityFromCookieHeader(typeof cookieHeader === 'string' ? cookieHeader : undefined)
     if (!identity) {
       logger.warn('Socket identity verification failed', {
         socketId: socket.id,
-        hasCookieHeader: Boolean(socket.handshake.headers.cookie),
+        hasCookieHeader: Boolean(cookieHeader),
         origin: socket.handshake.headers.origin ?? null,
       })
       next(new Error('UNAUTHENTICATED'))

@@ -28,7 +28,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
   socket.on(EVENTS.AUTH_REQUEST_QR, async (data) => {
     qrSuccessHandled = false
     try {
-      const platform = data?.platform
+      const platform = data?.platform as MusicSource
       if (!platform || !QR_PLATFORMS.has(platform)) {
         socket.emit(EVENTS.AUTH_QR_STATUS, { status: QR_STATUS.EXPIRED, message: '暂不支持该平台扫码登录' })
         return
@@ -56,7 +56,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
         return
       }
 
-      const platform = data.platform
+      const platform = data.platform as MusicSource
       if (!platform || !QR_PLATFORMS.has(platform)) {
         logger.warn('AUTH_CHECK_QR: invalid or missing platform', { platform })
         return
@@ -135,7 +135,8 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
         return
       }
 
-      const { platform, cookie } = data
+      const { cookie } = data
+      const platform = data.platform as MusicSource
       const mapping = getSocketMapping(socket.id)
       const roomId = mapping?.roomId ?? null
 
