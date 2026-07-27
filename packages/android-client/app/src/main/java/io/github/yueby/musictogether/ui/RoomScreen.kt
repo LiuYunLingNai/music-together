@@ -169,7 +169,7 @@ private enum class RoomTab(val label: String) {
 }
 
 private enum class RoomOverlay {
-    Queue, Search, Chat, Members, Accounts
+    Queue, Search, Chat, Members, Accounts, AccountSettings, RoomSettings
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -272,7 +272,21 @@ fun RoomScreen(
                         onDismissRequest = { menuExpanded = false },
                     ) {
                         DropdownMenuItem(
-                            text = { Text("账号与歌单") },
+                            text = { Text("个人账号") },
+                            onClick = {
+                                menuExpanded = false
+                                activeOverlay = RoomOverlay.AccountSettings
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("房间与音质") },
+                            onClick = {
+                                menuExpanded = false
+                                activeOverlay = RoomOverlay.RoomSettings
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("音源账号与歌单") },
                             onClick = {
                                 menuExpanded = false
                                 activeOverlay = RoomOverlay.Accounts
@@ -360,7 +374,7 @@ fun RoomScreen(
                     .fillMaxHeight(
                         when (overlay) {
                             RoomOverlay.Queue, RoomOverlay.Chat, RoomOverlay.Members -> 0.70f
-                            RoomOverlay.Accounts -> 0.82f
+                            RoomOverlay.Accounts, RoomOverlay.AccountSettings, RoomOverlay.RoomSettings -> 0.90f
                             RoomOverlay.Search -> 0.96f
                         },
                     ),
@@ -371,6 +385,8 @@ fun RoomScreen(
                     RoomOverlay.Chat -> ChatPane(appState.messages, viewModel)
                     RoomOverlay.Members -> MembersPane(room, appState.userId)
                     RoomOverlay.Accounts -> PlatformPane(appState, viewModel)
+                    RoomOverlay.AccountSettings -> AccountSettingsPane(appState, viewModel)
+                    RoomOverlay.RoomSettings -> RoomSettingsPane(appState, viewModel)
                 }
             }
         }

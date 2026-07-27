@@ -16,6 +16,15 @@ import org.json.JSONObject
 internal fun JSONObject.stringOrNull(name: String): String? =
     if (has(name) && !isNull(name)) optString(name).takeIf { it.isNotBlank() } else null
 
+internal fun JSONObject.audioQuality(name: String, fallback: String = "320"): String {
+    if (!has(name) || isNull(name)) return fallback
+    return when (val value = opt(name)) {
+        is Number -> value.toInt().toString()
+        is String -> value.takeIf { it.isNotBlank() } ?: fallback
+        else -> fallback
+    }
+}
+
 internal fun JSONObject.toTrack(): Track {
     val artists = optJSONArray("artist")
     val artistList = when {
@@ -75,10 +84,15 @@ internal fun JSONObject.toRoomState(): RoomState {
         creatorId = optString("creatorId"),
         hostId = optString("hostId"),
         hasPassword = optBoolean("hasPassword", false),
-        audioQuality = optInt("audioQuality", 320),
+        audioQuality = audioQuality("audioQuality"),
         users = List(usersJson.length()) { i ->
             val item = usersJson.getJSONObject(i)
-            User(item.optString("id"), item.optString("nickname"), item.optString("role", "member"))
+            User(
+                item.optString("id"),
+                item.optString("nickname"),
+                item.optString("role", "member"),
+                item.stringOrNull("avatarUrl"),
+            )
         },
         queue = List(queueJson.length()) { queueJson.getJSONObject(it).toTrack() },
         currentTrack = current?.toTrack(),

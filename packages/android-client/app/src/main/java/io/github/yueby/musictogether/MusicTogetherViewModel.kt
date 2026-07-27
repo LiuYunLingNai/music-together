@@ -2,11 +2,14 @@ package io.github.yueby.musictogether
 
 import android.app.Application
 import android.content.Context
+import android.net.Uri
+import android.util.Base64
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.yueby.musictogether.logging.AppLogger
 import io.github.yueby.musictogether.lyrics.LyricsParser
 import io.github.yueby.musictogether.model.AppState
+import io.github.yueby.musictogether.model.AccountProfile
 import io.github.yueby.musictogether.model.ChatMessage
 import io.github.yueby.musictogether.model.ConnectionStatus
 import io.github.yueby.musictogether.model.LyricsState
@@ -24,6 +27,7 @@ import io.github.yueby.musictogether.network.PersistentCookieJar
 import io.github.yueby.musictogether.network.ServerAddress
 import io.github.yueby.musictogether.network.SocketEvents
 import io.github.yueby.musictogether.network.stringOrNull
+import io.github.yueby.musictogether.network.audioQuality
 import io.github.yueby.musictogether.network.toChatMessage
 import io.github.yueby.musictogether.network.toPlayState
 import io.github.yueby.musictogether.network.toPlaylist
@@ -47,9 +51,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 
 class MusicTogetherViewModel(application: Application) : AndroidViewModel(application), SocketEvents {
@@ -61,6 +68,8 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         const val QR_WAITING_SCAN = 801
         const val QR_SUCCESS = 803
         const val MAX_QUEUE_SIZE = 200
+        val ACCOUNT_ID_PATTERN = Regex("^[a-z0-9_-]{3,32}$")
+        const val MAX_AVATAR_BYTES = 5 * 1024 * 1024
     }
 
     private val preferences = application.getSharedPreferences("music_together", Context.MODE_PRIVATE)
@@ -121,9 +130,188 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun updateNickname(value: String) {
-        val safe = value.take(20)
+        val safe = value.take(40)
         preferences.edit().putString("nickname", safe).apply()
         _state.value = _state.value.copy(nickname = safe)
+    }
+
+    fun refreshAccount(showError: Boolean = true) {
+        val server = activeServer ?: return
+        if (_state.value.accountLoading) return
+        _state.value = _state.value.copy(accountLoading = true)
+        viewModelScope.launch {
+            runCatching { api.currentProfile(server) }
+                .onSuccess(::applyAccountProfile)
+                .onFailure {
+                    AppLogger.warn("Account", "profile refresh failed: ${it.message}")
+                    _state.value = _state.value.copy(accountLoading = false)
+                    if (showError) setError(it.message ?: "账号资料加载失败")
+                }
+        }
+    }
+
+    fun saveNickname() {
+        val server = activeServer ?: return setError("请先连接服务端")
+        val nickname = _state.value.nickname.trim()
+        if (nickname.isBlank()) return setError("昵称不能为空")
+        runAccountAction("昵称已保存到服务器") { api.updateNickname(server, nickname) }
+    }
+
+    fun uploadAvatar(uri: Uri) {
+        val server = activeServer ?: return setError("请先连接服务端")
+        if (_state.value.accountProfile == null) return setError("请先保存昵称后再上传头像")
+        if (_state.value.accountBusy) return
+        _state.value = _state.value.copy(accountBusy = true)
+        viewModelScope.launch {
+            runCatching {
+                val resolver = getApplication<Application>().contentResolver
+                val mime = resolver.getType(uri)?.lowercase()
+                if (mime !in setOf("image/png", "image/jpeg", "image/jpg", "image/webp")) {
+                    error("仅支持 PNG、JPEG 和 WebP 图片")
+                }
+                val bytes = withContext(Dispatchers.IO) {
+                    resolver.openInputStream(uri)?.use(::readAvatarBytes) ?: error("无法读取图片")
+                }
+                val data = "data:$mime;base64,${Base64.encodeToString(bytes, Base64.NO_WRAP)}"
+                api.uploadAvatar(server, data)
+            }.onSuccess {
+                applyAccountProfile(it)
+                showNotice("头像已保存到服务器")
+            }.onFailure {
+                _state.value = _state.value.copy(accountBusy = false)
+                setError(it.message ?: "头像上传失败")
+            }
+        }
+    }
+
+    fun setInitialPassword(password: String) {
+        val server = activeServer ?: return setError("请先连接服务端")
+        if (password.length < 8) return setError("密码至少需要 8 个字符")
+        if (_state.value.accountBusy) return
+        _state.value = _state.value.copy(accountBusy = true)
+        viewModelScope.launch {
+            runCatching {
+                api.setInitialPassword(server, password)
+                api.currentProfile(server) ?: error("请先设置昵称")
+            }.onSuccess {
+                applyAccountProfile(it)
+                showNotice("账号密码已设置")
+            }.onFailure {
+                _state.value = _state.value.copy(accountBusy = false)
+                setError(it.message ?: "密码设置失败")
+            }
+        }
+    }
+
+    fun updateAccountId(accountId: String, currentPassword: String?) {
+        val server = activeServer ?: return setError("请先连接服务端")
+        val normalized = accountId.trim().lowercase()
+        if (!ACCOUNT_ID_PATTERN.matches(normalized)) {
+            return setError("账号 ID 需为 3-32 位小写字母、数字、下划线或连字符")
+        }
+        if (_state.value.accountBusy) return
+        _state.value = _state.value.copy(accountBusy = true)
+        viewModelScope.launch {
+            runCatching { api.updateAccountId(server, normalized, currentPassword) }
+                .onSuccess { profile ->
+                    val roomId = desiredRoomId
+                    roomId?.let {
+                        preferences.edit().remove(rejoinKey(it)).remove("${rejoinKey(it)}:expires").apply()
+                    }
+                    applyAccountProfile(profile)
+                    showNotice("账号 ID 已修改")
+                    reconnectSocket(server)
+                }
+                .onFailure {
+                    _state.value = _state.value.copy(accountBusy = false)
+                    setError(it.message ?: "账号 ID 修改失败")
+                }
+        }
+    }
+
+    fun loginIdentity(accountId: String, password: String) {
+        val server = activeServer ?: return setError("请先连接服务端")
+        if (accountId.isBlank() || password.isBlank()) return setError("请输入账号 ID 和密码")
+        if (_state.value.accountBusy) return
+        _state.value = _state.value.copy(accountBusy = true)
+        viewModelScope.launch {
+            runCatching {
+                api.recoverIdentity(server, accountId.trim(), password)
+                api.currentProfile(server) ?: error("账号资料恢复失败")
+            }.onSuccess {
+                clearIdentityBoundClientState(server)
+                applyAccountProfile(it)
+                showNotice("账号登录成功")
+                reconnectSocket(server)
+            }.onFailure {
+                _state.value = _state.value.copy(accountBusy = false)
+                setError(it.message ?: "账号登录失败")
+            }
+        }
+    }
+
+    fun logoutIdentity() {
+        val server = activeServer ?: return setError("请先连接服务端")
+        if (_state.value.accountBusy) return
+        _state.value = _state.value.copy(accountBusy = true)
+        viewModelScope.launch {
+            runCatching { api.logoutIdentity(server) }
+                .onSuccess { temporaryId ->
+                    desiredRoomId = null
+                    desiredRoomPassword = null
+                    nativePlayer.stop()
+                    clearIdentityBoundClientState(server)
+                    preferences.edit().remove("nickname").apply()
+                    _state.value = _state.value.copy(
+                        userId = temporaryId,
+                        nickname = "",
+                        accountProfile = null,
+                        accountBusy = false,
+                        room = null,
+                    )
+                    showNotice("已退出账号并切换到访客身份")
+                    reconnectSocket(server)
+                }
+                .onFailure {
+                    _state.value = _state.value.copy(accountBusy = false)
+                    setError(it.message ?: "退出账号失败")
+                }
+        }
+    }
+
+    fun loadAdminData() {
+        val server = activeServer ?: return setError("请先连接服务端")
+        if (_state.value.accountProfile?.role != "admin") return setError("需要服务器管理员权限")
+        if (_state.value.adminLoading) return
+        _state.value = _state.value.copy(adminLoading = true)
+        viewModelScope.launch {
+            runCatching { api.adminUsers(server) to api.adminRooms(server) }
+                .onSuccess { (users, rooms) ->
+                    _state.value = _state.value.copy(adminUsers = users, adminRooms = rooms, adminLoading = false)
+                }
+                .onFailure {
+                    _state.value = _state.value.copy(adminLoading = false)
+                    setError(it.message ?: "管理员数据加载失败")
+                }
+        }
+    }
+
+    fun deleteAdminUser(userId: String) = runAdminAction(userId, "账号已删除") { server ->
+        api.deleteAdminUser(server, userId)
+    }
+
+    fun resetAdminPassword(userId: String, password: String) {
+        if (password.length < 8) return setError("密码至少需要 8 个字符")
+        runAdminAction(userId, "密码已重置") { server -> api.resetAdminPassword(server, userId, password) }
+    }
+
+    fun dissolveAdminRoom(roomId: String) = runAdminAction(roomId, "房间已解散") { server ->
+        api.dissolveAdminRoom(server, roomId)
+    }
+
+    fun updateRoomAudioQuality(quality: String) {
+        val value: Any = quality.toIntOrNull() ?: quality
+        socket.emit(Events.ROOM_SETTINGS, JSONObject().put("audioQuality", value))
     }
 
     fun connect() {
@@ -149,12 +337,21 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             serverUrl = parsed.displayUrl,
             connectionStatus = ConnectionStatus.Connecting,
             room = if (serverChanged) null else _state.value.room,
+            accountProfile = if (serverChanged) null else _state.value.accountProfile,
+            adminUsers = if (serverChanged) emptyList() else _state.value.adminUsers,
+            adminRooms = if (serverChanged) emptyList() else _state.value.adminRooms,
             error = null,
         )
         viewModelScope.launch {
             runCatching { api.bootstrapIdentity(parsed) }
                 .onSuccess { userId ->
-                    _state.value = _state.value.copy(userId = userId)
+                    _state.value = _state.value.copy(userId = userId, accountLoading = true)
+                    runCatching { api.currentProfile(parsed) }
+                        .onSuccess(::applyAccountProfile)
+                        .onFailure {
+                            AppLogger.warn("Account", "profile bootstrap failed: ${it.message}")
+                            _state.value = _state.value.copy(accountLoading = false)
+                        }
                     socket.connect(parsed)
                 }
                 .onFailure {
@@ -179,18 +376,20 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
 
     fun createRoom(roomName: String, password: String) {
         if (!requireNickname()) return
-        socket.emit(Events.ROOM_CREATE, JSONObject().apply {
-            put("nickname", _state.value.nickname.trim())
-            if (roomName.isNotBlank()) put("roomName", roomName.trim().take(30))
-            if (password.isNotBlank()) put("password", password.take(32))
-        })
+        withPersistedNickname {
+            socket.emit(Events.ROOM_CREATE, JSONObject().apply {
+                put("nickname", _state.value.nickname.trim())
+                if (roomName.isNotBlank()) put("roomName", roomName.trim().take(30))
+                if (password.isNotBlank()) put("password", password.take(32))
+            })
+        }
     }
 
     fun joinRoom(roomId: String, password: String = "") {
         if (!requireNickname()) return
         desiredRoomId = roomId
         desiredRoomPassword = password
-        emitJoin(roomId, password)
+        withPersistedNickname { emitJoin(roomId, password) }
     }
 
     fun leaveRoom() {
@@ -512,7 +711,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         return state.room?.users?.firstOrNull { it.id == state.userId }?.role
     }
 
-    fun canControl(): Boolean = currentRole() in setOf("owner", "admin")
+    fun canControl(): Boolean = currentRole() in setOf("owner", "admin") || _state.value.accountProfile?.role == "admin"
 
     override fun onConnected() {
         viewModelScope.launch {
@@ -551,6 +750,10 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             Events.ROOM_CREATED -> {
                 val value = data as? JSONObject ?: return
                 desiredRoomId = value.optString("roomId")
+                value.stringOrNull("userId")?.let { userId ->
+                    _state.value = _state.value.copy(userId = userId)
+                }
+                refreshAccount(showError = false)
             }
             Events.ROOM_STATE -> {
                 val room = (data as? JSONObject)?.toRoomState() ?: return
@@ -558,6 +761,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 waitingForJoinRoomState = false
                 desiredRoomId = room.id
                 _state.value = _state.value.copy(room = room)
+                if (_state.value.accountProfile == null) refreshAccount(showError = false)
                 restorePlatformAccounts(room.id)
                 if (room.currentTrack == null) {
                     recoveredTrackId = null
@@ -592,14 +796,17 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     it.copy(
                         name = value.optString("name", it.name),
                         hasPassword = value.optBoolean("hasPassword", it.hasPassword),
-                        audioQuality = value.optInt("audioQuality", it.audioQuality),
+                        audioQuality = value.audioQuality("audioQuality", it.audioQuality),
                     )
                 }
             }
             Events.ROOM_USER_JOINED -> updateUsers { users ->
                 val value = data as? JSONObject ?: return@updateUsers users
                 users.filterNot { it.id == value.optString("id") } + User(
-                    value.optString("id"), value.optString("nickname"), value.optString("role", "member"),
+                    value.optString("id"),
+                    value.optString("nickname"),
+                    value.optString("role", "member"),
+                    value.stringOrNull("avatarUrl"),
                 )
             }
             Events.ROOM_USER_LEFT -> updateUsers { users ->
@@ -1118,6 +1325,119 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 ),
             )
         }
+    }
+
+    private fun applyAccountProfile(profile: AccountProfile?) {
+        if (profile == null) {
+            _state.value = _state.value.copy(accountProfile = null, accountLoading = false, accountBusy = false)
+            return
+        }
+        val server = activeServer
+        val resolved = profile.copy(avatarUrl = server?.let { api.resolveResource(it, profile.avatarUrl) } ?: profile.avatarUrl)
+        preferences.edit().putString("nickname", resolved.nickname).apply()
+        val previousId = _state.value.userId
+        _state.value = _state.value.copy(
+            userId = resolved.id,
+            nickname = resolved.nickname,
+            accountProfile = resolved,
+            accountLoading = false,
+            accountBusy = false,
+            room = _state.value.room?.let { room ->
+                room.copy(
+                    users = room.users.map { user ->
+                        if (user.id == resolved.id || user.id == previousId) {
+                            user.copy(id = resolved.id, nickname = resolved.nickname, avatarUrl = resolved.avatarUrl)
+                        } else {
+                            user
+                        }
+                    },
+                )
+            },
+        )
+    }
+
+    private fun withPersistedNickname(action: () -> Unit) {
+        val server = activeServer
+        val nickname = _state.value.nickname.trim()
+        if (server == null || _state.value.accountProfile?.nickname == nickname) {
+            action()
+            return
+        }
+        viewModelScope.launch {
+            runCatching { api.updateNickname(server, nickname) }
+                .onSuccess(::applyAccountProfile)
+                .onFailure { AppLogger.warn("Account", "nickname sync before room action failed: ${it.message}") }
+            action()
+        }
+    }
+
+    private fun runAccountAction(successMessage: String, action: suspend () -> AccountProfile) {
+        if (_state.value.accountBusy) return
+        _state.value = _state.value.copy(accountBusy = true)
+        viewModelScope.launch {
+            runCatching { action() }
+                .onSuccess {
+                    applyAccountProfile(it)
+                    showNotice(successMessage)
+                }
+                .onFailure {
+                    _state.value = _state.value.copy(accountBusy = false)
+                    setError(it.message ?: "账号操作失败")
+                }
+        }
+    }
+
+    private fun runAdminAction(
+        targetId: String,
+        successMessage: String,
+        action: suspend (ServerAddress) -> Unit,
+    ) {
+        val server = activeServer ?: return setError("请先连接服务端")
+        if (_state.value.accountProfile?.role != "admin") return setError("需要服务器管理员权限")
+        if (_state.value.adminWorkingId != null) return
+        _state.value = _state.value.copy(adminWorkingId = targetId)
+        viewModelScope.launch {
+            runCatching { action(server) }
+                .onSuccess {
+                    _state.value = _state.value.copy(adminWorkingId = null)
+                    showNotice(successMessage)
+                    loadAdminData()
+                }
+                .onFailure {
+                    _state.value = _state.value.copy(adminWorkingId = null)
+                    setError(it.message ?: "管理员操作失败")
+                }
+        }
+    }
+
+    private fun reconnectSocket(server: ServerAddress) {
+        socket.disconnect()
+        _state.value = _state.value.copy(connectionStatus = ConnectionStatus.Connecting)
+        socket.connect(server)
+    }
+
+    private fun clearIdentityBoundClientState(server: ServerAddress) {
+        val prefixes = listOf("platform_auth:${server.displayUrl}:", "rejoin:${server.displayUrl}:")
+        val editor = preferences.edit()
+        preferences.all.keys.filter { key -> prefixes.any(key::startsWith) }.forEach(editor::remove)
+        editor.apply()
+        resetPlatformRoomState()
+    }
+
+    private fun readAvatarBytes(input: java.io.InputStream): ByteArray {
+        val output = ByteArrayOutputStream()
+        val buffer = ByteArray(16 * 1024)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            output.write(buffer, 0, count)
+            if (output.size() > MAX_AVATAR_BYTES) error("头像不能超过 5MB")
+        }
+        return output.toByteArray()
+    }
+
+    private fun showNotice(message: String) {
+        _state.value = _state.value.copy(notice = UiNotice(text = message))
     }
 
     private fun requireNickname(): Boolean {

@@ -6,13 +6,16 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Lock
@@ -26,9 +29,11 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -44,6 +49,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import coil3.compose.AsyncImage
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import io.github.yueby.musictogether.BuildConfig
 import io.github.yueby.musictogether.MusicTogetherViewModel
 import io.github.yueby.musictogether.logging.AppLogger
@@ -51,6 +60,7 @@ import io.github.yueby.musictogether.model.AppState
 import io.github.yueby.musictogether.model.ConnectionStatus
 import io.github.yueby.musictogether.model.RoomListItem
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LobbyScreen(state: AppState, contentPadding: PaddingValues, viewModel: MusicTogetherViewModel) {
     var createDialog by remember { mutableStateOf(false) }
@@ -59,6 +69,7 @@ fun LobbyScreen(state: AppState, contentPadding: PaddingValues, viewModel: Music
     var connectionExpanded by remember {
         mutableStateOf(state.connectionStatus != ConnectionStatus.Connected)
     }
+    var accountSettingsOpen by remember { mutableStateOf(false) }
     val context = LocalContext.current
     LaunchedEffect(state.connectionStatus) {
         if (state.connectionStatus == ConnectionStatus.Connected) connectionExpanded = false
@@ -83,12 +94,19 @@ fun LobbyScreen(state: AppState, contentPadding: PaddingValues, viewModel: Music
                 TextButton(onClick = { connectionExpanded = !connectionExpanded }) {
                     Text(if (connectionExpanded) "收起" else "连接设置")
                 }
-                if (BuildConfig.DEBUG) {
-                    IconButton(onClick = { AppLogger.export(context) }) {
-                        Icon(Icons.Default.FileUpload, "导出日志")
-                    }
-                    IconButton(onClick = viewModel::clearLogs) {
-                        Icon(Icons.Default.DeleteSweep, "清空日志")
+                IconButton(
+                    onClick = { accountSettingsOpen = true },
+                    enabled = state.connectionStatus == ConnectionStatus.Connected,
+                ) {
+                    if (state.accountProfile?.avatarUrl != null) {
+                        AsyncImage(
+                            model = state.accountProfile.avatarUrl,
+                            contentDescription = "账号设置",
+                            modifier = Modifier.size(30.dp).clip(CircleShape),
+                            contentScale = ContentScale.Crop,
+                        )
+                    } else {
+                        Icon(Icons.Default.AccountCircle, "账号设置")
                     }
                 }
             }
@@ -123,6 +141,23 @@ fun LobbyScreen(state: AppState, contentPadding: PaddingValues, viewModel: Music
                                 ConnectionStatus.Connecting -> "连接中"
                                 ConnectionStatus.Disconnected -> "连接"
                             })
+                        }
+                        if (BuildConfig.DEBUG) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FilledTonalButton(
+                                    onClick = { AppLogger.export(context) },
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Icon(Icons.Default.FileUpload, null)
+                                    Spacer(Modifier.padding(3.dp))
+                                    Text("导出日志")
+                                }
+                                FilledTonalButton(onClick = viewModel::clearLogs, modifier = Modifier.weight(1f)) {
+                                    Icon(Icons.Default.DeleteSweep, null)
+                                    Spacer(Modifier.padding(3.dp))
+                                    Text("清空日志")
+                                }
+                            }
                         }
                     }
                 }
@@ -261,6 +296,13 @@ fun LobbyScreen(state: AppState, contentPadding: PaddingValues, viewModel: Music
         PasswordDialog(room.name, onDismiss = { joinTarget = null }) { password ->
             joinTarget = null
             viewModel.joinRoom(room.id, password)
+        }
+    }
+    if (accountSettingsOpen) {
+        ModalBottomSheet(onDismissRequest = { accountSettingsOpen = false }) {
+            Column(Modifier.fillMaxWidth().fillMaxHeight(0.90f)) {
+                AccountSettingsPane(state, viewModel)
+            }
         }
     }
 }

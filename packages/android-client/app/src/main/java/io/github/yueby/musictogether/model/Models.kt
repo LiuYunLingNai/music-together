@@ -4,6 +4,35 @@ data class User(
     val id: String,
     val nickname: String,
     val role: String,
+    val avatarUrl: String? = null,
+)
+
+data class AccountProfile(
+    val id: String,
+    val nickname: String,
+    val avatarUrl: String?,
+    val hasPassword: Boolean,
+    val role: String,
+)
+
+data class AdminUser(
+    val id: String,
+    val nickname: String,
+    val avatarUrl: String?,
+    val role: String,
+    val hasPassword: Boolean,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val lastSeenAt: Long,
+)
+
+data class AdminRoom(
+    val id: String,
+    val name: String,
+    val creatorId: String,
+    val userCount: Int,
+    val hasPassword: Boolean,
+    val currentTrackTitle: String?,
 )
 
 data class Track(
@@ -36,7 +65,7 @@ data class RoomState(
     val creatorId: String,
     val hostId: String,
     val hasPassword: Boolean,
-    val audioQuality: Int,
+    val audioQuality: String,
     val users: List<User>,
     val queue: List<Track>,
     val currentTrack: Track?,
@@ -175,6 +204,13 @@ data class AppState(
     val rooms: List<RoomListItem> = emptyList(),
     val room: RoomState? = null,
     val userId: String? = null,
+    val accountProfile: AccountProfile? = null,
+    val accountLoading: Boolean = false,
+    val accountBusy: Boolean = false,
+    val adminUsers: List<AdminUser> = emptyList(),
+    val adminRooms: List<AdminRoom> = emptyList(),
+    val adminLoading: Boolean = false,
+    val adminWorkingId: String? = null,
     val messages: List<ChatMessage> = emptyList(),
     val searchResults: List<Track> = emptyList(),
     val searchLoading: Boolean = false,
