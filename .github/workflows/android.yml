@@ -201,12 +201,26 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp app/build/outputs/apk/standard/release/app-standard-release.apk "dist/music-together-v${VERSION}.apk"
-          cp app/build/outputs/apk/vivo/release/app-vivo-release.apk "dist/music-together-vivo-${VERSION}.apk"
+          dist_dir="$PWD/dist"
+          package_dir="$(mktemp -d)"
+          trap 'rm -rf "$package_dir"' EXIT
+
+          standard_apk="music-together-v${VERSION}.apk"
+          vivo_apk="music-together-vivo-${VERSION}.apk"
+          cp app/build/outputs/apk/standard/release/app-standard-release.apk "$package_dir/$standard_apk"
+          cp app/build/outputs/apk/vivo/release/app-vivo-release.apk "$package_dir/$vivo_apk"
+          (
+            cd "$package_dir"
+            sha256sum "$standard_apk" > "$standard_apk.sha256"
+            sha256sum "$vivo_apk" > "$vivo_apk.sha256"
+            zip -q "$dist_dir/music-together-v${VERSION}.zip" "$standard_apk" "$standard_apk.sha256"
+            zip -q "$dist_dir/music-together-vivo-${VERSION}.zip" "$vivo_apk" "$vivo_apk.sha256"
+          )
+
           cp app/build/outputs/bundle/standardRelease/app-standard-release.aab "dist/music-together-v${VERSION}.aab"
           cd dist
-          sha256sum "music-together-v${VERSION}.apk" > "music-together-v${VERSION}.apk.sha256"
-          sha256sum "music-together-vivo-${VERSION}.apk" > "music-together-vivo-${VERSION}.apk.sha256"
+          sha256sum "music-together-v${VERSION}.zip" > "music-together-v${VERSION}.zip.sha256"
+          sha256sum "music-together-vivo-${VERSION}.zip" > "music-together-vivo-${VERSION}.zip.sha256"
           sha256sum "music-together-v${VERSION}.aab" > "music-together-v${VERSION}.aab.sha256"
 
       - name: Upload signed Release artifacts
