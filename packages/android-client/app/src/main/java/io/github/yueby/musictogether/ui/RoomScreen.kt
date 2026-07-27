@@ -677,7 +677,7 @@ private fun QueueControlMenu(
 
 @Composable
 private fun LyricsPanel(lyrics: LyricsState, positionSeconds: Double, isPlaying: Boolean) {
-    val rawPositionMs = (positionSeconds * 1000f).coerceAtLeast(0f)
+    val rawPositionMs = (positionSeconds * 1000.0).toFloat().coerceAtLeast(0f)
     val positionMs = rememberSmoothPositionMs(rawPositionMs, isPlaying)
     val lines = lyrics.lines
     val positionLong = positionMs.toLong()
