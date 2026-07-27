@@ -32,6 +32,7 @@ export function replaceActiveUserId(oldUserId: string, newUserId: string, io: Ty
     if (!changed) continue
 
     revokeRejoinTickets(room.id, oldUserId)
+    roomRepo.persist(room.id)
     io.to(room.id).emit(EVENTS.ROOM_STATE, toPublicRoomState(room))
   }
 

@@ -129,6 +129,7 @@ export function createRoom(
     hostId: userId,
     adminUserIds: new Set(),
     temporaryAdminUserId: null,
+    permanent: false,
     audioQuality: 320,
     users: [user],
     queue: [],
@@ -293,7 +294,7 @@ export function listRooms(): RoomListItem[] {
 
 export function updateSettings(
   roomId: string,
-  settings: { name?: string; password?: string | null; audioQuality?: AudioQuality },
+  settings: { name?: string; password?: string | null; audioQuality?: AudioQuality; permanent?: boolean },
 ): void {
   const room = roomRepo.get(roomId)
   if (!room) return
@@ -310,6 +311,12 @@ export function updateSettings(
   if (settings.audioQuality !== undefined) {
     room.audioQuality = settings.audioQuality
   }
+
+  if (settings.permanent !== undefined) {
+    room.permanent = settings.permanent
+  }
+
+  roomRepo.persist(roomId)
 }
 
 export function setUserRole(
@@ -334,6 +341,7 @@ export function setUserRole(
   const reconciledRoleChanged = reconcileRoomRoles(room)
   // Re-elect conductor (admin promotion/demotion may change priority)
   const hostChanged = electConductor(room)
+  roomRepo.persist(roomId)
   return { success: true, roleChanged: directRoleChanged || reconciledRoleChanged, hostChanged }
 }
 

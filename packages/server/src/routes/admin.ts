@@ -140,6 +140,7 @@ export function createAdminRoutes(io: TypedServer): Router {
         creatorId: room.creatorId,
         userCount: room.users.length,
         hasPassword: room.password !== null,
+        permanent: room.permanent,
         currentTrackTitle: room.currentTrack?.title ?? null,
       })),
     })

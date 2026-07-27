@@ -1,5 +1,57 @@
-import type { RoomListItem } from '@music-together/shared'
+import { LIMITS, type RoomListItem, type Track } from '@music-together/shared'
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto'
+import { config } from '../config.js'
+import { logger } from '../utils/logger.js'
+import { db } from './database.js'
 import type { RoomData, RoomRepository, SocketMapping } from './types.js'
+
+interface PermanentRoomRow {
+  id: string
+  state_json: string
+}
+
+interface PersistedRoomState {
+  name: RoomData['name']
+  /** Legacy plaintext field retained only for reading databases created before encryption. */
+  password?: RoomData['password']
+  passwordEncrypted?: string | null
+  creatorId: RoomData['creatorId']
+  adminUserIds: string[]
+  audioQuality: RoomData['audioQuality']
+  queue: RoomData['queue']
+  currentTrack: RoomData['currentTrack']
+  playState: RoomData['playState']
+  playMode: RoomData['playMode']
+}
+
+const encryptionKey = createHash('sha256').update(config.identity.secret).digest()
+
+function encryptPassword(password: string | null): string | null {
+  if (password === null) return null
+  const iv = randomBytes(12)
+  const cipher = createCipheriv('aes-256-gcm', encryptionKey, iv)
+  const encrypted = Buffer.concat([cipher.update(password, 'utf8'), cipher.final()])
+  return `v1:${iv.toString('base64url')}:${cipher.getAuthTag().toString('base64url')}:${encrypted.toString('base64url')}`
+}
+
+function decryptPassword(value: string | null | undefined): string | null {
+  if (value == null) return null
+  const [, iv, tag, encrypted] = value.split(':')
+  if (!value.startsWith('v1:') || !iv || !tag || !encrypted) return null
+  try {
+    const decipher = createDecipheriv('aes-256-gcm', encryptionKey, Buffer.from(iv, 'base64url'))
+    decipher.setAuthTag(Buffer.from(tag, 'base64url'))
+    return Buffer.concat([decipher.update(Buffer.from(encrypted, 'base64url')), decipher.final()]).toString('utf8')
+  } catch (error) {
+    logger.warn('Failed to decrypt permanent room password', { error })
+    return null
+  }
+}
+
+function withoutStreamUrl(track: Track): Track {
+  const { streamUrl: _streamUrl, ...persistable } = track
+  return persistable
+}
 
 export class InMemoryRoomRepository implements RoomRepository {
   private rooms = new Map<string, RoomData>()
@@ -8,6 +60,44 @@ export class InMemoryRoomRepository implements RoomRepository {
   private socketRTT = new Map<string, number>()
   /** Reverse index: roomId → Set of socketIds.  Keeps getP90RTT O(room sockets) instead of O(all sockets). */
   private roomToSockets = new Map<string, Set<string>>()
+  private upsertPermanentRoom = db.prepare(`
+    INSERT INTO permanent_rooms (id, state_json, updated_at)
+    VALUES (@id, @stateJson, @updatedAt)
+    ON CONFLICT(id) DO UPDATE SET state_json = excluded.state_json, updated_at = excluded.updated_at
+  `)
+  private deletePermanentRoom = db.prepare('DELETE FROM permanent_rooms WHERE id = ?')
+
+  constructor() {
+    const rows = db.prepare<[], PermanentRoomRow>('SELECT id, state_json FROM permanent_rooms').all()
+    for (const row of rows) {
+      try {
+        const state = JSON.parse(row.state_json) as PersistedRoomState
+        this.rooms.set(row.id, {
+          id: row.id,
+          name: state.name,
+          password:
+            state.passwordEncrypted !== undefined ? decryptPassword(state.passwordEncrypted) : (state.password ?? null),
+          creatorId: state.creatorId,
+          hostId: state.creatorId,
+          adminUserIds: new Set(state.adminUserIds ?? []),
+          temporaryAdminUserId: null,
+          permanent: true,
+          audioQuality: state.audioQuality,
+          users: [],
+          queue: (state.queue ?? []).slice(0, LIMITS.QUEUE_MAX_SIZE).map(withoutStreamUrl),
+          currentTrack: null,
+          playState: {
+            isPlaying: false,
+            currentTime: 0,
+            serverTimestamp: Date.now(),
+          },
+          playMode: state.playMode ?? 'loop-all',
+        })
+      } catch {
+        this.deletePermanentRoom.run(row.id)
+      }
+    }
+  }
 
   get(roomId: string): RoomData | undefined {
     return this.rooms.get(roomId)
@@ -15,10 +105,32 @@ export class InMemoryRoomRepository implements RoomRepository {
 
   set(roomId: string, room: RoomData): void {
     this.rooms.set(roomId, room)
+    this.persist(roomId)
+  }
+
+  persist(roomId: string): void {
+    const room = this.rooms.get(roomId)
+    if (!room?.permanent) {
+      this.deletePermanentRoom.run(roomId)
+      return
+    }
+    const state: PersistedRoomState = {
+      name: room.name,
+      passwordEncrypted: encryptPassword(room.password),
+      creatorId: room.creatorId,
+      adminUserIds: Array.from(room.adminUserIds),
+      audioQuality: room.audioQuality,
+      queue: room.queue.map(withoutStreamUrl),
+      currentTrack: room.currentTrack ? withoutStreamUrl(room.currentTrack) : null,
+      playState: room.playState,
+      playMode: room.playMode,
+    }
+    this.upsertPermanentRoom.run({ id: roomId, stateJson: JSON.stringify(state), updatedAt: Date.now() })
   }
 
   delete(roomId: string): void {
     this.rooms.delete(roomId)
+    this.deletePermanentRoom.run(roomId)
     // Clean up reverse index for the deleted room
     this.roomToSockets.delete(roomId)
   }
@@ -36,6 +148,7 @@ export class InMemoryRoomRepository implements RoomRepository {
       id: room.id,
       name: room.name,
       hasPassword: room.password !== null,
+      permanent: room.permanent,
       userCount: room.users.length,
       currentTrackTitle: room.currentTrack?.title ?? null,
       currentTrackArtist: room.currentTrack?.artist.join(', ') ?? null,

@@ -12,6 +12,8 @@ export interface RoomData {
   adminUserIds: Set<string>
   /** 临时管理员 ID：仅当房间内没有在线 owner / 持久 admin 时授予，不持久化 */
   temporaryAdminUserId: string | null
+  /** Keep the room when empty and restore it after a server restart. */
+  permanent: boolean
   audioQuality: AudioQuality
   users: User[]
   queue: Track[]
@@ -28,6 +30,7 @@ export interface SocketMapping {
 export interface RoomRepository {
   get(roomId: string): RoomData | undefined
   set(roomId: string, room: RoomData): void
+  persist(roomId: string): void
   delete(roomId: string): void
   getAll(): ReadonlyMap<string, RoomData>
   getAllIds(): string[]

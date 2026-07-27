@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { EVENTS, type Track } from '@music-together/shared'
+import { EVENTS, LIMITS, type Track } from '@music-together/shared'
 import { useSocketContext } from '@/providers/SocketProvider'
 
 export function useQueue() {
@@ -13,7 +13,14 @@ export function useQueue() {
   )
 
   const addBatchTracks = useCallback(
-    (tracks: Track[], playlistName?: string) => socket.emit(EVENTS.QUEUE_ADD_BATCH, { tracks, playlistName }),
+    (tracks: Track[], playlistName?: string) => {
+      for (let offset = 0; offset < tracks.length; offset += LIMITS.QUEUE_BATCH_MAX_SIZE) {
+        socket.emit(EVENTS.QUEUE_ADD_BATCH, {
+          tracks: tracks.slice(offset, offset + LIMITS.QUEUE_BATCH_MAX_SIZE),
+          playlistName,
+        })
+      }
+    },
     [socket],
   )
 

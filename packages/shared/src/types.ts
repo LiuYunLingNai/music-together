@@ -84,6 +84,8 @@ export interface RoomState {
   creatorId: string
   hostId: string
   hasPassword: boolean
+  /** Permanent rooms survive empty-room cleanup and server restarts. */
+  permanent: boolean
   /** 密码明文（仅 owner 可见；普通成员和临时管理员只收到 hasPassword） */
   password?: string | null
   audioQuality: AudioQuality
@@ -145,6 +147,7 @@ export interface RoomListItem {
   id: string
   name: string
   hasPassword: boolean
+  permanent: boolean
   userCount: number
   currentTrackTitle: string | null
   currentTrackArtist: string | null

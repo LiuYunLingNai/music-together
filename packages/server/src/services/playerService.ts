@@ -379,6 +379,7 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
     currentTime: 0,
     serverTimestamp: scheduleTime,
   }
+  roomRepo.persist(roomId)
 
   io.to(roomId).emit(EVENTS.PLAYER_PLAY, {
     track: resolved,
@@ -428,6 +429,7 @@ export function resumeTrack(io: TypedServer, roomId: string, _initiatorSocket?: 
 
   const scheduleTime = getScheduleTime(roomId)
   room.playState = { ...room.playState, isPlaying: true, serverTimestamp: scheduleTime }
+  roomRepo.persist(roomId)
   // All clients (including initiator) must execute at the same scheduled moment
   io.to(roomId).emit(EVENTS.PLAYER_RESUME, { playState: scheduled(room.playState, roomId, scheduleTime) })
 }
@@ -439,6 +441,7 @@ export function pauseTrack(io: TypedServer, roomId: string, _initiatorSocket?: T
   // Snapshot estimated position before pausing so resume starts from the correct point
   const snapshotTime = estimateCurrentTime(roomId)
   room.playState = { isPlaying: false, currentTime: snapshotTime, serverTimestamp: Date.now() }
+  roomRepo.persist(roomId)
   // All clients must pause at the same scheduled moment
   io.to(roomId).emit(EVENTS.PLAYER_PAUSE, { playState: scheduled(room.playState, roomId) })
 }
@@ -454,6 +457,7 @@ export function seekTrack(io: TypedServer, roomId: string, currentTime: number, 
     currentTime,
     serverTimestamp: room.playState.isPlaying ? scheduleTime : Date.now(),
   }
+  roomRepo.persist(roomId)
   // All clients must seek at the same scheduled moment
   io.to(roomId).emit(EVENTS.PLAYER_SEEK, { playState: scheduled(room.playState, roomId, scheduleTime) })
 }
@@ -462,6 +466,7 @@ export function updatePlayState(roomId: string, update: Partial<PlayState>): voi
   const room = roomRepo.get(roomId)
   if (room) {
     room.playState = { ...room.playState, ...update, serverTimestamp: Date.now() }
+    roomRepo.persist(roomId)
   }
 }
 
@@ -474,6 +479,7 @@ export function setCurrentTrack(roomId: string, track: Track | null): void {
       currentTime: 0,
       serverTimestamp: Date.now(),
     }
+    roomRepo.persist(roomId)
   }
 }
 
@@ -598,6 +604,7 @@ export async function syncPlaybackToSocket(
     const shouldAutoPlay = isAloneInRoom || room.playState.isPlaying
     if (isAloneInRoom && !room.playState.isPlaying) {
       room.playState = { ...room.playState, isPlaying: true, serverTimestamp: Date.now() }
+      roomRepo.persist(roomId)
     }
 
     const snapshotCurrentTime = estimateCurrentTime(roomId)

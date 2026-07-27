@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { Lock, LockOpen, Music, Users } from 'lucide-react'
+import { Lock, LockOpen, Music, Pin, Users } from 'lucide-react'
 import { motion, useReducedMotion } from 'motion/react'
 import type { RoomListItem } from '@music-together/shared'
 import { cn } from '@/lib/utils'
@@ -43,6 +43,7 @@ export const RoomCard = memo(function RoomCard({ room, index, onClick }: RoomCar
 
         {/* Right side: playing animation + lock icon */}
         <div className="ml-3 flex shrink-0 items-center gap-2">
+          {room.permanent && <Pin className="h-4 w-4 text-primary/70" aria-label="永久房间" />}
           {/* Subtle playing animation for rooms with active tracks */}
           {room.currentTrackTitle && (
             <div className="flex items-end gap-0.5">

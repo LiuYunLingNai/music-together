@@ -20,7 +20,12 @@ import { updateCurrentNickname } from '@/lib/profileApi'
 import { useAuth } from '@/hooks/useAuth'
 
 interface RoomSettingsSectionProps {
-  onUpdateSettings: (settings: { name?: string; password?: string | null; audioQuality?: AudioQuality }) => void
+  onUpdateSettings: (settings: {
+    name?: string
+    password?: string | null
+    audioQuality?: AudioQuality
+    permanent?: boolean
+  }) => void
 }
 
 export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionProps) {
@@ -259,6 +264,16 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
 
           <SettingRow label="房间密码" description="开启后需输入密码才能进入">
             <Switch checked={passwordEnabled} onCheckedChange={handlePasswordToggle} />
+          </SettingRow>
+
+          <SettingRow label="永久房间" description="空房不回收，服务重启后仍会保留">
+            <Switch
+              checked={room?.permanent ?? false}
+              onCheckedChange={(permanent) => {
+                onUpdateSettings({ permanent })
+                toast.success(permanent ? '已设为永久房间' : '已改为临时房间')
+              }}
+            />
           </SettingRow>
 
           {passwordEnabled && (

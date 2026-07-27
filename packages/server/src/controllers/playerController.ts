@@ -85,6 +85,7 @@ export function registerPlayerController(io: TypedServer, socket: TypedSocket) {
       const parsed = playerSetModeSchema.safeParse(data)
       if (!parsed.success) return
       ctx.room.playMode = parsed.data.mode
+      roomRepo.persist(ctx.roomId)
       // Broadcast updated room state so all clients see the new play mode
       ctx.io.to(ctx.roomId).emit(EVENTS.ROOM_STATE, roomService.toPublicRoomState(ctx.room))
       logger.info(`房间 ${ctx.roomId} 的播放模式已切换为 ${parsed.data.mode}`, {

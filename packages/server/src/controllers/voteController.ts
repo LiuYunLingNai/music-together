@@ -63,6 +63,7 @@ async function executeAction(
       const room = roomRepo.get(roomId)
       if (!room) break
       room.playMode = parsed.data.mode
+      roomRepo.persist(roomId)
       io.to(roomId).emit(EVENTS.ROOM_STATE, roomService.toPublicRoomState(room))
       logger.info(`投票通过：房间 ${roomId} 的播放模式已切换为 ${parsed.data.mode}`, {
         event: 'player.mode_changed_by_vote',

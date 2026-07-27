@@ -7,6 +7,7 @@ export function addTrack(roomId: string, track: Track): boolean {
   if (!room) return false
   if (room.queue.length >= LIMITS.QUEUE_MAX_SIZE) return false
   room.queue.push(track)
+  roomRepo.persist(roomId)
   return true
 }
 
@@ -22,6 +23,7 @@ export function addBatchTracks(roomId: string, tracks: Track[]): number {
   if (available <= 0) return 0
   const toAdd = tracks.slice(0, available)
   room.queue.push(...toAdd)
+  roomRepo.persist(roomId)
   return toAdd.length
 }
 
@@ -38,6 +40,7 @@ export function insertAfterCurrent(roomId: string, track: Track): boolean {
   const currentIndex = currentId ? room.queue.findIndex((t) => t.id === currentId) : -1
   const insertIndex = currentIndex >= 0 ? currentIndex + 1 : 0
   room.queue.splice(insertIndex, 0, track)
+  roomRepo.persist(roomId)
   return true
 }
 
@@ -45,6 +48,7 @@ export function removeTrack(roomId: string, trackId: string): void {
   const room = roomRepo.get(roomId)
   if (room) {
     room.queue = room.queue.filter((t) => t.id !== trackId)
+    roomRepo.persist(roomId)
   }
 }
 
@@ -52,6 +56,7 @@ export function clearQueue(roomId: string): void {
   const room = roomRepo.get(roomId)
   if (room) {
     room.queue = []
+    roomRepo.persist(roomId)
   }
 }
 
@@ -76,6 +81,7 @@ export function reorderTracks(roomId: string, trackIds: string[]): void {
     }
   }
   room.queue = reordered
+  roomRepo.persist(roomId)
 }
 
 /**

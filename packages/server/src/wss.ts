@@ -13,6 +13,7 @@
  */
 
 import { createServer, type IncomingMessage, type Server as HttpServer } from 'node:http'
+import { TIMING } from '@music-together/shared'
 import { nanoid } from 'nanoid'
 import { WebSocket, WebSocketServer, type RawData, type AddressInfo } from 'ws'
 import { logger } from './utils/logger.js'
@@ -210,6 +211,8 @@ export class TypedServer<
   private roomMap = new Map<string, Set<TypedSocket<ClientToServerEvents, ServerToClientEvents, SocketData>>>()
   private middlewares: MiddlewareFn<SocketData>[] = []
   private connectionHandlers: ((socket: TypedSocket<ClientToServerEvents, ServerToClientEvents, SocketData>) => void)[] = []
+  private heartbeatTimer: ReturnType<typeof setInterval>
+  private aliveSockets = new Map<WebSocket, boolean>()
 
   constructor(httpServer: HttpServer) {
     this.wss = new WebSocketServer({ noServer: true })
@@ -227,8 +230,24 @@ export class TypedServer<
     })
 
     this.wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
+      this.aliveSockets.set(ws, true)
+      ws.on('pong', () => this.aliveSockets.set(ws, true))
       this.handleConnection(ws, req)
     })
+
+    this.heartbeatTimer = setInterval(() => {
+      for (const socket of this.sockets) {
+        const ws = socket.ws
+        if (this.aliveSockets.get(ws) === false) {
+          logger.warn('WebSocket heartbeat timed out', { socketId: socket.id })
+          ws.terminate()
+          continue
+        }
+        this.aliveSockets.set(ws, false)
+        ws.ping()
+      }
+    }, TIMING.WEBSOCKET_HEARTBEAT_INTERVAL_MS)
+    this.heartbeatTimer.unref()
   }
 
   // -- Middleware ------------------------------------------------------------
@@ -272,6 +291,7 @@ export class TypedServer<
   /** @internal */
   removeSocket(socket: TypedSocket<ClientToServerEvents, ServerToClientEvents, SocketData>): void {
     this.sockets.delete(socket)
+    this.aliveSockets.delete(socket.ws)
     // Clean up all room memberships
     for (const [room, set] of this.roomMap) {
       set.delete(socket)
@@ -288,6 +308,7 @@ export class TypedServer<
   // -- Close ----------------------------------------------------------------
 
   close(cb?: () => void): void {
+    clearInterval(this.heartbeatTimer)
     for (const s of this.sockets) {
       try {
         s.ws.close()

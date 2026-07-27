@@ -46,6 +46,15 @@ export function scheduleDeletion(roomId: string, io?: TypedServer): void {
   // Prevent duplicate timers if called multiple times for the same room
   cancelDeletionTimer(roomId)
 
+  const room = roomRepo.get(roomId)
+  if (room?.permanent) {
+    logger.info(`永久房间 ${roomId} 已空置，将保留等待用户加入`, {
+      event: 'room.permanent_retained',
+      roomId,
+    })
+    return
+  }
+
   logger.info(`房间 ${roomId} 已空置，将在 ${config.room.gracePeriodMs / 1000} 秒后删除`, {
     event: 'room.deletion_scheduled',
     roomId,
@@ -53,7 +62,7 @@ export function scheduleDeletion(roomId: string, io?: TypedServer): void {
   })
   const timer = setTimeout(() => {
     const r = roomRepo.get(roomId)
-    if (r && r.users.length === 0) {
+    if (r && r.users.length === 0 && !r.permanent) {
       roomRepo.delete(roomId)
       chatRepo.deleteRoom(roomId)
       cleanupPlayerRoom(roomId)

@@ -30,6 +30,7 @@ export interface ServerToClientEvents {
   [EVENTS.ROOM_SETTINGS]: (settings: {
     name: string
     hasPassword: boolean
+    permanent: boolean
     password?: string | null
     audioQuality: AudioQuality
   }) => void
@@ -76,7 +77,12 @@ export interface ClientToServerEvents {
   [EVENTS.ROOM_JOIN]: (data: { roomId: string; nickname: string; password?: string; rejoinToken?: string }) => void
   [EVENTS.ROOM_LEAVE]: () => void
   [EVENTS.ROOM_LIST]: () => void
-  [EVENTS.ROOM_SETTINGS]: (data: { name?: string; password?: string | null; audioQuality?: AudioQuality }) => void
+  [EVENTS.ROOM_SETTINGS]: (data: {
+    name?: string
+    password?: string | null
+    audioQuality?: AudioQuality
+    permanent?: boolean
+  }) => void
   [EVENTS.ROOM_SET_ROLE]: (data: { userId: string; role: 'admin' | 'member' }) => void
 
   [EVENTS.PLAYER_PLAY]: (data?: { track?: Track }) => void

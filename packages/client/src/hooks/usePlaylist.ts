@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { EVENTS, type MusicSource, type Playlist, type Track } from '@music-together/shared'
+import { EVENTS, LIMITS, type MusicSource, type Playlist, type Track } from '@music-together/shared'
 import { useSocketContext } from '@/providers/SocketProvider'
 import { useRoomStore } from '@/stores/roomStore'
 import { SERVER_URL } from '@/lib/config'
 
-const PAGE_SIZE = 1000
+const PAGE_SIZE = LIMITS.PLAYLIST_PAGE_SIZE
 
 /** Build the playlist API URL with all query parameters */
 function buildPlaylistUrl(
@@ -231,7 +231,12 @@ export function usePlaylist() {
 
   const addBatchToQueue = useCallback(
     (tracks: Track[], playlistName?: string) => {
-      socket.emit(EVENTS.QUEUE_ADD_BATCH, { tracks, playlistName })
+      for (let offset = 0; offset < tracks.length; offset += LIMITS.QUEUE_BATCH_MAX_SIZE) {
+        socket.emit(EVENTS.QUEUE_ADD_BATCH, {
+          tracks: tracks.slice(offset, offset + LIMITS.QUEUE_BATCH_MAX_SIZE),
+          playlistName,
+        })
+      }
     },
     [socket],
   )

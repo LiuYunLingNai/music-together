@@ -192,6 +192,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         name: parsed.data.name,
         password: parsed.data.password,
         audioQuality: parsed.data.audioQuality,
+        permanent: parsed.data.permanent,
       })
 
       const updatedRoom = roomRepo.get(ctx.roomId)
@@ -201,6 +202,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
       const baseSettings = {
         name: updatedRoom.name,
         hasPassword: updatedRoom.password !== null,
+        permanent: updatedRoom.permanent,
         audioQuality: updatedRoom.audioQuality,
       }
       // 给 owner 发送含密码的设置
@@ -220,6 +222,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         roomName: updatedRoom.name,
         audioQuality: updatedRoom.audioQuality,
         passwordProtected: updatedRoom.password !== null,
+        permanent: updatedRoom.permanent,
         changedFields: Object.keys(parsed.data).filter(
           (key) => parsed.data[key as keyof typeof parsed.data] !== undefined,
         ),

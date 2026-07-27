@@ -38,6 +38,12 @@ db.exec(`
     updated_at INTEGER NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
+
+  CREATE TABLE IF NOT EXISTS permanent_rooms (
+    id TEXT PRIMARY KEY,
+    state_json TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
 `)
 
 interface TableColumn {

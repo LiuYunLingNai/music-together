@@ -38,6 +38,7 @@ export const roomSettingsSchema = z.object({
   name: z.string().min(1).max(LIMITS.ROOM_NAME_MAX_LENGTH).optional(),
   password: z.string().max(LIMITS.ROOM_PASSWORD_MAX_LENGTH).nullable().optional(),
   audioQuality: audioQualitySchema.optional(),
+  permanent: z.boolean().optional(),
 })
 
 export const setRoleSchema = z.object({
