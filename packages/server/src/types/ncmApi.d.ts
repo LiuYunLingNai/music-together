@@ -93,6 +93,12 @@ declare module '@neteasecloudmusicapienhanced/api' {
         [key: string]: unknown
       }
     }>
+    song_url_v1(params: { id: string | number; level: string } & RequestBaseConfig): Promise<{
+      body: {
+        data?: Array<{ url?: string; br?: number; level?: string }>
+        [key: string]: unknown
+      }
+    }>
   }
 
   const ncmApi: NcmApiInstance

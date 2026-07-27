@@ -2,8 +2,11 @@ import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { useRoomStore } from '@/stores/roomStore'
+import { useAccountStore } from '@/stores/accountStore'
 import type { UserRole } from '@music-together/shared'
 import { Crown, Shield, User } from 'lucide-react'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { resolveAvatarUrl } from '@/lib/profileApi'
 
 interface MembersSectionProps {
   onSetUserRole?: (userId: string, role: 'admin' | 'member') => void
@@ -31,7 +34,8 @@ function getRoleIcon(role: UserRole) {
 export function MembersSection({ onSetUserRole }: MembersSectionProps) {
   const room = useRoomStore((s) => s.room)
   const currentUser = useRoomStore((s) => s.currentUser)
-  const isOwner = currentUser?.role === 'owner'
+  const isServerAdmin = useAccountStore((state) => state.profile?.role === 'admin')
+  const isOwner = currentUser?.role === 'owner' || isServerAdmin
 
   return (
     <div className="space-y-6">
@@ -44,6 +48,10 @@ export function MembersSection({ onSetUserRole }: MembersSectionProps) {
             .sort((a, b) => (ROLE_ORDER[a.role] ?? 9) - (ROLE_ORDER[b.role] ?? 9))
             .map((user) => (
               <div key={user.id} className="flex items-center gap-2 rounded-lg px-3 py-1.5">
+                <Avatar size="sm">
+                  <AvatarImage src={resolveAvatarUrl(user.avatarUrl)} alt="" />
+                  <AvatarFallback>{user.nickname.slice(0, 1).toUpperCase()}</AvatarFallback>
+                </Avatar>
                 {getRoleIcon(user.role)}
                 <span className="text-sm">{user.nickname}</span>
                 {user.id === currentUser?.id && (

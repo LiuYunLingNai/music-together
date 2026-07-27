@@ -105,7 +105,7 @@ export interface ClientToServerEvents {
   // Auth
   [EVENTS.AUTH_REQUEST_QR]: (data: { platform: MusicSource }) => void
   [EVENTS.AUTH_CHECK_QR]: (data: { key: string; platform: MusicSource }) => void
-  [EVENTS.AUTH_SET_COOKIE]: (data: { platform: MusicSource; cookie: string }) => void
+  [EVENTS.AUTH_SET_COOKIE]: (data: { platform: MusicSource; cookie: string; persist?: boolean }) => void
   [EVENTS.AUTH_LOGOUT]: (data: { platform: MusicSource }) => void
   [EVENTS.AUTH_GET_STATUS]: () => void
 

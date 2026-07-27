@@ -6,19 +6,22 @@ import {
 } from '@/components/ui/responsive-dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
-import { KeyRound, Palette, Settings2, Type, Users, type LucideIcon } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { Disc3, Palette, Settings2, Shield, Type, UserRound, Users, type LucideIcon } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import { RoomSettingsSection } from './Settings/RoomSettingsSection'
 import { MembersSection } from './Settings/MembersSection'
 import { AppearanceSection } from './Settings/AppearanceSection'
 import { LyricsSection } from './Settings/LyricsSection'
 import { PlatformHub } from './Settings/PlatformHub'
+import { AccountSection } from './Settings/AccountSection'
+import { AdminSection } from './Settings/AdminSection'
+import { useAccountStore } from '@/stores/accountStore'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export type SettingsTab = 'room' | 'members' | 'appearance' | 'lyrics' | 'accounts'
+export type SettingsTab = 'room' | 'members' | 'account' | 'accounts' | 'appearance' | 'lyrics' | 'admin'
 
 interface SettingsDialogProps {
   open: boolean
@@ -67,10 +70,11 @@ function NavItem({
 // Tab config
 // ---------------------------------------------------------------------------
 
-const TABS: { id: SettingsTab; icon: LucideIcon; label: string }[] = [
+const BASE_TABS: { id: SettingsTab; icon: LucideIcon; label: string }[] = [
   { id: 'room', icon: Settings2, label: '房间' },
   { id: 'members', icon: Users, label: '成员' },
-  { id: 'accounts', icon: KeyRound, label: '账号' },
+  { id: 'account', icon: UserRound, label: '账号' },
+  { id: 'accounts', icon: Disc3, label: '音源账号' },
   { id: 'appearance', icon: Palette, label: '外观' },
   { id: 'lyrics', icon: Type, label: '歌词' },
 ]
@@ -87,6 +91,11 @@ export function SettingsDialog({
   initialTab,
 }: SettingsDialogProps) {
   const [tab, setTab] = useState<SettingsTab>('room')
+  const isServerAdmin = useAccountStore((state) => state.profile?.role === 'admin')
+  const tabs = useMemo(
+    () => (isServerAdmin ? [...BASE_TABS, { id: 'admin' as const, icon: Shield, label: '服务器管理' }] : BASE_TABS),
+    [isServerAdmin],
+  )
 
   // When dialog opens with an initialTab, jump to it
   useEffect(() => {
@@ -94,6 +103,10 @@ export function SettingsDialog({
       setTab(initialTab)
     }
   }, [open, initialTab])
+
+  useEffect(() => {
+    if (tab === 'admin' && !isServerAdmin) setTab('room')
+  }, [isServerAdmin, tab])
 
   return (
     <ResponsiveDialog open={open} onOpenChange={onOpenChange}>
@@ -104,7 +117,7 @@ export function SettingsDialog({
           <div className="flex shrink-0 flex-col border-b md:hidden">
             <ResponsiveDialogTitle className="px-4 pt-4 pb-2 text-lg font-semibold">设置</ResponsiveDialogTitle>
             <nav className="scrollbar-hide flex gap-1 overflow-x-auto px-4 pb-2" role="tablist" aria-label="设置分类">
-              {TABS.map((t) => (
+              {tabs.map((t) => (
                 <button
                   key={t.id}
                   role="tab"
@@ -128,7 +141,7 @@ export function SettingsDialog({
           <nav className="hidden w-48 shrink-0 flex-col border-r p-4 md:flex" role="tablist" aria-label="设置分类">
             <ResponsiveDialogTitle className="mb-4 px-3 text-lg font-semibold">设置</ResponsiveDialogTitle>
             <div className="space-y-1">
-              {TABS.map((t) => (
+              {tabs.map((t) => (
                 <NavItem key={t.id} icon={t.icon} label={t.label} active={tab === t.id} onClick={() => setTab(t.id)} />
               ))}
             </div>
@@ -144,6 +157,8 @@ export function SettingsDialog({
               <div className="p-4 sm:p-6">
                 {tab === 'room' && <RoomSettingsSection onUpdateSettings={onUpdateSettings} />}
                 {tab === 'members' && <MembersSection onSetUserRole={onSetUserRole} />}
+                {tab === 'account' && <AccountSection />}
+                {tab === 'admin' && isServerAdmin && <AdminSection />}
                 {tab === 'lyrics' && <LyricsSection />}
                 {tab === 'appearance' && <AppearanceSection />}
               </div>

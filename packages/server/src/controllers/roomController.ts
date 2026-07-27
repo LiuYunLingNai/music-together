@@ -10,7 +10,9 @@ import type { TypedServer, TypedSocket } from '../middleware/types.js'
 import { createWithOwnerOnly } from '../middleware/withControl.js'
 import { cleanupSocketRateLimit } from '../middleware/socketRateLimiter.js'
 import { roomRepo } from '../repositories/roomRepository.js'
+import { userRepo } from '../repositories/userRepository.js'
 import * as chatService from '../services/chatService.js'
+import * as authService from '../services/authService.js'
 import * as playerService from '../services/playerService.js'
 import { issueRejoinTicket, revokeRejoinTickets } from '../services/rejoinTicketService.js'
 import * as roomService from '../services/roomService.js'
@@ -55,6 +57,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
 
       socket.leave('lobby')
       socket.join(room.id)
+      authService.restoreUserCookies(room.id, user.id)
       socket.emit(EVENTS.ROOM_CREATED, { roomId: room.id, userId: user.id })
       // 创建者是 owner，发送含密码的完整状态
       socket.emit(EVENTS.ROOM_STATE, roomService.toPublicRoomStateForOwner(room))
@@ -115,6 +118,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
 
       socket.leave('lobby')
       socket.join(roomId)
+      authService.restoreUserCookies(roomId, user.id)
 
       // Send full room state + chat history
       // Owner 收到含密码版本，其他成员收到不含密码版本
@@ -131,6 +135,8 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
       }
       socket.emit(EVENTS.ROOM_REJOIN_TOKEN, { roomId, token: rejoin.token, expiresAt: rejoin.expiresAt })
       socket.emit(EVENTS.CHAT_HISTORY, chatService.getHistory(roomId))
+      socket.emit(EVENTS.AUTH_MY_STATUS, authService.getUserAuthStatus(user.id, roomId))
+      io.to(roomId).emit(EVENTS.AUTH_STATUS_UPDATE, authService.getAllPlatformStatus(roomId))
 
       // Sync playback state to the joining client (auto-resume, auto-play)
       playerService.syncPlaybackToSocket(io, socket, roomId, updatedRoom).catch((err) => {
@@ -210,6 +216,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         roomId: ctx.roomId,
         operatorId: ctx.user.id,
         operator: ctx.user.nickname,
+        operatorIsServerAdmin: userRepo.isServerAdmin(ctx.user.id),
         roomName: updatedRoom.name,
         audioQuality: updatedRoom.audioQuality,
         passwordProtected: updatedRoom.password !== null,
@@ -254,6 +261,8 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         event: 'room.role_changed',
         roomId: ctx.roomId,
         operatorId: ctx.user.id,
+        operator: ctx.user.nickname,
+        operatorIsServerAdmin: userRepo.isServerAdmin(ctx.user.id),
         targetUserId: userId,
         role,
         conductorChanged: result.hostChanged,

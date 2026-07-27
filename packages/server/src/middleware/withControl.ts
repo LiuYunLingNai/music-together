@@ -2,6 +2,7 @@ import { EVENTS, ERROR_CODE, defineAbilityFor } from '@music-together/shared'
 import type { Actions, Subjects } from '@music-together/shared'
 import type { HandlerContext, TypedServer } from './types.js'
 import { createWithRoom } from './withRoom.js'
+import { userRepo } from '../repositories/userRepository.js'
 
 /**
  * Socket 中间件：基于 CASL 权限检查。
@@ -16,7 +17,8 @@ export function createWithPermission(io: TypedServer) {
     handler: (ctx: HandlerContext, data: T) => void | Promise<void>,
   ) {
     return withRoom<T>((ctx, data) => {
-      const ability = defineAbilityFor(ctx.user.role)
+      const role = userRepo.isServerAdmin(ctx.user.id) ? 'owner' : ctx.user.role
+      const ability = defineAbilityFor(role)
       if (!ability.can(action, subject)) {
         ctx.socket.emit(EVENTS.ROOM_ERROR, {
           code: ERROR_CODE.NO_PERMISSION,
@@ -38,7 +40,7 @@ export function createWithOwnerOnly(io: TypedServer) {
 
   return function withOwnerOnly<T = void>(handler: (ctx: HandlerContext, data: T) => void | Promise<void>) {
     return withRoom<T>((ctx, data) => {
-      if (ctx.user.role !== 'owner') {
+      if (ctx.user.role !== 'owner' && !userRepo.isServerAdmin(ctx.user.id)) {
         ctx.socket.emit(EVENTS.ROOM_ERROR, {
           code: ERROR_CODE.NO_PERMISSION,
           message: '只有房主可以操作',

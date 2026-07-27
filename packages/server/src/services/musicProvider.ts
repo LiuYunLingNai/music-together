@@ -1,7 +1,7 @@
 import Meting from '@meting/core'
 import { get as kugouLrcGet, Format } from '@s4p/kugou-lrc'
 import type { KrcInfo } from '@s4p/kugou-lrc'
-import type { MusicSource, Track } from '@music-together/shared'
+import type { AudioQuality, MusicSource, Track } from '@music-together/shared'
 import { LRUCache } from 'lru-cache'
 import { nanoid } from 'nanoid'
 import pLimit from 'p-limit'
@@ -11,6 +11,30 @@ import * as tencentAuth from './tencentAuthService.js'
 import { parseCookieString } from '../utils/cookieUtils.js'
 import { logger } from '../utils/logger.js'
 import crypto from 'node:crypto'
+import { createRequire } from 'node:module'
+
+const require = createRequire(import.meta.url)
+const generateNeteaseConfig = require('@neteasecloudmusicapienhanced/api/generateConfig') as () => Promise<void> | void
+let neteaseConfigReady: Promise<boolean> | null = null
+
+function isXeapiPublicKeyMissing(err: unknown): boolean {
+  return String(err instanceof Error ? err.message : err).includes('xeapi public key is missing')
+}
+
+function ensureNeteaseEnhancedConfig(force = false): Promise<boolean> {
+  if (force) neteaseConfigReady = null
+  if (!neteaseConfigReady) {
+    neteaseConfigReady = Promise.resolve()
+      .then(() => generateNeteaseConfig())
+      .then(() => true)
+      .catch((err: unknown) => {
+        neteaseConfigReady = null
+        logger.warn('Netease enhanced API config initialization failed', { err })
+        return false
+      })
+  }
+  return neteaseConfigReady
+}
 
 /** AMLL LyricLine 格式（与 @applemusic-like-lyrics/core 一致，避免引入 client 依赖） */
 interface AmllLyricLine {
@@ -175,6 +199,66 @@ function normalizeBitrate(value: unknown): number | null {
   const bitrate = Number(value)
   if (!Number.isFinite(bitrate) || bitrate <= 0) return null
   return Math.round(bitrate >= 10_000 ? bitrate / 1000 : bitrate)
+}
+
+type NeteaseSoundQualityLevel =
+  | 'standard'
+  | 'higher'
+  | 'exhigh'
+  | 'lossless'
+  | 'dolby'
+  | 'hires'
+  | 'jyeffect'
+  | 'jymaster'
+  | 'sky'
+
+function neteaseQualityToLevel(quality: AudioQuality): NeteaseSoundQualityLevel | null {
+  switch (quality) {
+    case 128:
+      return 'standard'
+    case 192:
+      return 'higher'
+    case 320:
+      return 'exhigh'
+    case 999:
+      return 'lossless'
+    case 'netease_dolby':
+      return 'dolby'
+    case 'netease_hires':
+      return 'hires'
+    case 'netease_jyeffect':
+      return 'jyeffect'
+    case 'netease_spatial':
+      return 'sky'
+    case 'netease_master':
+      return 'jymaster'
+    default:
+      return null
+  }
+}
+
+const NETEASE_LEVEL_RANK: Record<NeteaseSoundQualityLevel, number> = {
+  standard: 0,
+  higher: 1,
+  exhigh: 2,
+  lossless: 3,
+  hires: 4,
+  jyeffect: 5,
+  dolby: 6,
+  sky: 7,
+  jymaster: 8,
+}
+
+function qualityToBitrate(quality: AudioQuality): 128 | 192 | 320 | 999 {
+  return typeof quality === 'number' ? quality : 999
+}
+
+function isNeteaseReturnedLevelAcceptable(quality: AudioQuality, returnedLevel: unknown): boolean {
+  const requested = neteaseQualityToLevel(quality)
+  const returned = String(returnedLevel ?? '').toLowerCase() as NeteaseSoundQualityLevel
+  if (!requested || NETEASE_LEVEL_RANK[returned] === undefined) return true
+  if (typeof quality === 'string') return returned === requested
+  return NETEASE_LEVEL_RANK[returned] >= NETEASE_LEVEL_RANK[requested]
 }
 
 // Path to song list in raw (non-formatted) API response per platform
@@ -1032,15 +1116,45 @@ class MusicProvider {
    * This can be lower than the requested room quality. Cookie-backed VIP
    * results use a fresh Meting instance and are intentionally not cached.
    */
+  private async getNeteaseStreamUrlV1(
+    urlId: string,
+    quality: AudioQuality,
+    cookie?: string,
+    retried = false,
+  ): Promise<CachedStreamUrl | null> {
+    const level = neteaseQualityToLevel(quality)
+    if (!level) return null
+
+    try {
+      await ensureNeteaseEnhancedConfig()
+      const res = await withTimeout(
+        ncmApi.song_url_v1({ id: urlId, level, timestamp: Date.now(), ...(cookie ? { cookie } : {}) }),
+      )
+      const data = res?.body?.data?.[0] as MetingJson | undefined
+      if (!data || !isNeteaseReturnedLevelAcceptable(quality, data.level)) return null
+      const url = String(data.url ?? '').replace(/^http:\/\//, 'https://')
+      if (!url) return null
+      return { url, actualBitrate: normalizeBitrate(data.br) ?? qualityToBitrate(quality) }
+    } catch (err) {
+      if (!retried && isXeapiPublicKeyMissing(err) && (await ensureNeteaseEnhancedConfig(true))) {
+        return this.getNeteaseStreamUrlV1(urlId, quality, cookie, true)
+      }
+      logger.warn('Netease song_url_v1 failed', { urlId, level, err })
+      return null
+    }
+  }
+
   async getStreamInfo(
     source: MusicSource,
     urlId: string,
-    bitrate = 320,
+    quality: AudioQuality = 320,
     cookie?: string,
   ): Promise<StreamUrlResult | null> {
+    const bitrate = qualityToBitrate(quality)
+    const qualityCacheKey = String(quality)
     // Skip cache when cookie is provided (VIP URLs are user-specific)
     if (!cookie) {
-      const cacheKey = `${source}:${urlId}:${bitrate}`
+      const cacheKey = `${source}:${urlId}:${qualityCacheKey}`
       const cached = this.streamUrlCache.get(cacheKey)
       if (cached) {
         logger.debug('命中播放地址缓存', {
@@ -1054,12 +1168,21 @@ class MusicProvider {
     }
 
     try {
+      if (source === 'netease') {
+        const result = await this.getNeteaseStreamUrlV1(urlId, quality, cookie)
+        if (result) {
+          if (!cookie) this.streamUrlCache.set(`${source}:${urlId}:${qualityCacheKey}`, result)
+          return { ...result, fromCache: false }
+        }
+        if (typeof quality === 'string' || quality === 999) return null
+      }
+
       // Kugou: use native API that properly handles VIP authentication
       if (source === 'kugou') {
         const result = await this.getKugouStreamUrl(urlId, bitrate, cookie)
         if (result) {
           if (!cookie) {
-            this.streamUrlCache.set(`${source}:${urlId}:${bitrate}`, result)
+            this.streamUrlCache.set(`${source}:${urlId}:${qualityCacheKey}`, result)
           }
           return { ...result, fromCache: false }
         }
@@ -1100,7 +1223,7 @@ class MusicProvider {
       }
 
       // Only cache non-cookie & successful results (null = transient failure, retry next time)
-      if (!cookie) this.streamUrlCache.set(`${source}:${urlId}:${bitrate}`, result)
+      if (!cookie) this.streamUrlCache.set(`${source}:${urlId}:${qualityCacheKey}`, result)
 
       return { ...result, fromCache: false }
     } catch (err) {
@@ -1110,8 +1233,13 @@ class MusicProvider {
   }
 
   /** Backwards-compatible URL-only helper used by the public REST endpoint. */
-  async getStreamUrl(source: MusicSource, urlId: string, bitrate = 320, cookie?: string): Promise<string | null> {
-    return (await this.getStreamInfo(source, urlId, bitrate, cookie))?.url ?? null
+  async getStreamUrl(
+    source: MusicSource,
+    urlId: string,
+    quality: AudioQuality = 320,
+    cookie?: string,
+  ): Promise<string | null> {
+    return (await this.getStreamInfo(source, urlId, quality, cookie))?.url ?? null
   }
 
   async getLyric(

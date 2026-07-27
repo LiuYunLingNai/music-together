@@ -10,6 +10,7 @@ import { estimateCurrentTime } from './syncService.js'
 import { updateVoteThreshold } from './voteService.js'
 import { logger } from '../utils/logger.js'
 import type { TypedServer } from '../middleware/types.js'
+import { userRepo } from '../repositories/userRepository.js'
 
 // Re-export from their new homes so existing `roomService.xxx()` callers
 // in controllers don't need import changes.
@@ -116,8 +117,9 @@ export function createRoom(
 ): { room: RoomData; user: User } {
   const roomId = nanoid(6).toUpperCase()
   const userId = persistentUserId || socketId
-
-  const user: User = { id: userId, nickname, role: 'owner' }
+  const persistedUser = userRepo.ensure(userId, { nickname })
+  const profile = persistedUser.nickname ? persistedUser : userRepo.updateProfile(userId, { nickname })
+  const user: User = { id: userId, nickname: profile.nickname, avatarUrl: profile.avatarUrl, role: 'owner' }
 
   const room: RoomData = {
     id: roomId,
@@ -169,6 +171,8 @@ export function joinRoom(
   cancelDeletionTimer(roomId)
 
   const userId = persistentUserId || socketId
+  const persistedUser = userRepo.ensure(userId, { nickname })
+  const profile = persistedUser.nickname ? persistedUser : userRepo.updateProfile(userId, { nickname })
   const isCreator = userId === room.creatorId
 
   // Determine the permission role — purely based on identity, no grace logic
@@ -181,7 +185,8 @@ export function joinRoom(
   // Rejoin — update existing user entry instead of creating duplicate
   const existing = room.users.find((u) => u.id === userId)
   if (existing) {
-    existing.nickname = nickname
+    existing.nickname = profile.nickname
+    existing.avatarUrl = profile.avatarUrl
     existing.role = resolveRole()
     roomRepo.setSocketMapping(socketId, roomId, userId)
     const roleChanged = reconcileRoomRoles(room)
@@ -191,7 +196,7 @@ export function joinRoom(
 
   // New user entry
   const role = resolveRole()
-  const user: User = { id: userId, nickname, role }
+  const user: User = { id: userId, nickname: profile.nickname, avatarUrl: profile.avatarUrl, role }
   room.users.push(user)
   roomRepo.setSocketMapping(socketId, roomId, userId)
 
@@ -397,6 +402,7 @@ export function validateJoinRequest(
   const alreadyInRoom = room.users.some((u) => u.id === effectiveUserId)
   const isCreator = effectiveUserId === room.creatorId
   const isPersistentAdmin = room.adminUserIds.has(effectiveUserId)
+  const isServerAdmin = userRepo.isServerAdmin(effectiveUserId)
   const hasValidRejoinTicket =
     typeof rejoinToken === 'string' && rejoinToken.length > 0
       ? consumeRejoinTicket(rejoinToken, roomId, effectiveUserId)
@@ -404,7 +410,12 @@ export function validateJoinRequest(
 
   // Password bypass: same socket mapping, already in room, creator, or persistent admin
   const skipPassword =
-    hasValidRejoinTicket || existingMapping?.roomId === roomId || alreadyInRoom || isCreator || isPersistentAdmin
+    hasValidRejoinTicket ||
+    existingMapping?.roomId === roomId ||
+    alreadyInRoom ||
+    isCreator ||
+    isPersistentAdmin ||
+    isServerAdmin
   // Notification skip: only when user is literally still in the room
   const isRejoin = existingMapping?.roomId === roomId || alreadyInRoom
 

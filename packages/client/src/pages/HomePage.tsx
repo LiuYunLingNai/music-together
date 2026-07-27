@@ -20,6 +20,8 @@ import { motion } from 'motion/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
+import { useAccountStore } from '@/stores/accountStore'
+import { fetchCurrentProfile, updateCurrentNickname } from '@/lib/profileApi'
 
 export default function HomePage() {
   const navigate = useNavigate()
@@ -49,7 +51,8 @@ export default function HomePage() {
   const lastJoinedRoomIdRef = useRef('')
 
   const setRoom = useRoomStore((s) => s.setRoom)
-  const savedNickname = storage.getNickname()
+  const accountProfile = useAccountStore((state) => state.profile)
+  const savedNickname = accountProfile?.nickname || storage.getNickname()
 
   // Safety timeout: reset actionLoading after 15s to prevent stuck button
   useEffect(() => {
@@ -74,8 +77,9 @@ export default function HomePage() {
 
   // Listen for room created / room state / chat history events for navigation
   useEffect(() => {
-    const onCreated = () => {
+    const onCreated = (data: { roomId: string; userId: string }) => {
       // currentUser will be auto-derived when onState fires and calls setRoom
+      storage.setUserId(data.userId)
       setActionLoading(false)
       setCreateDialogOpen(false)
       // Navigation is handled by onState which fires right after onCreated
@@ -90,6 +94,7 @@ export default function HomePage() {
       setActionLoading(false)
       setPasswordDialog({ open: false, room: null })
       setPasswordError(null)
+      void fetchCurrentProfile().catch(() => null)
       navigate(`/room/${roomState.id}`)
     }
 
@@ -152,7 +157,7 @@ export default function HomePage() {
 
   const handleCreateRoom = async (nickname: string, roomName?: string, password?: string) => {
     await unlockAudio()
-    storage.setNickname(nickname)
+    await updateCurrentNickname(nickname).catch(() => null)
     setActionLoading(true)
     createRoom(nickname, roomName, password)
   }
@@ -210,6 +215,7 @@ export default function HomePage() {
       if (!pending) return
 
       await unlockAudio()
+      await updateCurrentNickname(nickname).catch(() => null)
 
       if (pending.type === 'room') {
         const room = pending.room

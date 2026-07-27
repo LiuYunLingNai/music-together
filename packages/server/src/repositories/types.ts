@@ -33,6 +33,7 @@ export interface RoomRepository {
   getAllIds(): string[]
   getAllAsList(): RoomListItem[]
   setSocketMapping(socketId: string, roomId: string, userId: string): void
+  replaceUserId(oldUserId: string, newUserId: string): void
   getSocketMapping(socketId: string): SocketMapping | undefined
   deleteSocketMapping(socketId: string): void
   /** Check if a user has another active socket in the same room (excluding a specific socket) */

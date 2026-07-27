@@ -78,6 +78,30 @@ export function cancelDeletionTimer(roomId: string): void {
   }
 }
 
+/** Immediately dissolve a room and notify every connected member. */
+export function destroyRoom(roomId: string, io: TypedServer): boolean {
+  const room = roomRepo.get(roomId)
+  if (!room) return false
+
+  cancelDeletionTimer(roomId)
+  for (const socket of io.getSocketsInRoom(roomId)) {
+    roomRepo.deleteSocketMapping(socket.id)
+    socket.leave(roomId)
+    socket.join('lobby')
+    socket.emit(EVENTS.ROOM_ERROR, { code: 'ROOM_NOT_FOUND', message: '房间已被服务器管理员解散' })
+  }
+
+  roomRepo.delete(roomId)
+  chatRepo.deleteRoom(roomId)
+  cleanupPlayerRoom(roomId)
+  cleanupVoteRoom(roomId)
+  cleanupAuthRoom(roomId)
+  cleanupRoomRejoinTickets(roomId)
+  broadcastRoomList(io)
+  logger.info(`房间 ${roomId} 已被服务器管理员解散`, { event: 'room.dissolved', roomId })
+  return true
+}
+
 // ---------------------------------------------------------------------------
 // Debounced lobby broadcast
 // ---------------------------------------------------------------------------

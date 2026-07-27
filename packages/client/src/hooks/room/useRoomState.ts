@@ -2,10 +2,18 @@ import { useSocketContext } from '@/providers/SocketProvider'
 import { useRoomStore } from '@/stores/roomStore'
 import { storage } from '@/lib/storage'
 import { ERROR_CODE, EVENTS } from '@music-together/shared'
-import type { AudioQuality, MusicSource, RoomAutoFallbackEvent, RoomState, User, UserRole } from '@music-together/shared'
+import type {
+  AudioQuality,
+  MusicSource,
+  RoomAutoFallbackEvent,
+  RoomState,
+  User,
+  UserRole,
+} from '@music-together/shared'
 import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
+import { fetchCurrentProfile } from '@/lib/profileApi'
 
 /**
  * Handles core room lifecycle events:
@@ -41,6 +49,7 @@ export function useRoomState() {
       if ('password' in roomState) {
         useRoomStore.getState().setRoomPassword(roomState.password ?? null)
       }
+      void fetchCurrentProfile().catch(() => null)
 
       // Auto-resend persisted auth cookies so the room's cookie pool is populated
       resendCookies()
@@ -82,9 +91,12 @@ export function useRoomState() {
 
     const sourceLabel = (source: MusicSource) => {
       switch (source) {
-        case 'netease': return '网易云'
-        case 'tencent': return 'QQ音乐'
-        case 'kugou': return '酷狗音乐'
+        case 'netease':
+          return '网易云'
+        case 'tencent':
+          return 'QQ音乐'
+        case 'kugou':
+          return '酷狗音乐'
       }
     }
 

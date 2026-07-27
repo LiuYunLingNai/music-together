@@ -55,6 +55,7 @@ function createWebSocket(): TypedSocket {
   let shouldReconnect = true
 
   const connect = () => {
+    shouldReconnect = true
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
       return
     }

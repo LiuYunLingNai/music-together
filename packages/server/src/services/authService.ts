@@ -1,4 +1,5 @@
 import type { MusicSource, PlatformAuthStatus, MyPlatformAuth } from '@music-together/shared'
+import { platformAuthRepo } from '../repositories/platformAuthRepository.js'
 import { logger } from '../utils/logger.js'
 
 /**
@@ -53,12 +54,16 @@ export function addCookie(
   cookie: string,
   nickname: string,
   vipType: number,
+  persist = true,
 ): void {
   const entries = getPlatformEntries(roomId, platform)
   // Dedup by cookie value (same account) or by userId (same socket)
   const idx = entries.findIndex((e) => e.cookie === cookie || e.userId === userId)
   if (idx !== -1) entries.splice(idx, 1)
   entries.push({ cookie, userId, nickname, vipType })
+  if (persist) {
+    platformAuthRepo.save({ userId, platform, cookie, nickname, vipType })
+  }
   logger.info(`用户“${nickname}”已在房间 ${roomId} 登录 ${platform}`, {
     event: 'auth.account_added',
     roomId,
@@ -70,12 +75,13 @@ export function addCookie(
 }
 
 export function removeCookie(roomId: string, platform: MusicSource, userId: string): boolean {
+  const removedPersisted = platformAuthRepo.remove(userId, platform)
   const pool = roomCookiePool.get(roomId)
-  if (!pool) return false
+  if (!pool) return removedPersisted
   const entries = pool.get(platform)
-  if (!entries) return false
+  if (!entries) return removedPersisted
   const idx = entries.findIndex((e) => e.userId === userId)
-  if (idx === -1) return false
+  if (idx === -1) return removedPersisted
   const removed = entries.splice(idx, 1)[0]
   logger.info(`用户“${removed.nickname}”已在房间 ${roomId} 退出 ${platform}`, {
     event: 'auth.account_removed',
@@ -85,6 +91,41 @@ export function removeCookie(roomId: string, platform: MusicSource, userId: stri
     platform,
   })
   return true
+}
+
+/** Restore a user's server-persisted platform accounts into a room pool. */
+export function restoreUserCookies(roomId: string, userId: string): number {
+  const entries = platformAuthRepo.loadUser(userId)
+  for (const entry of entries) {
+    addCookie(roomId, entry.platform, userId, entry.cookie, entry.nickname, entry.vipType, false)
+  }
+  return entries.length
+}
+
+export function persistUserCookieFromRoom(roomId: string, platform: MusicSource, userId: string): boolean {
+  const entry = roomCookiePool
+    .get(roomId)
+    ?.get(platform)
+    ?.find((item) => item.userId === userId)
+  if (!entry) return false
+  platformAuthRepo.save({
+    userId,
+    platform,
+    cookie: entry.cookie,
+    nickname: entry.nickname,
+    vipType: entry.vipType,
+  })
+  return true
+}
+
+export function replaceUserId(oldUserId: string, newUserId: string): void {
+  for (const pool of roomCookiePool.values()) {
+    for (const entries of pool.values()) {
+      for (const entry of entries) {
+        if (entry.userId === oldUserId) entry.userId = newUserId
+      }
+    }
+  }
 }
 
 /**

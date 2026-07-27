@@ -64,6 +64,12 @@ export class InMemoryRoomRepository implements RoomRepository {
     socketSet.add(socketId)
   }
 
+  replaceUserId(oldUserId: string, newUserId: string): void {
+    for (const mapping of this.socketToRoom.values()) {
+      if (mapping.userId === oldUserId) mapping.userId = newUserId
+    }
+  }
+
   getSocketMapping(socketId: string): SocketMapping | undefined {
     return this.socketToRoom.get(socketId)
   }

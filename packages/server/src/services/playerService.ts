@@ -79,7 +79,9 @@ function scheduled(ps: PlayState, roomId: string, scheduleTime?: number): Schedu
 // ---------------------------------------------------------------------------
 
 /** Ordered fallback bitrates for each quality tier */
-const BITRATE_FALLBACKS: Record<AudioQuality, AudioQuality[]> = {
+type BitrateQuality = 128 | 192 | 320 | 999
+
+const BITRATE_FALLBACKS: Record<BitrateQuality, BitrateQuality[]> = {
   999: [320, 192, 128],
   320: [192, 128],
   192: [128],
@@ -101,8 +103,13 @@ const SOURCE_LABELS: Record<MusicSource, string> = {
   kugou: '酷狗音乐',
 }
 
-function formatAudioQuality(bitrate: number | null): string {
+function qualityToBitrate(quality: AudioQuality): BitrateQuality {
+  return typeof quality === 'number' ? quality : 999
+}
+
+function formatAudioQuality(bitrate: AudioQuality | number | null): string {
   if (bitrate === null) return '未知（上游未返回）'
+  if (typeof bitrate === 'string') return bitrate
   if (bitrate >= 900) return `无损（${bitrate} kbps 档）`
   return `${bitrate} kbps`
 }
@@ -115,8 +122,9 @@ function formatDuration(seconds: number): string {
 }
 
 function isQualityDowngraded(requested: AudioQuality, stream: ResolvedStreamUrl): boolean {
-  if (stream.actualBitrate !== null) return stream.actualBitrate < requested
-  return stream.attemptedBitrate < requested
+  const requestedBitrate = qualityToBitrate(requested)
+  if (stream.actualBitrate !== null) return stream.actualBitrate < requestedBitrate
+  return qualityToBitrate(stream.attemptedBitrate) < requestedBitrate
 }
 
 /**
@@ -133,7 +141,7 @@ async function resolveStreamUrl(
   if (result) return { ...result, attemptedBitrate: bitrate }
 
   // Fallback to lower bitrates
-  for (const fallback of BITRATE_FALLBACKS[bitrate]) {
+  for (const fallback of BITRATE_FALLBACKS[qualityToBitrate(bitrate)]) {
     const fallbackResult = await musicProvider.getStreamInfo(source, urlId, fallback, cookie)
     if (fallbackResult) {
       logger.warn('音质自动降级后获取到可播放资源', {

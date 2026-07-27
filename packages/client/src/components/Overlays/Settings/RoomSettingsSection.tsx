@@ -8,23 +8,16 @@ import { Switch } from '@/components/ui/switch'
 import { storage } from '@/lib/storage'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
+import { useAccountStore } from '@/stores/accountStore'
 import type { AudioQuality } from '@music-together/shared'
 import { LIMITS } from '@music-together/shared'
 import { Check, Copy, Lock, LockOpen, Pencil, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { SettingRow } from './SettingRow'
-
-const QUALITY_OPTIONS: { value: AudioQuality; label: string; description?: string }[] = [
-  { value: 128, label: '标准 128kbps' },
-  { value: 192, label: '较高 192kbps' },
-  { value: 320, label: 'HQ 320kbps' },
-  { value: 999, label: '无损 SQ', description: '需要 VIP 账号' },
-]
-
-function getQualityLabel(quality: AudioQuality): string {
-  return QUALITY_OPTIONS.find((o) => o.value === quality)?.label ?? `${quality}kbps`
-}
+import { getAudioQualityLabel, getAudioQualityOptions } from '@/lib/audioQuality'
+import { updateCurrentNickname } from '@/lib/profileApi'
+import { useAuth } from '@/hooks/useAuth'
 
 interface RoomSettingsSectionProps {
   onUpdateSettings: (settings: { name?: string; password?: string | null; audioQuality?: AudioQuality }) => void
@@ -35,7 +28,10 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
   const currentUser = useRoomStore((s) => s.currentUser)
   const roomPassword = useRoomStore((s) => s.roomPassword)
   const syncDrift = usePlayerStore((s) => s.syncDrift)
-  const isOwner = currentUser?.role === 'owner'
+  const isServerAdmin = useAccountStore((state) => state.profile?.role === 'admin')
+  const isOwner = currentUser?.role === 'owner' || isServerAdmin
+  const { platformStatus } = useAuth()
+  const qualityOptions = useMemo(() => getAudioQualityOptions(platformStatus), [platformStatus])
 
   const driftDisplay = useMemo(() => {
     const ms = Math.round(syncDrift * 1000)
@@ -48,11 +44,15 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
 
   // 昵称编辑
   const [nickname, setNickname] = useState(storage.getNickname())
-  const handleNicknameBlur = () => {
+  const handleNicknameBlur = async () => {
     const trimmed = nickname.trim()
     if (trimmed) {
-      storage.setNickname(trimmed)
-      toast.success('昵称已保存（下次加入房间生效）')
+      try {
+        await updateCurrentNickname(trimmed)
+        toast.success('昵称已保存到服务器')
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : '昵称保存失败')
+      }
     }
   }
 
@@ -192,16 +192,17 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
             <Select
               value={String(room?.audioQuality ?? 320)}
               onValueChange={(v) => {
-                const quality = Number(v) as AudioQuality
+                const numeric = Number(v)
+                const quality = (Number.isNaN(numeric) ? v : numeric) as AudioQuality
                 onUpdateSettings({ audioQuality: quality })
-                toast.success(`音质已切换为 ${getQualityLabel(quality)}`)
+                toast.success(`音质已切换为 ${getAudioQualityLabel(quality, platformStatus)}`)
               }}
             >
               <SelectTrigger className="h-8 w-[145px] text-sm">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {QUALITY_OPTIONS.map((opt) => (
+                {qualityOptions.map((opt) => (
                   <SelectItem key={opt.value} value={String(opt.value)}>
                     <div className="flex items-center gap-2">
                       <span>{opt.label}</span>
@@ -214,7 +215,9 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
               </SelectContent>
             </Select>
           ) : (
-            <span className="text-sm text-muted-foreground">{getQualityLabel(room?.audioQuality ?? 320)}</span>
+            <span className="text-sm text-muted-foreground">
+              {getAudioQualityLabel(room?.audioQuality ?? 320, platformStatus)}
+            </span>
           )}
         </SettingRow>
 
@@ -286,8 +289,8 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
           <Input
             value={nickname}
             onChange={(e) => setNickname(e.target.value)}
-            onBlur={handleNicknameBlur}
-            onKeyDown={(e) => e.key === 'Enter' && handleNicknameBlur()}
+            onBlur={() => void handleNicknameBlur()}
+            onKeyDown={(e) => e.key === 'Enter' && void handleNicknameBlur()}
             className="w-40"
             placeholder="输入昵称..."
           />

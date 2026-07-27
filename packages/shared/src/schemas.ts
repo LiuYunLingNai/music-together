@@ -18,7 +18,21 @@ export const roomJoinSchema = z.object({
   rejoinToken: z.string().min(1).max(500).optional(),
 })
 
-export const audioQualitySchema = z.union([z.literal(128), z.literal(192), z.literal(320), z.literal(999)])
+export const audioQualitySchema = z.union([
+  z.literal(128),
+  z.literal(192),
+  z.literal(320),
+  z.literal(999),
+  z.literal('netease_dolby'),
+  z.literal('netease_hires'),
+  z.literal('netease_jyeffect'),
+  z.literal('netease_master'),
+  z.literal('netease_spatial'),
+  z.literal('tencent_flac'),
+  z.literal('tencent_master'),
+  z.literal('kugou_hires'),
+  z.literal('kugou_master'),
+])
 
 export const roomSettingsSchema = z.object({
   name: z.string().min(1).max(LIMITS.ROOM_NAME_MAX_LENGTH).optional(),
@@ -124,7 +138,13 @@ export const searchQuerySchema = z.object({
 export const urlQuerySchema = z.object({
   source: musicSourceSchema,
   urlId: z.string().min(1),
-  bitrate: z.coerce.number().int().positive().default(320),
+  bitrate: z
+    .preprocess((value) => {
+      if (typeof value !== 'string' || value.trim() === '') return value
+      const numeric = Number(value)
+      return Number.isNaN(numeric) ? value : numeric
+    }, audioQualitySchema)
+    .default(320),
 })
 
 export const lyricQuerySchema = z.object({

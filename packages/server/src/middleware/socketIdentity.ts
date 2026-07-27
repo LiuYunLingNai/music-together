@@ -1,6 +1,7 @@
 import type { TypedServer, TypedSocket } from './types.js'
 import { getIdentityFromCookieHeader } from '../services/identityService.js'
 import { logger } from '../utils/logger.js'
+import { userRepo } from '../repositories/userRepository.js'
 
 /**
  * Socket identity guard: every websocket connection must carry a valid
@@ -19,6 +20,7 @@ export function attachSocketIdentity(io: TypedServer): void {
       next(new Error('UNAUTHENTICATED'))
       return
     }
+    userRepo.touch(identity.userId)
     socket.data.identityUserId = identity.userId
     logger.debug('实时连接身份验证通过', {
       socketId: socket.id,

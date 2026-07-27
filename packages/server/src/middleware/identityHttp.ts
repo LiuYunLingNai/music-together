@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express'
 import { getIdentityFromRequest, issueIdentityCookie } from '../services/identityService.js'
 import { logger } from '../utils/logger.js'
+import { userRepo } from '../repositories/userRepository.js'
 
 const RENEWAL_LOG_INTERVAL_MS = 5 * 60 * 1000
 const RENEWAL_MAP_MAX_SIZE = 10_000
@@ -35,6 +36,7 @@ function shouldLogRenewal(userId: string): boolean {
 export function identityHttpMiddleware(req: Request, res: Response, next: NextFunction): void {
   const identity = getIdentityFromRequest(req)
   if (identity) {
+    userRepo.touch(identity.userId)
     req.identityUserId = identity.userId
     const issued = issueIdentityCookie(req, res, identity.userId)
     if (shouldLogRenewal(identity.userId)) {

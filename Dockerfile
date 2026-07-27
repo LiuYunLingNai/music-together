@@ -1,6 +1,7 @@
 # ---- 阶段 1: 安装依赖 ----
 FROM node:22-alpine AS deps
 RUN corepack enable
+RUN apk add --no-cache python3 make g++
 WORKDIR /app
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY packages/shared/package.json packages/shared/
@@ -20,6 +21,7 @@ RUN pnpm --filter @music-together/client run build
 # ---- 阶段 3: 生产镜像 ----
 FROM node:22-alpine AS production
 RUN corepack enable
+RUN apk add --no-cache python3 make g++ vips
 WORKDIR /app
 
 # 复制所有 workspace 包的 package.json（pnpm workspace 需要完整结构）
@@ -39,6 +41,10 @@ COPY --from=build /app/packages/shared/dist packages/shared/dist
 # 生产环境：将 shared 的 exports 从 src(TS) 切换到 dist(JS)
 RUN sed -i 's|./src/index.ts|./dist/index.js|g' packages/shared/package.json
 
+RUN mkdir -p /app/data
+
 EXPOSE 3001
 ENV NODE_ENV=production
+ENV DATABASE_URL=file:/app/data/music-together.db
+VOLUME ["/app/data"]
 CMD ["node", "packages/server/dist/index.js"]

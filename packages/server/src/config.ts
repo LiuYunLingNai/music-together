@@ -17,13 +17,13 @@ const envSchema = z.object({
   REJOIN_TTL_MS: z.coerce.number().int().positive().default(TIMING.ROOM_GRACE_PERIOD_MS),
   IDENTITY_COOKIE_SECURE: z.enum(['true', 'false']).optional(),
   AUTO_FALLBACK_ENABLED: z.enum(['true', 'false']).default('true'),
+  DATABASE_URL: z.string().default('file:./data/music-together.db'),
+  SERVER_ADMIN_IDS: z.string().default(''),
 })
 
 const env = envSchema.parse(process.env)
 const isProd = process.env.NODE_ENV === 'production'
-const explicitOrigins = [env.CLIENT_URL, ...env.CORS_ORIGINS.split(',')]
-  .map((origin) => origin.trim())
-  .filter(Boolean)
+const explicitOrigins = [env.CLIENT_URL, ...env.CORS_ORIGINS.split(',')].map((origin) => origin.trim()).filter(Boolean)
 
 export const config = {
   version: rootPkg.version as string,
@@ -48,4 +48,12 @@ export const config = {
   autoFallback: {
     enabled: env.AUTO_FALLBACK_ENABLED === 'true',
   },
+  database: {
+    url: env.DATABASE_URL,
+  },
+  serverAdminIds: new Set(
+    env.SERVER_ADMIN_IDS.split(',')
+      .map((id) => id.trim())
+      .filter(Boolean),
+  ),
 } as const

@@ -12,13 +12,17 @@ import { identityHttpMiddleware } from './middleware/identityHttp.js'
 import { attachSocketIdentity } from './middleware/socketIdentity.js'
 import type { SocketData } from './middleware/types.js'
 import authRoutes from './routes/auth.js'
+import { createAdminRoutes } from './routes/admin.js'
+import { createAccountRoutes } from './routes/account.js'
 import musicRoutes from './routes/music.js'
 import roomRoutes from './routes/rooms.js'
 import { clearAllTimers } from './services/roomLifecycleService.js'
 import { logger } from './utils/logger.js'
+import { databasePath } from './repositories/database.js'
 
 const app = express()
 const httpServer = createServer(app)
+const io = new TypedServer<ClientToServerEvents, ServerToClientEvents, SocketData>(httpServer)
 
 // HTTP API CORS: in auto mode we allow the browser-reported origin and rely on
 // the cookie / same-host socket checks for deployment safety. This keeps local
@@ -29,11 +33,14 @@ app.use(
     credentials: true,
   }),
 )
-app.use(express.json({ limit: '1mb' }))
+app.use(express.json({ limit: '7mb' }))
 app.use('/api', identityHttpMiddleware)
+app.use('/uploads/avatars', express.static(path.join(path.dirname(databasePath), 'avatars'), { maxAge: '1h' }))
 
 // REST API routes
 app.use('/api/auth', authRoutes)
+app.use('/api/auth', createAccountRoutes(io))
+app.use('/api/admin', createAdminRoutes(io))
 app.use('/api/music', musicRoutes)
 app.use('/api/rooms', roomRoutes)
 
@@ -81,9 +88,6 @@ if (fs.existsSync(indexHtml)) {
 } else {
   logger.info('未发现客户端构建产物，已跳过静态页面托管（开发模式）')
 }
-
-// WebSocket server with typed events
-const io = new TypedServer<ClientToServerEvents, ServerToClientEvents, SocketData>(httpServer)
 
 attachSocketIdentity(io)
 initializeSocket(io)

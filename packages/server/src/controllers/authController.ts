@@ -86,6 +86,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
               result.cookie,
               userInfo.nickname,
               userInfo.vipType,
+              true,
             )
             upgradeRoomAudioQualityForVip(io, mapping.roomId, platform, userInfo.nickname, userInfo.vipType)
             broadcastAuthStatus(io, socket, mapping)
@@ -144,7 +145,10 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
       const roomId = mapping?.roomId ?? null
 
       // Fast path: cookie 已在房间池中，跳过验证
-      if (mapping && roomId && authService.hasCookie(roomId, platform, cookie)) {
+      if (mapping && roomId && authService.getUserCookie(mapping.userId, platform, roomId) === cookie) {
+        if (data.persist !== false) {
+          authService.persistUserCookieFromRoom(roomId, platform, mapping.userId)
+        }
         socket.emit(EVENTS.AUTH_SET_COOKIE_RESULT, {
           success: true,
           message: 'Cookie 已生效',
@@ -167,7 +171,15 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
       if (infoResult.ok) {
         const userInfo = infoResult.data
         if (mapping && mapping.roomId) {
-          authService.addCookie(mapping.roomId, platform, mapping.userId, cookie, userInfo.nickname, userInfo.vipType)
+          authService.addCookie(
+            mapping.roomId,
+            platform,
+            mapping.userId,
+            cookie,
+            userInfo.nickname,
+            userInfo.vipType,
+            data.persist !== false,
+          )
           upgradeRoomAudioQualityForVip(io, mapping.roomId, platform, userInfo.nickname, userInfo.vipType)
         }
         socket.emit(EVENTS.AUTH_SET_COOKIE_RESULT, {
@@ -189,7 +201,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
       } else {
         // 酷狗/QQ 音乐：验证失败也保存（可能是 API 变动，播放时可能仍有效）
         if (mapping && mapping.roomId) {
-          authService.addCookie(mapping.roomId, platform, mapping.userId, cookie, '手动登录', 0)
+          authService.addCookie(mapping.roomId, platform, mapping.userId, cookie, '手动登录', 0, data.persist !== false)
         }
         socket.emit(EVENTS.AUTH_SET_COOKIE_RESULT, {
           success: true,

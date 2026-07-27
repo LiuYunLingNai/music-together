@@ -23,6 +23,7 @@ interface RoomStore {
   setRoomPassword: (password: string | null) => void
   addUser: (user: User) => void
   removeUser: (userId: string) => void
+  updateUserProfile: (userId: string, profile: Pick<User, 'nickname' | 'avatarUrl'>) => void
   reset: () => void
 }
 
@@ -71,6 +72,14 @@ export const useRoomStore = create<RoomStore>((set) => ({
         return { room, currentUser: null }
       }
       return { room }
+    }),
+
+  updateUserProfile: (userId, profile) =>
+    set((state) => {
+      if (!state.room) return {}
+      const users = state.room.users.map((user) => (user.id === userId ? { ...user, ...profile } : user))
+      const room = { ...state.room, users }
+      return { room, currentUser: deriveCurrentUser(room) }
     }),
 
   reset: () => set({ room: null, currentUser: null, roomPassword: null }),

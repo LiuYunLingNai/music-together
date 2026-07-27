@@ -3,6 +3,7 @@ import { SERVER_URL } from '@/lib/config'
 import { storage } from '@/lib/storage'
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
+import { fetchCurrentProfile } from '@/lib/profileApi'
 
 interface SocketContextValue {
   socket: TypedSocket
@@ -55,7 +56,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
 
         const userId = res.headers.get('X-Identity-UserId') ?? res.headers.get('x-identity-userid')
         if (userId && userId.trim().length > 0) {
-          storage.setUserId(userId.trim())
+          await fetchCurrentProfile().catch(() => null)
         } else {
           storage.clearUserId()
         }
