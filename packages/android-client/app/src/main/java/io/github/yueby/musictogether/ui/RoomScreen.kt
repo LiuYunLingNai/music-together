@@ -686,6 +686,7 @@ private fun LyricsPanel(lyrics: LyricsState, positionSeconds: Double, isPlaying:
         !it.isBackground && positionLong >= it.startTimeMs && positionLong < it.endTimeMs
     }.takeIf { it >= 0 } ?: lines.indexOfLast { !it.isBackground && positionLong >= it.startTimeMs }
     val listState = rememberLazyListState()
+    // 网页端 AMLL 默认 alignPosition=0.4：当前行锚定在视口 ~40% 位置（靠上一些，不是正中）
     LaunchedEffect(activeIndex, lines.size) {
         if (activeIndex >= 0) listState.animateScrollToItem((activeIndex - 2).coerceAtLeast(0))
     }
@@ -696,10 +697,11 @@ private fun LyricsPanel(lyrics: LyricsState, positionSeconds: Double, isPlaying:
             Text(lyrics.error ?: "暂无歌词", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         else -> LazyColumn(
-            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceContainer),
+            modifier = Modifier.fillMaxSize(),
             state = listState,
-            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 120.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+            // 透明背景，让歌词直接浮在播放器背景上（对齐网页端 amll-container）
+            contentPadding = PaddingValues(horizontal = 32.dp, vertical = 140.dp),
+            verticalArrangement = Arrangement.spacedBy(26.dp),
         ) {
             itemsIndexed(lines, key = { index, line -> "${line.startTimeMs}:$index" }) { index, line ->
                 val overlapsPlayback = positionLong >= line.startTimeMs && positionLong < line.endTimeMs
@@ -719,28 +721,26 @@ private fun LyricLineItem(line: LyricLine, positionMs: Float, active: Boolean) {
     val textAlign = if (line.isDuet) TextAlign.End else TextAlign.Start
     val isBackground = line.isBackground
 
-    // 行级：active 放大、亮、加粗；非 active 微缩、淡、SemiBold
+    // 对齐网页端 AMLL：字号、字重统一，靠 scale/alpha 区分 active 与非 active
     val scale by animateFloatAsState(
-        targetValue = if (active) 1f else 0.97f,
+        targetValue = if (active) 1f else 0.92f,
         animationSpec = spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMediumLow),
         label = "lyricScale",
     )
     val alpha by animateFloatAsState(
-        targetValue = if (active) 1f else if (isBackground) 0.35f else 0.42f,
+        targetValue = if (active) 1f else if (isBackground) 0.3f else 0.5f,
         animationSpec = tween(500),
         label = "lyricAlpha",
     )
-    val fontSize by animateFloatAsState(
-        targetValue = if (active) 24f else if (isBackground) 16f else 19f,
-        animationSpec = spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMediumLow),
-        label = "lyricFontSize",
-    )
-    val fontWeight = if (active) FontWeight.Bold else FontWeight.SemiBold
+    // 网页端 fontWeight=600 (SemiBold)，不区分 active
+    val fontWeight = FontWeight.SemiBold
+    // 字号不变化（对齐网页端 enableScale 但字号本身统一）
+    val fontSize = if (isBackground) 16f else 22f
 
     val playedColor = MaterialTheme.colorScheme.onSurface
-    val unplayedColor = remember(playedColor) { playedColor.copy(alpha = 0.32f) }
+    val unplayedColor = remember(playedColor) { playedColor.copy(alpha = 0.4f) }
 
-    // 整行上浮：用 Animatable + spring 做弹性跟随，比直接绑定 lineProgress 自然得多
+    // 整行上浮：Animatable + spring 弹性跟随
     val lineProgress = if (line.endTimeMs > line.startTimeMs) {
         ((positionMs - line.startTimeMs) / (line.endTimeMs - line.startTimeMs)).coerceIn(0f, 1f)
     } else 0f
@@ -761,7 +761,6 @@ private fun LyricLineItem(line: LyricLine, positionMs: Float, active: Boolean) {
                 scaleY = scale
                 this.alpha = alpha
                 translationY = if (active) -rowOffset else rowOffset * 0.35f
-                shadowElevation = if (active) 3f else 0f
                 transformOrigin = if (line.isDuet) TransformOrigin(1f, 0f) else TransformOrigin(0f, 0f)
             },
         horizontalAlignment = alignment,
@@ -774,14 +773,14 @@ private fun LyricLineItem(line: LyricLine, positionMs: Float, active: Boolean) {
                 playedColor = playedColor,
                 unplayedColor = unplayedColor,
                 fontWeight = fontWeight,
-                active = active,
             ),
             modifier = Modifier.fillMaxWidth(),
             textAlign = textAlign,
             fontSize = fontSize.sp,
-            lineHeight = (fontSize * 1.35f).sp,
+            lineHeight = (fontSize * 1.4f).sp,
             fontWeight = fontWeight,
         )
+        // 翻译/罗马音字号 = 主歌词的 75%（对齐网页端 translationFontSize=75）
         line.translatedLyric.takeIf { it.isNotBlank() }?.let {
             Text(
                 it,
@@ -789,8 +788,10 @@ private fun LyricLineItem(line: LyricLine, positionMs: Float, active: Boolean) {
                     .fillMaxWidth()
                     .graphicsLayer { translationY = if (active) -rowOffset * 0.35f else 0f },
                 textAlign = textAlign,
-                style = MaterialTheme.typography.bodyMedium,
+                fontSize = (fontSize * 0.75f).sp,
+                lineHeight = ((fontSize * 0.75f) * 1.3f).sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.Normal,
             )
         }
         line.romanLyric.takeIf { it.isNotBlank() }?.let {
@@ -800,8 +801,10 @@ private fun LyricLineItem(line: LyricLine, positionMs: Float, active: Boolean) {
                     .fillMaxWidth()
                     .graphicsLayer { translationY = if (active) -rowOffset * 0.25f else 0f },
                 textAlign = textAlign,
-                style = MaterialTheme.typography.bodySmall,
+                fontSize = (fontSize * 0.75f).sp,
+                lineHeight = ((fontSize * 0.75f) * 1.3f).sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.Normal,
             )
         }
     }
@@ -809,8 +812,7 @@ private fun LyricLineItem(line: LyricLine, positionMs: Float, active: Boolean) {
 
 /**
  * 构建歌词 AnnotatedString。
- * 逐字颜色用 [lerp] 做 0..1 平滑过渡，避免 gradient stops 硬切分的不自然感；
- * 同时非 active 行统一压暗，让当前行更突出。
+ * 逐字颜色用 [lerp] 做 0..1 平滑过渡（对齐网页端 AMLL 的逐字扫光）。
  */
 private fun buildLyricText(
     words: List<LyricWord>,
@@ -818,12 +820,11 @@ private fun buildLyricText(
     playedColor: Color,
     unplayedColor: Color,
     fontWeight: FontWeight,
-    active: Boolean,
 ) = buildAnnotatedString {
     words.forEach { word ->
         val ratio = wordProgress(word, positionMs)
         val color = when {
-            ratio <= 0f -> if (active) unplayedColor else playedColor.copy(alpha = 0.30f)
+            ratio <= 0f -> unplayedColor
             ratio >= 1f -> playedColor
             else -> lerp(unplayedColor, playedColor, ratio)
         }
