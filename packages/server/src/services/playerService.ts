@@ -88,12 +88,20 @@ const BITRATE_FALLBACKS: Record<BitrateQuality, BitrateQuality[]> = {
   128: [],
 }
 
+const QUALITY_FALLBACKS: Partial<Record<AudioQuality, AudioQuality[]>> = {
+  tencent_master: ['tencent_flac', 320, 192, 128],
+  tencent_flac: [320, 192, 128],
+}
+
 interface ResolvedStreamUrl {
   url: string
   /** Quality tier attempted by our fallback chain. */
   attemptedBitrate: AudioQuality
   /** Bitrate actually reported/selected by the upstream provider. */
   actualBitrate: number | null
+  actualQuality?: AudioQuality
+  providerFormat?: string
+  fileSize?: number
   fromCache: boolean
 }
 
@@ -109,9 +117,20 @@ function qualityToBitrate(quality: AudioQuality): BitrateQuality {
 
 function formatAudioQuality(bitrate: AudioQuality | number | null): string {
   if (bitrate === null) return '未知（上游未返回）'
+  if (bitrate === 'tencent_master') return 'QQ 臻品母带'
+  if (bitrate === 'tencent_flac') return 'QQ 无损'
   if (typeof bitrate === 'string') return bitrate
-  if (bitrate >= 900) return `无损（${bitrate} kbps 档）`
+  if (bitrate === 999) return '无损'
   return `${bitrate} kbps`
+}
+
+function formatResolvedAudioQuality(stream: ResolvedStreamUrl): string {
+  const quality = formatAudioQuality(stream.actualQuality ?? stream.actualBitrate)
+  const details = [
+    stream.providerFormat,
+    stream.actualBitrate !== null ? `平均约 ${stream.actualBitrate} kbps` : null,
+  ].filter(Boolean)
+  return details.length ? `${quality}（${details.join('，')}）` : quality
 }
 
 function formatDuration(seconds: number): string {
@@ -122,6 +141,12 @@ function formatDuration(seconds: number): string {
 }
 
 function isQualityDowngraded(requested: AudioQuality, stream: ResolvedStreamUrl): boolean {
+  if (stream.actualQuality !== undefined) {
+    if (requested === 'tencent_master') return stream.actualQuality !== 'tencent_master'
+    if (requested === 'tencent_flac') {
+      return stream.actualQuality !== 'tencent_master' && stream.actualQuality !== 'tencent_flac'
+    }
+  }
   const requestedBitrate = qualityToBitrate(requested)
   if (stream.actualBitrate !== null) return stream.actualBitrate < requestedBitrate
   return qualityToBitrate(stream.attemptedBitrate) < requestedBitrate
@@ -141,7 +166,8 @@ async function resolveStreamUrl(
   if (result) return { ...result, attemptedBitrate: bitrate }
 
   // Fallback to lower bitrates
-  for (const fallback of BITRATE_FALLBACKS[qualityToBitrate(bitrate)]) {
+  const fallbacks = QUALITY_FALLBACKS[bitrate] ?? BITRATE_FALLBACKS[qualityToBitrate(bitrate)]
+  for (const fallback of fallbacks) {
     const fallbackResult = await musicProvider.getStreamInfo(source, urlId, fallback, cookie)
     if (fallbackResult) {
       logger.warn('音质自动降级后获取到可播放资源', {
@@ -364,7 +390,7 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
 
   const artistLabel = resolved.artist.filter(Boolean).join(' / ') || '未知歌手'
   const requestedQuality = formatAudioQuality(room.audioQuality)
-  const actualQuality = formatAudioQuality(streamResolution.actualBitrate)
+  const actualQuality = formatResolvedAudioQuality(streamResolution)
   const qualityDowngraded = isQualityDowngraded(room.audioQuality, streamResolution)
   const qualityDetail = qualityDowngraded ? `${actualQuality}（房间期望 ${requestedQuality}，已降级）` : actualQuality
 
@@ -384,6 +410,9 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
       requestedBitrate: room.audioQuality,
       attemptedBitrate: streamResolution.attemptedBitrate,
       actualBitrate: streamResolution.actualBitrate,
+      actualQuality: streamResolution.actualQuality ?? null,
+      providerFormat: streamResolution.providerFormat ?? null,
+      streamFileSize: streamResolution.fileSize ?? null,
       qualityDowngraded,
       streamUrlFromCache: streamResolution.fromCache,
       authenticated: usedAuthenticatedAccount,

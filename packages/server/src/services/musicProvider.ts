@@ -96,6 +96,12 @@ export interface StreamUrlResult {
   url: string
   /** Actual bitrate reported/selected by the provider, in kbps. */
   actualBitrate: number | null
+  /** Exact provider quality selected when it can be determined. */
+  actualQuality?: AudioQuality
+  /** Provider file prefix/format, for example AI00 or F000 on QQ Music. */
+  providerFormat?: string
+  /** Expected upstream file size in bytes. */
+  fileSize?: number
   fromCache: boolean
 }
 
@@ -162,6 +168,44 @@ interface TencentSearchSong {
   action?: {
     msgpay?: number
   }
+}
+
+interface TencentTrackInfo {
+  mid?: string
+  type?: number
+  interval?: number
+  vs?: unknown[]
+  file?: {
+    media_mid?: string
+    size_128mp3?: number
+    size_192aac?: number
+    size_320mp3?: number
+    size_flac?: number
+    size_new?: unknown[]
+  }
+}
+
+interface TencentVkeyResponse {
+  req_0?: {
+    code?: number
+    data?: {
+      sip?: unknown[]
+      midurlinfo?: Array<{
+        filename?: string
+        purl?: string
+        vkey?: string
+        result?: number
+      }>
+    }
+  }
+}
+
+interface TencentStreamSpec {
+  quality: AudioQuality
+  prefix: string
+  extension: string
+  mediaMid: string
+  fileSize: number
 }
 
 /** External API timeout (ms) */
@@ -251,6 +295,57 @@ const NETEASE_LEVEL_RANK: Record<NeteaseSoundQualityLevel, number> = {
 
 function qualityToBitrate(quality: AudioQuality): 128 | 192 | 320 | 999 {
   return typeof quality === 'number' ? quality : 999
+}
+
+function hashTencentGtk(value: string): number {
+  let hash = 5381
+  for (const character of value) hash += (hash << 5) + character.charCodeAt(0)
+  return hash & 0x7fffffff
+}
+
+function positiveNumber(value: unknown): number {
+  const number = Number(value)
+  return Number.isFinite(number) && number > 0 ? number : 0
+}
+
+function getTencentStreamSpec(track: TencentTrackInfo, quality: AudioQuality): TencentStreamSpec | null {
+  const file = track.file
+  if (!file) return null
+
+  const mediaMid = String(file.media_mid ?? '').trim()
+  const variants = Array.isArray(track.vs) ? track.vs : []
+  const modernSizes = Array.isArray(file.size_new) ? file.size_new : []
+
+  switch (quality) {
+    case 'tencent_master': {
+      const masterMid = String(variants[3] ?? '').trim()
+      const fileSize = positiveNumber(modernSizes[0])
+      return masterMid && fileSize
+        ? { quality, prefix: 'AI00', extension: '.flac', mediaMid: masterMid, fileSize }
+        : null
+    }
+    case 'tencent_flac':
+    case 999: {
+      const fileSize = positiveNumber(file.size_flac)
+      return mediaMid && fileSize
+        ? { quality: 'tencent_flac', prefix: 'F000', extension: '.flac', mediaMid, fileSize }
+        : null
+    }
+    case 320: {
+      const fileSize = positiveNumber(file.size_320mp3)
+      return mediaMid && fileSize ? { quality, prefix: 'M800', extension: '.mp3', mediaMid, fileSize } : null
+    }
+    case 192: {
+      const fileSize = positiveNumber(file.size_192aac)
+      return mediaMid && fileSize ? { quality, prefix: 'C600', extension: '.m4a', mediaMid, fileSize } : null
+    }
+    case 128: {
+      const fileSize = positiveNumber(file.size_128mp3)
+      return mediaMid && fileSize ? { quality, prefix: 'M500', extension: '.mp3', mediaMid, fileSize } : null
+    }
+    default:
+      return null
+  }
 }
 
 function isNeteaseReturnedLevelAcceptable(quality: AudioQuality, returnedLevel: unknown): boolean {
@@ -1144,6 +1239,139 @@ class MusicProvider {
     }
   }
 
+  private async getTencentTrackInfo(urlId: string, cookie?: string): Promise<TencentTrackInfo | null> {
+    const payload = {
+      comm: { ct: '6', cv: '80600', tmeAppID: 'qqmusic' },
+      req: {
+        module: 'music.pf_song_detail_svr',
+        method: 'get_song_detail_yqq',
+        param: { song_type: 0, song_mid: urlId },
+      },
+    }
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Referer: 'https://y.qq.com/',
+      'User-Agent': 'QQ%E9%9F%B3%E4%B9%90/73222',
+    }
+    if (cookie) headers.Cookie = cookie
+
+    const response = await withTimeout(
+      fetch('https://u.y.qq.com/cgi-bin/musicu.fcg', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+      }).then((result) => result.json() as Promise<Record<string, any>>),
+    )
+    return (response?.req?.data?.track_info as TencentTrackInfo | undefined) ?? null
+  }
+
+  /** Resolve an exact QQ Music file tier through the native VKey API. */
+  private async getTencentStreamUrl(
+    urlId: string,
+    quality: AudioQuality,
+    cookie?: string,
+  ): Promise<CachedStreamUrl | null> {
+    if (typeof quality === 'string' && !cookie) return null
+
+    try {
+      const track = await this.getTencentTrackInfo(urlId, cookie)
+      if (!track) return null
+
+      const spec = getTencentStreamSpec(track, quality)
+      if (!spec) {
+        logger.debug('QQ 音乐歌曲不提供请求的音质规格', { source: 'tencent', urlId, requestedQuality: quality })
+        return null
+      }
+
+      const cookies = cookie ? parseCookieString(cookie) : {}
+      const uin = String(cookies.uin ?? cookies.qqmusic_uin ?? '0').replace(/^o0*/, '') || '0'
+      const musicKey = cookies.qm_keyst ?? cookies.qqmusic_key ?? cookies.p_skey ?? ''
+      const gTk = musicKey ? hashTencentGtk(musicKey) : 5381
+      const filename = `${spec.prefix}${spec.mediaMid}${spec.extension}`
+      const payload = {
+        comm: {
+          ct: 24,
+          cv: 4747474,
+          platform: 'yqq.json',
+          uin: Number(uin) || 0,
+          g_tk: gTk,
+          g_tk_new_20200303: gTk,
+          format: 'json',
+          inCharset: 'utf-8',
+          outCharset: 'utf-8',
+          notice: 0,
+          needNewCode: 1,
+        },
+        req_0: {
+          module: 'music.vkey.GetVkey',
+          method: 'UrlGetVkey',
+          param: {
+            uin,
+            filename: [filename],
+            guid: String(crypto.randomInt(1_000_000_000, 9_999_999_999)),
+            songmid: [urlId],
+            songtype: [positiveNumber(track.type)],
+            ctx: 0,
+          },
+        },
+      }
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Referer: 'https://y.qq.com/',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) QQMusic/20.01',
+      }
+      if (cookie) headers.Cookie = cookie
+
+      const response = await withTimeout(
+        fetch('https://u.y.qq.com/cgi-bin/musicu.fcg', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(payload),
+        }).then((result) => result.json() as Promise<TencentVkeyResponse>),
+      )
+      const data = response?.req_0?.data
+      const urlInfo = data?.midurlinfo?.[0]
+      const purl = String(urlInfo?.purl ?? '').trim()
+      if (response?.req_0?.code !== 0 || urlInfo?.result !== 0 || !purl) {
+        logger.debug('QQ 音乐原生 VKey 未授权请求的音质规格', {
+          source: 'tencent',
+          urlId,
+          requestedQuality: quality,
+          providerFormat: spec.prefix,
+          result: urlInfo?.result ?? null,
+        })
+        return null
+      }
+
+      const baseUrl = String(data?.sip?.[0] ?? 'https://isure.stream.qqmusic.qq.com/')
+      const url = new URL(purl, baseUrl).toString().replace(/^http:\/\//, 'https://')
+      const duration = positiveNumber(track.interval)
+      const actualBitrate = duration > 0 ? Math.round((spec.fileSize * 8) / duration / 1000) : null
+
+      logger.info('QQ 音乐原生播放地址解析成功', {
+        event: 'music.tencent_stream_resolved',
+        source: 'tencent',
+        urlId,
+        requestedQuality: quality,
+        actualQuality: spec.quality,
+        providerFormat: spec.prefix,
+        fileSize: spec.fileSize,
+        averageBitrateKbps: actualBitrate,
+        authenticated: Boolean(cookie),
+      })
+      return {
+        url,
+        actualBitrate,
+        actualQuality: spec.quality,
+        providerFormat: spec.prefix,
+        fileSize: spec.fileSize,
+      }
+    } catch (err) {
+      logger.warn('QQ 音乐原生播放地址解析失败', { source: 'tencent', urlId, requestedQuality: quality, err })
+      return null
+    }
+  }
+
   async getStreamInfo(
     source: MusicSource,
     urlId: string,
@@ -1168,6 +1396,17 @@ class MusicProvider {
     }
 
     try {
+      if (source === 'tencent') {
+        const result = await this.getTencentStreamUrl(urlId, quality, cookie)
+        if (result) {
+          if (!cookie) this.streamUrlCache.set(`${source}:${urlId}:${qualityCacheKey}`, result)
+          return { ...result, fromCache: false }
+        }
+        // Do not let exact/lossless QQ tiers fall through to Meting, which can
+        // only express numeric legacy tiers and would report a false success.
+        if (typeof quality === 'string' || quality === 999) return null
+      }
+
       if (source === 'netease') {
         const result = await this.getNeteaseStreamUrlV1(urlId, quality, cookie)
         if (result) {
