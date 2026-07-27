@@ -1,8 +1,6 @@
 package io.github.yueby.musictogether.ui
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -86,10 +84,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -285,7 +285,7 @@ private fun PlayerPane(
         item {
             Box(Modifier.fillMaxWidth().heightIn(min = 320.dp, max = 460.dp)) {
                 if (visual == PlayerVisual.Lyrics && track != null) {
-                    LyricsPanel(lyrics, player.positionSeconds)
+                    LyricsPanel(lyrics, player.positionSeconds, player.playing)
                 } else if (track != null) {
                     AsyncImage(
                         model = track.cover,
@@ -676,13 +676,14 @@ private fun QueueControlMenu(
 }
 
 @Composable
-private fun LyricsPanel(lyrics: LyricsState, positionSeconds: Double) {
-    val rawPositionMs = (positionSeconds * 1000).toLong().coerceAtLeast(0)
-    val positionMs = rememberSmoothPositionMs(rawPositionMs)
+private fun LyricsPanel(lyrics: LyricsState, positionSeconds: Double, isPlaying: Boolean) {
+    val rawPositionMs = (positionSeconds * 1000f).coerceAtLeast(0f)
+    val positionMs = rememberSmoothPositionMs(rawPositionMs, isPlaying)
     val lines = lyrics.lines
+    val positionLong = positionMs.toLong()
     val activeIndex = lines.indexOfLast {
-        !it.isBackground && positionMs >= it.startTimeMs && positionMs < it.endTimeMs
-    }.takeIf { it >= 0 } ?: lines.indexOfLast { !it.isBackground && positionMs >= it.startTimeMs }
+        !it.isBackground && positionLong >= it.startTimeMs && positionLong < it.endTimeMs
+    }.takeIf { it >= 0 } ?: lines.indexOfLast { !it.isBackground && positionLong >= it.startTimeMs }
     val listState = rememberLazyListState()
     LaunchedEffect(activeIndex, lines.size) {
         if (activeIndex >= 0) listState.animateScrollToItem((activeIndex - 2).coerceAtLeast(0))
@@ -700,7 +701,7 @@ private fun LyricsPanel(lyrics: LyricsState, positionSeconds: Double) {
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             itemsIndexed(lines, key = { index, line -> "${line.startTimeMs}:$index" }) { index, line ->
-                val overlapsPlayback = positionMs >= line.startTimeMs && positionMs < line.endTimeMs
+                val overlapsPlayback = positionLong >= line.startTimeMs && positionLong < line.endTimeMs
                 LyricLineItem(line, positionMs, index == activeIndex || overlapsPlayback)
             }
         }
@@ -708,7 +709,7 @@ private fun LyricsPanel(lyrics: LyricsState, positionSeconds: Double) {
 }
 
 @Composable
-private fun LyricLineItem(line: LyricLine, positionMs: Long, active: Boolean) {
+private fun LyricLineItem(line: LyricLine, positionMs: Float, active: Boolean) {
     if (line.isInterlude) {
         InterludeDots(line, positionMs, active)
         return
@@ -717,14 +718,14 @@ private fun LyricLineItem(line: LyricLine, positionMs: Long, active: Boolean) {
     val textAlign = if (line.isDuet) TextAlign.End else TextAlign.Start
     val isBackground = line.isBackground
 
-    // Apple Music 风格：active 行放大、加深；非 active 行缩小、淡出
+    // 行级：active 切大一点、亮一点、字重加粗；非 active 缩 0.92、淡到 0.45
     val scale by animateFloatAsState(
         targetValue = if (active) 1f else 0.92f,
         animationSpec = spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow),
         label = "lyricScale",
     )
     val alpha by animateFloatAsState(
-        targetValue = if (active) 1f else if (isBackground) 0.45f else 0.6f,
+        targetValue = if (active) 1f else if (isBackground) 0.4f else 0.5f,
         animationSpec = tween(280),
         label = "lyricAlpha",
     )
@@ -735,9 +736,14 @@ private fun LyricLineItem(line: LyricLine, positionMs: Long, active: Boolean) {
     )
     val fontWeight = if (active) FontWeight.Bold else FontWeight.Medium
 
-    // 已播放字高对比，未播放字低对比灰，当前字扫光渐变填充
     val playedColor = MaterialTheme.colorScheme.onSurface
     val unplayedColor = remember(playedColor) { playedColor.copy(alpha = 0.32f) }
+
+    // 整行跟随行的播放进度上浮：未开始 +12dp，开始时连续上浮到 0dp
+    val lineProgress = if (line.endTimeMs > line.startTimeMs) {
+        ((positionMs - line.startTimeMs) / (line.endTimeMs - line.startTimeMs)).coerceIn(0f, 1f)
+    } else 0f
+    val rowOffset = (1f - lineProgress) * 12f
 
     Column(
         modifier = Modifier
@@ -746,29 +752,21 @@ private fun LyricLineItem(line: LyricLine, positionMs: Long, active: Boolean) {
                 scaleX = scale
                 scaleY = scale
                 this.alpha = alpha
-                // 二重唱右对齐时以右上为锚点缩放，左对齐时以左上为锚点
+                translationY = if (active) -rowOffset else rowOffset * 0.4f
                 transformOrigin = if (line.isDuet) TransformOrigin(1f, 0f) else TransformOrigin(0f, 0f)
             },
         horizontalAlignment = alignment,
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         Text(
-            text = buildAnnotatedString {
-                line.words.forEach { word ->
-                    val ratio = wordProgress(word, positionMs)
-                    val style = when {
-                        ratio <= 0f -> SpanStyle(color = unplayedColor, fontWeight = fontWeight)
-                        ratio >= 1f -> SpanStyle(color = playedColor, fontWeight = fontWeight)
-                        else -> SpanStyle(
-                            brush = Brush.horizontalGradient(
-                                colorStops = arrayOf(ratio to playedColor, ratio to unplayedColor),
-                            ),
-                            fontWeight = fontWeight,
-                        )
-                    }
-                    withStyle(style) { append(word.text) }
-                }
-            },
+            text = buildLyricText(
+                words = line.words,
+                positionMs = positionMs,
+                playedColor = playedColor,
+                unplayedColor = unplayedColor,
+                fontWeight = fontWeight,
+                active = active,
+            ),
             modifier = Modifier.fillMaxWidth(),
             textAlign = textAlign,
             fontSize = fontSize.sp,
@@ -776,26 +774,83 @@ private fun LyricLineItem(line: LyricLine, positionMs: Long, active: Boolean) {
             fontWeight = fontWeight,
         )
         line.translatedLyric.takeIf { it.isNotBlank() }?.let {
-            Text(it, Modifier.fillMaxWidth(), textAlign = textAlign, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                it,
+                Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer { translationY = if (active) -rowOffset * 0.4f else 0f },
+                textAlign = textAlign,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
         line.romanLyric.takeIf { it.isNotBlank() }?.let {
-            Text(it, Modifier.fillMaxWidth(), textAlign = textAlign, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                it,
+                Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer { translationY = if (active) -rowOffset * 0.3f else 0f },
+                textAlign = textAlign,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
 
+/** 构建歌词 AnnotatedString。逐字扫光由 Brush.horizontalGradient 实现，未播放字走半透明灰。 */
+private fun buildLyricText(
+    words: List<LyricWord>,
+    positionMs: Float,
+    playedColor: Color,
+    unplayedColor: Color,
+    fontWeight: FontWeight,
+    active: Boolean,
+) = buildAnnotatedString {
+    words.forEach { word ->
+        val ratio = wordProgress(word, positionMs)
+        val style = when {
+            ratio <= 0f -> SpanStyle(color = if (active) unplayedColor else playedColor.copy(alpha = 0.32f), fontWeight = fontWeight)
+            ratio >= 1f -> SpanStyle(color = playedColor, fontWeight = fontWeight)
+            else -> {
+                // 0..1 之间生成硬切分 stops：在 ratio 处由 playedColor 跳到 unplayedColor，
+                // 配合 fontWeight 变化实现"唱到的字高亮，未唱到字半透灰"
+                val stops = arrayOf(
+                    (ratio - 0.001f).coerceAtLeast(0f) to playedColor,
+                    ratio to unplayedColor,
+                    1f to unplayedColor,
+                )
+                SpanStyle(
+                    brush = Brush.horizontalGradient(colorStops = stops),
+                    fontWeight = fontWeight,
+                )
+            }
+        }
+        withStyle(style) { append(word.text) }
+    }
+}
+
 @Composable
-private fun InterludeDots(line: LyricLine, positionMs: Long, active: Boolean) {
-    val duration = (line.endTimeMs - line.startTimeMs).coerceAtLeast(1L)
-    val progress = ((positionMs - line.startTimeMs).toFloat() / duration).coerceIn(0f, 0.999f)
+private fun InterludeDots(line: LyricLine, positionMs: Float, active: Boolean) {
+    val start = line.startTimeMs.toFloat()
+    val end = line.endTimeMs.toFloat()
+    val duration = (end - start).coerceAtLeast(1f)
+    val progress = ((positionMs - start) / duration).coerceIn(0f, 0.999f)
     val highlightedDot = (progress * 3).toInt().coerceIn(0, 2)
     val alpha by animateFloatAsState(
         targetValue = if (active) 1f else 0.45f,
         animationSpec = tween(280),
         label = "interludeAlpha",
     )
+    val lineProgress = (progress / 0.999f).coerceIn(0f, 1f)
     Row(
-        modifier = Modifier.fillMaxWidth().height(31.dp).graphicsLayer { this.alpha = alpha },
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(31.dp)
+            .graphicsLayer {
+                this.alpha = alpha
+                translationY = if (active) -lineProgress * 12f else 0f
+            },
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -822,32 +877,55 @@ private fun InterludeDots(line: LyricLine, positionMs: Long, active: Boolean) {
 }
 
 /**
- * 把 NativePlayer 每 250ms 推送一次的 [rawPositionMs] 平滑成逐帧连续值，
- * 让逐字填充不会出现阶梯感。当跳跃幅度大于 2s（seek）时立即跳变，不做插值。
+ * 把 NativePlayer 每 250ms 推送一次的 [rawPositionMs] 在 Compose 帧内插值为连续值。
+ * 关键：用 [withFrameNanos] 按 60fps 推进内部 tick，让逐字扫光与行上浮在外部采样之间也是连续的。
+ *
+ * - 当 [rawPositionMs] 与内部位置差 > 2s（seek / 切歌）直接 snap；
+ * - 暂停时停止 tick，position 锁定在最后一次 rawPositionMs；
+ * - 播放时每帧叠加 (now - last) ms，外部更新时再 snap 修正漂移。
  */
 @Composable
-private fun rememberSmoothPositionMs(rawPositionMs: Long): Long {
-    val animatable = remember { Animatable(rawPositionMs.toFloat()) }
+private fun rememberSmoothPositionMs(rawPositionMs: Float, isPlaying: Boolean): Float {
+    val position = remember { mutableFloatStateOf(rawPositionMs) }
+
+    // 外部采样到来：先记录基准，再让 tick 在两帧之间追赶，避免漂移
     LaunchedEffect(rawPositionMs) {
-        val delta = kotlin.math.abs(rawPositionMs - animatable.value.toLong())
-        if (delta > 2_000) {
-            animatable.snapTo(rawPositionMs.toFloat())
-        } else {
-            animatable.animateTo(
-                targetValue = rawPositionMs.toFloat(),
-                animationSpec = tween(durationMillis = 250, easing = LinearEasing),
-            )
+        val delta = kotlin.math.abs(rawPositionMs - position.floatValue)
+        if (delta > 2_000f) {
+            position.floatValue = rawPositionMs
+        } else if (!isPlaying) {
+            // 暂停时直接把内部位置对齐到 raw，避免切到播放时跳一大截
+            position.floatValue = rawPositionMs
         }
     }
-    return animatable.value.toLong()
+
+    LaunchedEffect(isPlaying) {
+        if (!isPlaying) return@LaunchedEffect
+        var lastNanos = 0L
+        while (true) {
+            withFrameNanos { nanos ->
+                if (lastNanos == 0L) {
+                    lastNanos = nanos
+                    return@withFrameNanos
+                }
+                val dtMs = (nanos - lastNanos) / 1_000_000f
+                lastNanos = nanos
+                // 正常推进：内部位置按帧间隔累加
+                position.floatValue = position.floatValue + dtMs
+            }
+        }
+    }
+    return position.floatValue
 }
 
 /** 计算某个字在当前播放位置下的填充比例，0=未播放，1=已播放完。 */
-private fun wordProgress(word: LyricWord, positionMs: Long): Float {
-    if (positionMs <= word.startTimeMs) return 0f
-    if (positionMs >= word.endTimeMs) return 1f
-    val span = (word.endTimeMs - word.startTimeMs).coerceAtLeast(1L)
-    return ((positionMs - word.startTimeMs).toFloat() / span).coerceIn(0f, 1f)
+private fun wordProgress(word: LyricWord, positionMs: Float): Float {
+    val start = word.startTimeMs.toFloat()
+    val end = word.endTimeMs.toFloat()
+    if (positionMs <= start) return 0f
+    if (positionMs >= end) return 1f
+    val span = (end - start).coerceAtLeast(1f)
+    return ((positionMs - start) / span).coerceIn(0f, 1f)
 }
 
 private fun formatTime(seconds: Double): String {
