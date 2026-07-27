@@ -42,6 +42,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS permanent_rooms (
     id TEXT PRIMARY KEY,
     state_json TEXT NOT NULL,
+    chat_history_json TEXT NOT NULL DEFAULT '[]',
     updated_at INTEGER NOT NULL
   );
 `)
@@ -62,5 +63,6 @@ ensureColumn('users', 'password_hash', 'password_hash TEXT')
 ensureColumn('users', 'role', "role TEXT NOT NULL DEFAULT 'user'")
 ensureColumn('platform_auth', 'nickname_snapshot', 'nickname_snapshot TEXT')
 ensureColumn('platform_auth', 'vip_type', 'vip_type INTEGER NOT NULL DEFAULT 0')
+ensureColumn('permanent_rooms', 'chat_history_json', "chat_history_json TEXT NOT NULL DEFAULT '[]'")
 
 export const databasePath = dbPath

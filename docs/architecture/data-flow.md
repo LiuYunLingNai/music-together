@@ -246,7 +246,7 @@ Conductor（当前 `hostId` 对应用户）**自适应频率**上报当前播放
 2. **恢复播放**：暂停后点击播放，服务端检测同一首歌时发 `player:resume`（所有客户端预定时刻恢复）
 3. **自动续播**：房主独自重新加入时，若有歌曲暂停/排队中，自动恢复播放
 4. **加入房间补偿**：中途加入的客户端使用 `getServerTime()` 计算当前应处的播放位置，采用 fade-in 淡入策略（400ms 等待 + 200ms fade）减少加入延迟
-5. **房间宽限期**：房间空置 60 秒 (`ROOM_GRACE_PERIOD_MS`) 后自动清理（重复调用 `scheduleDeletion` 不会创建重复 timer）
+5. **房间宽限期**：普通房间空置 60 秒 (`ROOM_GRACE_PERIOD_MS`) 后自动清理（重复调用 `scheduleDeletion` 不会创建重复 timer）；永久房间不会因空置被清理，最近 200 条聊天消息会持久化到 SQLite 并在服务重启后恢复
 6. **角色与 Conductor 机制**：房间记录 `creatorId`（创建者 ID，永久不变）、`adminUserIds: Set<string>`（持久化 admin 集合）和 `temporaryAdminUserId`（临时管理员，仅在线态）。非空房间通过 `reconcileRoomRoles()` 保证至少有一个具备管理能力的在线用户：创建者在线时为 `owner`；持久 admin 在线时保持 `admin`；若 owner / 持久 admin 都不在线，则选择一个在线成员作为临时 `admin`，且不写入 `adminUserIds`。owner / 持久 admin 返回时会清除临时管理员并恢复其普通成员身份。`room.hostId` 是自动选举的播放主持（conductor），在用户加入/离开时基于已协调后的角色重选（优先级：owner > admin > member），无需宽限期。`setUserRole` 只能设置持久 `admin` / `member`（不能改 `owner`），同步维护 `adminUserIds`。返回的创建者/持久化 admin 免密码验证
 7. **持久化用户身份**：客户端通过 `storage.getUserId()` 生成并持久化 `nanoid`，每次 `ROOM_CREATE` / `ROOM_JOIN` 携带 `userId`，使服务端可跨 socket 重连识别同一用户。服务端通过 `roomRepo.getSocketMapping(socket.id)` 获取 `{ roomId, userId }` 映射——`socket.id` 仅用于 Socket 映射查找，所有涉及用户身份的操作（host 判断、auth cookie 归属、权限检查等）统一使用 `mapping.userId`
 8. **`currentUser` 自动推导**：`roomStore` 中 `currentUser` 始终从 `room.users` 自动推导（`deriveCurrentUser`），`setRoom` / `addUser` / `removeUser` / `updateRoom` 等 action 内部自动同步，不暴露 `setCurrentUser` 以避免脱节风险

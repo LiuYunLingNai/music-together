@@ -317,6 +317,9 @@ export function updateSettings(
   }
 
   roomRepo.persist(roomId)
+  if (room.permanent) {
+    chatRepo.persistRoom(roomId)
+  }
 }
 
 export function setUserRole(

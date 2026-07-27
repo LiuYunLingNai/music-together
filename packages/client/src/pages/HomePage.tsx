@@ -102,9 +102,8 @@ export default function HomePage() {
       storage.setRejoinToken(data.roomId, data.token, data.expiresAt)
     }
 
-    // 服务端在 ROOM_JOIN 后同时 emit ROOM_STATE + CHAT_HISTORY，
-    // 若不在这里监听 CHAT_HISTORY，消息会在 navigate 之前丢失
-    // （RoomPage 的 useChatSync 尚未挂载）。
+    // 服务端先发送 CHAT_HISTORY，再发送会触发页面跳转的 ROOM_STATE，
+    // 确保 RoomPage 监听器挂载前，历史消息已经写入 store。
     const onChatHistory = (messages: import('@music-together/shared').ChatMessage[]) => {
       useChatStore.getState().setMessages(messages)
     }

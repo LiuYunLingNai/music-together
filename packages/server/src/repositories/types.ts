@@ -55,5 +55,6 @@ export interface ChatRepository {
   getHistory(roomId: string): ChatMessage[]
   addMessage(roomId: string, message: ChatMessage): void
   createRoom(roomId: string): void
+  persistRoom(roomId: string): void
   deleteRoom(roomId: string): void
 }
