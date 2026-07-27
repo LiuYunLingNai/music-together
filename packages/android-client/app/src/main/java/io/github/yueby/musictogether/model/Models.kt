@@ -78,6 +78,7 @@ data class LyricWord(
     val text: String,
     val startTimeMs: Long,
     val endTimeMs: Long,
+    val romanText: String = "",
 )
 
 data class LyricLine(

@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
@@ -32,6 +33,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,7 +55,14 @@ import io.github.yueby.musictogether.model.RoomListItem
 fun LobbyScreen(state: AppState, contentPadding: PaddingValues, viewModel: MusicTogetherViewModel) {
     var createDialog by remember { mutableStateOf(false) }
     var joinTarget by remember { mutableStateOf<RoomListItem?>(null) }
+    var directRoomId by remember { mutableStateOf("") }
+    var connectionExpanded by remember {
+        mutableStateOf(state.connectionStatus != ConnectionStatus.Connected)
+    }
     val context = LocalContext.current
+    LaunchedEffect(state.connectionStatus) {
+        if (state.connectionStatus == ConnectionStatus.Connected) connectionExpanded = false
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(contentPadding),
@@ -64,8 +73,15 @@ fun LobbyScreen(state: AppState, contentPadding: PaddingValues, viewModel: Music
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Icon(Icons.Default.MusicNote, null, tint = MaterialTheme.colorScheme.primary)
                 Column(Modifier.weight(1f)) {
-                    Text("Music Together", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                    Text("原生 Android 客户端", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Music Together", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (state.connectionStatus == ConnectionStatus.Connected) "已连接" else "未连接",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                TextButton(onClick = { connectionExpanded = !connectionExpanded }) {
+                    Text(if (connectionExpanded) "收起" else "连接设置")
                 }
                 if (BuildConfig.DEBUG) {
                     IconButton(onClick = { AppLogger.export(context) }) {
@@ -78,34 +94,125 @@ fun LobbyScreen(state: AppState, contentPadding: PaddingValues, viewModel: Music
             }
         }
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("连接服务端", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    OutlinedTextField(
-                        value = state.serverUrl,
-                        onValueChange = viewModel::updateServerUrl,
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        label = { Text("服务端 URL") },
-                        supportingText = { Text("例如 https://music.example.com 或 http://192.168.1.8:3001") },
-                    )
-                    OutlinedTextField(
-                        value = state.nickname,
-                        onValueChange = viewModel::updateNickname,
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        label = { Text("昵称") },
-                    )
-                    Button(onClick = viewModel::connect, modifier = Modifier.fillMaxWidth()) {
-                        if (state.connectionStatus == ConnectionStatus.Connecting) {
-                            CircularProgressIndicator(Modifier.height(18.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.padding(4.dp))
+            if (connectionExpanded) {
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("连接设置", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        OutlinedTextField(
+                            value = state.serverUrl,
+                            onValueChange = viewModel::updateServerUrl,
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = { Text("服务端 URL") },
+                            supportingText = { Text("例如 https://music.example.com") },
+                        )
+                        OutlinedTextField(
+                            value = state.nickname,
+                            onValueChange = viewModel::updateNickname,
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = { Text("昵称") },
+                        )
+                        Button(onClick = viewModel::connect, modifier = Modifier.fillMaxWidth()) {
+                            if (state.connectionStatus == ConnectionStatus.Connecting) {
+                                CircularProgressIndicator(Modifier.height(18.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.padding(4.dp))
+                            }
+                            Text(when (state.connectionStatus) {
+                                ConnectionStatus.Connected -> "重新连接"
+                                ConnectionStatus.Connecting -> "连接中"
+                                ConnectionStatus.Disconnected -> "连接"
+                            })
                         }
-                        Text(when (state.connectionStatus) {
-                            ConnectionStatus.Connected -> "重新连接"
-                            ConnectionStatus.Connecting -> "连接中"
-                            ConnectionStatus.Disconnected -> "连接"
-                        })
+                    }
+                }
+            }
+        }
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 18.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    Icons.Default.Headphones,
+                    contentDescription = null,
+                    modifier = Modifier.height(44.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    "一起听见同一首歌",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    "创建房间，或加入朋友正在播放的音乐",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Card(
+                    onClick = { createDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Column(Modifier.weight(1f)) {
+                            Text("创建房间", fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "建立一个新的同步听歌房间",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+                Card(Modifier.fillMaxWidth()) {
+                    Column(
+                        Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Icon(Icons.Default.People, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Column {
+                                Text("加入房间", fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    "输入房间号直接加入",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            OutlinedTextField(
+                                value = directRoomId,
+                                onValueChange = { directRoomId = it.take(64) },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true,
+                                placeholder = { Text("房间号") },
+                            )
+                            Button(
+                                onClick = { viewModel.joinRoom(directRoomId.trim()) },
+                                enabled = state.connectionStatus == ConnectionStatus.Connected && directRoomId.isNotBlank(),
+                            ) {
+                                Text("加入")
+                            }
+                        }
                     }
                 }
             }
@@ -121,13 +228,6 @@ fun LobbyScreen(state: AppState, contentPadding: PaddingValues, viewModel: Music
                 }
                 IconButton(onClick = viewModel::refreshRooms, enabled = state.connectionStatus == ConnectionStatus.Connected) {
                     Icon(Icons.Default.Refresh, "刷新")
-                }
-                FilledTonalButton(
-                    onClick = { createDialog = true },
-                    enabled = state.connectionStatus == ConnectionStatus.Connected,
-                ) {
-                    Icon(Icons.Default.Add, null)
-                    Text("创建")
                 }
             }
         }

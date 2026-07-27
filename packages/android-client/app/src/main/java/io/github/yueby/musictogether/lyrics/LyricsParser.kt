@@ -8,11 +8,16 @@ import org.w3c.dom.Element
 import org.w3c.dom.Node
 import org.xml.sax.InputSource
 import java.io.StringReader
+import javax.xml.XMLConstants
 import javax.xml.parsers.DocumentBuilderFactory
 import kotlin.math.abs
 
 object LyricsParser {
     private const val TTM_NS = "http://www.w3.org/ns/ttml#metadata"
+    private const val ACCESS_EXTERNAL_DTD =
+        "http://javax.xml.XMLConstants/property/accessExternalDTD"
+    private const val ACCESS_EXTERNAL_SCHEMA =
+        "http://javax.xml.XMLConstants/property/accessExternalSchema"
     private const val INTERLUDE_MIN_GAP_MS = 2_000L
 
     private data class LrcEntry(val timeMs: Long, val text: String)
@@ -35,9 +40,14 @@ object LyricsParser {
         if (!xml.contains("<tt")) return emptyList()
         val factory = DocumentBuilderFactory.newInstance().apply {
             isNamespaceAware = true
+            isExpandEntityReferences = false
+            runCatching { isXIncludeAware = false }
+            runCatching { setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true) }
             runCatching { setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
             runCatching { setFeature("http://xml.org/sax/features/external-general-entities", false) }
             runCatching { setFeature("http://xml.org/sax/features/external-parameter-entities", false) }
+            runCatching { setAttribute(ACCESS_EXTERNAL_DTD, "") }
+            runCatching { setAttribute(ACCESS_EXTERNAL_SCHEMA, "") }
         }
         val document = factory.newDocumentBuilder().parse(InputSource(StringReader(xml)))
         val paragraphs = document.getElementsByTagNameNS("*", "p")
@@ -75,8 +85,16 @@ object LyricsParser {
                             else -> {
                                 val wordStart = parseTime(attribute(child, null, "begin")).takeIf { it > 0 } ?: start
                                 val wordEnd = parseTime(attribute(child, null, "end")).takeIf { it > 0 } ?: end
-                                val text = child.textContent
-                                if (text.isNotEmpty()) mainWords += LyricWord(text, wordStart, wordEnd)
+                                val romanWord = nestedRoleText(child, "x-roman")
+                                val text = lyricTextWithoutMetadata(child)
+                                if (text.isNotEmpty()) {
+                                    mainWords += LyricWord(
+                                        text = text,
+                                        startTimeMs = wordStart,
+                                        endTimeMs = wordEnd,
+                                        romanText = romanWord,
+                                    )
+                                }
                             }
                         }
                     }
@@ -90,7 +108,7 @@ object LyricsParser {
                 }
             }
             if (mainWords.isEmpty()) {
-                val text = paragraph.textContent.trim()
+                val text = lyricTextWithoutMetadata(paragraph).trim()
                 if (text.isNotEmpty()) mainWords += LyricWord(text, start, end)
             }
             if (mainWords.isNotEmpty()) {
@@ -113,12 +131,15 @@ object LyricsParser {
         repeat(spans.length) { index ->
             val span = spans.item(index) as? Element ?: return@repeat
             if (span === element) return@repeat
-            val text = span.textContent
+            val role = attribute(span, TTM_NS, "role")
+            if (role in setOf("x-roman", "x-translation")) return@repeat
+            val text = lyricTextWithoutMetadata(span)
             if (text.isEmpty()) return@repeat
             words += LyricWord(
                 text = text,
                 startTimeMs = parseTime(attribute(span, null, "begin")).takeIf { it > 0 } ?: fallbackStart,
                 endTimeMs = parseTime(attribute(span, null, "end")).takeIf { it > 0 } ?: fallbackEnd,
+                romanText = nestedRoleText(span, "x-roman"),
             )
         }
         return words
@@ -134,6 +155,7 @@ object LyricsParser {
                     text = word.optString("word"),
                     startTimeMs = word.optLong("startTime"),
                     endTimeMs = word.optLong("endTime"),
+                    romanText = word.optString("romanWord"),
                 )
             },
             translatedLyric = line.optString("translatedLyric"),
@@ -257,5 +279,31 @@ object LyricsParser {
             element.getAttributeNS(namespace, name).takeIf { it.isNotBlank() }?.let { return it }
         }
         return element.getAttribute(name).ifBlank { element.getAttribute("ttm:$name") }
+    }
+
+    private fun nestedRoleText(element: Element, targetRole: String): String {
+        val spans = element.getElementsByTagNameNS("*", "span")
+        repeat(spans.length) { index ->
+            val span = spans.item(index) as? Element ?: return@repeat
+            if (span !== element && attribute(span, TTM_NS, "role") == targetRole) {
+                return span.textContent.trim()
+            }
+        }
+        return ""
+    }
+
+    private fun lyricTextWithoutMetadata(element: Element): String = buildString {
+        val children = element.childNodes
+        repeat(children.length) { index ->
+            when (val child = children.item(index)) {
+                is Element -> {
+                    val role = attribute(child, TTM_NS, "role")
+                    if (role !in setOf("x-roman", "x-translation")) {
+                        append(lyricTextWithoutMetadata(child))
+                    }
+                }
+                else -> if (child.nodeType == Node.TEXT_NODE) append(child.nodeValue)
+            }
+        }
     }
 }

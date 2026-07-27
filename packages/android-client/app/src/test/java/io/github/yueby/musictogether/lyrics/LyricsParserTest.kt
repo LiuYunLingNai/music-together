@@ -73,4 +73,72 @@ class LyricsParserTest {
         assertTrue(lines[2].isInterlude)
         assertEquals(33_160L, lines[2].endTimeMs)
     }
+
+    @Test
+    fun keepsNestedRomanWordOutOfTtmlMainText() {
+        val xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
+              <body><div>
+                <p begin="00:00:01.000" end="00:00:03.000">
+                  <span begin="00:00:01.000" end="00:00:02.000">你<span ttm:role="x-roman">ni</span></span>
+                  <span begin="00:00:02.000" end="00:00:03.000">好<span ttm:role="x-roman">hao</span></span>
+                </p>
+              </div></body>
+            </tt>
+        """.trimIndent()
+
+        val line = LyricsParser.parseTtml(xml).single { !it.isInterlude }
+
+        assertEquals("你好", line.text)
+        assertEquals(listOf("ni", "hao"), line.words.map { it.romanText })
+    }
+
+    @Test
+    fun keepsParagraphMetadataOutOfUntimedMainText() {
+        val xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
+              <body><div>
+                <p begin="00:00:01.000" end="00:00:03.000">
+                  正文
+                  <span ttm:role="x-roman">zheng wen</span>
+                  <span ttm:role="x-translation">main text</span>
+                </p>
+              </div></body>
+            </tt>
+        """.trimIndent()
+
+        val line = LyricsParser.parseTtml(xml).single { !it.isInterlude }
+
+        assertEquals("正文", line.text)
+    }
+
+    @Test
+    fun parsesRomanWordFromWordByWordPayload() {
+        val data = org.json.JSONObject().put(
+            "wordByWord",
+            org.json.JSONArray().put(
+                org.json.JSONObject()
+                    .put("startTime", 1_000)
+                    .put("endTime", 2_000)
+                    .put(
+                        "words",
+                        org.json.JSONArray().put(
+                            org.json.JSONObject()
+                                .put("word", "空")
+                                .put("startTime", 1_000)
+                                .put("endTime", 2_000)
+                                .put("romanWord", "sora"),
+                        ),
+                    ),
+            ),
+        )
+
+        val (lines, source) = LyricsParser.parseServerResponse(data)
+        val line = lines.single { !it.isInterlude }
+
+        assertEquals("wordByWord", source)
+        assertEquals("sora", line.words.single().romanText)
+    }
 }
