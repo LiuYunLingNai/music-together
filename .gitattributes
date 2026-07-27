@@ -1,13 +1,13 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 
-# 源码文件强制使用 LF
-*.ts text eol=lf
-*.tsx text eol=lf
-*.js text eol=lf
-*.json text eol=lf
+# Android 源码和配置强制使用 LF
+*.kt text eol=lf
+*.kts text eol=lf
+*.xml text eol=lf
+*.properties text eol=lf
 *.md text eol=lf
-*.css text eol=lf
-*.html text eol=lf
 *.yaml text eol=lf
 *.yml text eol=lf
+gradlew text eol=lf
+*.bat text eol=crlf

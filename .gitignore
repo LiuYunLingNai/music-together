@@ -1,22 +1,32 @@
-node_modules
-dist
+# Local configuration and secrets
 .env
-.env.local
-*.log
+.env.*
+local.properties
+**/local.properties
+**/keystore.properties
+**/keystore/
+
+# Android and Gradle outputs
+.gradle/
+**/.gradle/
+.kotlin/
+**/build/
+*.apk
+*.aab
+
+# Local artifacts left by other branches
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+*.tsbuildinfo
+
+# IDE and OS files
+.idea/
+*.iml
 .DS_Store
 Thumbs.db
-.claude
-.spec-workflow
-.pnpm-store/
-.omc
-.trae
-/.sanshu-memory
-/artifacts/
 
-# Android
-packages/android-client/.gradle/
-packages/android-client/local.properties
-packages/android-client/**/build/
-packages/android-client/keystore.properties
-packages/android-client/keystore/
-*.apk
+# Logs and temporary files
+*.log
+*.tmp
