@@ -277,9 +277,9 @@ export default function HomePage() {
       <footer className="border-t border-border/50">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-2 px-4 py-4">
           <span className="text-xs text-muted-foreground">
-            Music Together · Made by Yueby ·{' '}
+            Music Together · Made by Yueby - Forked by LiuYunLingNai && 15515151 && YuapXc ·{' '}
             <a
-              href="https://github.com/Yueby/music-together/blob/main/package.json"
+              href="https://github.com/LiuYunLingNai/music-together/blob/main/package.json"
               target="_blank"
               rel="noopener noreferrer"
               className="relative inline-flex items-center transition-colors hover:text-foreground"
@@ -294,7 +294,7 @@ export default function HomePage() {
             </a>
           </span>
           <a
-            href="https://github.com/Yueby/music-together"
+            href="https://github.com/LiuYunLingNai/music-together"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
