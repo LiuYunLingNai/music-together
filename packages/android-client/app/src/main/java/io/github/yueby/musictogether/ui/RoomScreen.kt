@@ -61,6 +61,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
@@ -283,6 +284,14 @@ fun RoomScreen(
                             onClick = {
                                 menuExpanded = false
                                 activeOverlay = RoomOverlay.RoomSettings
+                            },
+                        )
+                        DropdownMenuItem(
+                            leadingIcon = { Icon(Icons.Default.ContentCopy, null) },
+                            text = { Text("复制房间链接") },
+                            onClick = {
+                                menuExpanded = false
+                                viewModel.copyRoomLink()
                             },
                         )
                         DropdownMenuItem(
@@ -534,6 +543,7 @@ private fun MobilePlayerSurface(
                             lyrics = lyrics,
                             player = player,
                             onShowCover = onToggleLyrics,
+                            onOpenChat = onOpenChat,
                             onSeek = viewModel::seek,
                             sharedTransitionScope = this@SharedTransitionLayout,
                             animatedVisibilityScope = this,
@@ -649,6 +659,7 @@ private fun MobileLyricsHero(
     lyrics: LyricsState,
     player: PlayerUiState,
     onShowCover: () -> Unit,
+    onOpenChat: () -> Unit,
     onSeek: (Double) -> Unit,
     sharedTransitionScope: SharedTransitionScope,
     animatedVisibilityScope: AnimatedVisibilityScope,
@@ -711,6 +722,16 @@ private fun MobileLyricsHero(
                     fontSize = 16.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Clip,
+                )
+            }
+            IconButton(
+                onClick = onOpenChat,
+                modifier = Modifier.size(40.dp),
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Chat,
+                    contentDescription = "打开聊天",
+                    tint = Color.White.copy(alpha = 0.72f),
                 )
             }
         }

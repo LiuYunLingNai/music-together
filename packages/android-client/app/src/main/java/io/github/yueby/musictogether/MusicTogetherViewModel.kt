@@ -1,6 +1,8 @@
 package io.github.yueby.musictogether
 
 import android.app.Application
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.net.Uri
 import android.util.Base64
@@ -67,7 +69,8 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         const val QR_EXPIRED = 800
         const val QR_WAITING_SCAN = 801
         const val QR_SUCCESS = 803
-        const val MAX_QUEUE_SIZE = 200
+        const val MAX_QUEUE_SIZE = 1000
+        const val MAX_QUEUE_BATCH_SIZE = 200
         val ACCOUNT_ID_PATTERN = Regex("^[a-z0-9_-]{3,32}$")
         const val MAX_AVATAR_BYTES = 5 * 1024 * 1024
     }
@@ -77,6 +80,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         .cookieJar(PersistentCookieJar(application))
         .connectTimeout(12, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
+        .pingInterval(25, TimeUnit.SECONDS)
         .build()
     private val api = MusicTogetherApi(okHttp)
     private val socket = MusicTogetherSocket(okHttp, this)
@@ -312,6 +316,19 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     fun updateRoomAudioQuality(quality: String) {
         val value: Any = quality.toIntOrNull() ?: quality
         socket.emit(Events.ROOM_SETTINGS, JSONObject().put("audioQuality", value))
+    }
+
+    fun updateRoomPermanent(permanent: Boolean) {
+        socket.emit(Events.ROOM_SETTINGS, JSONObject().put("permanent", permanent))
+    }
+
+    fun copyRoomLink() {
+        val room = _state.value.room ?: return
+        val server = activeServer ?: return setError("请先连接服务端")
+        val link = "${server.displayUrl}/room/${room.id}"
+        val clipboard = getApplication<Application>().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("Music Together 房间链接", link))
+        showNotice("房间链接已复制")
     }
 
     fun connect() {
@@ -585,12 +602,15 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             setNotice(if (available == 0) "播放队列已满" else "当前已加载歌曲都在队列中")
             return
         }
-        val sent = socket.emit(
-            Events.QUEUE_ADD_BATCH,
-            JSONObject()
-                .put("tracks", JSONArray(tracks.map { it.toJson() }))
-                .put("playlistName", playlist.name),
-        )
+        var sent = true
+        tracks.chunked(MAX_QUEUE_BATCH_SIZE).forEach { page ->
+            sent = socket.emit(
+                Events.QUEUE_ADD_BATCH,
+                JSONObject()
+                    .put("tracks", JSONArray(page.map { it.toJson() }))
+                    .put("playlistName", playlist.name),
+            ) && sent
+        }
         AppLogger.info("Queue", "playlist batch=${tracks.size} source=${playlist.source} sent=$sent")
         setNotice(
             if (sent) "已提交 ${tracks.size} 首歌曲到播放队列" else "批量点歌发送失败，请检查连接",
@@ -796,6 +816,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     it.copy(
                         name = value.optString("name", it.name),
                         hasPassword = value.optBoolean("hasPassword", it.hasPassword),
+                        permanent = value.optBoolean("permanent", it.permanent),
                         audioQuality = value.audioQuality("audioQuality", it.audioQuality),
                     )
                 }

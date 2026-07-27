@@ -83,12 +83,12 @@ kotlin {
 val unicodeSafeUnitTestClasses by tasks.registering(Jar::class) {
     archiveClassifier.set("unit-test-classes")
     destinationDirectory.set(gradle.gradleUserHomeDir.resolve("caches/music-together-test-classes/${rootProject.name}"))
-    from(layout.buildDirectory.dir("tmp/kotlin-classes/debug"))
-    from(layout.buildDirectory.dir("tmp/kotlin-classes/debugUnitTest"))
-    dependsOn("compileDebugKotlin", "compileDebugUnitTestKotlin")
+    from(layout.buildDirectory.dir("tmp/kotlin-classes/standardDebug"))
+    from(layout.buildDirectory.dir("tmp/kotlin-classes/standardDebugUnitTest"))
+    dependsOn("compileStandardDebugKotlin", "compileStandardDebugUnitTestKotlin")
 }
 
-tasks.withType<Test>().configureEach {
+tasks.withType<Test>().matching { it.name.contains("StandardDebug") }.configureEach {
     dependsOn(unicodeSafeUnitTestClasses)
     doFirst {
         classpath = files(unicodeSafeUnitTestClasses.get().archiveFile.get().asFile) + classpath

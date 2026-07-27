@@ -84,6 +84,7 @@ internal fun JSONObject.toRoomState(): RoomState {
         creatorId = optString("creatorId"),
         hostId = optString("hostId"),
         hasPassword = optBoolean("hasPassword", false),
+        permanent = optBoolean("permanent", false),
         audioQuality = audioQuality("audioQuality"),
         users = List(usersJson.length()) { i ->
             val item = usersJson.getJSONObject(i)
@@ -107,6 +108,7 @@ internal fun JSONArray.toRoomList(): List<RoomListItem> = List(length()) { i ->
         id = item.optString("id"),
         name = item.optString("name", "未命名房间"),
         hasPassword = item.optBoolean("hasPassword"),
+        permanent = item.optBoolean("permanent", false),
         userCount = item.optInt("userCount"),
         currentTrackTitle = item.stringOrNull("currentTrackTitle"),
         currentTrackArtist = item.stringOrNull("currentTrackArtist"),

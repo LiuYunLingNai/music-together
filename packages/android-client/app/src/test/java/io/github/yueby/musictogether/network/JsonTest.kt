@@ -2,6 +2,8 @@ package io.github.yueby.musictogether.network
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class JsonTest {
@@ -22,6 +24,12 @@ class JsonTest {
     @Test
     fun audioQualityFallsBackWhenUpdateOmitsValue() {
         assertEquals("netease_hires", JSONObject().audioQuality("audioQuality", "netease_hires"))
+    }
+
+    @Test
+    fun roomStateParsesPermanentFlagWithLegacyFallback() {
+        assertTrue(roomJson().put("permanent", true).toRoomState().permanent)
+        assertFalse(roomJson().toRoomState().permanent)
     }
 
     private fun roomJson() = JSONObject(

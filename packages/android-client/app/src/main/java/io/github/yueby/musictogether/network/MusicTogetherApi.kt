@@ -175,7 +175,7 @@ class MusicTogetherApi(private val client: OkHttpClient) {
         roomId: String,
         offset: Int,
         total: Int?,
-        limit: Int = 1000,
+        limit: Int = 100,
     ): PlaylistPage = withContext(Dispatchers.IO) {
         val url = server.api("music", "playlist").newBuilder()
             .addQueryParameter("source", source)

@@ -336,7 +336,7 @@ private fun PlaylistDetailPane(state: AppState, playlist: Playlist, viewModel: M
     val hub = state.platformHub
     val listState = rememberLazyListState()
     val queueIds = state.room?.queue.orEmpty().mapTo(hashSetOf()) { it.id }
-    val availableCount = (200 - (state.room?.queue?.size ?: 0)).coerceAtLeast(0)
+    val availableCount = (1000 - (state.room?.queue?.size ?: 0)).coerceAtLeast(0)
     val addableCount = hub.playlistTracks.count { it.id !in queueIds }.coerceAtMost(availableCount)
     val shouldLoadMore by remember(
         listState,
