@@ -17,6 +17,12 @@ const envSchema = z.object({
   REJOIN_TTL_MS: z.coerce.number().int().positive().default(TIMING.ROOM_GRACE_PERIOD_MS),
   IDENTITY_COOKIE_SECURE: z.enum(['true', 'false']).optional(),
   AUTO_FALLBACK_ENABLED: z.enum(['true', 'false']).default('true'),
+  QQ_MUSIC_API_URL: z
+    .string()
+    .trim()
+    .refine((value) => !value || URL.canParse(value), 'QQ_MUSIC_API_URL must be a valid absolute URL')
+    .default(''),
+  QQ_MUSIC_API_KEY: z.string().trim().default(''),
   DATABASE_URL: z.string().default('file:./data/music-together.db'),
   SERVER_ADMIN_IDS: z.string().default(''),
 })
@@ -47,6 +53,10 @@ export const config = {
   },
   autoFallback: {
     enabled: env.AUTO_FALLBACK_ENABLED === 'true',
+  },
+  qqMusicApi: {
+    url: env.QQ_MUSIC_API_URL,
+    key: env.QQ_MUSIC_API_KEY,
   },
   database: {
     url: env.DATABASE_URL,

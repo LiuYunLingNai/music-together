@@ -314,10 +314,13 @@ function handleLeave(io: TypedServer, socket: TypedSocket, reason?: string, revo
 
   io.to(roomId).emit(EVENTS.ROOM_USER_LEFT, user)
 
-  // System message for user left (server-authoritative)
-  if (room && room.users.length > 0) {
+  // Always persist the leave event. When the last user leaves there is nobody
+  // to receive it live, but it must still appear in history after a rejoin.
+  if (room) {
     const leaveMsg = chatService.createSystemMessage(roomId, `${user.nickname} 离开了房间`)
-    io.to(roomId).emit(EVENTS.CHAT_MESSAGE, leaveMsg)
+    if (room.users.length > 0) {
+      io.to(roomId).emit(EVENTS.CHAT_MESSAGE, leaveMsg)
+    }
   }
 
   // 角色或主持变更时广播完整状态，确保所有客户端更新 hostId / 权限
