@@ -182,7 +182,7 @@ src/
 ├── repositories/               # 数据仓库：内存存储
 │   ├── types.ts                #   接口定义（RoomRepository, ChatRepository）
 │   ├── roomRepository.ts       #   房间数据 + Socket 映射 + per-socket RTT + roomToSockets 反向索引（Map<string, RoomData>）
-│   └── chatRepository.ts       #   聊天记录（Map<string, ChatMessage[]>）
+│   └── chatRepository.ts       #   聊天记录（内存最多 200 条；永久房间同步持久化到 SQLite）
 │
 ├── middleware/                  # Socket.IO 中间件
 │   ├── types.ts                #   TypedServer, TypedSocket, HandlerContext

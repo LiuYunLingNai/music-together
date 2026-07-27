@@ -120,7 +120,11 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
       socket.join(roomId)
       authService.restoreUserCookies(roomId, user.id)
 
-      // Send full room state + chat history
+      // Send history before ROOM_STATE. The lobby navigates as soon as it receives
+      // ROOM_STATE, which creates a brief gap before the room listeners mount.
+      socket.emit(EVENTS.CHAT_HISTORY, chatService.getHistory(roomId))
+
+      // Send full room state
       // Owner 收到含密码版本，其他成员收到不含密码版本
       const isOwner = user.role === 'owner'
       const stateForJoiner = isOwner
@@ -134,7 +138,6 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         socket.to(roomId).emit(EVENTS.ROOM_STATE, roomService.toPublicRoomState(updatedRoom))
       }
       socket.emit(EVENTS.ROOM_REJOIN_TOKEN, { roomId, token: rejoin.token, expiresAt: rejoin.expiresAt })
-      socket.emit(EVENTS.CHAT_HISTORY, chatService.getHistory(roomId))
       socket.emit(EVENTS.AUTH_MY_STATUS, authService.getUserAuthStatus(user.id, roomId))
       io.to(roomId).emit(EVENTS.AUTH_STATUS_UPDATE, authService.getAllPlatformStatus(roomId))
 
