@@ -84,7 +84,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private val clock = ClockSync()
     private val _state = MutableStateFlow(
         AppState(
-            serverUrl = preferences.getString("server_url", "http://10.0.2.2:3001").orEmpty(),
+            serverUrl = preferences.getString("server_url", "https://sharemusic.lyln114514.com").orEmpty(),
             nickname = preferences.getString("nickname", "").orEmpty(),
         ),
     )
