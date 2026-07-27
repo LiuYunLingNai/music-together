@@ -1,5 +1,8 @@
 package io.github.yueby.musictogether.model
 
+import androidx.compose.runtime.Immutable
+
+@Immutable
 data class User(
     val id: String,
     val nickname: String,
@@ -7,6 +10,7 @@ data class User(
     val avatarUrl: String? = null,
 )
 
+@Immutable
 data class AccountProfile(
     val id: String,
     val nickname: String,
@@ -15,6 +19,7 @@ data class AccountProfile(
     val role: String,
 )
 
+@Immutable
 data class AdminUser(
     val id: String,
     val nickname: String,
@@ -26,6 +31,7 @@ data class AdminUser(
     val lastSeenAt: Long,
 )
 
+@Immutable
 data class AdminRoom(
     val id: String,
     val name: String,
@@ -35,6 +41,7 @@ data class AdminRoom(
     val currentTrackTitle: String?,
 )
 
+@Immutable
 data class Track(
     val id: String,
     val title: String,
@@ -52,6 +59,7 @@ data class Track(
     val requestedBy: String? = null,
 )
 
+@Immutable
 data class PlayState(
     val isPlaying: Boolean = false,
     val currentTime: Double = 0.0,
@@ -59,6 +67,7 @@ data class PlayState(
     val serverTimeToExecute: Long? = null,
 )
 
+@Immutable
 data class RoomState(
     val id: String,
     val name: String,
@@ -74,6 +83,7 @@ data class RoomState(
     val playMode: String,
 )
 
+@Immutable
 data class RoomListItem(
     val id: String,
     val name: String,
@@ -84,6 +94,15 @@ data class RoomListItem(
     val currentTrackArtist: String?,
 )
 
+@Immutable
+data class ServerConnection(
+    val url: String,
+    val status: ConnectionStatus = ConnectionStatus.Disconnected,
+    val rooms: List<RoomListItem> = emptyList(),
+    val error: String? = null,
+)
+
+@Immutable
 data class ChatMessage(
     val id: String,
     val userId: String,
@@ -93,6 +112,7 @@ data class ChatMessage(
     val type: String,
 )
 
+@Immutable
 data class VoteState(
     val id: String,
     val action: String,
@@ -105,6 +125,7 @@ data class VoteState(
     val payload: Map<String, String> = emptyMap(),
 )
 
+@Immutable
 data class LyricWord(
     val text: String,
     val startTimeMs: Long,
@@ -112,6 +133,7 @@ data class LyricWord(
     val romanText: String = "",
 )
 
+@Immutable
 data class LyricLine(
     val words: List<LyricWord>,
     val translatedLyric: String = "",
@@ -125,6 +147,7 @@ data class LyricLine(
     val text: String get() = words.joinToString("") { it.text }
 }
 
+@Immutable
 data class LyricsState(
     val trackId: String? = null,
     val lines: List<LyricLine> = emptyList(),
@@ -133,6 +156,7 @@ data class LyricsState(
     val error: String? = null,
 )
 
+@Immutable
 data class PlatformAuthStatus(
     val platform: String,
     val loggedInCount: Int,
@@ -140,6 +164,7 @@ data class PlatformAuthStatus(
     val maxVipType: Int,
 )
 
+@Immutable
 data class MyPlatformAuth(
     val platform: String,
     val loggedIn: Boolean,
@@ -147,6 +172,7 @@ data class MyPlatformAuth(
     val vipType: Int = 0,
 )
 
+@Immutable
 data class Playlist(
     val id: String,
     val name: String,
@@ -157,6 +183,7 @@ data class Playlist(
     val description: String? = null,
 )
 
+@Immutable
 data class QrLoginState(
     val open: Boolean = false,
     val platform: String = "netease",
@@ -167,6 +194,7 @@ data class QrLoginState(
     val loading: Boolean = false,
 )
 
+@Immutable
 data class PlatformHubState(
     val authStatus: List<PlatformAuthStatus> = emptyList(),
     val myAuth: List<MyPlatformAuth> = emptyList(),
@@ -187,20 +215,25 @@ data class PlatformHubState(
     val playlistError: String? = null,
 )
 
+@Immutable
 data class UiNotice(
     val id: Long = System.nanoTime(),
     val text: String,
     val isError: Boolean = false,
 )
 
+@Immutable
 enum class ConnectionStatus {
     Disconnected,
     Connecting,
     Connected,
 }
 
+@Immutable
 data class AppState(
     val serverUrl: String = "http://10.0.2.2:3001",
+    val selectedServerUrl: String = serverUrl,
+    val servers: List<ServerConnection> = emptyList(),
     val nickname: String = "",
     val connectionStatus: ConnectionStatus = ConnectionStatus.Disconnected,
     val rooms: List<RoomListItem> = emptyList(),

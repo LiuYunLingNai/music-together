@@ -3,6 +3,7 @@ package io.github.yueby.musictogether.player
 import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
+import androidx.compose.runtime.Immutable
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -25,10 +26,12 @@ import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.max
 
+@Immutable
 data class PlayerUiState(
     val track: Track? = null,
     val playing: Boolean = false,
     val positionSeconds: Double = 0.0,
+    val durationSeconds: Double = 0.0,
     val bufferedPercent: Int = 0,
     val error: String? = null,
     val connectedToMediaSession: Boolean = false,
@@ -244,7 +247,8 @@ class NativePlayer(
             val expectedPositionMs = (pending.basePositionMs + elapsedMs).coerceAtLeast(0)
             AppLogger.info(
                 "Player",
-                "ready track=${pending.trackId} seekMs=$expectedPositionMs loadWaitMs=$waitMs playing=${pending.autoPlay}",
+                "ready track=${pending.trackId} seekMs=$expectedPositionMs loadWaitMs=$waitMs " +
+                    "durationMs=${controller.duration} playing=${pending.autoPlay}",
             )
             withPlayer {
                 it.playbackParameters = PlaybackParameters.DEFAULT
@@ -266,6 +270,7 @@ class NativePlayer(
         _state.value = _state.value.copy(
             playing = controller.isPlaying,
             positionSeconds = controller.currentPosition.coerceAtLeast(0) / 1000.0,
+            durationSeconds = controller.duration.takeIf { it > 0 }?.div(1000.0) ?: 0.0,
             bufferedPercent = controller.bufferedPercentage,
             connectedToMediaSession = true,
         )

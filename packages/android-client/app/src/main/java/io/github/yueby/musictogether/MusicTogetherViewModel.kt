@@ -19,6 +19,7 @@ import io.github.yueby.musictogether.model.PlatformHubState
 import io.github.yueby.musictogether.model.Playlist
 import io.github.yueby.musictogether.model.QrLoginState
 import io.github.yueby.musictogether.model.PlayState
+import io.github.yueby.musictogether.model.ServerConnection
 import io.github.yueby.musictogether.model.Track
 import io.github.yueby.musictogether.model.UiNotice
 import io.github.yueby.musictogether.model.User
@@ -27,6 +28,7 @@ import io.github.yueby.musictogether.network.MusicTogetherApi
 import io.github.yueby.musictogether.network.MusicTogetherSocket
 import io.github.yueby.musictogether.network.PersistentCookieJar
 import io.github.yueby.musictogether.network.ServerAddress
+import io.github.yueby.musictogether.network.ServerCatalog
 import io.github.yueby.musictogether.network.SocketEvents
 import io.github.yueby.musictogether.network.stringOrNull
 import io.github.yueby.musictogether.network.audioQuality
@@ -63,6 +65,7 @@ import java.util.concurrent.TimeUnit
 
 class MusicTogetherViewModel(application: Application) : AndroidViewModel(application), SocketEvents {
     private data class PendingQueueAction(val title: String, val pinned: Boolean)
+    private data class PendingRoomCreation(val name: String, val password: String)
     private data class PlaylistContext(val source: String, val id: String, val roomId: String)
 
     private companion object {
@@ -73,9 +76,16 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         const val MAX_QUEUE_BATCH_SIZE = 200
         val ACCOUNT_ID_PATTERN = Regex("^[a-z0-9_-]{3,32}$")
         const val MAX_AVATAR_BYTES = 5 * 1024 * 1024
+        const val DEFAULT_SERVER_URL = "https://sharemusic.lyln114514.com"
+        const val SERVERS_KEY = "server_urls"
+        const val MAX_SERVERS = 10
     }
 
     private val preferences = application.getSharedPreferences("music_together", Context.MODE_PRIVATE)
+    private val initialServerUrls = ServerCatalog.decode(
+        preferences.getString(SERVERS_KEY, null),
+        preferences.getString("server_url", DEFAULT_SERVER_URL).orEmpty().ifBlank { DEFAULT_SERVER_URL },
+    ).ifEmpty { listOf(DEFAULT_SERVER_URL) }
     private val okHttp = OkHttpClient.Builder()
         .cookieJar(PersistentCookieJar(application))
         .connectTimeout(12, TimeUnit.SECONDS)
@@ -88,7 +98,9 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private val clock = ClockSync()
     private val _state = MutableStateFlow(
         AppState(
-            serverUrl = preferences.getString("server_url", "https://sharemusic.lyln114514.com").orEmpty(),
+            serverUrl = initialServerUrls.first(),
+            selectedServerUrl = initialServerUrls.first(),
+            servers = initialServerUrls.map { ServerConnection(it) },
             nickname = preferences.getString("nickname", "").orEmpty(),
         ),
     )
@@ -97,8 +109,13 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     val playerState: StateFlow<PlayerUiState> = nativePlayer.state
 
     private var activeServer: ServerAddress? = null
+    private var socketServerUrl: String? = null
+    private val discoverySockets = linkedMapOf<String, MusicTogetherSocket>()
+    private val discoveryReconnectJobs = mutableMapOf<String, Job>()
+    private val discoveryStarting = mutableSetOf<String>()
     private var desiredRoomId: String? = null
     private var desiredRoomPassword: String? = null
+    private var pendingRoomCreation: PendingRoomCreation? = null
     private var shouldReconnect = false
     private var reconnectJob: Job? = null
     private var clockJob: Job? = null
@@ -337,45 +354,131 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             setError("请输入有效的服务端 URL")
             return
         }
+        pendingRoomCreation = null
+        connectToServer(parsed, keepDesiredRoom = false)
+    }
+
+    fun selectServer(serverUrl: String) {
+        val server = ServerAddress.parse(serverUrl) ?: return setError("服务端地址无效")
+        pendingRoomCreation = null
+        if (activeServer?.displayUrl == server.displayUrl && _state.value.connectionStatus == ConnectionStatus.Connected) {
+            _state.value = _state.value.copy(serverUrl = server.displayUrl, selectedServerUrl = server.displayUrl)
+            return
+        }
+        connectToServer(server, keepDesiredRoom = false)
+    }
+
+    fun removeServer(serverUrl: String) {
+        val normalized = ServerAddress.parse(serverUrl)?.displayUrl ?: return
+        val remaining = _state.value.servers.filterNot { it.url == normalized }
+        if (remaining.isEmpty()) return setError("至少保留一个服务器")
+        discoveryReconnectJobs.remove(normalized)?.cancel()
+        discoveryStarting -= normalized
+        discoverySockets.remove(normalized)?.disconnect()
+        persistServers(remaining.map(ServerConnection::url))
+        _state.value = _state.value.copy(servers = remaining)
+        if (activeServer?.displayUrl == normalized) selectServer(remaining.first().url)
+    }
+
+    fun joinRoomOnServer(serverUrl: String, roomId: String, password: String = "") {
+        val server = ServerAddress.parse(serverUrl) ?: return setError("服务端地址无效")
+        if (!requireNickname()) return
+        AppLogger.info(
+            "Room",
+            "selected room=$roomId targetServer=${server.displayUrl} activeServer=${activeServer?.displayUrl}",
+        )
+        desiredRoomId = roomId
+        desiredRoomPassword = password
+        pendingRoomCreation = null
+        if (activeServer?.displayUrl == server.displayUrl && _state.value.connectionStatus == ConnectionStatus.Connected) {
+            withPersistedNickname { emitJoin(roomId, password) }
+        } else {
+            connectToServer(server, keepDesiredRoom = true)
+        }
+    }
+
+    private fun connectToServer(parsed: ServerAddress, keepDesiredRoom: Boolean) {
+        if (_state.value.servers.none { it.url == parsed.displayUrl } && _state.value.servers.size >= MAX_SERVERS) {
+            setError("最多同时连接 $MAX_SERVERS 台服务器")
+            return
+        }
         AppLogger.info("Connection", "connect server=${parsed.displayUrl}")
         shouldReconnect = true
         reconnectJob?.cancel()
         socket.disconnect()
+        socketServerUrl = null
         val serverChanged = activeServer?.displayUrl != null && activeServer?.displayUrl != parsed.displayUrl
         activeServer = parsed
-        if (serverChanged) {
+        if (serverChanged && !keepDesiredRoom) {
             desiredRoomId = null
             desiredRoomPassword = null
+        }
+        if (serverChanged) {
             nativePlayer.stop()
             resetPlatformRoomState()
         }
+        val serverUrls = ServerCatalog.normalize(_state.value.servers.map(ServerConnection::url) + parsed.displayUrl)
+        persistServers(serverUrls)
+        discoveryReconnectJobs.remove(parsed.displayUrl)?.cancel()
+        discoveryStarting -= parsed.displayUrl
+        discoverySockets.remove(parsed.displayUrl)?.disconnect()
         preferences.edit().putString("server_url", parsed.displayUrl).apply()
+        val existingServers = _state.value.servers
+        val selectedRooms = existingServers.firstOrNull { it.url == parsed.displayUrl }?.rooms.orEmpty()
         _state.value = _state.value.copy(
             serverUrl = parsed.displayUrl,
+            selectedServerUrl = parsed.displayUrl,
+            servers = serverUrls.map { url ->
+                existingServers.firstOrNull { it.url == url }
+                    ?.let { existing ->
+                        existing.copy(
+                            status = if (url == parsed.displayUrl) ConnectionStatus.Connecting else existing.status,
+                            error = null,
+                        )
+                    }
+                    ?: ServerConnection(url, if (url == parsed.displayUrl) ConnectionStatus.Connecting else ConnectionStatus.Disconnected)
+            },
             connectionStatus = ConnectionStatus.Connecting,
+            rooms = selectedRooms,
             room = if (serverChanged) null else _state.value.room,
             accountProfile = if (serverChanged) null else _state.value.accountProfile,
+            accountLoading = true,
             adminUsers = if (serverChanged) emptyList() else _state.value.adminUsers,
             adminRooms = if (serverChanged) emptyList() else _state.value.adminRooms,
             error = null,
         )
+        syncDiscoveryConnections()
         viewModelScope.launch {
             runCatching { api.bootstrapIdentity(parsed) }
                 .onSuccess { userId ->
-                    _state.value = _state.value.copy(userId = userId, accountLoading = true)
-                    runCatching { api.currentProfile(parsed) }
-                        .onSuccess(::applyAccountProfile)
-                        .onFailure {
-                            AppLogger.warn("Account", "profile bootstrap failed: ${it.message}")
-                            _state.value = _state.value.copy(accountLoading = false)
-                        }
-                    socket.connect(parsed)
+                    if (activeServer?.displayUrl == parsed.displayUrl) {
+                        _state.value = _state.value.copy(userId = userId, accountLoading = true)
+                        runCatching { api.currentProfile(parsed) }
+                            .onSuccess { profile ->
+                                if (activeServer?.displayUrl == parsed.displayUrl) applyAccountProfile(profile)
+                            }
+                            .onFailure {
+                                if (activeServer?.displayUrl == parsed.displayUrl) {
+                                    AppLogger.warn("Account", "profile bootstrap failed: ${it.message}")
+                                    _state.value = _state.value.copy(accountLoading = false)
+                                }
+                            }
+                        connectPrimarySocket(parsed)
+                    }
                 }
-                .onFailure {
-                    AppLogger.error("Connection", "identity bootstrap failed server=${parsed.displayUrl}", it)
-                    _state.value = _state.value.copy(connectionStatus = ConnectionStatus.Disconnected)
-                    setError(it.message ?: "无法连接服务端")
-                    scheduleReconnect()
+                .onFailure { error ->
+                    if (activeServer?.displayUrl == parsed.displayUrl) {
+                        AppLogger.error("Connection", "identity bootstrap failed server=${parsed.displayUrl}", error)
+                        _state.value = _state.value.copy(
+                            connectionStatus = ConnectionStatus.Disconnected,
+                            accountLoading = false,
+                        )
+                        updateServerConnection(parsed.displayUrl) { connection ->
+                            connection.copy(status = ConnectionStatus.Disconnected, error = error.message ?: "连接失败")
+                        }
+                        setError(error.message ?: "无法连接服务端")
+                        scheduleReconnect()
+                    }
                 }
         }
     }
@@ -386,27 +489,48 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         stopPeriodicJobs()
         resetPlatformRoomState()
         socket.disconnect()
-        _state.value = _state.value.copy(connectionStatus = ConnectionStatus.Disconnected)
+        socketServerUrl = null
+        discoveryReconnectJobs.values.forEach { it.cancel() }
+        discoveryReconnectJobs.clear()
+        discoveryStarting.clear()
+        discoverySockets.values.forEach(MusicTogetherSocket::disconnect)
+        discoverySockets.clear()
+        _state.value = _state.value.copy(
+            connectionStatus = ConnectionStatus.Disconnected,
+            servers = _state.value.servers.map { it.copy(status = ConnectionStatus.Disconnected) },
+        )
     }
 
-    fun refreshRooms() = socket.emit(Events.ROOM_LIST)
+    fun refreshRooms() {
+        socket.emit(Events.ROOM_LIST)
+        discoverySockets.values.forEach { it.emit(Events.ROOM_LIST) }
+    }
 
-    fun createRoom(roomName: String, password: String) {
+    fun createRoomOnServer(serverUrl: String, roomName: String, password: String) {
+        val server = ServerAddress.parse(serverUrl) ?: return setError("服务端地址无效")
         if (!requireNickname()) return
-        withPersistedNickname {
-            socket.emit(Events.ROOM_CREATE, JSONObject().apply {
-                put("nickname", _state.value.nickname.trim())
-                if (roomName.isNotBlank()) put("roomName", roomName.trim().take(30))
-                if (password.isNotBlank()) put("password", password.take(32))
-            })
+        val creation = PendingRoomCreation(roomName.trim().take(30), password.take(32))
+        AppLogger.info(
+            "Room",
+            "create selected targetServer=${server.displayUrl} activeServer=${activeServer?.displayUrl}",
+        )
+        desiredRoomId = null
+        desiredRoomPassword = null
+        if (activeServer?.displayUrl == server.displayUrl && _state.value.connectionStatus == ConnectionStatus.Connected) {
+            pendingRoomCreation = null
+            emitCreateRoom(creation)
+        } else {
+            pendingRoomCreation = creation
+            connectToServer(server, keepDesiredRoom = false)
         }
     }
 
+    fun createRoom(roomName: String, password: String) {
+        createRoomOnServer(_state.value.selectedServerUrl, roomName, password)
+    }
+
     fun joinRoom(roomId: String, password: String = "") {
-        if (!requireNickname()) return
-        desiredRoomId = roomId
-        desiredRoomPassword = password
-        withPersistedNickname { emitJoin(roomId, password) }
+        joinRoomOnServer(_state.value.selectedServerUrl, roomId, password)
     }
 
     fun leaveRoom() {
@@ -733,19 +857,136 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
 
     fun canControl(): Boolean = currentRole() in setOf("owner", "admin") || _state.value.accountProfile?.role == "admin"
 
-    override fun onConnected() {
+    private fun persistServers(urls: List<String>) {
+        preferences.edit().putString(SERVERS_KEY, ServerCatalog.encode(urls)).apply()
+    }
+
+    private fun updateServerConnection(url: String, transform: (ServerConnection) -> ServerConnection) {
+        val current = _state.value
+        _state.value = current.copy(
+            servers = current.servers.map { if (it.url == url) transform(it) else it },
+        )
+    }
+
+    private fun syncDiscoveryConnections() {
+        val activeUrl = activeServer?.displayUrl
+        val wanted = _state.value.servers.map(ServerConnection::url).filterNot { it == activeUrl }.toSet()
+        (discoverySockets.keys - wanted).forEach { url ->
+            discoverySockets.remove(url)?.disconnect()
+            discoveryReconnectJobs.remove(url)?.cancel()
+            discoveryStarting -= url
+        }
+        wanted.forEach { url ->
+            if (url !in discoverySockets && url !in discoveryStarting) {
+                ServerAddress.parse(url)?.let(::connectDiscoveryServer)
+            }
+        }
+    }
+
+    private fun connectDiscoveryServer(server: ServerAddress) {
+        val url = server.displayUrl
+        if (url == activeServer?.displayUrl || url in discoveryStarting || url in discoverySockets) return
+        discoveryStarting += url
+        updateServerConnection(url) { it.copy(status = ConnectionStatus.Connecting, error = null) }
         viewModelScope.launch {
+            runCatching { api.bootstrapIdentity(server) }
+                .onSuccess {
+                    discoveryStarting -= url
+                    if (url == activeServer?.displayUrl || _state.value.servers.none { it.url == url }) return@onSuccess
+                    val discoverySocket = MusicTogetherSocket(okHttp, DiscoverySocketEvents(url))
+                    discoverySockets[url] = discoverySocket
+                    discoverySocket.connect(server)
+                }
+                .onFailure { error ->
+                    discoveryStarting -= url
+                    AppLogger.warn("Discovery", "bootstrap failed server=$url reason=${error.message.orEmpty()}")
+                    updateServerConnection(url) {
+                        it.copy(status = ConnectionStatus.Disconnected, error = error.message ?: "连接失败")
+                    }
+                    scheduleDiscoveryReconnect(url)
+                }
+        }
+    }
+
+    private fun scheduleDiscoveryReconnect(url: String) {
+        if (url == activeServer?.displayUrl || _state.value.servers.none { it.url == url }) return
+        discoveryReconnectJobs.remove(url)?.cancel()
+        discoveryReconnectJobs[url] = viewModelScope.launch {
+            delay(3_000)
+            discoverySockets.remove(url)?.disconnect()
+            ServerAddress.parse(url)?.let(::connectDiscoveryServer)
+        }
+    }
+
+    private inner class DiscoverySocketEvents(private val serverUrl: String) : SocketEvents {
+        override fun onConnected() {
+            viewModelScope.launch {
+                discoveryReconnectJobs.remove(serverUrl)?.cancel()
+                updateServerConnection(serverUrl) {
+                    it.copy(status = ConnectionStatus.Connected, error = null)
+                }
+                discoverySockets[serverUrl]?.emit(Events.ROOM_LIST)
+            }
+        }
+
+        override fun onDisconnected(reason: String?) {
+            viewModelScope.launch {
+                updateServerConnection(serverUrl) {
+                    it.copy(status = ConnectionStatus.Disconnected, error = reason?.takeIf(String::isNotBlank))
+                }
+                scheduleDiscoveryReconnect(serverUrl)
+            }
+        }
+
+        override fun onEvent(event: String, data: Any?) {
+            if (event == Events.ROOM_LIST_UPDATE) {
+                val rooms = (data as? JSONArray)?.toRoomList().orEmpty()
+                viewModelScope.launch {
+                    updateServerConnection(serverUrl) { it.copy(rooms = rooms, error = null) }
+                }
+            } else if (event == "connect_error") {
+                val message = (data as? JSONObject)?.optString("message")?.takeIf(String::isNotBlank)
+                viewModelScope.launch {
+                    updateServerConnection(serverUrl) { it.copy(error = message ?: "连接认证失败") }
+                }
+            }
+        }
+    }
+
+    override fun onConnected() {
+        val connectedServerUrl = socketServerUrl
+        viewModelScope.launch {
+            if (connectedServerUrl == null || connectedServerUrl != activeServer?.displayUrl) {
+                AppLogger.warn(
+                    "WebSocket",
+                    "ignore mismatched connection socketServer=$connectedServerUrl activeServer=${activeServer?.displayUrl}",
+                )
+                socket.disconnect()
+                socketServerUrl = null
+                return@launch
+            }
             AppLogger.info("WebSocket", "connected server=${activeServer?.displayUrl}")
             reconnectJob?.cancel()
             _state.value = _state.value.copy(connectionStatus = ConnectionStatus.Connected, error = null)
+            activeServer?.displayUrl?.let { url ->
+                updateServerConnection(url) { it.copy(status = ConnectionStatus.Connected, error = null) }
+            }
             socket.emit(Events.ROOM_LIST)
-            desiredRoomId?.let { emitJoin(it, desiredRoomPassword.orEmpty()) }
+            val creation = pendingRoomCreation
+            if (creation != null) {
+                pendingRoomCreation = null
+                emitCreateRoom(creation)
+            } else {
+                desiredRoomId?.let { emitJoin(it, desiredRoomPassword.orEmpty()) }
+            }
             startPeriodicJobs()
         }
     }
 
     override fun onDisconnected(reason: String?) {
+        val disconnectedServerUrl = socketServerUrl
         viewModelScope.launch {
+            if (disconnectedServerUrl != activeServer?.displayUrl) return@launch
             AppLogger.warn("WebSocket", "disconnected reason=${reason.orEmpty()}")
             stopPeriodicJobs()
             clock.reset()
@@ -753,12 +994,25 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             pendingQueueActions.clear()
             resetPlatformRoomState()
             _state.value = _state.value.copy(connectionStatus = ConnectionStatus.Disconnected)
+            activeServer?.displayUrl?.let { url ->
+                updateServerConnection(url) { it.copy(status = ConnectionStatus.Disconnected, error = reason) }
+            }
             if (shouldReconnect) scheduleReconnect()
         }
     }
 
     override fun onEvent(event: String, data: Any?) {
-        viewModelScope.launch { handleEvent(event, data) }
+        val eventServerUrl = socketServerUrl
+        viewModelScope.launch {
+            if (eventServerUrl == activeServer?.displayUrl) {
+                handleEvent(event, data)
+            } else {
+                AppLogger.warn(
+                    "WebSocket",
+                    "ignore event=$event socketServer=$eventServerUrl activeServer=${activeServer?.displayUrl}",
+                )
+            }
+        }
     }
 
     private fun handleEvent(event: String, data: Any?) {
@@ -809,7 +1063,13 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     .putLong("${rejoinKey(roomId)}:expires", expiresAt)
                     .apply()
             }
-            Events.ROOM_LIST_UPDATE -> _state.value = _state.value.copy(rooms = (data as? JSONArray)?.toRoomList().orEmpty())
+            Events.ROOM_LIST_UPDATE -> {
+                val rooms = (data as? JSONArray)?.toRoomList().orEmpty()
+                _state.value = _state.value.copy(rooms = rooms)
+                activeServer?.displayUrl?.let { url ->
+                    updateServerConnection(url) { it.copy(rooms = rooms, error = null) }
+                }
+            }
             Events.ROOM_SETTINGS -> {
                 val value = data as? JSONObject ?: return
                 updateRoom {
@@ -839,8 +1099,27 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 users.map { if (it.id == value.optString("userId")) it.copy(role = value.optString("role")) else it }
             }
             Events.ROOM_ERROR -> {
+                val wasJoining = waitingForJoinRoomState
                 waitingForJoinRoomState = false
                 val message = (data as? JSONObject)?.optString("message") ?: "房间操作失败"
+                if (wasJoining) {
+                    val failedRoomId = desiredRoomId
+                    AppLogger.warn(
+                        "Room",
+                        "join failed room=${failedRoomId.orEmpty()} server=${socketServerUrl.orEmpty()} message=$message",
+                    )
+                    if (failedRoomId != null && message.contains("不存在")) {
+                        _state.value = _state.value.copy(rooms = _state.value.rooms.filterNot { it.id == failedRoomId })
+                        socketServerUrl?.let { url ->
+                            updateServerConnection(url) { connection ->
+                                connection.copy(rooms = connection.rooms.filterNot { it.id == failedRoomId })
+                            }
+                        }
+                        socket.emit(Events.ROOM_LIST)
+                    }
+                    desiredRoomId = null
+                    desiredRoomPassword = null
+                }
                 if (pendingQueueActions.isNotEmpty()) {
                     pendingQueueActions.clear()
                     setError("点歌失败：$message")
@@ -1034,12 +1313,20 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         val token = preferences.getString(tokenKey, null)
         val expires = preferences.getLong("$tokenKey:expires", 0)
         waitingForJoinRoomState = true
-        socket.emit(Events.ROOM_JOIN, JSONObject().apply {
+        AppLogger.info(
+            "Room",
+            "join request room=$roomId socketServer=$socketServerUrl activeServer=${activeServer?.displayUrl}",
+        )
+        val sent = socket.emit(Events.ROOM_JOIN, JSONObject().apply {
             put("roomId", roomId)
             put("nickname", _state.value.nickname.trim())
             if (password.isNotBlank()) put("password", password)
             if (!token.isNullOrBlank() && expires > System.currentTimeMillis()) put("rejoinToken", token)
         })
+        if (!sent) {
+            waitingForJoinRoomState = false
+            setError("服务器连接尚未就绪")
+        }
     }
 
     private fun rejoinKey(roomId: String): String = "rejoin:${activeServer?.displayUrl}:$roomId"
@@ -1432,8 +1719,37 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     private fun reconnectSocket(server: ServerAddress) {
+        if (activeServer?.displayUrl != server.displayUrl) {
+            AppLogger.warn(
+                "WebSocket",
+                "ignore stale reconnect requested=${server.displayUrl} active=${activeServer?.displayUrl}",
+            )
+            return
+        }
         socket.disconnect()
+        socketServerUrl = null
         _state.value = _state.value.copy(connectionStatus = ConnectionStatus.Connecting)
+        updateServerConnection(server.displayUrl) { it.copy(status = ConnectionStatus.Connecting, error = null) }
+        connectPrimarySocket(server)
+    }
+
+    private fun emitCreateRoom(creation: PendingRoomCreation) {
+        withPersistedNickname {
+            AppLogger.info(
+                "Room",
+                "create request socketServer=$socketServerUrl activeServer=${activeServer?.displayUrl}",
+            )
+            val sent = socket.emit(Events.ROOM_CREATE, JSONObject().apply {
+                put("nickname", _state.value.nickname.trim())
+                if (creation.name.isNotBlank()) put("roomName", creation.name)
+                if (creation.password.isNotBlank()) put("password", creation.password)
+            })
+            if (!sent) setError("服务器连接尚未就绪")
+        }
+    }
+
+    private fun connectPrimarySocket(server: ServerAddress) {
+        socketServerUrl = server.displayUrl
         socket.connect(server)
     }
 
@@ -1475,7 +1791,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         if (!shouldReconnect || reconnectJob?.isActive == true) return
         reconnectJob = viewModelScope.launch {
             delay(2_000)
-            if (shouldReconnect) connect()
+            if (shouldReconnect) activeServer?.let { connectToServer(it, keepDesiredRoom = true) }
         }
     }
 
@@ -1527,6 +1843,10 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         searchJob?.cancel()
         PlaybackCommandBridge.listener = null
         socket.disconnect()
+        socketServerUrl = null
+        discoveryReconnectJobs.values.forEach { it.cancel() }
+        discoverySockets.values.forEach(MusicTogetherSocket::disconnect)
+        discoverySockets.clear()
         nativePlayer.release()
         okHttp.dispatcher.executorService.shutdown()
         super.onCleared()

@@ -9,14 +9,9 @@ import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -109,6 +104,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
@@ -120,8 +116,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.BlendMode
@@ -141,6 +137,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import io.github.yueby.musictogether.BuildConfig
 import io.github.yueby.musictogether.MusicTogetherViewModel
@@ -177,7 +174,6 @@ private enum class RoomOverlay {
 @Composable
 fun RoomScreen(
     appState: AppState,
-    playerState: PlayerUiState,
     outerPadding: PaddingValues,
     viewModel: MusicTogetherViewModel,
 ) {
@@ -335,7 +331,6 @@ fun RoomScreen(
                     room = room,
                     userId = appState.userId,
                     lyrics = appState.lyrics,
-                    player = playerState,
                     viewModel = viewModel,
                     onOpenQueue = { activeOverlay = RoomOverlay.Queue },
                     onOpenChat = { activeOverlay = RoomOverlay.Chat },
@@ -407,11 +402,11 @@ private fun PlayerPane(
     room: RoomState,
     userId: String?,
     lyrics: LyricsState,
-    player: PlayerUiState,
     viewModel: MusicTogetherViewModel,
     onOpenQueue: () -> Unit,
     onOpenChat: () -> Unit,
 ) {
+    val player by viewModel.playerState.collectAsStateWithLifecycle()
     val track = player.track ?: room.currentTrack
     // Player visual is a room-level preference. Changing tracks must not force
     // users out of the lyrics view.
@@ -449,26 +444,6 @@ private fun MobilePlayerSurface(
         animationSpec = tween(3200),
         label = "background-scale",
     )
-    val backgroundFlow = rememberInfiniteTransition(label = "background-flow")
-    val backgroundDriftX by backgroundFlow.animateFloat(
-        initialValue = -18f,
-        targetValue = 18f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(11_000, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "background-drift-x",
-    )
-    val backgroundDriftY by backgroundFlow.animateFloat(
-        initialValue = 12f,
-        targetValue = -12f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(13_000, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "background-drift-y",
-    )
-
     Box(
         Modifier
             .fillMaxSize()
@@ -485,12 +460,9 @@ private fun MobilePlayerSurface(
                     .graphicsLayer {
                         scaleX = backgroundScale
                         scaleY = backgroundScale
-                        translationX = if (player.playing) backgroundDriftX else 0f
-                        translationY = if (player.playing) backgroundDriftY else 0f
-                        rotationZ = if (player.playing) backgroundDriftX * 0.025f else 0f
                         alpha = 0.68f
                     }
-                    .blur(54.dp),
+                    .blur(32.dp),
                 contentScale = ContentScale.Crop,
             )
         }
@@ -808,7 +780,8 @@ private fun MobilePlayerControls(
     LaunchedEffect(player.positionSeconds) {
         if (!seeking) seekPosition = player.positionSeconds
     }
-    val duration = (track?.duration ?: 0.0).coerceAtLeast(1.0)
+    val reportedDuration = maxOf(track?.duration ?: 0.0, player.durationSeconds)
+    val seekRangeDuration = reportedDuration.coerceAtLeast(1.0)
     val seekThumbSize by animateDpAsState(
         targetValue = if (seeking) 10.dp else 7.dp,
         animationSpec = spring(dampingRatio = 0.72f, stiffness = 520f),
@@ -817,7 +790,7 @@ private fun MobilePlayerControls(
 
     Column(Modifier.fillMaxWidth()) {
         Slider(
-            value = seekPosition.coerceIn(0.0, duration).toFloat(),
+            value = seekPosition.coerceIn(0.0, seekRangeDuration).toFloat(),
             onValueChange = {
                 seeking = true
                 seekPosition = it.toDouble()
@@ -826,7 +799,7 @@ private fun MobilePlayerControls(
                 seeking = false
                 viewModel.seek(seekPosition)
             },
-            valueRange = 0f..duration.toFloat(),
+            valueRange = 0f..seekRangeDuration.toFloat(),
             enabled = track != null && viewModel.canControl(),
             modifier = Modifier
                 .fillMaxWidth()
@@ -861,7 +834,7 @@ private fun MobilePlayerControls(
             )
             Spacer(Modifier.weight(1f))
             Text(
-                formatTime(track?.duration ?: 0.0),
+                formatTime(reportedDuration),
                 color = Color.White.copy(alpha = 0.52f),
                 fontSize = 11.sp,
             )
@@ -1501,8 +1474,8 @@ private fun LyricsPanel(
     onSeek: ((Double) -> Unit)? = null,
 ) {
     val rawPositionMs = (positionSeconds * 1000.0).toFloat().coerceAtLeast(0f)
-    val positionMs = rememberSmoothPositionMs(rawPositionMs, isPlaying)
-    val positionLong = positionMs.toLong()
+    val smoothPositionMs = rememberSmoothPositionMs(rawPositionMs, isPlaying)
+    val positionLong = rawPositionMs.toLong()
     val groups = remember(lyrics.lines) { buildAmllLyricGroups(lyrics.lines) }
     val interludes = remember(lyrics.lines) { lyrics.lines.filter { it.isInterlude } }
     val activeInterlude = interludes.firstOrNull {
@@ -1587,23 +1560,7 @@ private fun LyricsPanel(
             }
 
             LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        compositingStrategy = CompositingStrategy.Offscreen
-                    }
-                    .drawWithContent {
-                        drawContent()
-                        drawRect(
-                            brush = Brush.verticalGradient(
-                                0f to Color.Transparent,
-                                0.10f to Color.Black,
-                                0.86f to Color.Black,
-                                1f to Color.Transparent,
-                            ),
-                            blendMode = BlendMode.DstIn,
-                        )
-                    },
+                modifier = Modifier.fillMaxSize(),
                 state = listState,
                 contentPadding = PaddingValues(
                     start = 18.dp,
@@ -1645,7 +1602,7 @@ private fun LyricsPanel(
                                         positionLong < main.endTimeMs
                                 AmllLyricLineItem(
                                     group = item.group,
-                                    positionMs = positionMs,
+                                    positionMs = smoothPositionMs,
                                     active =
                                         activeInterlude == null &&
                                             (index == activeIndex || overlapsPlayback),
@@ -1664,7 +1621,7 @@ private fun LyricsPanel(
                             is AmllLyricListItem.Interlude -> {
                                 AmllActiveInterludeDots(
                                     line = item.line,
-                                    positionMs = positionMs,
+                                    positionMs = smoothPositionMs,
                                     alignEnd = item.alignEnd,
                                     modifier = Modifier.fillMaxWidth(),
                                 )
@@ -1681,13 +1638,14 @@ private fun LyricsPanel(
 @Composable
 private fun AmllLyricLineItem(
     group: AmllLyricGroup,
-    positionMs: Float,
+    positionMs: State<Float>,
     active: Boolean,
     distanceFromActive: Int,
     passed: Boolean,
     onClick: (() -> Unit)?,
 ) {
     val line = group.main
+    val currentPositionMs = if (active) positionMs.value else 0f
     val alignment = if (line.isDuet) Alignment.End else Alignment.Start
     val textAlign = if (line.isDuet) TextAlign.End else TextAlign.Start
     val scale by animateFloatAsState(
@@ -1749,7 +1707,7 @@ private fun AmllLyricLineItem(
     ) {
         AmllWordRow(
             line = line,
-            positionMs = positionMs,
+            positionMs = currentPositionMs,
             active = active,
             fontSize = 24f,
             fontWeight = mainWeight,
@@ -1787,10 +1745,10 @@ private fun AmllLyricLineItem(
             ) {
                 group.backgrounds.forEach { background ->
                     val backgroundActive =
-                        positionMs >= background.startTimeMs && positionMs < background.endTimeMs
+                        currentPositionMs >= background.startTimeMs && currentPositionMs < background.endTimeMs
                     AmllWordRow(
                         line = background,
-                        positionMs = positionMs,
+                        positionMs = currentPositionMs,
                         active = backgroundActive,
                         fontSize = 17f,
                         fontWeight = FontWeight.SemiBold,
@@ -2204,12 +2162,19 @@ private fun AmllKaraokeCharacter(
     glyphIndex: Int,
     glyphCount: Int,
 ) {
-    val highlightProgress = if (active) wordProgress(glyph, positionMs) else 0f
-    val baseAlpha = if (active) {
-        if (subdued) 0.22f else 0.25f
-    } else {
-        if (subdued) 0.72f else 1f
+    if (!active) {
+        Text(
+            text = glyph.text,
+            color = Color.White.copy(alpha = if (subdued) 0.72f else 1f),
+            fontSize = fontSize.sp,
+            lineHeight = (fontSize * 1.25f).sp,
+            fontWeight = fontWeight,
+            maxLines = 1,
+        )
+        return
     }
+    val highlightProgress = wordProgress(glyph, positionMs)
+    val baseAlpha = if (subdued) 0.22f else 0.25f
     val staggerMs = emphasisProfile.durationMs.toFloat() / 2.5f / glyphCount
     val staggeredStartMs = chunkStartTimeMs + (staggerMs * glyphIndex).toLong()
     val entryTimeMs = maxOf(glyph.startTimeMs, staggeredStartMs)
@@ -2226,27 +2191,13 @@ private fun AmllKaraokeCharacter(
     } else {
         0f
     }
-    val emphasis by animateFloatAsState(
-        targetValue = easedTarget,
-        animationSpec = tween(
-            durationMillis = if (inEmphasisWindow) 90 else 180,
-            easing = LinearEasing,
-        ),
-        label = "amllCharacterEmphasis",
-    )
+    val emphasis = easedTarget
     val floatTarget = if (inEmphasisWindow) {
         sin((elapsedFraction / 1.4f).coerceIn(0f, 1f) * PI).toFloat()
     } else {
         0f
     }
-    val floatLift by animateFloatAsState(
-        targetValue = floatTarget,
-        animationSpec = tween(
-            durationMillis = if (inEmphasisWindow) 90 else 180,
-            easing = LinearEasing,
-        ),
-        label = "amllCharacterFloat",
-    )
+    val floatLift = floatTarget
     val density = LocalDensity.current
     val fontSizePx = with(density) { fontSize.sp.toPx() }
     val centerOffset = glyphCount / 2f - glyphIndex
@@ -2332,12 +2283,13 @@ private fun amllEaseInOutBack(value: Float): Float {
 @Composable
 private fun AmllActiveInterludeDots(
     line: LyricLine,
-    positionMs: Float,
+    positionMs: State<Float>,
     alignEnd: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val currentPositionMs = positionMs.value
     val duration = (line.endTimeMs - line.startTimeMs).coerceAtLeast(1L).toFloat()
-    val elapsed = (positionMs - line.startTimeMs).coerceIn(0f, duration)
+    val elapsed = (currentPositionMs - line.startTimeMs).coerceIn(0f, duration)
     val remaining = (duration - elapsed).coerceAtLeast(0f)
     val dotTimeline = (duration - 750f).coerceAtLeast(1f)
     val fadeIn = ((elapsed - 500f) / 500f).coerceIn(0f, 1f)
@@ -2406,7 +2358,7 @@ private fun AmllActiveInterludeDots(
  * - 播放时每帧叠加 (now - last) ms，外部更新时再 snap 修正漂移。
  */
 @Composable
-private fun rememberSmoothPositionMs(rawPositionMs: Float, isPlaying: Boolean): Float {
+private fun rememberSmoothPositionMs(rawPositionMs: Float, isPlaying: Boolean): State<Float> {
     val position = remember { mutableFloatStateOf(rawPositionMs) }
 
     // 外部采样到来：先记录基准，再让 tick 在两帧之间追赶，避免漂移
@@ -2436,7 +2388,7 @@ private fun rememberSmoothPositionMs(rawPositionMs: Float, isPlaying: Boolean): 
             }
         }
     }
-    return position.floatValue
+    return position
 }
 
 /** 计算某个字在当前播放位置下的填充比例，0=未播放，1=已播放完。 */

@@ -32,6 +32,7 @@ class MusicTogetherSocket(
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                if (this@MusicTogetherSocket.webSocket !== webSocket) return
                 runCatching {
                     val message = JSONObject(text)
                     val event = message.optString("event")
@@ -41,7 +42,7 @@ class MusicTogetherSocket(
             }
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                webSocket.close(code, reason)
+                if (this@MusicTogetherSocket.webSocket === webSocket) webSocket.close(code, reason)
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {

@@ -1,5 +1,6 @@
 package io.github.yueby.musictogether.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -9,15 +10,20 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Headphones
@@ -32,9 +38,11 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -48,6 +56,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import androidx.compose.foundation.shape.CircleShape
@@ -59,12 +68,15 @@ import io.github.yueby.musictogether.logging.AppLogger
 import io.github.yueby.musictogether.model.AppState
 import io.github.yueby.musictogether.model.ConnectionStatus
 import io.github.yueby.musictogether.model.RoomListItem
+import io.github.yueby.musictogether.model.ServerConnection
+
+private data class RoomTarget(val serverUrl: String, val room: RoomListItem)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LobbyScreen(state: AppState, contentPadding: PaddingValues, viewModel: MusicTogetherViewModel) {
     var createDialog by remember { mutableStateOf(false) }
-    var joinTarget by remember { mutableStateOf<RoomListItem?>(null) }
+    var joinTarget by remember { mutableStateOf<RoomTarget?>(null) }
     var directRoomId by remember { mutableStateOf("") }
     var connectionExpanded by remember {
         mutableStateOf(state.connectionStatus != ConnectionStatus.Connected)
@@ -86,7 +98,7 @@ fun LobbyScreen(state: AppState, contentPadding: PaddingValues, viewModel: Music
                 Column(Modifier.weight(1f)) {
                     Text("Music Together", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Text(
-                        if (state.connectionStatus == ConnectionStatus.Connected) "已连接" else "未连接",
+                        "${state.servers.count { it.status == ConnectionStatus.Connected }}/${state.servers.size} 台服务器在线",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -115,13 +127,13 @@ fun LobbyScreen(state: AppState, contentPadding: PaddingValues, viewModel: Music
             if (connectionExpanded) {
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("连接设置", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text("服务器连接", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         OutlinedTextField(
                             value = state.serverUrl,
                             onValueChange = viewModel::updateServerUrl,
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
-                            label = { Text("服务端 URL") },
+                            label = { Text("服务器 URL") },
                             supportingText = { Text("例如 https://music.example.com") },
                         )
                         OutlinedTextField(
@@ -137,10 +149,57 @@ fun LobbyScreen(state: AppState, contentPadding: PaddingValues, viewModel: Music
                                 Spacer(Modifier.padding(4.dp))
                             }
                             Text(when (state.connectionStatus) {
-                                ConnectionStatus.Connected -> "重新连接"
-                                ConnectionStatus.Connecting -> "连接中"
-                                ConnectionStatus.Disconnected -> "连接"
+                                ConnectionStatus.Connected -> "添加并切换"
+                                ConnectionStatus.Connecting -> "正在连接"
+                                ConnectionStatus.Disconnected -> "添加并连接"
                             })
+                        }
+                        state.servers.forEachIndexed { index, server ->
+                            if (index > 0) HorizontalDivider()
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Icon(
+                                    Icons.Default.Dns,
+                                    contentDescription = null,
+                                    tint = if (server.status == ConnectionStatus.Connected) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                )
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        server.url,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = if (server.url == state.selectedServerUrl) FontWeight.SemiBold else FontWeight.Normal,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        when (server.status) {
+                                            ConnectionStatus.Connected -> "已连接 · ${server.rooms.size} 个房间"
+                                            ConnectionStatus.Connecting -> "连接中"
+                                            ConnectionStatus.Disconnected -> server.error ?: "未连接"
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                if (server.url != state.selectedServerUrl) {
+                                    TextButton(onClick = { viewModel.selectServer(server.url) }) { Text("切换") }
+                                }
+                                IconButton(
+                                    onClick = { viewModel.removeServer(server.url) },
+                                    enabled = state.servers.size > 1,
+                                ) {
+                                    Icon(Icons.Default.Delete, "移除服务器")
+                                }
+                            }
                         }
                         if (BuildConfig.DEBUG) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -255,29 +314,64 @@ fun LobbyScreen(state: AppState, contentPadding: PaddingValues, viewModel: Music
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("公开房间", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("所有公开房间", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Text(
-                        if (state.connectionStatus == ConnectionStatus.Connected) "${state.rooms.size} 个房间" else "等待连接服务端",
+                        "${state.servers.sumOf { it.rooms.size }} 个房间 · ${state.servers.size} 台服务器",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                IconButton(onClick = viewModel::refreshRooms, enabled = state.connectionStatus == ConnectionStatus.Connected) {
+                IconButton(
+                    onClick = viewModel::refreshRooms,
+                    enabled = state.servers.any { it.status == ConnectionStatus.Connected },
+                ) {
                     Icon(Icons.Default.Refresh, "刷新")
                 }
             }
         }
-        if (state.rooms.isEmpty()) {
+        if (state.servers.all { it.rooms.isEmpty() }) {
             item {
                 Text(
-                    if (state.connectionStatus == ConnectionStatus.Connected) "暂无房间，创建一个开始听歌吧。" else "连接后会显示房间列表。",
+                    if (state.servers.any { it.status == ConnectionStatus.Connected }) {
+                        "已连接的服务器暂无公开房间。"
+                    } else {
+                        "正在连接服务器，房间列表稍后显示。"
+                    },
                     modifier = Modifier.padding(vertical = 28.dp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         } else {
-            items(state.rooms, key = { it.id }) { room ->
-                RoomCard(room) {
-                    if (room.hasPassword) joinTarget = room else viewModel.joinRoom(room.id)
+            state.servers.filter { it.rooms.isNotEmpty() }.forEach { server ->
+                item(key = "server:${server.url}") {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            server.url.removePrefix("https://").removePrefix("http://"),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            when (server.status) {
+                                ConnectionStatus.Connected -> if (server.url == state.selectedServerUrl) {
+                                    "当前服务器"
+                                } else {
+                                    "${server.rooms.size} 个房间"
+                                }
+                                ConnectionStatus.Connecting -> "正在连接"
+                                ConnectionStatus.Disconnected -> "离线 · 上次发现 ${server.rooms.size} 个房间"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                items(server.rooms, key = { room -> "${server.url}:${room.id}" }) { room ->
+                    RoomCard(room) {
+                        if (room.hasPassword) {
+                            joinTarget = RoomTarget(server.url, room)
+                        } else {
+                            viewModel.joinRoomOnServer(server.url, room.id)
+                        }
+                    }
                 }
             }
         }
@@ -285,17 +379,19 @@ fun LobbyScreen(state: AppState, contentPadding: PaddingValues, viewModel: Music
 
     if (createDialog) {
         CreateRoomDialog(
+            servers = state.servers,
+            initialServerUrl = state.selectedServerUrl,
             onDismiss = { createDialog = false },
-            onCreate = { name, password ->
+            onCreate = { serverUrl, name, password ->
                 createDialog = false
-                viewModel.createRoom(name, password)
+                viewModel.createRoomOnServer(serverUrl, name, password)
             },
         )
     }
-    joinTarget?.let { room ->
-        PasswordDialog(room.name, onDismiss = { joinTarget = null }) { password ->
+    joinTarget?.let { target ->
+        PasswordDialog(target.room.name, onDismiss = { joinTarget = null }) { password ->
             joinTarget = null
-            viewModel.joinRoom(room.id, password)
+            viewModel.joinRoomOnServer(target.serverUrl, target.room.id, password)
         }
     }
     if (accountSettingsOpen) {
@@ -328,14 +424,57 @@ private fun RoomCard(room: RoomListItem, onClick: () -> Unit) {
 }
 
 @Composable
-private fun CreateRoomDialog(onDismiss: () -> Unit, onCreate: (String, String) -> Unit) {
+private fun CreateRoomDialog(
+    servers: List<ServerConnection>,
+    initialServerUrl: String,
+    onDismiss: () -> Unit,
+    onCreate: (String, String, String) -> Unit,
+) {
     var name by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var selectedServerUrl by remember(initialServerUrl) { mutableStateOf(initialServerUrl) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("创建房间") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                modifier = Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text("创建到服务器", style = MaterialTheme.typography.labelLarge)
+                servers.forEach { server ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { selectedServerUrl = server.url }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        RadioButton(
+                            selected = selectedServerUrl == server.url,
+                            onClick = { selectedServerUrl = server.url },
+                        )
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                server.url,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                when (server.status) {
+                                    ConnectionStatus.Connected -> "已连接"
+                                    ConnectionStatus.Connecting -> "连接中"
+                                    ConnectionStatus.Disconnected -> "未连接，创建时将自动连接"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+                HorizontalDivider()
                 OutlinedTextField(name, { name = it.take(30) }, label = { Text("房间名（可选）") }, singleLine = true)
                 OutlinedTextField(
                     password,
@@ -346,7 +485,14 @@ private fun CreateRoomDialog(onDismiss: () -> Unit, onCreate: (String, String) -
                 )
             }
         },
-        confirmButton = { Button(onClick = { onCreate(name, password) }) { Text("创建") } },
+        confirmButton = {
+            Button(
+                onClick = { onCreate(selectedServerUrl, name, password) },
+                enabled = servers.any { it.url == selectedServerUrl },
+            ) {
+                Text("创建")
+            }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
 }
