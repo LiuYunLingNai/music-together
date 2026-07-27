@@ -1,6 +1,7 @@
 package io.github.yueby.musictogether.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -93,9 +94,9 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -718,32 +719,39 @@ private fun LyricLineItem(line: LyricLine, positionMs: Float, active: Boolean) {
     val textAlign = if (line.isDuet) TextAlign.End else TextAlign.Start
     val isBackground = line.isBackground
 
-    // 行级：active 切大一点、亮一点、字重加粗；非 active 缩 0.92、淡到 0.45
+    // 行级：active 放大、亮、加粗；非 active 微缩、淡、SemiBold
     val scale by animateFloatAsState(
-        targetValue = if (active) 1f else 0.92f,
-        animationSpec = spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow),
+        targetValue = if (active) 1f else 0.97f,
+        animationSpec = spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMediumLow),
         label = "lyricScale",
     )
     val alpha by animateFloatAsState(
-        targetValue = if (active) 1f else if (isBackground) 0.4f else 0.5f,
-        animationSpec = tween(280),
+        targetValue = if (active) 1f else if (isBackground) 0.35f else 0.42f,
+        animationSpec = tween(500),
         label = "lyricAlpha",
     )
     val fontSize by animateFloatAsState(
         targetValue = if (active) 24f else if (isBackground) 16f else 19f,
-        animationSpec = spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow),
+        animationSpec = spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMediumLow),
         label = "lyricFontSize",
     )
-    val fontWeight = if (active) FontWeight.Bold else FontWeight.Medium
+    val fontWeight = if (active) FontWeight.Bold else FontWeight.SemiBold
 
     val playedColor = MaterialTheme.colorScheme.onSurface
     val unplayedColor = remember(playedColor) { playedColor.copy(alpha = 0.32f) }
 
-    // 整行跟随行的播放进度上浮：未开始 +12dp，开始时连续上浮到 0dp
+    // 整行上浮：用 Animatable + spring 做弹性跟随，比直接绑定 lineProgress 自然得多
     val lineProgress = if (line.endTimeMs > line.startTimeMs) {
         ((positionMs - line.startTimeMs) / (line.endTimeMs - line.startTimeMs)).coerceIn(0f, 1f)
     } else 0f
-    val rowOffset = (1f - lineProgress) * 12f
+    val rowOffsetAnim = remember { Animatable(0f) }
+    LaunchedEffect(lineProgress) {
+        rowOffsetAnim.animateTo(
+            targetValue = (1f - lineProgress) * 10f,
+            animationSpec = spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessLow),
+        )
+    }
+    val rowOffset = rowOffsetAnim.value
 
     Column(
         modifier = Modifier
@@ -752,7 +760,8 @@ private fun LyricLineItem(line: LyricLine, positionMs: Float, active: Boolean) {
                 scaleX = scale
                 scaleY = scale
                 this.alpha = alpha
-                translationY = if (active) -rowOffset else rowOffset * 0.4f
+                translationY = if (active) -rowOffset else rowOffset * 0.35f
+                shadowElevation = if (active) 3f else 0f
                 transformOrigin = if (line.isDuet) TransformOrigin(1f, 0f) else TransformOrigin(0f, 0f)
             },
         horizontalAlignment = alignment,
@@ -770,7 +779,7 @@ private fun LyricLineItem(line: LyricLine, positionMs: Float, active: Boolean) {
             modifier = Modifier.fillMaxWidth(),
             textAlign = textAlign,
             fontSize = fontSize.sp,
-            lineHeight = (fontSize * 1.3f).sp,
+            lineHeight = (fontSize * 1.35f).sp,
             fontWeight = fontWeight,
         )
         line.translatedLyric.takeIf { it.isNotBlank() }?.let {
@@ -778,7 +787,7 @@ private fun LyricLineItem(line: LyricLine, positionMs: Float, active: Boolean) {
                 it,
                 Modifier
                     .fillMaxWidth()
-                    .graphicsLayer { translationY = if (active) -rowOffset * 0.4f else 0f },
+                    .graphicsLayer { translationY = if (active) -rowOffset * 0.35f else 0f },
                 textAlign = textAlign,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -789,7 +798,7 @@ private fun LyricLineItem(line: LyricLine, positionMs: Float, active: Boolean) {
                 it,
                 Modifier
                     .fillMaxWidth()
-                    .graphicsLayer { translationY = if (active) -rowOffset * 0.3f else 0f },
+                    .graphicsLayer { translationY = if (active) -rowOffset * 0.25f else 0f },
                 textAlign = textAlign,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -798,7 +807,11 @@ private fun LyricLineItem(line: LyricLine, positionMs: Float, active: Boolean) {
     }
 }
 
-/** 构建歌词 AnnotatedString。逐字扫光由 Brush.horizontalGradient 实现，未播放字走半透明灰。 */
+/**
+ * 构建歌词 AnnotatedString。
+ * 逐字颜色用 [lerp] 做 0..1 平滑过渡，避免 gradient stops 硬切分的不自然感；
+ * 同时非 active 行统一压暗，让当前行更突出。
+ */
 private fun buildLyricText(
     words: List<LyricWord>,
     positionMs: Float,
@@ -809,24 +822,12 @@ private fun buildLyricText(
 ) = buildAnnotatedString {
     words.forEach { word ->
         val ratio = wordProgress(word, positionMs)
-        val style = when {
-            ratio <= 0f -> SpanStyle(color = if (active) unplayedColor else playedColor.copy(alpha = 0.32f), fontWeight = fontWeight)
-            ratio >= 1f -> SpanStyle(color = playedColor, fontWeight = fontWeight)
-            else -> {
-                // 0..1 之间生成硬切分 stops：在 ratio 处由 playedColor 跳到 unplayedColor，
-                // 配合 fontWeight 变化实现"唱到的字高亮，未唱到字半透灰"
-                val stops = arrayOf(
-                    (ratio - 0.001f).coerceAtLeast(0f) to playedColor,
-                    ratio to unplayedColor,
-                    1f to unplayedColor,
-                )
-                SpanStyle(
-                    brush = Brush.horizontalGradient(colorStops = stops),
-                    fontWeight = fontWeight,
-                )
-            }
+        val color = when {
+            ratio <= 0f -> if (active) unplayedColor else playedColor.copy(alpha = 0.30f)
+            ratio >= 1f -> playedColor
+            else -> lerp(unplayedColor, playedColor, ratio)
         }
-        withStyle(style) { append(word.text) }
+        withStyle(SpanStyle(color = color, fontWeight = fontWeight)) { append(word.text) }
     }
 }
 
@@ -838,18 +839,25 @@ private fun InterludeDots(line: LyricLine, positionMs: Float, active: Boolean) {
     val progress = ((positionMs - start) / duration).coerceIn(0f, 0.999f)
     val highlightedDot = (progress * 3).toInt().coerceIn(0, 2)
     val alpha by animateFloatAsState(
-        targetValue = if (active) 1f else 0.45f,
-        animationSpec = tween(280),
+        targetValue = if (active) 1f else 0.42f,
+        animationSpec = tween(500),
         label = "interludeAlpha",
     )
     val lineProgress = (progress / 0.999f).coerceIn(0f, 1f)
+    val rowOffsetAnim = remember { Animatable(0f) }
+    LaunchedEffect(lineProgress) {
+        rowOffsetAnim.animateTo(
+            targetValue = lineProgress * 10f,
+            animationSpec = spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessLow),
+        )
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .height(31.dp)
             .graphicsLayer {
                 this.alpha = alpha
-                translationY = if (active) -lineProgress * 12f else 0f
+                translationY = if (active) -rowOffsetAnim.value else 0f
             },
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
