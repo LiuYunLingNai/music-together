@@ -61,6 +61,12 @@
 - **实时聊天** -- 房间内文字聊天，支持系统消息
 - **移动端适配** -- 响应式设计，横竖屏自动切换布局
 
+## 演示站点
+
+```bash
+https://sharemusic.lyln114514.com
+```
+
 ## 快速开始
 
 ### 环境要求
@@ -71,7 +77,7 @@
 ### 安装与开发
 
 ```bash
-git clone https://github.com/Yueby/music-together.git
+git clone https://github.com/LiuYunLingNai/music-together.git
 cd music-together
 pnpm install
 pnpm dev
@@ -86,8 +92,17 @@ Docker 单镜像部署：
 ```bash
 docker run -d --name music-together --restart unless-stopped \
   -p 3001:3001 \
-  ghcr.io/yueby/music-together:latest
+  ghcr.io/LiuYunLingNai/music-together:latest
 ```
+
+如果您所在地区网络不是很好，请使用：
+
+```bash
+docker run -d --name music-together --restart unless-stopped \
+  -p 3001:3001 \
+  ghcr.nju.edu.cn/LiuYunLingNai/music-together:latest
+```
+
 
 > 如果宿主机 `3001` 端口已被占用，修改 `-p 宿主机端口:容器端口` 左侧端口即可，例如 `-p 8080:3001`。
 
@@ -112,6 +127,7 @@ push 到 main 后 GitHub Actions 自动构建镜像。详见 [架构文档](docs
 
 ```
 packages/
+  android-client   -- 安卓端服务
   client/   -- 前端 React 应用
   server/   -- 后端 Node.js 服务
   shared/   -- 共享类型、常量与权限定义
