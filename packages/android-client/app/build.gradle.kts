@@ -25,6 +25,18 @@ android {
         versionName = "1.7.0"
     }
 
+    flavorDimensions += "distribution"
+
+    productFlavors {
+        create("standard") {
+            dimension = "distribution"
+        }
+        create("vivo") {
+            dimension = "distribution"
+            applicationId = "cmccwm.mobilemusic"
+        }
+    }
+
     buildFeatures {
         compose = true
         buildConfig = true

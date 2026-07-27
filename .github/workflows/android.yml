@@ -108,23 +108,26 @@ jobs:
       - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@v6
 
-      - name: Build Debug APK
+      - name: Build Debug APKs
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon assembleDebug
+          ./gradlew --no-daemon assembleStandardDebug assembleVivoDebug
 
-      - name: Create Debug checksum
+      - name: Create Debug checksums
         run: |
-          cd app/build/outputs/apk/debug
-          sha256sum app-debug.apk > app-debug.apk.sha256
+          cd app/build/outputs/apk
+          sha256sum standard/debug/app-standard-debug.apk > app-standard-debug.apk.sha256
+          sha256sum vivo/debug/app-vivo-debug.apk > app-vivo-debug.apk.sha256
 
-      - name: Upload Debug APK
+      - name: Upload Debug APKs
         uses: actions/upload-artifact@v7
         with:
           name: music-together-android-debug-${{ github.run_number }}
           path: |
-            packages/android-client/app/build/outputs/apk/debug/app-debug.apk
-            packages/android-client/app/build/outputs/apk/debug/app-debug.apk.sha256
+            packages/android-client/app/build/outputs/apk/standard/debug/app-standard-debug.apk
+            packages/android-client/app/build/outputs/apk/standard/debug/app-standard-debug.apk.sha256
+            packages/android-client/app/build/outputs/apk/vivo/debug/app-vivo-debug.apk
+            packages/android-client/app/build/outputs/apk/vivo/debug/app-vivo-debug.apk.sha256
           if-no-files-found: error
           retention-days: 30
 
@@ -182,14 +185,15 @@ jobs:
             printf 'keyPassword=%s\n' "$ANDROID_KEY_PASSWORD"
           } > keystore.properties
 
-      - name: Build signed Release APK and AAB
+      - name: Build signed Release APKs and AAB
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon assembleRelease bundleRelease
+          ./gradlew --no-daemon assembleStandardRelease assembleVivoRelease bundleStandardRelease
 
-      - name: Verify Release APK signature
+      - name: Verify Release APK signatures
         run: |
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/standard/release/app-standard-release.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/vivo/release/app-vivo-release.apk
 
       - name: Prepare named Release files and checksums
         env:
@@ -197,10 +201,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp app/build/outputs/apk/release/app-release.apk "dist/music-together-v${VERSION}.apk"
-          cp app/build/outputs/bundle/release/app-release.aab "dist/music-together-v${VERSION}.aab"
+          cp app/build/outputs/apk/standard/release/app-standard-release.apk "dist/music-together-v${VERSION}.apk"
+          cp app/build/outputs/apk/vivo/release/app-vivo-release.apk "dist/music-together-vivo-${VERSION}.apk"
+          cp app/build/outputs/bundle/standardRelease/app-standard-release.aab "dist/music-together-v${VERSION}.aab"
           cd dist
           sha256sum "music-together-v${VERSION}.apk" > "music-together-v${VERSION}.apk.sha256"
+          sha256sum "music-together-vivo-${VERSION}.apk" > "music-together-vivo-${VERSION}.apk.sha256"
           sha256sum "music-together-v${VERSION}.aab" > "music-together-v${VERSION}.aab.sha256"
 
       - name: Upload signed Release artifacts
