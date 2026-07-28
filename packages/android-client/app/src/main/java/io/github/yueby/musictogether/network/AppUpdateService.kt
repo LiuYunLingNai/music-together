@@ -25,7 +25,9 @@ class AppUpdateService(private val client: OkHttpClient) {
             .build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw IOException("更新检查失败（${response.code}）")
-            val releases = JSONArray(response.body.string())
+            val releases = JSONArray(
+                (response.body ?: throw IOException("更新检查响应为空")).string(),
+            )
             (0 until releases.length())
                 .mapNotNull(releases::optJSONObject)
                 .firstNotNullOfOrNull { release ->
@@ -49,7 +51,7 @@ class AppUpdateService(private val client: OkHttpClient) {
         try {
             executeAssetRequest(update.apkUrl, source).use { response ->
                 if (!response.isSuccessful) throw IOException("APK 下载失败（${response.code}）")
-                val body = response.body
+                val body = response.body ?: throw IOException("APK 下载响应为空")
                 val total = body.contentLength()
                 if (total > MAX_APK_BYTES) throw IOException("更新包超过允许大小")
                 val digest = MessageDigest.getInstance("SHA-256")
@@ -94,7 +96,8 @@ class AppUpdateService(private val client: OkHttpClient) {
     private fun fetchChecksum(url: String, source: UpdateDownloadSource): String {
         executeAssetRequest(url, source).use { response ->
             if (!response.isSuccessful) throw IOException("更新包校验文件下载失败（${response.code}）")
-            return response.body.string().trim().substringBefore(' ').lowercase()
+            return (response.body ?: throw IOException("更新包校验文件响应为空"))
+                .string().trim().substringBefore(' ').lowercase()
                 .takeIf { it.matches(Regex("[0-9a-f]{64}")) }
                 ?: throw IOException("更新包校验文件格式错误")
         }
