@@ -119,7 +119,13 @@ export function createRoom(
   const userId = persistentUserId || socketId
   const persistedUser = userRepo.ensure(userId, { nickname })
   const profile = persistedUser.nickname ? persistedUser : userRepo.updateProfile(userId, { nickname })
-  const user: User = { id: userId, nickname: profile.nickname, avatarUrl: profile.avatarUrl, role: 'owner' }
+  const user: User = {
+    id: userId,
+    nickname: profile.nickname,
+    avatarUrl: profile.avatarUrl,
+    role: 'owner',
+    isServerAdmin: userRepo.isServerAdmin(userId),
+  }
 
   const room: RoomData = {
     id: roomId,
@@ -189,6 +195,7 @@ export function joinRoom(
     existing.nickname = profile.nickname
     existing.avatarUrl = profile.avatarUrl
     existing.role = resolveRole()
+    existing.isServerAdmin = userRepo.isServerAdmin(userId)
     roomRepo.setSocketMapping(socketId, roomId, userId)
     const roleChanged = reconcileRoomRoles(room)
     const hostChanged = electConductor(room)
@@ -197,7 +204,13 @@ export function joinRoom(
 
   // New user entry
   const role = resolveRole()
-  const user: User = { id: userId, nickname: profile.nickname, avatarUrl: profile.avatarUrl, role }
+  const user: User = {
+    id: userId,
+    nickname: profile.nickname,
+    avatarUrl: profile.avatarUrl,
+    role,
+    isServerAdmin: userRepo.isServerAdmin(userId),
+  }
   room.users.push(user)
   roomRepo.setSocketMapping(socketId, roomId, userId)
 

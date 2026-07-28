@@ -1,13 +1,12 @@
 import {
   EVENTS,
   ERROR_CODE,
-  defineAbilityFor,
   playerSeekSchema,
   playerSetModeSchema,
   playerSyncSchema,
 } from '@music-together/shared'
 import type { TypedServer, TypedSocket } from '../middleware/types.js'
-import { createWithPermission } from '../middleware/withControl.js'
+import { createWithPermission, defineAbilityForRoomUser } from '../middleware/withControl.js'
 import { createWithRoom } from '../middleware/withRoom.js'
 import { checkSocketRateLimit } from '../middleware/socketRateLimiter.js'
 import { roomRepo } from '../repositories/roomRepository.js'
@@ -59,7 +58,7 @@ export function registerPlayerController(io: TypedServer, socket: TypedSocket) {
     EVENTS.PLAYER_NEXT,
     withRoom(async (ctx) => {
       if (ctx.user.id !== ctx.room.hostId) {
-        const ability = defineAbilityFor(ctx.user.role)
+        const ability = defineAbilityForRoomUser(ctx.user.id, ctx.user.role)
         if (!ability.can('next', 'Player')) {
           ctx.socket.emit(EVENTS.ROOM_ERROR, {
             code: ERROR_CODE.NO_PERMISSION,

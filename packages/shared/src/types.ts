@@ -115,6 +115,8 @@ export interface User {
   id: string
   nickname: string
   role: UserRole
+  /** Account-level server administrator status, independent of the room role. */
+  isServerAdmin: boolean
   avatarUrl?: string | null
 }
 
