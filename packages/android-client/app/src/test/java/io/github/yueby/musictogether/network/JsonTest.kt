@@ -32,6 +32,32 @@ class JsonTest {
         assertFalse(roomJson().toRoomState().permanent)
     }
 
+    @Test
+    fun trackPreservesBilibiliMetadataFields() {
+        val track = JSONObject(
+            """{
+              "id": "bvid-1",
+              "title": "Video",
+              "artist": ["Uploader"],
+              "album": "Bilibili",
+              "duration": 180,
+              "cover": "https://cover.example/metadata.jpg",
+              "bilibiliCover": "https://cover.example/video.jpg",
+              "source": "bilibili",
+              "sourceId": "BV1xx",
+              "urlId": "BV1xx",
+              "lyricId": "123",
+              "picId": "123",
+              "metadataSource": "netease"
+            }""".trimIndent(),
+        ).toTrack()
+
+        assertEquals("bilibili", track.source)
+        assertEquals("https://cover.example/video.jpg", track.bilibiliCover)
+        assertEquals("netease", track.metadataSource)
+        assertEquals("netease", track.toJson().getString("metadataSource"))
+    }
+
     private fun roomJson() = JSONObject(
         """{
           "id": "room-1",

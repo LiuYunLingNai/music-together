@@ -54,9 +54,22 @@ data class Track(
     val urlId: String,
     val lyricId: String? = null,
     val picId: String? = null,
+    val bilibiliCover: String? = null,
+    val metadataSource: String? = null,
     val streamUrl: String? = null,
     val vip: Boolean = false,
     val requestedBy: String? = null,
+)
+
+@Immutable
+data class BilibiliMetadataMatchState(
+    val track: Track? = null,
+    val pinned: Boolean = false,
+    val source: String = "netease",
+    val keyword: String = "",
+    val results: List<Track> = emptyList(),
+    val loading: Boolean = false,
+    val error: String? = null,
 )
 
 @Immutable
@@ -256,6 +269,8 @@ data class AppState(
     val searchKeyword: String = "",
     val searchSource: String = "netease",
     val searchError: String? = null,
+    val bilibiliMetadataMatch: BilibiliMetadataMatchState = BilibiliMetadataMatchState(),
+    val lyricOffsets: Map<String, Int> = emptyMap(),
     val activeVote: VoteState? = null,
     val lyrics: LyricsState = LyricsState(),
     val platformHub: PlatformHubState = PlatformHubState(),

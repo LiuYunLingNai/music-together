@@ -10,8 +10,10 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.yueby.musictogether.logging.AppLogger
 import io.github.yueby.musictogether.lyrics.LyricsParser
+import io.github.yueby.musictogether.lyrics.lyricOffsetKey
 import io.github.yueby.musictogether.model.AppState
 import io.github.yueby.musictogether.model.AccountProfile
+import io.github.yueby.musictogether.model.BilibiliMetadataMatchState
 import io.github.yueby.musictogether.model.ChatMessage
 import io.github.yueby.musictogether.model.ConnectionStatus
 import io.github.yueby.musictogether.model.LyricsState
@@ -77,12 +79,14 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         const val QR_SUCCESS = 803
         const val MAX_QUEUE_SIZE = 1000
         const val MAX_QUEUE_BATCH_SIZE = 200
+        val BILIBILI_METADATA_SOURCES = setOf("netease", "tencent")
         val ACCOUNT_ID_PATTERN = Regex("^[a-z0-9_-]{3,32}$")
         const val MAX_AVATAR_BYTES = 5 * 1024 * 1024
         const val DEFAULT_SERVER_URL = "https://sharemusic.lyln114514.com"
         const val SERVERS_KEY = "server_urls"
         const val MAX_SERVERS = 10
         const val UPDATE_SOURCE_KEY = "update_download_source"
+        const val LYRIC_OFFSETS_KEY = "lyric_offsets"
         const val GITHUB_RELEASES_API = "https://api.github.com/repos/LiuYunLingNai/music-together/releases"
     }
 
@@ -108,6 +112,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             selectedServerUrl = initialServerUrls.first(),
             servers = initialServerUrls.map { ServerConnection(it) },
             nickname = preferences.getString("nickname", "").orEmpty(),
+            lyricOffsets = loadLyricOffsets(),
             updateSource = preferences.getString(UPDATE_SOURCE_KEY, null)
                 ?.let { runCatching { UpdateDownloadSource.valueOf(it) }.getOrNull() }
                 ?: UpdateDownloadSource.GitHub,
@@ -128,6 +133,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private var shouldReconnect = false
     private var reconnectJob: Job? = null
     private var clockJob: Job? = null
+    private var bilibiliMetadataSearchJob: Job? = null
     private var syncJob: Job? = null
     private var lyricJob: Job? = null
     private var searchJob: Job? = null
@@ -553,6 +559,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         pendingQueueActions.clear()
         chatVisible = false
         chatNotifications.clear()
+        dismissBilibiliMetadata()
         resetPlatformRoomState()
         waitingForJoinRoomState = false
         _state.value = _state.value.copy(room = null, messages = emptyList(), activeVote = null)
@@ -591,11 +598,44 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun addTrack(track: Track) {
-        emitSearchQueueAction(track, pinned = false)
+        if (track.source == "bilibili") beginBilibiliMetadataMatch(track, pinned = false)
+        else emitSearchQueueAction(track, pinned = false)
     }
 
     fun insertAfterCurrent(track: Track) {
-        emitSearchQueueAction(track, pinned = true)
+        if (track.source == "bilibili") beginBilibiliMetadataMatch(track, pinned = true)
+        else emitSearchQueueAction(track, pinned = true)
+    }
+
+    fun searchBilibiliMetadata(keyword: String, source: String) {
+        val match = _state.value.bilibiliMetadataMatch
+        if (match.track == null || source !in BILIBILI_METADATA_SOURCES || keyword.isBlank()) return
+        requestBilibiliMetadataSearch(match.copy(source = source, keyword = keyword.trim().take(100)))
+    }
+
+    fun selectBilibiliMetadata(metadataTrack: Track) {
+        val match = _state.value.bilibiliMetadataMatch
+        val track = match.track ?: return
+        val resolvedTrack = track.copy(
+            metadataSource = match.source,
+            lyricId = metadataTrack.lyricId,
+            picId = metadataTrack.picId,
+            cover = metadataTrack.cover.ifBlank { track.cover },
+        )
+        _state.value = _state.value.copy(bilibiliMetadataMatch = BilibiliMetadataMatchState())
+        emitSearchQueueAction(resolvedTrack, match.pinned)
+    }
+
+    fun skipBilibiliMetadata() {
+        val match = _state.value.bilibiliMetadataMatch
+        val track = match.track ?: return
+        _state.value = _state.value.copy(bilibiliMetadataMatch = BilibiliMetadataMatchState())
+        emitSearchQueueAction(track, match.pinned)
+    }
+
+    fun dismissBilibiliMetadata() {
+        bilibiliMetadataSearchJob?.cancel()
+        _state.value = _state.value.copy(bilibiliMetadataMatch = BilibiliMetadataMatchState())
     }
 
     fun requestPlatformStatus() {
@@ -818,6 +858,15 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
 
     fun seek(seconds: Double) {
         if (canControl()) socket.emit(Events.PLAYER_SEEK, JSONObject().put("currentTime", seconds.coerceAtLeast(0.0)))
+    }
+
+    fun setLyricOffset(track: Track?, offsetMs: Int) {
+        val key = lyricOffsetKey(track) ?: return
+        val value = offsetMs.coerceIn(-10_000, 10_000)
+        val lyricOffsets = _state.value.lyricOffsets.toMutableMap()
+        if (value == 0) lyricOffsets.remove(key) else lyricOffsets[key] = value
+        persistLyricOffsets(lyricOffsets)
+        _state.value = _state.value.copy(lyricOffsets = lyricOffsets)
     }
 
     fun setPlayMode(mode: String) {
@@ -1535,6 +1584,25 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private fun platformCookieKey(platform: String): String =
         "platform_auth:${activeServer?.displayUrl.orEmpty()}:$platform"
 
+    private fun loadLyricOffsets(): Map<String, Int> {
+        val raw = preferences.getString(LYRIC_OFFSETS_KEY, null) ?: return emptyMap()
+        val json = runCatching { JSONObject(raw) }.getOrNull() ?: return emptyMap()
+        return buildMap {
+            val keys = json.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                val value = json.optInt(key, 0).coerceIn(-10_000, 10_000)
+                if (value != 0) put(key, value)
+            }
+        }
+    }
+
+    private fun persistLyricOffsets(offsets: Map<String, Int>) {
+        val json = JSONObject()
+        offsets.forEach { (key, value) -> json.put(key, value) }
+        preferences.edit().putString(LYRIC_OFFSETS_KEY, json.toString()).apply()
+    }
+
     private fun storedPlatformCookie(platform: String): String? =
         preferences.getString(platformCookieKey(platform), null)?.takeIf { it.isNotBlank() }
 
@@ -1609,6 +1677,51 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                         searchHasMore = false,
                         searchError = message,
                         searchResults = if (append) _state.value.searchResults else emptyList(),
+                    )
+                }
+        }
+    }
+
+    private fun beginBilibiliMetadataMatch(track: Track, pinned: Boolean) {
+        requestBilibiliMetadataSearch(
+            BilibiliMetadataMatchState(
+                track = track,
+                pinned = pinned,
+                source = "netease",
+                keyword = track.title,
+                loading = true,
+            ),
+        )
+    }
+
+    private fun requestBilibiliMetadataSearch(match: BilibiliMetadataMatchState) {
+        val server = activeServer ?: return setError("尚未连接服务器")
+        bilibiliMetadataSearchJob?.cancel()
+        val pending = match.copy(loading = true, error = null)
+        _state.value = _state.value.copy(bilibiliMetadataMatch = pending)
+        bilibiliMetadataSearchJob = viewModelScope.launch {
+            runCatching { api.search(server, pending.keyword, pending.source, _state.value.room?.id, page = 1) }
+                .onFailure { if (it is CancellationException) throw it }
+                .onSuccess { result ->
+                    val current = _state.value.bilibiliMetadataMatch
+                    if (
+                        current.track?.id != pending.track?.id ||
+                        current.source != pending.source ||
+                        current.keyword != pending.keyword
+                    ) return@onSuccess
+                    _state.value = _state.value.copy(
+                        bilibiliMetadataMatch = pending.copy(results = result.tracks, loading = false),
+                    )
+                }
+                .onFailure { error ->
+                    val current = _state.value.bilibiliMetadataMatch
+                    if (
+                        current.track?.id != pending.track?.id ||
+                        current.source != pending.source ||
+                        current.keyword != pending.keyword
+                    ) return@onFailure
+                    _state.value = _state.value.copy(
+                        bilibiliMetadataMatch = pending.copy(loading = false, error = error.message ?: "搜索失败"),
                     )
                 }
         }
@@ -1946,6 +2059,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         shouldReconnect = false
         lyricJob?.cancel()
         searchJob?.cancel()
+        bilibiliMetadataSearchJob?.cancel()
         PlaybackCommandBridge.listener = null
         socket.disconnect()
         socketServerUrl = null

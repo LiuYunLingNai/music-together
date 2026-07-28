@@ -74,8 +74,10 @@ import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VerticalAlignTop
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -142,6 +144,7 @@ import coil3.compose.AsyncImage
 import io.github.yueby.musictogether.BuildConfig
 import io.github.yueby.musictogether.MusicTogetherViewModel
 import io.github.yueby.musictogether.logging.AppLogger
+import io.github.yueby.musictogether.lyrics.lyricOffsetKey
 import io.github.yueby.musictogether.model.AppState
 import io.github.yueby.musictogether.model.ChatMessage
 import io.github.yueby.musictogether.model.LyricLine
@@ -331,6 +334,7 @@ fun RoomScreen(
                     room = room,
                     userId = appState.userId,
                     lyrics = appState.lyrics,
+                    lyricOffsets = appState.lyricOffsets,
                     viewModel = viewModel,
                     onOpenQueue = { activeOverlay = RoomOverlay.Queue },
                     onOpenChat = { activeOverlay = RoomOverlay.Chat },
@@ -402,12 +406,14 @@ private fun PlayerPane(
     room: RoomState,
     userId: String?,
     lyrics: LyricsState,
+    lyricOffsets: Map<String, Int>,
     viewModel: MusicTogetherViewModel,
     onOpenQueue: () -> Unit,
     onOpenChat: () -> Unit,
 ) {
     val player by viewModel.playerState.collectAsStateWithLifecycle()
     val track = player.track ?: room.currentTrack
+    val lyricOffsetMs = lyricOffsetKey(track)?.let { lyricOffsets[it] } ?: 0
     // Player visual is a room-level preference. Changing tracks must not force
     // users out of the lyrics view.
     var lyricsExpanded by remember(room.id) { mutableStateOf(false) }
@@ -416,6 +422,7 @@ private fun PlayerPane(
         track = track,
         room = room,
         lyrics = lyrics,
+        lyricOffsetMs = lyricOffsetMs,
         player = player,
         viewModel = viewModel,
         lyricsExpanded = lyricsExpanded,
@@ -431,6 +438,7 @@ private fun MobilePlayerSurface(
     track: Track?,
     room: RoomState,
     lyrics: LyricsState,
+    lyricOffsetMs: Int,
     player: PlayerUiState,
     viewModel: MusicTogetherViewModel,
     lyricsExpanded: Boolean,
@@ -513,10 +521,12 @@ private fun MobilePlayerSurface(
                         MobileLyricsHero(
                             track = track,
                             lyrics = lyrics,
+                            lyricOffsetMs = lyricOffsetMs,
                             player = player,
                             onShowCover = onToggleLyrics,
                             onOpenChat = onOpenChat,
                             onSeek = viewModel::seek,
+                            onSetLyricOffset = { offset -> viewModel.setLyricOffset(track, offset) },
                             sharedTransitionScope = this@SharedTransitionLayout,
                             animatedVisibilityScope = this,
                         )
@@ -629,13 +639,16 @@ private fun MobileCoverHero(
 private fun MobileLyricsHero(
     track: Track,
     lyrics: LyricsState,
+    lyricOffsetMs: Int,
     player: PlayerUiState,
     onShowCover: () -> Unit,
     onOpenChat: () -> Unit,
     onSeek: (Double) -> Unit,
+    onSetLyricOffset: (Int) -> Unit,
     sharedTransitionScope: SharedTransitionScope,
     animatedVisibilityScope: AnimatedVisibilityScope,
 ) {
+    var lyricOffsetDialogVisible by remember(track.id) { mutableStateOf(false) }
     val coverInteraction = remember { MutableInteractionSource() }
     val coverPressed by coverInteraction.collectIsPressedAsState()
     val coverScale by animateFloatAsState(
@@ -696,6 +709,18 @@ private fun MobileLyricsHero(
                     overflow = TextOverflow.Clip,
                 )
             }
+            if (lyricOffsetKey(track) != null) {
+                IconButton(
+                    onClick = { lyricOffsetDialogVisible = true },
+                    modifier = Modifier.size(40.dp),
+                ) {
+                    Icon(
+                        Icons.Default.Tune,
+                        contentDescription = "歌词时间校正",
+                        tint = Color.White.copy(alpha = 0.72f),
+                    )
+                }
+            }
             IconButton(
                 onClick = onOpenChat,
                 modifier = Modifier.size(40.dp),
@@ -716,11 +741,62 @@ private fun MobileLyricsHero(
             LyricsPanel(
                 lyrics = lyrics,
                 positionSeconds = player.positionSeconds,
+                lyricOffsetMs = lyricOffsetMs,
                 isPlaying = player.playing,
-                onSeek = onSeek,
+                onSeek = { lyricTimeSeconds -> onSeek(lyricTimeSeconds + lyricOffsetMs / 1000.0) },
             )
         }
     }
+    if (lyricOffsetDialogVisible) {
+        LyricOffsetDialog(
+            offsetMs = lyricOffsetMs,
+            onDismiss = { lyricOffsetDialogVisible = false },
+            onOffsetChange = onSetLyricOffset,
+        )
+    }
+}
+
+@Composable
+private fun LyricOffsetDialog(
+    offsetMs: Int,
+    onDismiss: () -> Unit,
+    onOffsetChange: (Int) -> Unit,
+) {
+    var offsetSeconds by remember(offsetMs) { mutableFloatStateOf(offsetMs / 1000f) }
+    val description = when {
+        offsetMs > 0 -> "歌词延后 ${"%.1f".format(Locale.getDefault(), offsetMs / 1000.0)} 秒"
+        offsetMs < 0 -> "歌词提前 ${"%.1f".format(Locale.getDefault(), -offsetMs / 1000.0)} 秒"
+        else -> "未校正"
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("歌词时间校正") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text(description)
+                Slider(
+                    value = offsetSeconds,
+                    onValueChange = { value ->
+                        offsetSeconds = value
+                        onOffsetChange((value * 1000).roundToInt())
+                    },
+                    valueRange = -10f..10f,
+                    steps = 199,
+                )
+                Text(
+                    "调整仅保存在本机，范围为提前或延后 10 秒。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("完成") }
+        },
+        dismissButton = {
+            TextButton(onClick = { onOffsetChange(0) }) { Text("重置") }
+        },
+    )
 }
 
 @Composable
@@ -1134,7 +1210,7 @@ private fun SearchPane(state: AppState, viewModel: MusicTogetherViewModel) {
     Column(Modifier.fillMaxSize().padding(12.dp)) {
         Text("搜索并点歌", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(8.dp))
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf("netease" to "网易云", "tencent" to "QQ 音乐", "kugou" to "酷狗").forEach { (value, label) ->
+            listOf("netease" to "网易云", "tencent" to "QQ 音乐", "kugou" to "酷狗", "bilibili" to "B站").forEach { (value, label) ->
                 AssistChip(onClick = { source = value }, label = { Text(label) }, leadingIcon = if (source == value) {
                     { Icon(Icons.Default.MusicNote, null, Modifier.size(16.dp)) }
                 } else null)
@@ -1144,7 +1220,7 @@ private fun SearchPane(state: AppState, viewModel: MusicTogetherViewModel) {
             value = keyword,
             onValueChange = { keyword = it.take(100) },
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("歌曲、歌手或专辑") },
+            label = { Text(if (source == "bilibili") "搜索 B 站视频" else "歌曲、歌手或专辑") },
             singleLine = true,
             trailingIcon = {
                 IconButton(onClick = { viewModel.search(keyword, source) }) { Icon(Icons.Default.Search, "搜索") }
@@ -1213,6 +1289,87 @@ private fun SearchPane(state: AppState, viewModel: MusicTogetherViewModel) {
             }
         }
     }
+    BilibiliMetadataDialog(state.bilibiliMetadataMatch, viewModel)
+}
+
+@Composable
+private fun BilibiliMetadataDialog(
+    match: io.github.yueby.musictogether.model.BilibiliMetadataMatchState,
+    viewModel: MusicTogetherViewModel,
+) {
+    val track = match.track ?: return
+    var keyword by remember(track.id) { mutableStateOf(match.keyword) }
+    AlertDialog(
+        onDismissRequest = viewModel::dismissBilibiliMetadata,
+        title = { Text("选择歌词和封面") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("netease" to "网易云音乐", "tencent" to "QQ 音乐").forEach { (source, label) ->
+                        AssistChip(
+                            onClick = { viewModel.searchBilibiliMetadata(keyword, source) },
+                            label = { Text(label) },
+                            leadingIcon = if (match.source == source) {
+                                { Icon(Icons.Default.MusicNote, null, Modifier.size(16.dp)) }
+                            } else {
+                                null
+                            },
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = keyword,
+                    onValueChange = { keyword = it.take(100) },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("搜索歌曲或歌手") },
+                    singleLine = true,
+                    trailingIcon = {
+                        IconButton(onClick = { viewModel.searchBilibiliMetadata(keyword, match.source) }) {
+                            Icon(Icons.Default.Search, "搜索")
+                        }
+                    },
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(
+                        onSearch = { viewModel.searchBilibiliMetadata(keyword, match.source) },
+                    ),
+                )
+                when {
+                    match.loading -> Box(Modifier.fillMaxWidth().padding(28.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                    match.error != null -> Text(match.error, color = MaterialTheme.colorScheme.error)
+                    match.results.isEmpty() -> Text(
+                        "未找到匹配歌曲，可修改关键词或直接播放视频。",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    else -> LazyColumn(Modifier.height(260.dp)) {
+                        items(match.results, key = { it.id }) { metadataTrack ->
+                            ListItem(
+                                headlineContent = { Text(metadataTrack.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                supportingContent = {
+                                    Text(
+                                        listOf(metadataTrack.artist.joinToString(" / "), metadataTrack.album)
+                                            .filter { it.isNotBlank() }
+                                            .joinToString(" · "),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                },
+                                modifier = Modifier.clickable { viewModel.selectBilibiliMetadata(metadataTrack) },
+                            )
+                            HorizontalDivider()
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = viewModel::skipBilibiliMetadata) { Text("直接播放视频") }
+        },
+        dismissButton = {
+            TextButton(onClick = viewModel::dismissBilibiliMetadata) { Text("取消") }
+        },
+    )
 }
 
 @Composable
@@ -1470,10 +1627,11 @@ private fun buildAmllLyricGroups(lines: List<LyricLine>): List<AmllLyricGroup> {
 private fun LyricsPanel(
     lyrics: LyricsState,
     positionSeconds: Double,
+    lyricOffsetMs: Int,
     isPlaying: Boolean,
     onSeek: ((Double) -> Unit)? = null,
 ) {
-    val rawPositionMs = (positionSeconds * 1000.0).toFloat().coerceAtLeast(0f)
+    val rawPositionMs = (positionSeconds * 1000.0 - lyricOffsetMs).toFloat().coerceAtLeast(0f)
     val smoothPositionMs = rememberSmoothPositionMs(rawPositionMs, isPlaying)
     val positionLong = rawPositionMs.toLong()
     val groups = remember(lyrics.lines) { buildAmllLyricGroups(lyrics.lines) }

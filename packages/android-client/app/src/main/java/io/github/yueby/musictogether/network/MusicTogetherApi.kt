@@ -161,11 +161,12 @@ class MusicTogetherApi(private val client: OkHttpClient) {
 
     suspend fun lyrics(server: ServerAddress, track: Track): JSONObject? = withContext(Dispatchers.IO) {
         val lyricId = track.lyricId?.takeIf { it.isNotBlank() } ?: return@withContext null
+        val source = track.metadataSource ?: track.source
         val url = server.api("music", "lyric").newBuilder()
-            .addQueryParameter("source", track.source)
+            .addQueryParameter("source", source)
             .addQueryParameter("lyricId", lyricId)
             .build()
-        executeJson(url, "lyrics:${track.source}")
+        executeJson(url, "lyrics:$source")
     }
 
     suspend fun playlist(
@@ -198,15 +199,18 @@ class MusicTogetherApi(private val client: OkHttpClient) {
     }
 
     suspend fun ttml(track: Track): String? = withContext(Dispatchers.IO) {
-        val folder = when (track.source) {
+        val source = track.metadataSource ?: track.source
+        val lyricTrackId = if (track.metadataSource != null) track.lyricId else track.sourceId
+        if (lyricTrackId.isNullOrBlank()) return@withContext null
+        val folder = when (source) {
             "netease" -> "ncm-lyrics"
             "tencent" -> "qq-lyrics"
             else -> return@withContext null
         }
-        val url = "https://amlldb.bikonoo.com/$folder/${track.sourceId}.ttml"
+        val url = "https://amlldb.bikonoo.com/$folder/$lyricTrackId.ttml"
         val request = Request.Builder().url(url).get().build()
         val ttmlClient = client.newBuilder().callTimeout(8, TimeUnit.SECONDS).build()
-        AppLogger.info("HTTP", "GET TTML source=${track.source} sourceId=${track.sourceId}")
+        AppLogger.info("HTTP", "GET TTML source=$source sourceId=$lyricTrackId")
         ttmlClient.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
                 AppLogger.warn("HTTP", "TTML status=${response.code}")
