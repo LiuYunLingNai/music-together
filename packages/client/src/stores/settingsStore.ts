@@ -26,7 +26,8 @@ type ResettableFields<K extends string, V> = {
 }
 
 /** 合并所有 resettable key 的字段为完整 SettingsStore 类型 */
-type SettingsStore = ResettableFields<'ttmlEnabled', boolean> &
+type SettingsStore = ResettableFields<'playbackTempoSyncEnabled', boolean> &
+  ResettableFields<'ttmlEnabled', boolean> &
   ResettableFields<'ttmlDbUrl', string> &
   ResettableFields<'lyricAlignAnchor', 'top' | 'center' | 'bottom'> &
   ResettableFields<'lyricAlignPosition', number> &
@@ -81,6 +82,7 @@ export const useSettingsStore = create<SettingsStore>((set) => {
   }
 
   return {
+    ...resettable('playbackTempoSyncEnabled', storage.getPlaybackTempoSyncEnabled, storage.setPlaybackTempoSyncEnabled),
     ...resettable('ttmlEnabled', storage.getTtmlEnabled, storage.setTtmlEnabled),
     ...resettable('ttmlDbUrl', storage.getTtmlDbUrl, storage.setTtmlDbUrl),
     ...resettable('lyricAlignAnchor', storage.getLyricAlignAnchor, storage.setLyricAlignAnchor),

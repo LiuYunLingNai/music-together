@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react'
 import { Howl } from 'howler'
 import type { Track } from '@music-together/shared'
 import { usePlayerStore } from '@/stores/playerStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { CURRENT_TIME_THROTTLE_MS } from '@/lib/constants'
 import { toast } from 'sonner'
 import { getServerTime } from '@/lib/clockSync'
@@ -51,6 +52,7 @@ export function useHowl(onTrackEnd: () => void) {
 
   // Use selectors for the one reactive value we need (volume sync effect)
   const volume = usePlayerStore((s) => s.volume)
+  const playbackTempoSyncEnabled = useSettingsStore((s) => s.playbackTempoSyncEnabled)
 
   // Throttled time update loop with stalled detection
   const startTimeUpdate = useCallback(() => {
@@ -334,6 +336,7 @@ export function useHowl(onTrackEnd: () => void) {
       stretchReadyRef.current = (canTimeStretch ? attachTimeStretch(howl) : Promise.resolve(null)).then(
         (controller) => {
           if (howlRef.current === howl) stretchRef.current = controller
+          controller?.setEnabled(useSettingsStore.getState().playbackTempoSyncEnabled)
           return controller
         },
       )
@@ -348,6 +351,13 @@ export function useHowl(onTrackEnd: () => void) {
       howlRef.current.volume(volume)
     }
   }, [volume])
+
+  useEffect(() => {
+    const controller = stretchRef.current
+    if (!controller) return
+    if (!playbackTempoSyncEnabled) controller.reset()
+    controller.setEnabled(playbackTempoSyncEnabled)
+  }, [playbackTempoSyncEnabled])
 
   // Cleanup on unmount
   useEffect(() => {

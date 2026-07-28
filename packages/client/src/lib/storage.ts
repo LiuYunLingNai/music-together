@@ -71,6 +71,7 @@ const LYRIC_ANCHORS = ['top', 'center', 'bottom'] as const
 
 /** 所有持久化设置项的默认值 — 供 store 层的 resettable 工厂使用 */
 export const SETTING_DEFAULTS = {
+  playbackTempoSyncEnabled: true,
   ttmlEnabled: true,
   ttmlDbUrl: 'https://amlldb.bikonoo.com/ncm-lyrics/%s.ttml',
   lyricAlignAnchor: 'center' as 'top' | 'center' | 'bottom',
@@ -104,6 +105,10 @@ export const storage = {
     return Math.max(0, Math.min(1, vol))
   },
   setVolume: (v: number) => safeSet('volume', String(v)),
+
+  // Playback synchronization
+  getPlaybackTempoSyncEnabled: () => safeGet('playbackTempoSyncEnabled') !== 'false',
+  setPlaybackTempoSyncEnabled: (v: boolean) => safeSet('playbackTempoSyncEnabled', String(v)),
 
   // Lyric settings
   getLyricAlignAnchor: () => safeEnum('lyricAlignAnchor', LYRIC_ANCHORS, SETTING_DEFAULTS.lyricAlignAnchor),

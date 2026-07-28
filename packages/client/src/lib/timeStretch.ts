@@ -21,6 +21,7 @@ interface StretchGraph {
   node: SoundTouchNode
   context: AudioContext
   bypassed: boolean
+  failed: boolean
   metricsSnapshots: number
   lastBlockCount: number
   lastUnderrunCount: number
@@ -28,6 +29,7 @@ interface StretchGraph {
 
 export interface TimeStretchController {
   readonly enabled: boolean
+  setEnabled: (enabled: boolean) => void
   setTempo: (tempo: number) => void
   reset: () => void
 }
@@ -80,13 +82,26 @@ function registerProcessor(context: AudioContext): Promise<void> {
   return registration
 }
 
-function disableGraph(graph: StretchGraph): void {
+function disableGraph(graph: StretchGraph, failed = false): void {
+  if (failed) graph.failed = true
   if (graph.bypassed) return
   graph.bypassed = true
+  graph.node.playbackRate.setValueAtTime(1, graph.context.currentTime)
   graph.node.disconnect()
   graph.source.disconnect()
   graph.source.connect(graph.context.destination)
   graph.audio.playbackRate = 1
+}
+
+function enableGraph(graph: StretchGraph): void {
+  if (!graph.bypassed || graph.failed) return
+  graph.source.disconnect()
+  graph.source.connect(graph.node)
+  graph.node.connect(graph.context.destination)
+  graph.bypassed = false
+  graph.metricsSnapshots = 0
+  graph.lastBlockCount = graph.node.metrics?.blockCount ?? 0
+  graph.lastUnderrunCount = graph.node.metrics?.underrunCount ?? 0
 }
 
 /**
@@ -124,6 +139,7 @@ export async function attachTimeStretch(howl: Howl): Promise<TimeStretchControll
       node,
       context,
       bypassed: false,
+      failed: false,
       metricsSnapshots: 0,
       lastBlockCount: 0,
       lastUnderrunCount: 0,
@@ -141,7 +157,7 @@ export async function attachTimeStretch(howl: Howl): Promise<TimeStretchControll
       // WSOLA needs a short initial buffer, so startup underruns are expected.
       // After warm-up, sustained gaps indicate that this device cannot keep up.
       if (graph.metricsSnapshots > 3 && blockDelta > 0 && underrunDelta / blockDelta > 0.02) {
-        disableGraph(graph)
+        disableGraph(graph, true)
       }
     })
     return createController(graph)
@@ -157,6 +173,10 @@ function createController(graph: StretchGraph): TimeStretchController {
   return {
     get enabled() {
       return !graph.bypassed
+    },
+    setEnabled: (enabled) => {
+      if (enabled) enableGraph(graph)
+      else disableGraph(graph)
     },
     setTempo: (tempo) => {
       if (graph.bypassed) return
