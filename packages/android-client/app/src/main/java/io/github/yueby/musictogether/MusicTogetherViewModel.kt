@@ -821,8 +821,13 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun setPlayMode(mode: String) {
-        if (canControl()) socket.emit(Events.PLAYER_SET_MODE, JSONObject().put("mode", mode))
-        else startVote("set-mode", JSONObject().put("mode", mode))
+        val description = playModeDescription(mode)
+        if (canControl()) {
+            socket.emit(Events.PLAYER_SET_MODE, JSONObject().put("mode", mode))
+            setNotice("播放模式：$description")
+        } else {
+            startVote("set-mode", JSONObject().put("mode", mode), description)
+        }
     }
 
     fun sendChat(content: String) {
@@ -1546,6 +1551,14 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         _state.value = _state.value.copy(notice = UiNotice(text = message, isError = isError))
     }
 
+    private fun playModeDescription(mode: String): String = when (mode) {
+        "sequential" -> "顺序播放，播完队列后停止"
+        "loop-all" -> "列表循环，播完队列后从头开始"
+        "loop-one" -> "单曲循环，重复播放当前歌曲"
+        "shuffle" -> "随机播放，随机选择下一首歌曲"
+        else -> "未知播放模式"
+    }
+
     private fun platformLabel(platform: String): String = when (platform) {
         "netease" -> "网易云音乐"
         "tencent" -> "QQ 音乐"
@@ -1645,7 +1658,11 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         }
     }
 
-    private fun startVote(action: String, payload: JSONObject? = null) {
+    private fun startVote(
+        action: String,
+        payload: JSONObject? = null,
+        successDescription: String = voteActionLabel(action),
+    ) {
         val sent = socket.emit(Events.VOTE_START, JSONObject().apply {
             put("action", action)
             payload?.let { put("payload", it) }
@@ -1653,7 +1670,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         AppLogger.info("Vote", "start action=$action sent=$sent")
         _state.value = _state.value.copy(
             notice = UiNotice(
-                text = if (sent) "已发起投票：${voteActionLabel(action)}" else "投票发送失败，请检查连接",
+                text = if (sent) "已发起投票：$successDescription" else "投票发送失败，请检查连接",
                 isError = !sent,
             ),
         )
