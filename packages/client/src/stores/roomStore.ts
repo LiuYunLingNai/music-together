@@ -77,7 +77,14 @@ export const useRoomStore = create<RoomStore>((set) => ({
   updateUserProfile: (userId, profile) =>
     set((state) => {
       if (!state.room) return {}
-      const users = state.room.users.map((user) => (user.id === userId ? { ...user, ...profile } : user))
+      // Account profiles also have a `role` field (`user` / `admin`). Only copy
+      // display fields so account-level data cannot overwrite the authoritative
+      // room role (`owner` / `admin` / `member`).
+      const users = state.room.users.map((user) =>
+        user.id === userId
+          ? { ...user, nickname: profile.nickname, avatarUrl: profile.avatarUrl }
+          : user,
+      )
       const room = { ...state.room, users }
       return { room, currentUser: deriveCurrentUser(room) }
     }),

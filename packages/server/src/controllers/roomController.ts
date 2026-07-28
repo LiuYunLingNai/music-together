@@ -124,6 +124,11 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
       // ROOM_STATE, which creates a brief gap before the room listeners mount.
       socket.emit(EVENTS.CHAT_HISTORY, chatService.getHistory(roomId))
 
+      // Resume playback before sending the initial room state. PLAYER_PLAY may
+      // arrive before the room page mounts its player listener, so ROOM_STATE
+      // must already describe the resumed state for client-side recovery.
+      playerService.preparePlaybackForJoiningRoom(roomId, updatedRoom)
+
       // Send full room state
       // Owner 收到含密码版本，其他成员收到不含密码版本
       const isOwner = user.role === 'owner'

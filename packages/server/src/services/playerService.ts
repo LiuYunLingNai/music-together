@@ -588,6 +588,23 @@ export function playPrevTrackInRoom(
 // ---------------------------------------------------------------------------
 
 /**
+ * Resume a paused track before the first room state is sent to a user joining
+ * an empty room. The client uses that initial state to recover playback when
+ * the following PLAYER_PLAY event arrives before its player listeners mount.
+ */
+export function preparePlaybackForJoiningRoom(roomId: string, room: RoomData): void {
+  const isFirstUserInRoom = room.users.length === 1
+  if (!isFirstUserInRoom || !room.currentTrack?.streamUrl || room.playState.isPlaying) return
+
+  room.playState = {
+    ...room.playState,
+    isPlaying: true,
+    serverTimestamp: Date.now(),
+  }
+  roomRepo.persist(roomId)
+}
+
+/**
  * Send current playback state to a socket that just joined a room.
  * Handles auto-resume when alone, and auto-play from queue.
  */
@@ -600,12 +617,10 @@ export async function syncPlaybackToSocket(
   const isAloneInRoom = room.users.length === 1
 
   if (room.currentTrack?.streamUrl) {
-    // Alone in room + track was paused → auto-resume (user rejoining)
+    // Keep this idempotent fallback for callers that do not prepare the room
+    // state before syncing playback.
+    preparePlaybackForJoiningRoom(roomId, room)
     const shouldAutoPlay = isAloneInRoom || room.playState.isPlaying
-    if (isAloneInRoom && !room.playState.isPlaying) {
-      room.playState = { ...room.playState, isPlaying: true, serverTimestamp: Date.now() }
-      roomRepo.persist(roomId)
-    }
 
     const snapshotCurrentTime = estimateCurrentTime(roomId)
     const snapshotTimestamp = Date.now()
