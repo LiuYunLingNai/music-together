@@ -8,8 +8,9 @@ export const PLAYER_PLAY_DEDUP_MS = 2000
 /** Throttle interval for currentTime store updates */
 export const CURRENT_TIME_THROTTLE_MS = 100
 
-/** Interval for client-initiated sync requests (drift correction) */
-export const SYNC_REQUEST_INTERVAL_MS = 1_000
+/** User-configurable range for steady-state sync packets (seconds) */
+export const SYNC_PACKET_INTERVAL_MIN_SECONDS = 1
+export const SYNC_PACKET_INTERVAL_MAX_SECONDS = 60
 
 /** Logical drift target for the pitch-preserving tempo controller. */
 export const DRIFT_DEAD_ZONE_MS = 5

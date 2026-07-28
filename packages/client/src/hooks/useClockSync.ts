@@ -2,14 +2,15 @@ import { useEffect, useRef } from 'react'
 import { EVENTS, NTP } from '@music-together/shared'
 import { useSocketContext } from '@/providers/SocketProvider'
 import { recordPing, processPong, resetClockSync, isCalibrated, getMedianRTT } from '@/lib/clockSync'
+import { useSettingsStore } from '@/stores/settingsStore'
 
 /**
  * Runs the NTP clock-sync loop for the lifetime of the socket connection.
  *
  * Phase 1 (calibration): rapid pings every `NTP.INITIAL_INTERVAL_MS` until
  *   `MAX_INITIAL_SAMPLES` are collected.
- * Phase 2 (steady state): pings every `NTP.STEADY_STATE_INTERVAL_MS` to
- *   track drift.
+ * Phase 2 (steady state): pings at the user-configured sync packet interval
+ *   to track drift.
  */
 export function useClockSync(): void {
   const { socket } = useSocketContext()
@@ -25,6 +26,12 @@ export function useClockSync(): void {
       socket.emit(EVENTS.NTP_PING, { clientPingId: id, lastRttMs: rtt > 0 ? rtt : undefined })
     }
 
+    const startSteadyHeartbeat = () => {
+      if (intervalRef.current !== null) clearInterval(intervalRef.current)
+      const intervalMs = useSettingsStore.getState().syncPacketIntervalSeconds * 1000
+      intervalRef.current = setInterval(sendPing, intervalMs)
+    }
+
     const startFastCalibration = () => {
       if (intervalRef.current !== null) clearInterval(intervalRef.current)
       resetClockSync()
@@ -37,10 +44,14 @@ export function useClockSync(): void {
       processPong(data.clientPingId, data.serverTime)
       if (!switchedRef.current && isCalibrated() && intervalRef.current !== null) {
         switchedRef.current = true
-        clearInterval(intervalRef.current)
-        intervalRef.current = setInterval(sendPing, NTP.STEADY_STATE_INTERVAL_MS)
+        startSteadyHeartbeat()
       }
     }
+
+    const unsubscribeSettings = useSettingsStore.subscribe((state, previousState) => {
+      if (state.syncPacketIntervalSeconds === previousState.syncPacketIntervalSeconds) return
+      if (switchedRef.current && intervalRef.current !== null) startSteadyHeartbeat()
+    })
 
     const onDisconnect = () => {
       if (intervalRef.current !== null) clearInterval(intervalRef.current)
@@ -69,6 +80,7 @@ export function useClockSync(): void {
       socket.off('connect', startFastCalibration)
       socket.off('disconnect', onDisconnect)
       document.removeEventListener('visibilitychange', onVisibilityChange)
+      unsubscribeSettings()
       for (const timer of burstTimers) clearTimeout(timer)
       if (intervalRef.current !== null) {
         clearInterval(intervalRef.current)

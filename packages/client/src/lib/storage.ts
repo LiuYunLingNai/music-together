@@ -1,4 +1,5 @@
-import type { MusicSource } from '@music-together/shared'
+import { NTP, type MusicSource } from '@music-together/shared'
+import { SYNC_PACKET_INTERVAL_MAX_SECONDS, SYNC_PACKET_INTERVAL_MIN_SECONDS } from '@/lib/constants'
 
 const PREFIX = 'mt-'
 
@@ -72,6 +73,7 @@ const LYRIC_ANCHORS = ['top', 'center', 'bottom'] as const
 /** 所有持久化设置项的默认值 — 供 store 层的 resettable 工厂使用 */
 export const SETTING_DEFAULTS = {
   playbackTempoSyncEnabled: true,
+  syncPacketIntervalSeconds: NTP.STEADY_STATE_INTERVAL_MS / 1000,
   ttmlEnabled: true,
   ttmlDbUrl: 'https://amlldb.bikonoo.com/ncm-lyrics/%s.ttml',
   lyricAlignAnchor: 'center' as 'top' | 'center' | 'bottom',
@@ -110,6 +112,12 @@ export const storage = {
   // Playback synchronization
   getPlaybackTempoSyncEnabled: () => safeGet('playbackTempoSyncEnabled') !== 'false',
   setPlaybackTempoSyncEnabled: (v: boolean) => safeSet('playbackTempoSyncEnabled', String(v)),
+
+  getSyncPacketIntervalSeconds: () => {
+    const seconds = safeInt('syncPacketIntervalSeconds', SETTING_DEFAULTS.syncPacketIntervalSeconds)
+    return Math.max(SYNC_PACKET_INTERVAL_MIN_SECONDS, Math.min(SYNC_PACKET_INTERVAL_MAX_SECONDS, seconds))
+  },
+  setSyncPacketIntervalSeconds: (v: number) => safeSet('syncPacketIntervalSeconds', String(v)),
 
   // Lyric settings
   getLyricAlignAnchor: () => safeEnum('lyricAlignAnchor', LYRIC_ANCHORS, SETTING_DEFAULTS.lyricAlignAnchor),

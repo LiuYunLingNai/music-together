@@ -6,13 +6,13 @@ import {
   MAX_TEMPO_ADJUSTMENT,
   DRIFT_SMOOTH_ALPHA,
   MAX_NETWORK_DELAY_S,
-  SYNC_REQUEST_INTERVAL_MS,
   DRIFT_SEEK_RTT_MARGIN_MS,
   HARD_SEEK_CONFIRM_COUNT,
 } from '@/lib/constants'
 import { useSocketContext } from '@/providers/SocketProvider'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import type { ScheduledPlayState } from '@music-together/shared'
 import { EVENTS } from '@music-together/shared'
 import type { Howl } from 'howler'
@@ -61,6 +61,7 @@ export function usePlayerSync(
 ) {
   const { socket } = useSocketContext()
   const setCurrentTime = usePlayerStore((s) => s.setCurrentTime)
+  const syncPacketIntervalSeconds = useSettingsStore((s) => s.syncPacketIntervalSeconds)
 
   // Pending scheduled action timers (so we can cancel on unmount / new action)
   const scheduledTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -294,12 +295,12 @@ export function usePlayerSync(
       // returning to the old constant one-request-per-second traffic pattern.
       visibilityFollowUp = setTimeout(requestSyncIfPlaying, 250)
     }
-    const interval = setInterval(requestSyncIfPlaying, SYNC_REQUEST_INTERVAL_MS)
+    const interval = setInterval(requestSyncIfPlaying, syncPacketIntervalSeconds * 1000)
     document.addEventListener('visibilitychange', onVisibilityChange)
     return () => {
       clearInterval(interval)
       if (visibilityFollowUp) clearTimeout(visibilityFollowUp)
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
-  }, [socket, howlRef])
+  }, [socket, howlRef, syncPacketIntervalSeconds])
 }
