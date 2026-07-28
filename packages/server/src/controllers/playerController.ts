@@ -1,10 +1,4 @@
-import {
-  EVENTS,
-  ERROR_CODE,
-  playerSeekSchema,
-  playerSetModeSchema,
-  playerSyncSchema,
-} from '@music-together/shared'
+import { EVENTS, ERROR_CODE, playerSeekSchema, playerSetModeSchema } from '@music-together/shared'
 import type { TypedServer, TypedSocket } from '../middleware/types.js'
 import { createWithPermission, defineAbilityForRoomUser } from '../middleware/withControl.js'
 import { createWithRoom } from '../middleware/withRoom.js'
@@ -12,7 +6,7 @@ import { checkSocketRateLimit } from '../middleware/socketRateLimiter.js'
 import { roomRepo } from '../repositories/roomRepository.js'
 import * as playerService from '../services/playerService.js'
 import * as roomService from '../services/roomService.js'
-import { estimateCurrentTime } from '../services/syncService.js'
+import { estimateCurrentTimeAt } from '../services/syncService.js'
 import { logger } from '../utils/logger.js'
 
 export function registerPlayerController(io: TypedServer, socket: TypedSocket) {
@@ -116,51 +110,6 @@ export function registerPlayerController(io: TypedServer, socket: TypedSocket) {
     }
   })
 
-  // Conductor reports real playback position (keeps server-side playState accurate
-  // for mid-song joiners and reconnection recovery — no forwarding to clients)
-  socket.on(EVENTS.PLAYER_SYNC, (raw) => {
-    try {
-      const parsed = playerSyncSchema.safeParse(raw)
-      if (!parsed.success) return
-      const { currentTime } = parsed.data
-
-      const mapping = roomRepo.getSocketMapping(socket.id)
-      if (!mapping) return
-      const room = roomRepo.get(mapping.roomId)
-      if (!room) return
-      // Only accept reports from the conductor
-      if (room.hostId !== mapping.userId) return
-
-      // Reject stale reports from a sleeping conductor: if the reported position is
-      // far behind the server's estimate, the conductor likely just woke from sleep
-      // and hasn't drift-corrected yet.  Accepting this would poison the server
-      // state and cause all other clients to seek backwards.
-      if (room.playState.isPlaying) {
-        const estimated = estimateCurrentTime(mapping.roomId)
-        if (!playerService.validateConductorReport(mapping.roomId, currentTime, estimated)) {
-          return
-        }
-      }
-
-      // Prefer hostServerTime (NTP-calibrated) to eliminate Host→Server
-      // one-way network delay (~RTT/2) from estimateCurrentTime.
-      // Fall back to Date.now() if missing or unreasonably far from server clock.
-      const serverNow = Date.now()
-      const timestamp =
-        parsed.data.hostServerTime && Math.abs(parsed.data.hostServerTime - serverNow) < 10_000
-          ? parsed.data.hostServerTime
-          : serverNow
-      room.playState = {
-        ...room.playState,
-        currentTime,
-        serverTimestamp: timestamp,
-      }
-    } catch (err) {
-      // Sync is best-effort; log but don't emit error to avoid noise
-      logger.error('PLAYER_SYNC handler error', err, { socketId: socket.id })
-    }
-  })
-
   socket.on(EVENTS.PLAYER_SYNC_REQUEST, () => {
     try {
       const mapping = roomRepo.getSocketMapping(socket.id)
@@ -168,10 +117,11 @@ export function registerPlayerController(io: TypedServer, socket: TypedSocket) {
       const room = roomRepo.get(mapping.roomId)
       if (!room) return
 
+      const serverTimestamp = Date.now()
       socket.emit(EVENTS.PLAYER_SYNC_RESPONSE, {
-        currentTime: estimateCurrentTime(mapping.roomId),
+        currentTime: estimateCurrentTimeAt(mapping.roomId, serverTimestamp),
         isPlaying: room.playState.isPlaying,
-        serverTimestamp: Date.now(),
+        serverTimestamp,
       })
     } catch (err) {
       logger.error('PLAYER_SYNC_REQUEST handler error', err, {

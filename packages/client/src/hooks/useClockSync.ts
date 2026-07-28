@@ -17,15 +17,24 @@ export function useClockSync(): void {
   const switchedRef = useRef(false)
 
   useEffect(() => {
-    // Reset on fresh connection
-    resetClockSync()
-    switchedRef.current = false
+    const burstTimers: ReturnType<typeof setTimeout>[] = []
 
-    // --- Pong handler ---
+    const sendPing = () => {
+      const id = recordPing()
+      const rtt = getMedianRTT()
+      socket.emit(EVENTS.NTP_PING, { clientPingId: id, lastRttMs: rtt > 0 ? rtt : undefined })
+    }
+
+    const startFastCalibration = () => {
+      if (intervalRef.current !== null) clearInterval(intervalRef.current)
+      resetClockSync()
+      switchedRef.current = false
+      sendPing()
+      intervalRef.current = setInterval(sendPing, NTP.INITIAL_INTERVAL_MS)
+    }
+
     const onPong = (data: { clientPingId: number; serverTime: number }) => {
       processPong(data.clientPingId, data.serverTime)
-
-      // Switch from fast to slow interval once — only on first calibration
       if (!switchedRef.current && isCalibrated() && intervalRef.current !== null) {
         switchedRef.current = true
         clearInterval(intervalRef.current)
@@ -33,21 +42,34 @@ export function useClockSync(): void {
       }
     }
 
-    socket.on(EVENTS.NTP_PONG, onPong)
-
-    // --- Ping sender (includes last measured RTT for server-side scheduling) ---
-    const sendPing = () => {
-      const id = recordPing()
-      const rtt = getMedianRTT()
-      socket.emit(EVENTS.NTP_PING, { clientPingId: id, lastRttMs: rtt > 0 ? rtt : undefined })
+    const onDisconnect = () => {
+      if (intervalRef.current !== null) clearInterval(intervalRef.current)
+      intervalRef.current = null
+      resetClockSync()
     }
 
-    // Start with fast interval
-    sendPing() // first ping immediately
-    intervalRef.current = setInterval(sendPing, NTP.INITIAL_INTERVAL_MS)
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible' || !socket.connected) return
+      // Timers and performance clocks can behave differently across sleep and
+      // mobile backgrounding. Refresh several samples without discarding the
+      // last usable anchor, so an arriving playback action can still schedule.
+      for (let i = 0; i < 5; i++) {
+        burstTimers.push(setTimeout(sendPing, i * NTP.INITIAL_INTERVAL_MS))
+      }
+    }
+
+    socket.on(EVENTS.NTP_PONG, onPong)
+    socket.on('connect', startFastCalibration)
+    socket.on('disconnect', onDisconnect)
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    if (socket.connected) startFastCalibration()
 
     return () => {
       socket.off(EVENTS.NTP_PONG, onPong)
+      socket.off('connect', startFastCalibration)
+      socket.off('disconnect', onDisconnect)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      for (const timer of burstTimers) clearTimeout(timer)
       if (intervalRef.current !== null) {
         clearInterval(intervalRef.current)
         intervalRef.current = null

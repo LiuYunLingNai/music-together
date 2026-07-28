@@ -2,20 +2,15 @@ import { getServerTime, isCalibrated, getMedianRTT } from '@/lib/clockSync'
 import {
   DRIFT_SEEK_THRESHOLD_MS,
   DRIFT_DEAD_ZONE_MS,
-  DRIFT_RATE_KP,
-  MAX_RATE_ADJUSTMENT,
+  DRIFT_TEMPO_KP,
+  MAX_TEMPO_ADJUSTMENT,
   DRIFT_SMOOTH_ALPHA,
-  DRIFT_PLUGIN_SEEK_THRESHOLD_MS,
-  CONDUCTOR_REPORT_INTERVAL_MS,
-  CONDUCTOR_REPORT_FAST_INTERVAL_MS,
-  CONDUCTOR_REPORT_FAST_DURATION_MS,
   MAX_NETWORK_DELAY_S,
   SYNC_REQUEST_INTERVAL_MS,
-  DRIFT_GRACE_PERIOD_MS,
   DRIFT_SEEK_RTT_MARGIN_MS,
   HARD_SEEK_CONFIRM_COUNT,
+  HARD_SEEK_FADE_MS,
 } from '@/lib/constants'
-import { storage } from '@/lib/storage'
 import { useSocketContext } from '@/providers/SocketProvider'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
@@ -39,7 +34,6 @@ function scheduleDelay(serverTimeToExecute: number): number {
   return Math.max(0, serverTimeToExecute - getServerTime())
 }
 
-/** Clamp a value between -limit and +limit. */
 function clamp(value: number, limit: number): number {
   return Math.max(-limit, Math.min(limit, value))
 }
@@ -50,20 +44,22 @@ function clamp(value: number, limit: number): number {
 
 /**
  * Manages playback sync via **event-driven Scheduled Execution**
- * with periodic **proportional drift correction + EMA smoothing**:
+ * with periodic **pitch-preserving drift correction + EMA smoothing**:
  *
- *   |smoothedDrift| > 200ms → hard seek (audible jump, rare)
- *   |smoothedDrift| 30~200ms → proportional rate adjustment
- *                              rate = 1 - clamp(drift * Kp, ±0.02)
- *   |smoothedDrift| < 30ms  → reset to normal rate 1.0x (dead zone)
+ *   small drift           -> SoundTouch tempo correction (max +/-1%)
+ *   sustained large drift -> fade-protected seek correction (rare)
  *
- * The EMA low-pass filter smooths noisy drift measurements to prevent
- * the control loop from oscillating between speed-up and slow-down.
- *
- * If a browser speed plugin (e.g. Global Speed) overrides the rate,
- * rate correction is automatically disabled and only hard seek is used.
+ * The EMA low-pass filter prevents a single noisy network sample from
+ * triggering a seek. Native uncorrected playback rate is never used.
  */
-export function usePlayerSync(howlRef: RefObject<Howl | null>, soundIdRef: RefObject<number | undefined>) {
+export function usePlayerSync(
+  howlRef: RefObject<Howl | null>,
+  soundIdRef: RefObject<number | undefined>,
+  schedulePlayback: (targetTime: number, executeAt: number) => void,
+  cancelScheduledPlayback: () => void,
+  pausePlayback: (position: number) => void,
+  setPlaybackTempo: (tempo: number) => void,
+) {
   const { socket } = useSocketContext()
   const setCurrentTime = usePlayerStore((s) => s.setCurrentTime)
 
@@ -72,21 +68,14 @@ export function usePlayerSync(howlRef: RefObject<Howl | null>, soundIdRef: RefOb
   // Monotonic action ID — guards against stale setTimeout(fn, 0) callbacks
   // when rapid events arrive in the same event loop tick.
   const actionIdRef = useRef(0)
-  // When true, rate() micro-adjustment is disabled (browser plugin detected)
-  const rateDisabledRef = useRef(false)
-  // Consecutive count of rate override detections (require 3 to confirm plugin)
-  const rateOverrideCountRef = useRef(0)
-  // Timer for the 50ms rate-override detection check (stored so we can clear it)
-  const rateCheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // EMA-smoothed drift value (seconds) — persists across sync responses
   const smoothedDriftRef = useRef(0)
   // When true, next sync response seeds EMA directly instead of blending,
   // avoiding the cold-start lag after pause/resume/new-track.
   const emaColdStartRef = useRef(true)
-  // Timestamp when the current track started playing (for adaptive conductor reporting)
-  const trackStartTimeRef = useRef(0)
   // Consecutive hard-seek triggers — require HARD_SEEK_CONFIRM_COUNT before actually seeking
   const hardSeekCountRef = useRef(0)
+  const hardSeekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const clearScheduled = () => {
     if (scheduledTimerRef.current) {
@@ -109,9 +98,9 @@ export function usePlayerSync(howlRef: RefObject<Howl | null>, soundIdRef: RefOb
         if (actionIdRef.current !== id) return // stale callback
         if (howlRef.current) {
           howlRef.current.seek(data.playState.currentTime)
-          if (howlRef.current.rate() !== 1) howlRef.current.rate(1)
         }
         setCurrentTime(data.playState.currentTime)
+        setPlaybackTempo(1)
         smoothedDriftRef.current = 0
         emaColdStartRef.current = true
         // Keep roomStore.playState in sync for recovery effect
@@ -128,22 +117,21 @@ export function usePlayerSync(howlRef: RefObject<Howl | null>, soundIdRef: RefOb
     // -- PAUSE --------------------------------------------------------------
     const onPause = (data: { playState: ScheduledPlayState }) => {
       clearScheduled()
+      cancelScheduledPlayback()
       const id = ++actionIdRef.current
       const delay = scheduleDelay(data.playState.serverTimeToExecute)
 
       scheduledTimerRef.current = setTimeout(() => {
         if (actionIdRef.current !== id) return // stale callback
-        if (howlRef.current && soundIdRef.current !== undefined) {
-          howlRef.current.pause(soundIdRef.current)
-          // Sync to the server's authoritative time snapshot
-          howlRef.current.seek(data.playState.currentTime)
-          if (howlRef.current.rate() !== 1) howlRef.current.rate(1)
+        if (howlRef.current) {
+          pausePlayback(data.playState.currentTime)
           setCurrentTime(data.playState.currentTime)
         }
         // Reset drift state — paused means no drift
         smoothedDriftRef.current = 0
         emaColdStartRef.current = true
         usePlayerStore.getState().setSyncDrift(0)
+        setPlaybackTempo(1)
         // Keep roomStore.playState in sync for recovery effect
         useRoomStore.getState().updateRoom({
           playState: {
@@ -161,22 +149,16 @@ export function usePlayerSync(howlRef: RefObject<Howl | null>, soundIdRef: RefOb
       const id = ++actionIdRef.current
       const delay = scheduleDelay(data.playState.serverTimeToExecute)
 
+      if (howlRef.current) {
+        schedulePlayback(data.playState.currentTime, data.playState.serverTimeToExecute)
+      }
+
       scheduledTimerRef.current = setTimeout(() => {
         if (actionIdRef.current !== id) return // stale callback
         if (!howlRef.current) return
-        // Seek to the expected position at this moment
-        if (data.playState.currentTime > 0) {
-          howlRef.current.seek(data.playState.currentTime)
-          setCurrentTime(data.playState.currentTime)
-        }
-        if (howlRef.current.rate() !== 1) howlRef.current.rate(1)
         smoothedDriftRef.current = 0
         emaColdStartRef.current = true
-        if (soundIdRef.current !== undefined) {
-          howlRef.current.play(soundIdRef.current)
-        } else {
-          soundIdRef.current = howlRef.current.play()
-        }
+        setPlaybackTempo(1)
         // Keep roomStore.playState in sync for recovery effect
         useRoomStore.getState().updateRoom({
           playState: {
@@ -191,34 +173,20 @@ export function usePlayerSync(howlRef: RefObject<Howl | null>, soundIdRef: RefOb
     // -- NEW TRACK (PLAYER_PLAY) ---------------------------------------------
     // When a new track loads, cancel any pending action from the previous track
     // so it doesn't accidentally seek/pause/resume the new Howl instance.
-    // Also reset rate-disabled flag to give the new track a fresh chance.
     const onPlay = () => {
       clearScheduled()
       ++actionIdRef.current // invalidate any pending stale callbacks
-      rateDisabledRef.current = false
-      rateOverrideCountRef.current = 0
       hardSeekCountRef.current = 0
       smoothedDriftRef.current = 0
       emaColdStartRef.current = true
-      trackStartTimeRef.current = Date.now()
+      setPlaybackTempo(1)
     }
 
     // -- SYNC RESPONSE (proportional drift correction + EMA smoothing) ------
     const onSyncResponse = (data: { currentTime: number; isPlaying: boolean; serverTimestamp: number }) => {
       if (!howlRef.current) return
       if (!howlRef.current.playing()) return
-
-      // Conductor (hostId) is the authoritative playback source — skip drift
-      // correction to avoid a feedback loop where server estimate (based on
-      // host reports) pulls the conductor forward/backward.
-      const { room: syncRoom } = useRoomStore.getState()
-      const myId = storage.getUserId()
-      if (syncRoom?.hostId === myId) return
-
-      // Grace period after new track: skip rate micro-adjustments
-      // (estimateCurrentTime is unreliable until conductor submits at least
-      // one progress report), but still allow hard seek for large drifts.
-      const inGracePeriod = Date.now() - trackStartTimeRef.current < DRIFT_GRACE_PERIOD_MS
+      if (!isCalibrated()) return
 
       // Use NTP-calibrated server time for accurate delay estimation
       const networkDelaySec = Math.max(
@@ -246,13 +214,11 @@ export function usePlayerSync(howlRef: RefObject<Howl | null>, soundIdRef: RefOb
       usePlayerStore.getState().setSyncDrift(sd)
 
       // Adaptive hard-seek threshold: on high-latency links the NTP offset
-      // error (asymmetric routing) and extrapolation jitter can easily reach
-      // the static 200ms threshold, triggering repeated backward jumps.
+      // error (asymmetric routing) and extrapolation jitter can trigger
+      // unnecessary backward jumps on a static threshold.
       // Raising the threshold proportionally to the observed RTT avoids this.
       const rttBasedThreshold = (getMedianRTT() + DRIFT_SEEK_RTT_MARGIN_MS) / 1000
-      const hardSeekThreshold = rateDisabledRef.current
-        ? DRIFT_PLUGIN_SEEK_THRESHOLD_MS / 1000
-        : Math.max(DRIFT_SEEK_THRESHOLD_MS / 1000, rttBasedThreshold)
+      const hardSeekThreshold = Math.max(DRIFT_SEEK_THRESHOLD_MS / 1000, rttBasedThreshold)
 
       if (absDrift > hardSeekThreshold) {
         // Require HARD_SEEK_CONFIRM_COUNT consecutive triggers to avoid
@@ -261,47 +227,28 @@ export function usePlayerSync(howlRef: RefObject<Howl | null>, soundIdRef: RefOb
         if (hardSeekCountRef.current < HARD_SEEK_CONFIRM_COUNT) return
         // Confirmed: large sustained drift — hard seek
         hardSeekCountRef.current = 0
-        howlRef.current.seek(expectedTime)
-        if (howlRef.current.rate() !== 1) howlRef.current.rate(1)
+        const howl = howlRef.current
+        const soundId = soundIdRef.current
+        const restoreVolume = usePlayerStore.getState().volume
+        setPlaybackTempo(1)
+        if (hardSeekTimerRef.current) clearTimeout(hardSeekTimerRef.current)
+        howl.fade(howl.volume(), 0, HARD_SEEK_FADE_MS, soundId)
+        hardSeekTimerRef.current = setTimeout(() => {
+          hardSeekTimerRef.current = null
+          if (howlRef.current !== howl || !howl.playing()) return
+          howl.seek(expectedTime, soundId)
+          howl.fade(0, restoreVolume, HARD_SEEK_FADE_MS * 2, soundId)
+          setCurrentTime(expectedTime)
+        }, HARD_SEEK_FADE_MS)
         smoothedDriftRef.current = 0
         emaColdStartRef.current = true
-      } else if (absDrift > DRIFT_DEAD_ZONE_MS / 1000 && !rateDisabledRef.current) {
-        // Drift fell below hard-seek threshold — reset consecutive counter
-        // so only truly consecutive above-threshold measurements trigger a seek.
+      } else if (absDrift > DRIFT_DEAD_ZONE_MS / 1000) {
         hardSeekCountRef.current = 0
-        // 宽限期内跳过 rate 微调 — 等 conductor report 稳定后再启用
-        if (inGracePeriod) return
-        // Proportional rate correction: larger drift → stronger correction,
-        // naturally decelerating as we approach the target — no oscillation.
-        const adj = clamp(sd * DRIFT_RATE_KP, MAX_RATE_ADJUSTMENT)
-        const targetRate = 1 - adj
-        howlRef.current.rate(targetRate)
-        // Verify rate was applied — detect browser speed plugin interference.
-        // Use setTimeout instead of rAF to avoid false positives when the tab
-        // is in background (rAF is throttled/paused by browsers).
-        // Require 3 consecutive detections to confirm a plugin, not just one.
-        // Clear previous check timer to avoid stacking on rapid sync responses.
-        if (rateCheckTimerRef.current) clearTimeout(rateCheckTimerRef.current)
-        rateCheckTimerRef.current = setTimeout(() => {
-          rateCheckTimerRef.current = null
-          if (!howlRef.current) return
-          if (Math.abs(howlRef.current.rate() - targetRate) > 0.005) {
-            rateOverrideCountRef.current++
-            if (rateOverrideCountRef.current >= 3) {
-              rateDisabledRef.current = true
-              console.warn(
-                'Rate correction disabled: external plugin detected (confirmed after 3 consecutive overrides)',
-              )
-            }
-          } else {
-            // Rate applied successfully — reset counter
-            rateOverrideCountRef.current = 0
-          }
-        }, 50)
+        const adjustment = clamp(sd * DRIFT_TEMPO_KP, MAX_TEMPO_ADJUSTMENT)
+        setPlaybackTempo(1 - adjustment)
       } else {
-        // Within dead zone: ensure normal playback rate
         hardSeekCountRef.current = 0
-        if (howlRef.current.rate() !== 1) howlRef.current.rate(1)
+        setPlaybackTempo(1)
       }
     }
 
@@ -313,9 +260,9 @@ export function usePlayerSync(howlRef: RefObject<Howl | null>, soundIdRef: RefOb
 
     return () => {
       clearScheduled()
-      if (rateCheckTimerRef.current) {
-        clearTimeout(rateCheckTimerRef.current)
-        rateCheckTimerRef.current = null
+      if (hardSeekTimerRef.current) {
+        clearTimeout(hardSeekTimerRef.current)
+        hardSeekTimerRef.current = null
       }
       socket.off(EVENTS.PLAYER_SEEK, onSeek)
       socket.off(EVENTS.PLAYER_PAUSE, onPause)
@@ -323,67 +270,39 @@ export function usePlayerSync(howlRef: RefObject<Howl | null>, soundIdRef: RefOb
       socket.off(EVENTS.PLAYER_PLAY, onPlay)
       socket.off(EVENTS.PLAYER_SYNC_RESPONSE, onSyncResponse)
     }
-  }, [socket, howlRef, soundIdRef, setCurrentTime])
+  }, [
+    socket,
+    howlRef,
+    soundIdRef,
+    setCurrentTime,
+    schedulePlayback,
+    cancelScheduledPlayback,
+    pausePlayback,
+    setPlaybackTempo,
+  ])
 
   // -----------------------------------------------------------------------
-  // Periodic sync request (client-initiated drift correction).
-  // Host skips: it is the authoritative source and reports its own position.
+  // Every client, including the room host, follows the server-owned timeline.
   // -----------------------------------------------------------------------
   useEffect(() => {
-    const interval = setInterval(() => {
-      const { room: r2 } = useRoomStore.getState()
-      const myId = storage.getUserId()
-      if (r2?.hostId !== myId) {
-        socket.emit(EVENTS.PLAYER_SYNC_REQUEST)
-      }
-    }, SYNC_REQUEST_INTERVAL_MS)
-    return () => clearInterval(interval)
-  }, [socket])
-
-  // -----------------------------------------------------------------------
-  // Conductor progress reporting (keeps server-side playState accurate for
-  // mid-song joiners and reconnection recovery).
-  // Adaptive: fast interval (2s) for the first 10s of a new track,
-  // then slows to the normal interval (5s) to reduce overhead.
-  // -----------------------------------------------------------------------
-  useEffect(() => {
-    let timerId: ReturnType<typeof setTimeout> | null = null
-
-    const report = () => {
-      const { room } = useRoomStore.getState()
-      const myId = storage.getUserId()
-      if (room?.hostId === myId && howlRef.current?.playing()) {
-        socket.emit(EVENTS.PLAYER_SYNC, {
-          currentTime: howlRef.current.seek() as number,
-          hostServerTime: getServerTime(),
-        })
-      }
-      // Schedule next report — fast if within the initial window, slow otherwise
-      const elapsed = Date.now() - trackStartTimeRef.current
-      const interval =
-        elapsed < CONDUCTOR_REPORT_FAST_DURATION_MS ? CONDUCTOR_REPORT_FAST_INTERVAL_MS : CONDUCTOR_REPORT_INTERVAL_MS
-      timerId = setTimeout(report, interval)
+    const requestSyncIfPlaying = () => {
+      if (!socket.connected || !howlRef.current?.playing()) return
+      socket.emit(EVENTS.PLAYER_SYNC_REQUEST)
     }
 
-    // When the tab returns from background, immediately send a conductor report
-    // so the server's playState is refreshed after potential setTimeout throttling.
+    let visibilityFollowUp: ReturnType<typeof setTimeout> | null = null
     const onVisibilityChange = () => {
       if (document.visibilityState !== 'visible') return
-      const { room: r } = useRoomStore.getState()
-      const myId = storage.getUserId()
-      if (r?.hostId === myId && howlRef.current?.playing()) {
-        socket.emit(EVENTS.PLAYER_SYNC, {
-          currentTime: howlRef.current.seek() as number,
-          hostServerTime: getServerTime(),
-        })
-      }
+      requestSyncIfPlaying()
+      // A second close sample confirms a real post-background drift without
+      // returning to the old constant one-request-per-second traffic pattern.
+      visibilityFollowUp = setTimeout(requestSyncIfPlaying, 250)
     }
+    const interval = setInterval(requestSyncIfPlaying, SYNC_REQUEST_INTERVAL_MS)
     document.addEventListener('visibilitychange', onVisibilityChange)
-
-    timerId = setTimeout(report, CONDUCTOR_REPORT_FAST_INTERVAL_MS)
-
     return () => {
-      if (timerId) clearTimeout(timerId)
+      clearInterval(interval)
+      if (visibilityFollowUp) clearTimeout(visibilityFollowUp)
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
   }, [socket, howlRef])

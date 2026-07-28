@@ -82,8 +82,6 @@ function reconcileRoomRoles(room: RoomData): boolean {
 /**
  * 从在线用户中选出最高优先级的 conductor（播放主持）。
  * 优先级：owner > admin(含临时 admin) > member（按加入顺序）。
- * 若 conductor 变更且正在播放，刷新 playState 时间戳以确保
- * 新 conductor 的首次 report 不被 validateConductorReport 拒绝。
  */
 function electConductor(room: RoomData): boolean {
   const prev = room.hostId
@@ -92,13 +90,6 @@ function electConductor(room: RoomData): boolean {
   room.hostId = candidate?.id ?? room.hostId
 
   if (room.hostId !== prev) {
-    if (room.playState.isPlaying) {
-      room.playState = {
-        ...room.playState,
-        currentTime: estimateCurrentTime(room.id),
-        serverTimestamp: Date.now(),
-      }
-    }
     return true
   }
   return false
@@ -265,8 +256,8 @@ export function leaveRoom(
   room.users = room.users.filter((u) => u.id !== userId)
   roomRepo.deleteSocketMapping(socketId)
 
-  // An empty room has no conductor to report playback progress or advance the
-  // queue. Freeze the server-authoritative position as soon as the last user
+  // An empty room has no conductor to advance the queue. Freeze the
+  // server-authoritative position as soon as the last user
   // leaves so permanent rooms do not keep accumulating playback time while
   // nobody is listening. Persist before scheduling cleanup because permanent
   // rooms return early from scheduleDeletion().

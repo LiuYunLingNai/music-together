@@ -1,4 +1,4 @@
-import { getServerTime, isCalibrated } from '@/lib/clockSync'
+import { getServerTime } from '@/lib/clockSync'
 import { PLAYER_PLAY_DEDUP_MS } from '@/lib/constants'
 import { storage } from '@/lib/storage'
 import { useSocketContext } from '@/providers/SocketProvider'
@@ -43,11 +43,20 @@ export function usePlayer() {
     }
   }, [socket])
 
-  const { howlRef, soundIdRef, loadTrack } = useHowl(autoNext)
+  const {
+    howlRef,
+    soundIdRef,
+    loadTrack,
+    schedulePlayback,
+    cancelScheduledPlayback,
+    pausePlayback,
+    stopPlayback,
+    setPlaybackTempo,
+  } = useHowl(autoNext)
   const { fetchLyric } = useLyric()
 
   // Connect sync (handles SEEK, PAUSE, RESUME + conductor reporting)
-  usePlayerSync(howlRef, soundIdRef)
+  usePlayerSync(howlRef, soundIdRef, schedulePlayback, cancelScheduledPlayback, pausePlayback, setPlaybackTempo)
 
   // Reset dedup ref on disconnect so reconnect PLAYER_PLAY is never blocked
   useEffect(() => {
@@ -62,8 +71,6 @@ export function usePlayer() {
   }, [socket])
 
   // Listen for PLAYER_PLAY events (new track load)
-  const playTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
   useEffect(() => {
     const onPlayerPlay = (data: { track: Track; playState: ScheduledPlayState }) => {
       // Deduplicate: ignore if the same track with the same serverTimestamp
@@ -94,6 +101,11 @@ export function usePlayer() {
             serverTimestamp: data.playState.serverTimestamp,
           },
         })
+        if (data.playState.isPlaying) {
+          schedulePlayback(data.playState.currentTime, data.playState.serverTimeToExecute, () => {
+            fetchLyric(data.track)
+          })
+        }
         return
       }
       loadingRef.current = { trackId: data.track.id, ts: now, serverTimestamp: data.playState.serverTimestamp }
@@ -108,44 +120,15 @@ export function usePlayer() {
         },
       })
 
-      const ct = data.playState.currentTime
-      const executeDelay = Math.max(
-        0,
-        data.playState.serverTimeToExecute - (isCalibrated() ? getServerTime() : Date.now()),
-      )
-
-      if (ct > 0 && data.playState.isPlaying && executeDelay > 0) {
-        if (playTimerRef.current) clearTimeout(playTimerRef.current)
-        playTimerRef.current = setTimeout(() => {
-          playTimerRef.current = null
-          loadTrack(data.track, ct, data.playState.isPlaying)
+      // Start downloading immediately, while remaining silent. Playback is
+      // committed at the shared server time. If this device buffers past the
+      // deadline, schedulePlayback aligns it before the fade-in.
+      loadTrack(data.track, data.playState.currentTime, data.playState.isPlaying)
+      if (data.playState.isPlaying) {
+        schedulePlayback(data.playState.currentTime, data.playState.serverTimeToExecute, () => {
           fetchLyric(data.track)
-        }, executeDelay)
-        return
-      }
-
-      if (ct === 0 && data.playState.serverTimeToExecute) {
-        // New track from position 0: schedule load so playback begins at
-        // the coordinated server-time.  We load with autoPlay=true and let
-        // the scheduling delay account for buffering.
-        // When NTP is not yet calibrated, execute immediately (delay=0) to
-        // avoid wildly inaccurate scheduling from uncorrected local clocks.
-        const delay = isCalibrated() ? Math.max(0, data.playState.serverTimeToExecute - getServerTime()) : 0
-        if (playTimerRef.current) clearTimeout(playTimerRef.current)
-        playTimerRef.current = setTimeout(() => {
-          playTimerRef.current = null
-          loadTrack(data.track, 0, data.playState.isPlaying)
-          fetchLyric(data.track)
-        }, delay)
+        })
       } else {
-        // Mid-song join or currentTime > 0: load immediately and seek to
-        // the expected position at the scheduled execution time.
-        const elapsed = data.playState.isPlaying
-          ? Math.max(0, (getServerTime() - data.playState.serverTimestamp) / 1000)
-          : 0
-        const adjustedTime = ct + elapsed
-
-        loadTrack(data.track, adjustedTime, data.playState.isPlaying)
         fetchLyric(data.track)
       }
     }
@@ -154,12 +137,8 @@ export function usePlayer() {
 
     return () => {
       socket.off(EVENTS.PLAYER_PLAY, onPlayerPlay)
-      if (playTimerRef.current) {
-        clearTimeout(playTimerRef.current)
-        playTimerRef.current = null
-      }
     }
-  }, [socket, loadTrack, fetchLyric])
+  }, [socket, loadTrack, fetchLyric, schedulePlayback])
 
   useEffect(() => {
     const onTrackMetadataUpdated = (data: { track: Track }) => {
@@ -195,15 +174,7 @@ export function usePlayer() {
       // Server has cleared the track (queue empty / cleared) — reset client
       if (!roomTrack && playerTrack) {
         hasRecovered = true
-        if (howlRef.current) {
-          try {
-            howlRef.current.unload()
-          } catch {
-            /* ignore */
-          }
-          howlRef.current = null
-        }
-        soundIdRef.current = undefined
+        stopPlayback()
         usePlayerStore.getState().reset()
         return
       }
@@ -219,17 +190,16 @@ export function usePlayer() {
         if (loadingRef.current?.trackId === roomTrack.id && howlRef.current) return
 
         hasRecovered = true
-        // Cancel any pending scheduled load from onPlayerPlay to prevent
-        // a second loadTrack call when the timer fires after recovery.
-        if (playTimerRef.current) {
-          clearTimeout(playTimerRef.current)
-          playTimerRef.current = null
-        }
         const ps = room.playState
         const elapsed = ps.isPlaying ? (getServerTime() - ps.serverTimestamp) / 1000 : 0
+        const recoveredTime = ps.currentTime + Math.max(0, elapsed)
         recoveredTrackIdRef.current = roomTrack.id
-        loadTrack(roomTrack, ps.currentTime + Math.max(0, elapsed), ps.isPlaying)
-        fetchLyric(roomTrack)
+        loadTrack(roomTrack, recoveredTime, ps.isPlaying)
+        if (ps.isPlaying) {
+          schedulePlayback(recoveredTime, getServerTime(), () => fetchLyric(roomTrack))
+        } else {
+          fetchLyric(roomTrack)
+        }
       }
     }
 
@@ -241,7 +211,7 @@ export function usePlayer() {
     return unsubscribe
     // `socket` intentionally excluded — effect subscribes to roomStore, not socket directly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadTrack, fetchLyric])
+  }, [loadTrack, fetchLyric, schedulePlayback, stopPlayback])
 
   // -----------------------------------------------------------------------
   // Controls — emit to server only.  Server broadcasts ScheduledPlayState

@@ -59,6 +59,9 @@ importers:
       '@pixi/sprite':
         specifier: ^7.4.3
         version: 7.4.3(@pixi/core@7.4.3)(@pixi/display@7.4.3(@pixi/core@7.4.3))
+      '@soundtouchjs/audio-worklet':
+        specifier: 2.1.0
+        version: 2.1.0
       '@tanstack/react-virtual':
         specifier: ^3.13.18
         version: 3.13.18(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -1897,6 +1900,18 @@ packages:
   '@sindresorhus/merge-streams@4.0.0':
     resolution: {integrity: sha512-tlqY9xq5ukxTUZBmoOp+m61cqwQD5pHJtFY3Mn8CA8ps6yghLH/Hw8UPdqg4OLmFW3IFlcXnQNmo/dh8HzXYIQ==}
     engines: {node: '>=18'}
+
+  '@soundtouchjs/audio-worklet@2.1.0':
+    resolution: {integrity: sha512-+LKvyvUx4ErwdD6jiUTHYqm5K7LMr+wGPz9PJufOORdDHL283RL2EsPHmdrtsCaDyapZIX2Xf7NljQVnx9lDwQ==}
+
+  '@soundtouchjs/core@2.1.0':
+    resolution: {integrity: sha512-LXZ1HPXnyu0iPw+qlxcb48zuIQfP+DZAyRGG2w2/nfdKsJVft3122J6wHO/uVhZwUOjrgjYPrwu6DBkd66KMtA==}
+
+  '@soundtouchjs/interpolation-strategy-lanczos@2.1.0':
+    resolution: {integrity: sha512-Nf/JO03CEVoMcLCo2tQdXg7zC5PkEtcudgonYRjmkFWASj7bc/EX48Qy70L9kt1bfol54x1Fg/xU2os32b6Z2g==}
+
+  '@soundtouchjs/worklet-base@2.1.0':
+    resolution: {integrity: sha512-450GQpS1ehZ6iJep/udiUbXFvOtDDoX92Nk4xPp2YzMrkH3uz4tc2TSaZj4qmNy+mgjaIP17vB4pzzVzR3BZoQ==}
 
   '@tailwindcss/node@4.1.18':
     resolution: {integrity: sha512-DoR7U1P7iYhw16qJ49fgXUlry1t4CpXeErJHnQ44JgTSKMaZUdf17cfn5mHchfJ4KRBZRFA/Coo+MUF5+gOaCQ==}
@@ -6452,6 +6467,22 @@ snapshots:
   '@sec-ant/readable-stream@0.4.1': {}
 
   '@sindresorhus/merge-streams@4.0.0': {}
+
+  '@soundtouchjs/audio-worklet@2.1.0':
+    dependencies:
+      '@soundtouchjs/core': 2.1.0
+      '@soundtouchjs/interpolation-strategy-lanczos': 2.1.0
+      '@soundtouchjs/worklet-base': 2.1.0
+
+  '@soundtouchjs/core@2.1.0':
+    dependencies:
+      '@soundtouchjs/interpolation-strategy-lanczos': 2.1.0
+
+  '@soundtouchjs/interpolation-strategy-lanczos@2.1.0': {}
+
+  '@soundtouchjs/worklet-base@2.1.0':
+    dependencies:
+      '@soundtouchjs/core': 2.1.0
 
   '@tailwindcss/node@4.1.18':
     dependencies:

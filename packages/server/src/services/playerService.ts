@@ -6,7 +6,7 @@ import { musicProvider } from './musicProvider.js'
 import * as queueService from './queueService.js'
 import * as trackFallbackService from './trackFallbackService.js'
 import * as authService from './authService.js'
-import { estimateCurrentTime } from './syncService.js'
+import { estimateCurrentTime, estimateCurrentTimeAt } from './syncService.js'
 import { broadcastRoomList } from './roomLifecycleService.js'
 import { toPublicRoomState } from '../utils/roomUtils.js'
 import { config } from '../config.js'
@@ -373,7 +373,7 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
   }
 
   // Update room state — align serverTimestamp with the scheduled execution time
-  // so that estimateCurrentTime() is accurate before the first conductor report.
+  // so estimateCurrentTime() is accurate from the first scheduled frame.
   room.currentTrack = resolved
   const scheduleTime = getScheduleTime(roomId)
   room.playState = {
@@ -441,11 +441,12 @@ export function pauseTrack(io: TypedServer, roomId: string, _initiatorSocket?: T
   if (!room) return
 
   // Snapshot estimated position before pausing so resume starts from the correct point
-  const snapshotTime = estimateCurrentTime(roomId)
-  room.playState = { isPlaying: false, currentTime: snapshotTime, serverTimestamp: Date.now() }
+  const scheduleTime = getScheduleTime(roomId)
+  const snapshotTime = estimateCurrentTimeAt(roomId, scheduleTime)
+  room.playState = { isPlaying: false, currentTime: snapshotTime, serverTimestamp: scheduleTime }
   roomRepo.persist(roomId)
   // All clients must pause at the same scheduled moment
-  io.to(roomId).emit(EVENTS.PLAYER_PAUSE, { playState: scheduled(room.playState, roomId) })
+  io.to(roomId).emit(EVENTS.PLAYER_PAUSE, { playState: scheduled(room.playState, roomId, scheduleTime) })
 }
 
 export function seekTrack(io: TypedServer, roomId: string, currentTime: number, _initiatorSocket?: TypedSocket): void {
@@ -624,19 +625,20 @@ export async function syncPlaybackToSocket(
     preparePlaybackForJoiningRoom(roomId, room)
     const shouldAutoPlay = isAloneInRoom || room.playState.isPlaying
 
-    const snapshotCurrentTime = estimateCurrentTime(roomId)
     const snapshotTimestamp = Date.now()
     const joinCalibrationDelayMs = NTP.INITIAL_INTERVAL_MS * NTP.MAX_INITIAL_SAMPLES + 100
     const scheduleTime = shouldAutoPlay
       ? Math.max(getScheduleTime(roomId), snapshotTimestamp + joinCalibrationDelayMs)
       : snapshotTimestamp
-    const delaySec = shouldAutoPlay ? Math.max(0, (scheduleTime - snapshotTimestamp) / 1000) : 0
+    const snapshotCurrentTime = shouldAutoPlay
+      ? estimateCurrentTimeAt(roomId, scheduleTime)
+      : estimateCurrentTime(roomId)
 
     socket.emit(EVENTS.PLAYER_PLAY, {
       track: room.currentTrack,
       playState: {
         isPlaying: shouldAutoPlay,
-        currentTime: snapshotCurrentTime + delaySec,
+        currentTime: snapshotCurrentTime,
         serverTimestamp: scheduleTime,
         serverTimeToExecute: scheduleTime,
       },
@@ -649,47 +651,16 @@ export async function syncPlaybackToSocket(
 }
 
 // ---------------------------------------------------------------------------
-// Room cleanup, debounce & conductor report validation
+// Room cleanup and debounce
 // ---------------------------------------------------------------------------
 
 /** Debounce tracking for PLAYER_NEXT per room */
 const lastNextTimestamp = new Map<string, number>()
 
-/** Track consecutive rejected conductor reports per room to break deadlocks */
-const conductorRejectCount = new Map<string, number>()
-
-/** Force-accept a conductor report after this many consecutive rejections */
-const CONDUCTOR_REJECT_FORCE_ACCEPT_COUNT = 2
-
-/** Max allowed drift (seconds) between conductor-reported time and server estimate */
-const CONDUCTOR_REJECT_DRIFT_THRESHOLD_S = 3
-
 /** Remove per-room entries for a deleted room */
 export function cleanupRoom(roomId: string): void {
   lastNextTimestamp.delete(roomId)
-  conductorRejectCount.delete(roomId)
   playMutexes.delete(roomId)
-}
-
-/**
- * Validate a conductor sync report against the server estimate.
- * Returns true if the report should be ACCEPTED, false if rejected (stale).
- * Automatically force-accepts after CONDUCTOR_REJECT_FORCE_ACCEPT_COUNT consecutive
- * rejections to break deadlocks when the server estimate has diverged.
- */
-export function validateConductorReport(roomId: string, reportedTime: number, estimatedTime: number): boolean {
-  if (estimatedTime - reportedTime > CONDUCTOR_REJECT_DRIFT_THRESHOLD_S) {
-    const count = (conductorRejectCount.get(roomId) ?? 0) + 1
-    conductorRejectCount.set(roomId, count)
-    if (count < CONDUCTOR_REJECT_FORCE_ACCEPT_COUNT) {
-      return false // reject
-    }
-    // Too many consecutive rejections — force accept to break deadlock
-    logger.warn(`Force-accepting conductor report after ${count} consecutive rejections`, { roomId })
-  }
-  // Accepted — reset counter
-  conductorRejectCount.delete(roomId)
-  return true
 }
 
 /**

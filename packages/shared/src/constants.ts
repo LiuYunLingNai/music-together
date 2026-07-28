@@ -45,7 +45,7 @@ export const NTP = {
   /** Fast sampling interval during initial calibration (ms) */
   INITIAL_INTERVAL_MS: 50,
   /** Steady-state heartbeat interval after initial calibration (ms) */
-  STEADY_STATE_INTERVAL_MS: 5_000,
+  STEADY_STATE_INTERVAL_MS: 1_000,
   /** Number of rapid samples to collect during initial calibration */
   MAX_INITIAL_SAMPLES: 20,
   /** Maximum stored measurements (sliding window) */
