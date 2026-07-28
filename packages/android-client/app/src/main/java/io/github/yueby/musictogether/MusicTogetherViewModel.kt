@@ -873,7 +873,6 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         val description = playModeDescription(mode)
         if (canControl()) {
             socket.emit(Events.PLAYER_SET_MODE, JSONObject().put("mode", mode))
-            setNotice("播放模式：$description")
         } else {
             startVote("set-mode", JSONObject().put("mode", mode), description)
         }
@@ -1837,7 +1836,6 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             AppLogger.info(
                 "Lyrics",
                 "loaded track=${track.id} source=$source lines=${lines.size} " +
-                    "interludes=${lines.count { it.isInterlude }} " +
                     "firstMs=${lines.firstOrNull()?.startTimeMs ?: -1} " +
                     "lastMs=${lines.lastOrNull()?.endTimeMs ?: -1} error=${message.orEmpty()}",
             )

@@ -115,10 +115,10 @@ jobs:
       - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@v6
 
-      - name: Build Debug APKs
+      - name: Check and build Debug APKs
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon assembleStandardDebug assembleVivoDebug
+          ./gradlew --no-daemon testStandardDebugUnitTest lintStandardDebug assembleStandardDebug assembleVivoDebug
 
       - name: Create Debug checksums
         run: |

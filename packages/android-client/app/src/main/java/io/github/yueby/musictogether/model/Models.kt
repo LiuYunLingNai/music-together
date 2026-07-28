@@ -139,11 +139,19 @@ data class VoteState(
 )
 
 @Immutable
+data class LyricRuby(
+    val text: String,
+    val startTimeMs: Long,
+    val endTimeMs: Long,
+)
+
+@Immutable
 data class LyricWord(
     val text: String,
     val startTimeMs: Long,
     val endTimeMs: Long,
     val romanText: String = "",
+    val ruby: List<LyricRuby> = emptyList(),
 )
 
 @Immutable
@@ -155,7 +163,6 @@ data class LyricLine(
     val endTimeMs: Long,
     val isBackground: Boolean = false,
     val isDuet: Boolean = false,
-    val isInterlude: Boolean = false,
 ) {
     val text: String get() = words.joinToString("") { it.text }
 }
