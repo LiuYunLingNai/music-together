@@ -17,6 +17,7 @@ interface PersistedRoomState {
   passwordEncrypted?: string | null
   creatorId: RoomData['creatorId']
   adminUserIds: string[]
+  hidden?: boolean
   audioQuality: RoomData['audioQuality']
   queue: RoomData['queue']
   currentTrack: RoomData['currentTrack']
@@ -81,6 +82,7 @@ export class InMemoryRoomRepository implements RoomRepository {
           hostId: state.creatorId,
           adminUserIds: new Set(state.adminUserIds ?? []),
           temporaryAdminUserId: null,
+          hidden: state.hidden ?? false,
           permanent: true,
           audioQuality: state.audioQuality,
           users: [],
@@ -119,6 +121,7 @@ export class InMemoryRoomRepository implements RoomRepository {
       passwordEncrypted: encryptPassword(room.password),
       creatorId: room.creatorId,
       adminUserIds: Array.from(room.adminUserIds),
+      hidden: room.hidden,
       audioQuality: room.audioQuality,
       queue: room.queue.map(withoutStreamUrl),
       currentTrack: room.currentTrack ? withoutStreamUrl(room.currentTrack) : null,
@@ -143,16 +146,19 @@ export class InMemoryRoomRepository implements RoomRepository {
     return Array.from(this.rooms.keys())
   }
 
-  getAllAsList(): RoomListItem[] {
-    return Array.from(this.rooms.values()).map((room) => ({
-      id: room.id,
-      name: room.name,
-      hasPassword: room.password !== null,
-      permanent: room.permanent,
-      userCount: room.users.length,
-      currentTrackTitle: room.currentTrack?.title ?? null,
-      currentTrackArtist: room.currentTrack?.artist.join(', ') ?? null,
-    }))
+  getPublicLobbyList(): RoomListItem[] {
+    // This projection is exclusively for the public lobby. Direct joins and admin APIs use get()/getAll().
+    return Array.from(this.rooms.values())
+      .filter((room) => !room.hidden)
+      .map((room) => ({
+        id: room.id,
+        name: room.name,
+        hasPassword: room.password !== null,
+        permanent: room.permanent,
+        userCount: room.users.length,
+        currentTrackTitle: room.currentTrack?.title ?? null,
+        currentTrackArtist: room.currentTrack?.artist.join(', ') ?? null,
+      }))
   }
 
   setSocketMapping(socketId: string, roomId: string, userId: string): void {

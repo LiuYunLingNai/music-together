@@ -118,7 +118,7 @@ export function destroyRoom(roomId: string, io: TypedServer): boolean {
 /**
  * 向 lobby 频道广播房间列表变更（100ms trailing 防抖）。
  * 多次快速调用（如 create+join、多人同时 leave）会合并为一次广播，
- * 避免重复执行 getAllAsList() 遍历和序列化。
+ * 避免重复执行公开大厅投影的遍历和序列化。
  */
 export function broadcastRoomList(io: TypedServer): void {
   pendingIO = io
@@ -126,7 +126,7 @@ export function broadcastRoomList(io: TypedServer): void {
   broadcastTimer = setTimeout(() => {
     broadcastTimer = null
     if (pendingIO) {
-      const rooms: RoomListItem[] = roomRepo.getAllAsList()
+      const rooms: RoomListItem[] = roomRepo.getPublicLobbyList()
       pendingIO.to('lobby').emit(EVENTS.ROOM_LIST_UPDATE, rooms)
     }
   }, 100)

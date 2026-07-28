@@ -12,6 +12,8 @@ export interface RoomData {
   adminUserIds: Set<string>
   /** 临时管理员 ID：仅当房间内没有在线 owner / 持久 admin 时授予，不持久化 */
   temporaryAdminUserId: string | null
+  /** Hide the room from the public lobby; direct joins remain available. */
+  hidden: boolean
   /** Keep the room when empty and restore it after a server restart. */
   permanent: boolean
   audioQuality: AudioQuality
@@ -34,7 +36,8 @@ export interface RoomRepository {
   delete(roomId: string): void
   getAll(): ReadonlyMap<string, RoomData>
   getAllIds(): string[]
-  getAllAsList(): RoomListItem[]
+  /** Public lobby projection; hidden rooms must never be included. */
+  getPublicLobbyList(): RoomListItem[]
   setSocketMapping(socketId: string, roomId: string, userId: string): void
   replaceUserId(oldUserId: string, newUserId: string): void
   getSocketMapping(socketId: string): SocketMapping | undefined

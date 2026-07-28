@@ -31,6 +31,8 @@ interface SettingsDialogProps {
     name?: string
     password?: string | null
     audioQuality?: import('@music-together/shared').AudioQuality
+    hidden?: boolean
+    permanent?: boolean
   }) => void
   onSetUserRole?: (userId: string, role: 'admin' | 'member') => void
   initialTab?: SettingsTab

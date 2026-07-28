@@ -70,6 +70,7 @@ export function useRoomState() {
     const onSettings = (settings: {
       name: string
       hasPassword: boolean
+      hidden: boolean
       permanent: boolean
       password?: string | null
       audioQuality: AudioQuality

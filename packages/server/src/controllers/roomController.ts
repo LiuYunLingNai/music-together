@@ -25,7 +25,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
   // ---- Room list (不需要在房间内) ----
   socket.on(EVENTS.ROOM_LIST, () => {
     try {
-      socket.emit(EVENTS.ROOM_LIST_UPDATE, roomService.listRooms())
+      socket.emit(EVENTS.ROOM_LIST_UPDATE, roomService.listPublicRooms())
     } catch (err) {
       logger.error('ROOM_LIST handler error', err, { socketId: socket.id })
     }
@@ -200,6 +200,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         name: parsed.data.name,
         password: parsed.data.password,
         audioQuality: parsed.data.audioQuality,
+        hidden: parsed.data.hidden,
         permanent: parsed.data.permanent,
       })
 
@@ -210,6 +211,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
       const baseSettings = {
         name: updatedRoom.name,
         hasPassword: updatedRoom.password !== null,
+        hidden: updatedRoom.hidden,
         permanent: updatedRoom.permanent,
         audioQuality: updatedRoom.audioQuality,
       }
@@ -230,6 +232,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         roomName: updatedRoom.name,
         audioQuality: updatedRoom.audioQuality,
         passwordProtected: updatedRoom.password !== null,
+        hidden: updatedRoom.hidden,
         permanent: updatedRoom.permanent,
         changedFields: Object.keys(parsed.data).filter(
           (key) => parsed.data[key as keyof typeof parsed.data] !== undefined,

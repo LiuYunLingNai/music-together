@@ -25,6 +25,7 @@ interface AdminRoom {
   creatorId: string
   userCount: number
   hasPassword: boolean
+  hidden: boolean
   permanent: boolean
   currentTrackTitle: string | null
 }
@@ -200,7 +201,8 @@ export function AdminSection() {
                     <span className="truncate text-sm font-medium">{room.name}</span>
                     <Badge variant="outline">{room.userCount} 人</Badge>
                     {room.hasPassword && <Badge variant="secondary">密码</Badge>}
-                    {room.permanent && <Badge variant="secondary">永久</Badge>}
+                    <Badge variant={room.hidden ? 'secondary' : 'outline'}>{room.hidden ? '隐藏' : '公开'}</Badge>
+                    <Badge variant={room.permanent ? 'secondary' : 'outline'}>{room.permanent ? '永久' : '临时'}</Badge>
                   </div>
                   <p className="truncate text-xs text-muted-foreground">
                     {room.id}

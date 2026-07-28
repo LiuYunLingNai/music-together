@@ -30,6 +30,7 @@ export interface ServerToClientEvents {
   [EVENTS.ROOM_SETTINGS]: (settings: {
     name: string
     hasPassword: boolean
+    hidden: boolean
     permanent: boolean
     password?: string | null
     audioQuality: AudioQuality
@@ -82,6 +83,7 @@ export interface ClientToServerEvents {
     name?: string
     password?: string | null
     audioQuality?: AudioQuality
+    hidden?: boolean
     permanent?: boolean
   }) => void
   [EVENTS.ROOM_SET_ROLE]: (data: { userId: string; role: 'admin' | 'member' }) => void

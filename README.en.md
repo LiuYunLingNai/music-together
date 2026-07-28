@@ -59,6 +59,7 @@
 - **Voting system** -- Members vote to control playback actions
 - **Play modes** -- Sequential, single loop, list loop, shuffle
 - **Real-time chat** -- In-room text messaging with system messages
+- **Hidden rooms** -- Hide rooms from the lobby while keeping room IDs and invite links joinable
 - **Mobile responsive** -- Adaptive layout with orientation-based switching
 
 ## Quick Start

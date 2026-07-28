@@ -127,6 +127,7 @@ export function createAdminRoutes(io: TypedServer): Router {
   })
 
   router.get('/rooms', (req, res) => {
+    // Read the complete repository directly; the lobby projection intentionally filters hidden rooms.
     const rooms = Array.from(roomRepo.getAll().values())
     logger.info('服务器管理员查看了活跃房间列表', {
       event: 'admin.rooms_viewed',
@@ -140,6 +141,7 @@ export function createAdminRoutes(io: TypedServer): Router {
         creatorId: room.creatorId,
         userCount: room.users.length,
         hasPassword: room.password !== null,
+        hidden: room.hidden,
         permanent: room.permanent,
         currentTrackTitle: room.currentTrack?.title ?? null,
       })),

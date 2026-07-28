@@ -24,6 +24,7 @@ interface RoomSettingsSectionProps {
     name?: string
     password?: string | null
     audioQuality?: AudioQuality
+    hidden?: boolean
     permanent?: boolean
   }) => void
 }
@@ -266,7 +267,18 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
             <Switch checked={passwordEnabled} onCheckedChange={handlePasswordToggle} />
           </SettingRow>
 
-          <SettingRow label="永久房间" description="空房不回收，服务重启后仍会保留">
+          <SettingRow label="隐藏房间" description="从大厅隐藏，可与永久房间同时开启；仍可通过完整房间号或邀请链接加入">
+            <Switch
+              aria-label="隐藏房间"
+              checked={room?.hidden ?? false}
+              onCheckedChange={(hidden) => {
+                onUpdateSettings({ hidden })
+                toast.success(hidden ? '房间已从大厅隐藏' : '房间已在大厅公开')
+              }}
+            />
+          </SettingRow>
+
+          <SettingRow label="永久房间" description="无论公开或隐藏，空房均不回收，服务重启后仍会保留">
             <Switch
               checked={room?.permanent ?? false}
               onCheckedChange={(permanent) => {

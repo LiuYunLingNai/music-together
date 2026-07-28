@@ -94,6 +94,8 @@ export interface RoomState {
   creatorId: string
   hostId: string
   hasPassword: boolean
+  /** Hide the room from the public lobby while keeping direct joins available. */
+  hidden: boolean
   /** Permanent rooms survive empty-room cleanup and server restarts. */
   permanent: boolean
   /** 密码明文（仅 owner 可见；普通成员和临时管理员只收到 hasPassword） */

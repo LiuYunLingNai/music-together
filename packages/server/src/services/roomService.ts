@@ -126,6 +126,7 @@ export function createRoom(
     hostId: userId,
     adminUserIds: new Set(),
     temporaryAdminUserId: null,
+    hidden: false,
     permanent: false,
     audioQuality: 320,
     users: [user],
@@ -309,13 +310,19 @@ export function getRoom(roomId: string): RoomData | undefined {
   return roomRepo.get(roomId)
 }
 
-export function listRooms(): RoomListItem[] {
-  return roomRepo.getAllAsList()
+export function listPublicRooms(): RoomListItem[] {
+  return roomRepo.getPublicLobbyList()
 }
 
 export function updateSettings(
   roomId: string,
-  settings: { name?: string; password?: string | null; audioQuality?: AudioQuality; permanent?: boolean },
+  settings: {
+    name?: string
+    password?: string | null
+    audioQuality?: AudioQuality
+    hidden?: boolean
+    permanent?: boolean
+  },
 ): void {
   const room = roomRepo.get(roomId)
   if (!room) return
@@ -331,6 +338,10 @@ export function updateSettings(
 
   if (settings.audioQuality !== undefined) {
     room.audioQuality = settings.audioQuality
+  }
+
+  if (settings.hidden !== undefined) {
+    room.hidden = settings.hidden
   }
 
   if (settings.permanent !== undefined) {
