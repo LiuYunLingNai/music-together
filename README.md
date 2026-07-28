@@ -92,6 +92,10 @@ Docker 单镜像部署：
 ```bash
 docker run -d --name music-together --restart unless-stopped \
   -p 3001:3001 \
+  -e SERVER_ADMIN_IDS=服务器管理员ID(多个用英文逗号分隔) \
+  -e QQ_MUSIC_API_KEY='你的 QQ_MUSIC_API_KEY' \
+  -e QQ_MUSIC_API_URL='API url' \
+  -v 填入本地存放数据路径:/app/data \
   ghcr.io/LiuYunLingNai/music-together:latest
 ```
 
@@ -100,8 +104,14 @@ docker run -d --name music-together --restart unless-stopped \
 ```bash
 docker run -d --name music-together --restart unless-stopped \
   -p 3001:3001 \
+  -e SERVER_ADMIN_IDS=服务器管理员ID(多个用英文逗号分隔) \
+  -e QQ_MUSIC_API_KEY='你的 QQ_MUSIC_API_KEY' \
+  -e QQ_MUSIC_API_URL='API url' \
+  -v 填入本地存放数据路径:/app/data \
   ghcr.nju.edu.cn/LiuYunLingNai/music-together:latest
 ```
+
+> 本地数据存放路径主要用于存放账号等内容，如果未映射路径则容器重启后数据会丢失
 
 
 > 如果宿主机 `3001` 端口已被占用，修改 `-p 宿主机端口:容器端口` 左侧端口即可，例如 `-p 8080:3001`。
