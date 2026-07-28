@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.VerticalAlignTop
 import androidx.compose.material3.AssistChip
@@ -73,6 +74,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import io.github.yueby.musictogether.MusicTogetherViewModel
 import io.github.yueby.musictogether.model.AppState
@@ -164,6 +166,7 @@ internal fun QueuePane(
     viewModel: MusicTogetherViewModel,
     onClose: (() -> Unit)? = null,
 ) {
+    val appState by viewModel.state.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     var confirmClear by remember { mutableStateOf(false) }
     val currentIndex = room.queue.indexOfFirst { it.id == room.currentTrack?.id }
@@ -237,7 +240,7 @@ internal fun QueuePane(
                 onClick = { viewModel.playTrack(track) },
                 highlighted = isCurrent,
                 compact = true,
-                trailingContent = if (canReorder) {
+                trailingContent = if (canReorder || track.source == "bilibili") {
                     {
                         QueueControlMenu(
                             track = track,
@@ -249,6 +252,9 @@ internal fun QueuePane(
                             onMoveDown = { viewModel.moveTrack(track, 1) },
                             onPin = { viewModel.pinTrack(track) },
                             onRemove = { viewModel.removeTrack(track) },
+                            onReselectMetadata = track.takeIf { it.source == "bilibili" }?.let { video ->
+                                { viewModel.reselectBilibiliMetadata(video) }
+                            },
                         )
                     }
                 } else null,
@@ -256,6 +262,7 @@ internal fun QueuePane(
             HorizontalDivider()
         }
     }
+    BilibiliMetadataDialog(appState.bilibiliMetadataMatch, viewModel)
 }
 
 @Composable
@@ -614,6 +621,7 @@ private fun QueueControlMenu(
     onMoveDown: () -> Unit,
     onPin: () -> Unit,
     onRemove: () -> Unit,
+    onReselectMetadata: (() -> Unit)? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
@@ -624,6 +632,13 @@ private fun QueueControlMenu(
                 leadingIcon = { Icon(Icons.Default.PlayArrow, null) },
                 onClick = { expanded = false; onPlay() },
             )
+            onReselectMetadata?.let { reselect ->
+                DropdownMenuItem(
+                    text = { Text("重选歌词和封面") },
+                    leadingIcon = { Icon(Icons.Default.Refresh, null) },
+                    onClick = { expanded = false; reselect() },
+                )
+            }
             DropdownMenuItem(
                 text = { Text("上移") },
                 leadingIcon = { Icon(Icons.Default.KeyboardArrowUp, null) },

@@ -154,6 +154,11 @@ class NativePlayer(
         load(track, playState)
     }
 
+    fun updateTrackMetadata(track: Track) {
+        if (_state.value.track?.id != track.id) return
+        _state.value = _state.value.copy(track = track)
+    }
+
     fun pause(playState: PlayState) = schedule(playState.serverTimeToExecute) {
         it.pause()
         it.seekTo((playState.currentTime * 1000).toLong())

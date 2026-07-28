@@ -607,6 +607,11 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         else emitSearchQueueAction(track, pinned = true)
     }
 
+    fun reselectBilibiliMetadata(track: Track) {
+        if (track.source != "bilibili") return
+        beginBilibiliMetadataMatch(track, pinned = false, queueTrackId = track.id)
+    }
+
     fun searchBilibiliMetadata(keyword: String, source: String) {
         val match = _state.value.bilibiliMetadataMatch
         if (match.track == null || source !in BILIBILI_METADATA_SOURCES || keyword.isBlank()) return
@@ -623,14 +628,25 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             cover = metadataTrack.cover.ifBlank { track.cover },
         )
         _state.value = _state.value.copy(bilibiliMetadataMatch = BilibiliMetadataMatchState())
-        emitSearchQueueAction(resolvedTrack, match.pinned)
+        if (match.queueTrackId != null) {
+            emitBilibiliMetadataUpdate(
+                trackId = match.queueTrackId,
+                metadataSource = match.source,
+                lyricId = resolvedTrack.lyricId,
+                picId = resolvedTrack.picId,
+                cover = resolvedTrack.cover,
+            )
+        } else {
+            emitSearchQueueAction(resolvedTrack, match.pinned)
+        }
     }
 
     fun skipBilibiliMetadata() {
         val match = _state.value.bilibiliMetadataMatch
         val track = match.track ?: return
         _state.value = _state.value.copy(bilibiliMetadataMatch = BilibiliMetadataMatchState())
-        emitSearchQueueAction(track, match.pinned)
+        if (match.queueTrackId != null) emitBilibiliMetadataUpdate(trackId = match.queueTrackId, clearMetadata = true)
+        else emitSearchQueueAction(track, match.pinned)
     }
 
     fun dismissBilibiliMetadata() {
@@ -1296,6 +1312,12 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     nativePlayer.load(track, playState)
                 }
             }
+            Events.PLAYER_TRACK_METADATA_UPDATED -> {
+                val track = (data as? JSONObject)?.optJSONObject("track")?.toTrack() ?: return
+                updateRoom { it.copy(currentTrack = track) }
+                nativePlayer.updateTrackMetadata(track)
+                loadLyrics(track)
+            }
             Events.PLAYER_PAUSE -> handleScheduledState(data) { nativePlayer.pause(it) }
             Events.PLAYER_RESUME -> handleScheduledState(data) { nativePlayer.resume(it) }
             Events.PLAYER_SEEK -> handleScheduledState(data) { nativePlayer.seek(it) }
@@ -1681,11 +1703,12 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         }
     }
 
-    private fun beginBilibiliMetadataMatch(track: Track, pinned: Boolean) {
+    private fun beginBilibiliMetadataMatch(track: Track, pinned: Boolean, queueTrackId: String? = null) {
         requestBilibiliMetadataSearch(
             BilibiliMetadataMatchState(
                 track = track,
                 pinned = pinned,
+                queueTrackId = queueTrackId,
                 source = "netease",
                 keyword = track.title,
                 loading = true,
@@ -1724,6 +1747,27 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     )
                 }
         }
+    }
+
+    private fun emitBilibiliMetadataUpdate(
+        trackId: String,
+        metadataSource: String? = null,
+        lyricId: String? = null,
+        picId: String? = null,
+        cover: String? = null,
+        clearMetadata: Boolean = false,
+    ) {
+        val payload = JSONObject().put("trackId", trackId)
+        if (clearMetadata) {
+            payload.put("clearMetadata", true)
+        } else {
+            payload.put("metadataSource", metadataSource)
+            lyricId?.let { payload.put("lyricId", it) }
+            picId?.let { payload.put("picId", it) }
+            payload.put("cover", cover.orEmpty())
+        }
+        val sent = socket.emit(Events.QUEUE_UPDATE_METADATA, payload)
+        if (!sent) setError("歌词和封面更新失败，请检查连接")
     }
 
     private fun handleScheduledState(data: Any?, action: (PlayState) -> Unit) {

@@ -25,12 +25,14 @@ object Events {
     const val PLAYER_SYNC_REQUEST = "player:sync_request"
     const val PLAYER_SYNC_RESPONSE = "player:sync_response"
     const val PLAYER_SET_MODE = "player:set_mode"
+    const val PLAYER_TRACK_METADATA_UPDATED = "player:track_metadata_updated"
 
     const val QUEUE_ADD = "queue:add"
     const val QUEUE_INSERT_AFTER_CURRENT = "queue:insert_after_current"
     const val QUEUE_REMOVE = "queue:remove"
     const val QUEUE_CLEAR = "queue:clear"
     const val QUEUE_REORDER = "queue:reorder"
+    const val QUEUE_UPDATE_METADATA = "queue:update_metadata"
     const val QUEUE_UPDATED = "queue:updated"
 
     const val CHAT_MESSAGE = "chat:message"

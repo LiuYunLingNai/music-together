@@ -65,6 +65,7 @@ data class Track(
 data class BilibiliMetadataMatchState(
     val track: Track? = null,
     val pinned: Boolean = false,
+    val queueTrackId: String? = null,
     val source: String = "netease",
     val keyword: String = "",
     val results: List<Track> = emptyList(),
