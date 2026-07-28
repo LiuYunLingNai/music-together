@@ -24,4 +24,14 @@ class AppUpdateServiceTest {
 
         assertEquals(githubUrl, service.run { UpdateDownloadSource.GitHub.resolveAssetUrl(githubUrl) })
     }
+
+    @Test
+    fun selectsTheVivoReleaseAssetForTheVivoFlavor() {
+        assertEquals("music-together-vivo-2.0.0.apk", service.apkAssetName("2.0.0", "vivo"))
+    }
+
+    @Test
+    fun selectsTheStandardReleaseAssetForOtherFlavors() {
+        assertEquals("music-together-v2.0.0.apk", service.apkAssetName("2.0.0", "standard"))
+    }
 }

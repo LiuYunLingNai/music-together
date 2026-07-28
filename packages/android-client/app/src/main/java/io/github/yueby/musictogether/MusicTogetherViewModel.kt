@@ -865,7 +865,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         _state.value = _state.value.copy(updateChecking = true, updateError = null)
         viewModelScope.launch {
             runCatching {
-                appUpdateService.latestRelease(GITHUB_RELEASES_API, BuildConfig.VERSION_NAME)
+                appUpdateService.latestRelease(GITHUB_RELEASES_API, BuildConfig.VERSION_NAME, BuildConfig.FLAVOR)
             }.onSuccess { update ->
                 val keepDownloadedApk = update?.versionName == _state.value.updateInfo?.versionName &&
                     downloadedUpdateApk?.exists() == true

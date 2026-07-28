@@ -192,14 +192,15 @@ jobs:
             printf 'keyPassword=%s\n' "$ANDROID_KEY_PASSWORD"
           } > keystore.properties
 
-      - name: Build signed Release APK and AAB
+      - name: Build signed Release APKs and AAB
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon assembleStandardRelease bundleStandardRelease
+          ./gradlew --no-daemon assembleStandardRelease assembleVivoRelease bundleStandardRelease
 
-      - name: Verify Release APK signature
+      - name: Verify Release APK signatures
         run: |
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/standard/release/app-standard-release.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/vivo/release/app-vivo-release.apk
 
       - name: Prepare named Release files and checksums
         env:
@@ -208,9 +209,11 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           cp app/build/outputs/apk/standard/release/app-standard-release.apk "dist/music-together-v${VERSION}.apk"
+          cp app/build/outputs/apk/vivo/release/app-vivo-release.apk "dist/music-together-vivo-${VERSION}.apk"
           cp app/build/outputs/bundle/standardRelease/app-standard-release.aab "dist/music-together-v${VERSION}.aab"
           cd dist
           sha256sum "music-together-v${VERSION}.apk" > "music-together-v${VERSION}.apk.sha256"
+          sha256sum "music-together-vivo-${VERSION}.apk" > "music-together-vivo-${VERSION}.apk.sha256"
           sha256sum "music-together-v${VERSION}.aab" > "music-together-v${VERSION}.aab.sha256"
 
       - name: Upload signed Release artifacts

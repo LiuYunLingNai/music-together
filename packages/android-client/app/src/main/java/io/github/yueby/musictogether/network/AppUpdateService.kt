@@ -17,6 +17,7 @@ class AppUpdateService(private val client: OkHttpClient) {
     suspend fun latestRelease(
         apiUrl: String,
         installedVersion: String,
+        flavor: String,
     ): AppUpdateInfo? = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url(apiUrl)
@@ -31,7 +32,7 @@ class AppUpdateService(private val client: OkHttpClient) {
             (0 until releases.length())
                 .mapNotNull(releases::optJSONObject)
                 .firstNotNullOfOrNull { release ->
-                    release.toUpdateInfoOrNull(installedVersion)
+                    release.toUpdateInfoOrNull(installedVersion, flavor)
                 }
         }
     }
@@ -118,17 +119,18 @@ class AppUpdateService(private val client: OkHttpClient) {
 
     private fun JSONObject.toUpdateInfoOrNull(
         installedVersion: String,
+        flavor: String,
     ): AppUpdateInfo? {
         if (optBoolean("draft") || optBoolean("prerelease")) return null
         val tagName = optString("tag_name")
         val versionName = tagName.removePrefix("v")
         if (versionName.isBlank() || !isNewerVersion(versionName, installedVersion)) return null
 
-        val apkName = Regex("music-together-v.+\\.apk")
+        val apkName = apkAssetName(versionName, flavor)
         val assets = optJSONArray("assets") ?: JSONArray()
         val apk = (0 until assets.length())
             .mapNotNull { assets.optJSONObject(it) }
-            .firstOrNull { it.optString("name").matches(apkName) }
+            .firstOrNull { it.optString("name") == apkName }
             ?: return null
         val checksum = (0 until assets.length())
             .mapNotNull { assets.optJSONObject(it) }
@@ -155,6 +157,11 @@ class AppUpdateService(private val client: OkHttpClient) {
 
     private fun String.versionParts(): List<Int> =
         removePrefix("v").substringBefore('-').split('.').map { it.toIntOrNull() ?: 0 }
+
+    internal fun apkAssetName(versionName: String, flavor: String): String = when (flavor) {
+        "vivo" -> "music-together-vivo-$versionName.apk"
+        else -> "music-together-v$versionName.apk"
+    }
 
     private companion object {
         const val MAX_APK_BYTES = 200L * 1024L * 1024L
