@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { EVENTS, NTP } from '@music-together/shared'
-import { useSocketContext } from '@/providers/SocketProvider'
+import { useSocketContext } from '@/providers/socket-context'
 import { recordPing, processPong, resetClockSync, isCalibrated, getMedianRTT } from '@/lib/clockSync'
 import { useSettingsStore } from '@/stores/settingsStore'
 

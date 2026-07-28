@@ -32,12 +32,14 @@ export function ChatPanel() {
 
   // Smart auto-scroll: only scroll to bottom if user was already at the bottom
   useEffect(() => {
-    if (isAtBottomRef.current) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-    } else {
-      // User has scrolled up — show new message hint
-      setShowNewMsgHint(true)
-    }
+    const frame = requestAnimationFrame(() => {
+      if (isAtBottomRef.current) {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+      } else {
+        setShowNewMsgHint(true)
+      }
+    })
+    return () => cancelAnimationFrame(frame)
   }, [messages])
 
   const scrollToBottom = useCallback(() => {

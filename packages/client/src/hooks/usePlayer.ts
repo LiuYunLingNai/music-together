@@ -1,7 +1,7 @@
 import { getServerTime } from '@/lib/clockSync'
 import { PLAYER_PLAY_DEDUP_MS } from '@/lib/constants'
 import { storage } from '@/lib/storage'
-import { useSocketContext } from '@/providers/SocketProvider'
+import { useSocketContext } from '@/providers/socket-context'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
 import type { ScheduledPlayState, Track } from '@music-together/shared'

@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import { EVENTS, LIMITS } from '@music-together/shared'
-import { useSocketContext } from '@/providers/SocketProvider'
+import { useSocketContext } from '@/providers/socket-context'
 import { toast } from 'sonner'
 
 export function useChat() {

@@ -1,4 +1,4 @@
-import { useSocketContext } from '@/providers/SocketProvider'
+import { useSocketContext } from '@/providers/socket-context'
 import { useChatStore } from '@/stores/chatStore'
 import { EVENTS } from '@music-together/shared'
 import type { ChatMessage } from '@music-together/shared'

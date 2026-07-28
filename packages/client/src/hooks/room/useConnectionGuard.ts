@@ -1,4 +1,4 @@
-import { useSocketContext } from '@/providers/SocketProvider'
+import { useSocketContext } from '@/providers/socket-context'
 import { resetAllRoomState } from '@/lib/resetStores'
 import { useEffect } from 'react'
 

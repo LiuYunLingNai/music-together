@@ -12,7 +12,7 @@ import { useAccountStore } from '@/stores/accountStore'
 import type { AudioQuality } from '@music-together/shared'
 import { LIMITS } from '@music-together/shared'
 import { Check, Copy, Lock, LockOpen, Pencil, X } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { SettingRow } from './SettingRow'
 import { getAudioQualityLabel, getAudioQualityOptions } from '@/lib/audioQuality'
@@ -45,8 +45,15 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
     const isHigh = Math.abs(ms) > 500
     return { label, isHigh }
   }, [syncDrift])
-  const [passwordInput, setPasswordInput] = useState('')
-  const [passwordEnabled, setPasswordEnabled] = useState(room?.hasPassword ?? false)
+  const hasPassword = room?.hasPassword ?? false
+  const [passwordDraft, setPasswordDraft] = useState({ hasPassword, enabled: hasPassword, input: '' })
+  const currentPasswordDraft =
+    passwordDraft.hasPassword === hasPassword ? passwordDraft : { hasPassword, enabled: hasPassword, input: '' }
+  const passwordInput = currentPasswordDraft.input
+  const passwordEnabled = currentPasswordDraft.enabled
+  const updatePasswordDraft = (update: Partial<Omit<typeof currentPasswordDraft, 'hasPassword'>>) => {
+    setPasswordDraft({ ...currentPasswordDraft, ...update })
+  }
 
   // 昵称编辑
   const [nickname, setNickname] = useState(storage.getNickname())
@@ -66,11 +73,6 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
   const [editingName, setEditingName] = useState(false)
   const [nameInput, setNameInput] = useState('')
 
-  useEffect(() => {
-    setPasswordEnabled(room?.hasPassword ?? false)
-    setPasswordInput('')
-  }, [room?.hasPassword])
-
   const copyRoomLink = () => {
     const url = `${window.location.origin}/room/${room?.id}`
     navigator.clipboard.writeText(url)
@@ -79,12 +81,11 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
 
   const handlePasswordToggle = (checked: boolean) => {
     if (!checked) {
-      setPasswordEnabled(false)
-      setPasswordInput('')
+      updatePasswordDraft({ enabled: false, input: '' })
       onUpdateSettings({ password: null })
       toast.success('密码已移除')
     } else {
-      setPasswordEnabled(true)
+      updatePasswordDraft({ enabled: true })
     }
   }
 
@@ -94,6 +95,7 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
       return
     }
     onUpdateSettings({ password: passwordInput.trim() })
+    updatePasswordDraft({ input: '' })
     toast.success('密码已设置')
   }
 
@@ -294,7 +296,7 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
                 type="password"
                 placeholder="输入新密码..."
                 value={passwordInput}
-                onChange={(e) => setPasswordInput(e.target.value)}
+                onChange={(e) => updatePasswordDraft({ input: e.target.value })}
                 maxLength={LIMITS.ROOM_PASSWORD_MAX_LENGTH}
                 className="flex-1"
                 onKeyDown={(e) => e.key === 'Enter' && handleSetPassword()}

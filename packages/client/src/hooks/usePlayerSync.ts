@@ -9,7 +9,7 @@ import {
   DRIFT_SEEK_RTT_MARGIN_MS,
   HARD_SEEK_CONFIRM_COUNT,
 } from '@/lib/constants'
-import { useSocketContext } from '@/providers/SocketProvider'
+import { useSocketContext } from '@/providers/socket-context'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
 import { useSettingsStore } from '@/stores/settingsStore'

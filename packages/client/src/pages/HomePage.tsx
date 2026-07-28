@@ -10,14 +10,14 @@ import { useLobby } from '@/hooks/useLobby'
 import { unlockAudio } from '@/lib/audioUnlock'
 import { ACTION_LOADING_TIMEOUT_MS } from '@/lib/constants'
 import { storage } from '@/lib/storage'
-import { useSocketContext } from '@/providers/SocketProvider'
+import { useSocketContext } from '@/providers/socket-context'
 import { useRoomStore } from '@/stores/roomStore'
 import { useChatStore } from '@/stores/chatStore'
 import { useVersionCheck } from '@/hooks/useVersionCheck'
 import { EVENTS, ERROR_CODE, type RoomListItem, type RoomState } from '@music-together/shared'
 import { Github, Headphones } from 'lucide-react'
 import { motion } from 'motion/react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useAccountStore } from '@/stores/accountStore'
@@ -43,16 +43,44 @@ export default function HomePage() {
   // Stores the pending join action while waiting for nickname input
   const pendingJoinRef = useRef<{ type: 'room'; room: RoomListItem } | { type: 'direct'; roomId: string } | null>(null)
 
-  // Refs for onError closure to always read the latest values
-  const passwordDialogRef = useRef(passwordDialog)
-  passwordDialogRef.current = passwordDialog
-  const directRoomIdRef = useRef(directRoomId)
-  directRoomIdRef.current = directRoomId
   const lastJoinedRoomIdRef = useRef('')
 
   const setRoom = useRoomStore((s) => s.setRoom)
   const accountProfile = useAccountStore((state) => state.profile)
   const savedNickname = accountProfile?.nickname || storage.getNickname()
+
+  const onRoomError = useEffectEvent((error: { code: string; message: string }) => {
+    setActionLoading(false)
+    if (error.code !== ERROR_CODE.WRONG_PASSWORD) {
+      toast.error(error.message)
+      return
+    }
+
+    if (passwordDialog.open) {
+      setPasswordError('密码错误，请重试')
+      return
+    }
+
+    const targetRoomId = lastJoinedRoomIdRef.current || directRoomId.trim()
+    if (!targetRoomId) {
+      toast.error(error.message)
+      return
+    }
+
+    setPasswordDialog({
+      open: true,
+      room: {
+        id: targetRoomId,
+        name: targetRoomId,
+        hasPassword: true,
+        permanent: false,
+        userCount: 0,
+        currentTrackTitle: null,
+        currentTrackArtist: null,
+      },
+    })
+    setPasswordError(null)
+  })
 
   // Safety timeout: reset actionLoading after 15s to prevent stuck button
   useEffect(() => {
@@ -108,50 +136,18 @@ export default function HomePage() {
       useChatStore.getState().setMessages(messages)
     }
 
-    const onError = (error: { code: string; message: string }) => {
-      setActionLoading(false)
-      if (error.code === ERROR_CODE.WRONG_PASSWORD) {
-        // If password dialog is already open, show error
-        if (passwordDialogRef.current.open) {
-          setPasswordError('密码错误，请重试')
-        } else {
-          // Direct join hit a password-protected room — open password dialog
-          const targetRoomId = lastJoinedRoomIdRef.current || directRoomIdRef.current.trim()
-          if (targetRoomId) {
-            setPasswordDialog({
-              open: true,
-              room: {
-                id: targetRoomId,
-                name: targetRoomId,
-                hasPassword: true,
-                permanent: false,
-                userCount: 0,
-                currentTrackTitle: null,
-                currentTrackArtist: null,
-              },
-            })
-            setPasswordError(null)
-          } else {
-            toast.error(error.message)
-          }
-        }
-      } else {
-        toast.error(error.message)
-      }
-    }
-
     socket.on(EVENTS.ROOM_CREATED, onCreated)
     socket.on(EVENTS.ROOM_STATE, onState)
     socket.on(EVENTS.ROOM_REJOIN_TOKEN, onRejoinToken)
     socket.on(EVENTS.CHAT_HISTORY, onChatHistory)
-    socket.on(EVENTS.ROOM_ERROR, onError)
+    socket.on(EVENTS.ROOM_ERROR, onRoomError)
 
     return () => {
       socket.off(EVENTS.ROOM_CREATED, onCreated)
       socket.off(EVENTS.ROOM_STATE, onState)
       socket.off(EVENTS.ROOM_REJOIN_TOKEN, onRejoinToken)
       socket.off(EVENTS.CHAT_HISTORY, onChatHistory)
-      socket.off(EVENTS.ROOM_ERROR, onError)
+      socket.off(EVENTS.ROOM_ERROR, onRoomError)
     }
   }, [socket, navigate, setRoom])
 

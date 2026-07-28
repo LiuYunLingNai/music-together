@@ -101,15 +101,16 @@ export function SettingsDialog({
     [isServerAdmin],
   )
 
-  // When dialog opens with an initialTab, jump to it
   useEffect(() => {
-    if (open && initialTab) {
-      setTab(initialTab)
-    }
+    if (!open || !initialTab) return
+    const frame = requestAnimationFrame(() => setTab(initialTab))
+    return () => cancelAnimationFrame(frame)
   }, [open, initialTab])
 
   useEffect(() => {
-    if (tab === 'admin' && !isServerAdmin) setTab('room')
+    if (tab !== 'admin' || isServerAdmin) return
+    const frame = requestAnimationFrame(() => setTab('room'))
+    return () => cancelAnimationFrame(frame)
   }, [isServerAdmin, tab])
 
   return (

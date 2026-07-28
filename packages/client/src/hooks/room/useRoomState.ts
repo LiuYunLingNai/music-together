@@ -1,4 +1,4 @@
-import { useSocketContext } from '@/providers/SocketProvider'
+import { useSocketContext } from '@/providers/socket-context'
 import { useRoomStore } from '@/stores/roomStore'
 import { storage } from '@/lib/storage'
 import { ERROR_CODE, EVENTS } from '@music-together/shared'
@@ -27,8 +27,6 @@ import { fetchCurrentProfile } from '@/lib/profileApi'
 export function useRoomState() {
   const navigate = useNavigate()
   const { socket } = useSocketContext()
-  const navigateRef = useRef(navigate)
-  navigateRef.current = navigate
 
   // Guard against React Strict Mode double-mount sending cookies twice.
   // Persists across cleanup/re-setup so the second mount is a no-op.
@@ -152,7 +150,7 @@ export function useRoomState() {
 
       toast.error(error.message)
       if (error.code === ERROR_CODE.ROOM_NOT_FOUND) {
-        navigateRef.current('/', { replace: true })
+        navigate('/', { replace: true })
       }
     }
 
@@ -183,5 +181,5 @@ export function useRoomState() {
       socket.off(EVENTS.ROOM_AUTO_FALLBACK, onAutoFallback)
       socket.off(EVENTS.ROOM_ERROR, onError)
     }
-  }, [socket])
+  }, [socket, navigate])
 }

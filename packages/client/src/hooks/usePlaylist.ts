@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { EVENTS, LIMITS, type MusicSource, type Playlist, type Track } from '@music-together/shared'
-import { useSocketContext } from '@/providers/SocketProvider'
+import { useSocketContext } from '@/providers/socket-context'
 import { useRoomStore } from '@/stores/roomStore'
 import { SERVER_URL } from '@/lib/config'
 

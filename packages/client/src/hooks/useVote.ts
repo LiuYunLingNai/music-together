@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { EVENTS } from '@music-together/shared'
 import type { PlayMode, VoteAction, VoteState } from '@music-together/shared'
-import { useSocketContext } from '@/providers/SocketProvider'
+import { useSocketContext } from '@/providers/socket-context'
 import { useSocketEvent } from './useSocketEvent'
 import { toast } from 'sonner'
 

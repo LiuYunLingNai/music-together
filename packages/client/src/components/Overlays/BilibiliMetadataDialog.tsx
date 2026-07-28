@@ -24,7 +24,10 @@ interface BilibiliMetadataDialogProps {
 
 export function BilibiliMetadataDialog({ track, roomId, onOpenChange, onSelect, onSkip }: BilibiliMetadataDialogProps) {
   const [source, setSource] = useState<BilibiliMetadataSource>('netease')
-  const [keyword, setKeyword] = useState('')
+  const trackId = track?.id
+  const trackTitle = track?.title
+  const [query, setQuery] = useState({ trackId, value: trackTitle ?? '' })
+  const keyword = query.trackId === trackId ? query.value : (trackTitle ?? '')
   const { results, loading, loadingMore, hasMore, hasSearched, search, loadMore, resetState } = useSearch(
     source,
     'song',
@@ -32,11 +35,10 @@ export function BilibiliMetadataDialog({ track, roomId, onOpenChange, onSelect, 
   )
 
   useEffect(() => {
-    if (!track) return
-    setKeyword(track.title)
+    if (!trackTitle) return
     resetState()
-    search(track.title)
-  }, [track?.id, source, resetState, search])
+    search(trackTitle)
+  }, [trackId, trackTitle, source, resetState, search])
 
   return (
     <ResponsiveDialog open={Boolean(track)} onOpenChange={onOpenChange}>
@@ -59,7 +61,7 @@ export function BilibiliMetadataDialog({ track, roomId, onOpenChange, onSelect, 
           <div className="flex gap-2">
             <Input
               value={keyword}
-              onChange={(event) => setKeyword(event.target.value)}
+              onChange={(event) => setQuery({ trackId, value: event.target.value })}
               onKeyDown={(event) => event.key === 'Enter' && search(keyword)}
               placeholder="搜索歌曲或歌手..."
               autoFocus

@@ -9,36 +9,37 @@ import { useCallback, useRef, useState } from 'react'
  */
 export function useCoverWidth(paused: boolean) {
   const [width, setWidth] = useState(0)
-  const pausedRef = useRef(paused)
-  pausedRef.current = paused
   const observerRef = useRef<ResizeObserver | null>(null)
 
-  const ref = useCallback((node: HTMLDivElement | null) => {
-    observerRef.current?.disconnect()
-    observerRef.current = null
-    if (!node) return
+  const ref = useCallback(
+    (node: HTMLDivElement | null) => {
+      observerRef.current?.disconnect()
+      observerRef.current = null
+      if (!node) return
 
-    const update = (w: number, h: number) => {
-      if (pausedRef.current) return
-      const newDimension = Math.floor(Math.min(w, h))
+      const update = (w: number, h: number) => {
+        if (paused) return
+        const newDimension = Math.floor(Math.min(w, h))
 
-      setWidth((prev) => {
-        // Hysteresis dead-zone: Ignore sub 3px changes to prevent ResizeObserver infinite loops
-        // when the zoom scaling below changes the actual pixel height of the controls.
-        if (Math.abs(prev - newDimension) <= 3) return prev
-        return newDimension
+        setWidth((prev) => {
+          // Hysteresis dead-zone: Ignore sub 3px changes to prevent ResizeObserver infinite loops
+          // when the zoom scaling below changes the actual pixel height of the controls.
+          if (Math.abs(prev - newDimension) <= 3) return prev
+          return newDimension
+        })
+      }
+
+      const rect = node.getBoundingClientRect()
+      update(rect.width, rect.height)
+
+      const ro = new ResizeObserver(([entry]) => {
+        update(entry.contentRect.width, entry.contentRect.height)
       })
-    }
-
-    const rect = node.getBoundingClientRect()
-    update(rect.width, rect.height)
-
-    const ro = new ResizeObserver(([entry]) => {
-      update(entry.contentRect.width, entry.contentRect.height)
-    })
-    ro.observe(node)
-    observerRef.current = ro
-  }, [])
+      ro.observe(node)
+      observerRef.current = ro
+    },
+    [paused],
+  )
 
   return { ref, coverWidth: width }
 }

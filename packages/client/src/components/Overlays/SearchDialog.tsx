@@ -15,7 +15,7 @@ import { useRoomStore } from '@/stores/roomStore'
 import { useSearch } from '@/hooks/useSearch'
 import { usePlaylist } from '@/hooks/usePlaylist'
 import { useIsMobile } from '@/hooks/useIsMobile'
-import { useSocketContext } from '@/providers/SocketProvider'
+import { useSocketContext } from '@/providers/socket-context'
 import { EVENTS } from '@music-together/shared'
 import type { MusicSource, Track, Playlist } from '@music-together/shared'
 import type { BilibiliMetadataSource } from '@music-together/shared'
@@ -122,7 +122,6 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
     prevSourceRef.current = source
     prevTypeRef.current = searchType
     if ((sourceChanged || typeChanged) && keyword.trim()) {
-      setAddedIds(new Set())
       search(keyword.trim())
       if (searchType === 'song') listRef.current?.scrollToTop()
     }
@@ -146,9 +145,10 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
     if (open) requestAnimationFrame(measurePill)
   }, [open, measurePill])
 
-  // Reset album detail when dialog closes
   useEffect(() => {
-    if (!open) setSelectedAlbum(null)
+    if (open) return
+    const frame = requestAnimationFrame(() => setSelectedAlbum(null))
+    return () => cancelAnimationFrame(frame)
   }, [open])
 
   const handleSearch = (overrideKeyword?: string) => {

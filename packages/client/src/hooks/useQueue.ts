@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import { EVENTS, LIMITS, type Track } from '@music-together/shared'
-import { useSocketContext } from '@/providers/SocketProvider'
+import { useSocketContext } from '@/providers/socket-context'
 
 export function useQueue() {
   const { socket } = useSocketContext()

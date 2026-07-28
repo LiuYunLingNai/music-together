@@ -1,4 +1,4 @@
-import { useSocketContext } from '@/providers/SocketProvider'
+import { useSocketContext } from '@/providers/socket-context'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
 import { useAccountStore } from '@/stores/accountStore'

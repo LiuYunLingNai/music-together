@@ -15,28 +15,24 @@ interface NowPlayingProps {
 
 export function NowPlaying({ compact = false, onCoverClick }: NowPlayingProps) {
   const currentTrack = usePlayerStore((s) => s.currentTrack)
-  const [coverError, setCoverError] = useState(false)
+  const [failedCoverTrackId, setFailedCoverTrackId] = useState<string | null>(null)
 
   // Skip layoutId on first frame to prevent unwanted entry animation
   const [ready, setReady] = useState(false)
   useEffect(() => {
-    setReady(true)
+    const frame = requestAnimationFrame(() => setReady(true))
+    return () => cancelAnimationFrame(frame)
   }, [])
   const layoutId = ready ? 'cover-art' : undefined
 
-  // Reset error state when track changes
-  useEffect(() => {
-    setCoverError(false)
-  }, [currentTrack?.id])
-
-  const showCover = currentTrack?.cover && !coverError
+  const showCover = currentTrack?.cover && failedCoverTrackId !== currentTrack.id
 
   const coverContent = showCover ? (
     <img
       src={currentTrack.cover}
       alt={currentTrack.title}
       className="h-full w-full object-cover"
-      onError={() => setCoverError(true)}
+      onError={() => setFailedCoverTrackId(currentTrack.id)}
     />
   ) : (
     <div className="flex h-full w-full items-center justify-center bg-secondary">
@@ -64,14 +60,10 @@ export function NowPlaying({ compact = false, onCoverClick }: NowPlayingProps) {
           transition={SONG_INFO_TRANSITION}
           className="min-w-0 flex-1 will-change-transform"
         >
-          <motion.div
-            className="text-[22px] font-semibold leading-tight text-white/90"
-          >
+          <motion.div className="text-[22px] font-semibold leading-tight text-white/90">
             <MarqueeText>{currentTrack?.title ?? '暂无歌曲'}</MarqueeText>
           </motion.div>
-          <motion.div
-            className="text-base text-white/50"
-          >
+          <motion.div className="text-base text-white/50">
             <MarqueeText>{currentTrack ? currentTrack.artist.join(' / ') : '...'}</MarqueeText>
           </motion.div>
         </motion.div>

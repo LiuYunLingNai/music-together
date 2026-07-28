@@ -1,4 +1,4 @@
-import { useSocketContext } from '@/providers/SocketProvider'
+import { useSocketContext } from '@/providers/socket-context'
 import { useRoomStore } from '@/stores/roomStore'
 import { EVENTS } from '@music-together/shared'
 import type { Track } from '@music-together/shared'

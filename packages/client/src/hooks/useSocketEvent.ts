@@ -1,6 +1,6 @@
 import type { ServerToClientEvents } from '@music-together/shared'
-import { useSocketContext } from '@/providers/SocketProvider'
-import { useEffect, useRef } from 'react'
+import { useSocketContext } from '@/providers/socket-context'
+import { useEffect, useEffectEvent } from 'react'
 
 /**
  * Generic hook to subscribe to a typed Socket.IO event.
@@ -11,22 +11,16 @@ import { useEffect, useRef } from 'react'
  */
 export function useSocketEvent<E extends keyof ServerToClientEvents>(event: E, handler: ServerToClientEvents[E]) {
   const { socket } = useSocketContext()
-
-  // Keep a stable ref so the effect doesn't re-subscribe on every render
-  const handlerRef = useRef(handler)
-  handlerRef.current = handler
+  const onEvent = useEffectEvent((...args: unknown[]) => {
+    ;(handler as unknown as (...eventArgs: unknown[]) => void)(...args)
+  })
 
   useEffect(() => {
-    // Wrapper delegates to the latest handler via ref.
-    // Socket.IO's overloaded .on/.off signatures can't infer the handler type
-    // from a generic event name, so we cast through `unknown` to satisfy the compiler.
-    const wrapper: ServerToClientEvents[E] = ((...args: unknown[]) => {
-      ;(handlerRef.current as (...a: unknown[]) => void)(...args)
-    }) as unknown as ServerToClientEvents[E]
+    const wrapper = onEvent as unknown as ServerToClientEvents[E]
 
-    socket.on(event as keyof ServerToClientEvents & string, wrapper as never)
+    socket.on(event, wrapper as never)
     return () => {
-      socket.off(event as keyof ServerToClientEvents & string, wrapper as never)
+      socket.off(event, wrapper as never)
     }
   }, [socket, event])
 }

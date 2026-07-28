@@ -1,16 +1,10 @@
 import { getSocket, type TypedSocket } from '@/lib/socket'
 import { SERVER_URL } from '@/lib/config'
 import { storage } from '@/lib/storage'
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { fetchCurrentProfile } from '@/lib/profileApi'
-
-interface SocketContextValue {
-  socket: TypedSocket
-  isConnected: boolean
-}
-
-const SocketContext = createContext<SocketContextValue | null>(null)
+import { SocketContext, type SocketContextValue } from '@/providers/socket-context'
 
 /** Persistent toast id so we can dismiss it on reconnect */
 const DISCONNECT_TOAST_ID = 'socket-disconnect'
@@ -106,10 +100,4 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   const value = useMemo<SocketContextValue>(() => ({ socket: socketRef.current, isConnected }), [isConnected])
 
   return <SocketContext.Provider value={value}>{children}</SocketContext.Provider>
-}
-
-export function useSocketContext(): SocketContextValue {
-  const ctx = useContext(SocketContext)
-  if (!ctx) throw new Error('useSocketContext must be used within SocketProvider')
-  return ctx
 }

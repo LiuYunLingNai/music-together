@@ -2,8 +2,8 @@ import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { formatTime } from '@/lib/format'
-import { AbilityContext } from '@/providers/AbilityProvider'
-import { useSocketContext } from '@/providers/SocketProvider'
+import { AbilityContext } from '@/providers/ability-context'
+import { useSocketContext } from '@/providers/socket-context'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
 import type { PlayMode, VoteAction } from '@music-together/shared'
@@ -103,7 +103,8 @@ export const PlayerControls = memo(function PlayerControls({
   const handlePlayPause = () => {
     if (playCooldown) return
     if (canPlay) {
-      isPlaying ? onPause() : onPlay()
+      if (isPlaying) onPause()
+      else onPlay()
     } else if (canVote) {
       onStartVote(isPlaying ? 'pause' : 'resume')
     }

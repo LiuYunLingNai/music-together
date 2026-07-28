@@ -1,15 +1,22 @@
 import type { ClientToServerEvents, ServerToClientEvents } from '@music-together/shared'
 import { SERVER_URL } from './config'
 
-type ConnectionEventName = 'connect' | 'disconnect' | 'connect_error'
+interface ConnectionEvents {
+  connect: () => void
+  disconnect: () => void
+  connect_error: (error: Error) => void
+}
+
+type SocketInboundEvents = ServerToClientEvents & ConnectionEvents
+type StoredHandler = (...args: unknown[]) => void
 
 export type TypedSocket = {
   connected: boolean
   connect: () => void
   disconnect: () => void
-  on: (event: keyof ServerToClientEvents | ConnectionEventName, handler: (...args: any[]) => void) => void
-  off: (event: keyof ServerToClientEvents | ConnectionEventName, handler: (...args: any[]) => void) => void
-  emit: <E extends keyof ClientToServerEvents>(event: E, data?: any) => void
+  on: <E extends keyof SocketInboundEvents>(event: E, handler: SocketInboundEvents[E]) => void
+  off: <E extends keyof SocketInboundEvents>(event: E, handler: SocketInboundEvents[E]) => void
+  emit: <E extends keyof ClientToServerEvents>(event: E, ...args: Parameters<ClientToServerEvents[E]>) => void
 }
 
 let socket: TypedSocket | null = null
@@ -39,10 +46,10 @@ export function waitForConnect(): Promise<TypedSocket> {
   if (s.connected) return Promise.resolve(s)
   return new Promise((resolve) => {
     const handler = () => {
-      s.off('connect', handler as any)
+      s.off('connect', handler)
       resolve(s)
     }
-    s.on('connect', handler as any)
+    s.on('connect', handler)
     s.connect()
   })
 }
@@ -50,7 +57,7 @@ export function waitForConnect(): Promise<TypedSocket> {
 function createWebSocket(): TypedSocket {
   let ws: WebSocket | null = null
   let connected = false
-  const handlers = new Map<string, Set<(...args: any[]) => void>>()
+  const handlers = new Map<string, Set<StoredHandler>>()
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let shouldReconnect = true
 
@@ -121,25 +128,25 @@ function createWebSocket(): TypedSocket {
     connected = false
   }
 
-  const on = (event: keyof ServerToClientEvents | ConnectionEventName, handler: (...args: any[]) => void) => {
+  const on = <E extends keyof SocketInboundEvents>(event: E, handler: SocketInboundEvents[E]) => {
     let set = handlers.get(event as string)
     if (!set) {
       set = new Set()
       handlers.set(event as string, set)
     }
-    set.add(handler)
+    set.add(handler as unknown as StoredHandler)
   }
 
-  const off = (event: keyof ServerToClientEvents | ConnectionEventName, handler: (...args: any[]) => void) => {
+  const off = <E extends keyof SocketInboundEvents>(event: E, handler: SocketInboundEvents[E]) => {
     const set = handlers.get(event as string)
     if (set) {
-      set.delete(handler)
+      set.delete(handler as unknown as StoredHandler)
     }
   }
 
-  const emit = <E extends keyof ClientToServerEvents>(event: E, data?: any) => {
+  const emit = <E extends keyof ClientToServerEvents>(event: E, ...args: Parameters<ClientToServerEvents[E]>) => {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ event, data }))
+      ws.send(JSON.stringify({ event, data: args[0] }))
     }
   }
 

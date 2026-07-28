@@ -6,14 +6,14 @@ import { cn } from '@/lib/utils'
 import { getProxiedCoverUrl } from '@/lib/cover'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
-import { useSocketContext } from '@/providers/SocketProvider'
+import { useSocketContext } from '@/providers/socket-context'
 import type { Track } from '@music-together/shared'
 import { EVENTS } from '@music-together/shared'
 import { useHasHover } from '@/hooks/useHasHover'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useCallback, useContext, useEffect, useRef, useState, type MouseEvent } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { AbilityContext } from '@/providers/AbilityProvider'
+import { AbilityContext } from '@/providers/ability-context'
 import { ArrowUpToLine, ChevronDown, ChevronUp, ListX, Music, Play, RefreshCw, Trash2, User, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { MarqueeText } from '@/components/ui/marquee-text'
@@ -73,6 +73,8 @@ export function QueueDrawer({
   const [metadataTrack, setMetadataTrack] = useState<Track | null>(null)
 
   const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
+  // TanStack Virtual manages mutable measurements internally and cannot be compiler-memoized.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: queue.length,
     getScrollElement: () => scrollElement,

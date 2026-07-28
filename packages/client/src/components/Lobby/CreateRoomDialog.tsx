@@ -33,11 +33,10 @@ export function CreateRoomDialog({
   const [passwordEnabled, setPasswordEnabled] = useState(false)
   const [password, setPassword] = useState('')
 
-  // Sync nickname from defaultNickname when the dialog opens
   useEffect(() => {
-    if (open) {
-      setNickname(defaultNickname)
-    }
+    if (!open) return
+    const frame = requestAnimationFrame(() => setNickname(defaultNickname))
+    return () => cancelAnimationFrame(frame)
   }, [open, defaultNickname])
 
   const canSubmit = nickname.trim() && !(passwordEnabled && !password.trim())

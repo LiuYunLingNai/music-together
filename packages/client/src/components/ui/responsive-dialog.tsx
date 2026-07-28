@@ -171,5 +171,4 @@ export {
   ResponsiveDialogFooter,
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
-  useIsResponsiveMobile,
 }

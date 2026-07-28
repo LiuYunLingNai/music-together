@@ -1,5 +1,5 @@
 import { storage } from '@/lib/storage'
-import { useSocketContext } from '@/providers/SocketProvider'
+import { useSocketContext } from '@/providers/socket-context'
 import type { MusicSource, MyPlatformAuth, PlatformAuthStatus } from '@music-together/shared'
 import { EVENTS } from '@music-together/shared'
 import { useCallback, useEffect, useRef, useState } from 'react'

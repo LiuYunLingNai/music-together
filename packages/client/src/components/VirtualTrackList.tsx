@@ -71,6 +71,8 @@ export const VirtualTrackList = forwardRef<VirtualTrackListRef, VirtualTrackList
 
   const rowCount = tracks.length + (hasMore ? 1 : 0)
 
+  // TanStack Virtual manages mutable measurements internally and cannot be compiler-memoized.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: rowCount,
     getScrollElement: () => scrollElement,
@@ -80,14 +82,14 @@ export const VirtualTrackList = forwardRef<VirtualTrackListRef, VirtualTrackList
 
   // Infinite scroll: trigger onLoadMore when approaching the bottom
   const virtualItems = virtualizer.getVirtualItems()
-  const lastItem = virtualItems.at(-1)
+  const lastItemIndex = virtualItems.at(-1)?.index
 
   useEffect(() => {
-    if (!lastItem) return
-    if (lastItem.index >= tracks.length - LOAD_MORE_THRESHOLD && hasMore && !loadingMore) {
+    if (lastItemIndex === undefined) return
+    if (lastItemIndex >= tracks.length - LOAD_MORE_THRESHOLD && hasMore && !loadingMore) {
       onLoadMore()
     }
-  }, [lastItem?.index, tracks.length, hasMore, loadingMore, onLoadMore])
+  }, [lastItemIndex, tracks.length, hasMore, loadingMore, onLoadMore])
 
   // Loading skeleton
   if (loading) {
