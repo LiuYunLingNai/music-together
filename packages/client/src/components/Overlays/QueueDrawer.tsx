@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from '@/components/ui/drawer'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { getProxiedCoverUrl } from '@/lib/cover'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
 import { useSocketContext } from '@/providers/SocketProvider'
@@ -13,9 +14,10 @@ import { useIsMobile } from '@/hooks/useIsMobile'
 import { useCallback, useContext, useEffect, useRef, useState, type MouseEvent } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { AbilityContext } from '@/providers/AbilityProvider'
-import { ArrowUpToLine, ChevronDown, ChevronUp, ListX, Music, Play, Trash2, User, X } from 'lucide-react'
+import { ArrowUpToLine, ChevronDown, ChevronUp, ListX, Music, Play, RefreshCw, Trash2, User, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { MarqueeText } from '@/components/ui/marquee-text'
+import { BilibiliMetadataDialog } from './BilibiliMetadataDialog'
 import type { MusicSource } from '@music-together/shared'
 
 const EMPTY_QUEUE: Track[] = []
@@ -24,6 +26,7 @@ const SOURCE_STYLE: Record<MusicSource, { label: string; className: string }> = 
   netease: { label: '网易', className: 'text-white bg-red-500 ring-red-600/50' },
   tencent: { label: 'QQ', className: 'text-white bg-green-500 ring-green-600/50' },
   kugou: { label: '酷狗', className: 'text-white bg-blue-500 ring-blue-600/50' },
+  bilibili: { label: 'B站', className: 'text-white bg-pink-500 ring-pink-600/50' },
 }
 
 interface QueueDrawerProps {
@@ -31,11 +34,25 @@ interface QueueDrawerProps {
   onOpenChange: (open: boolean) => void
   onRemoveFromQueue: (trackId: string) => void
   onReorderQueue: (trackIds: string[]) => void
+  onUpdateBilibiliMetadata: (
+    trackId: string,
+    metadata:
+      | { metadataSource: 'netease' | 'tencent'; lyricId?: string; picId?: string; cover: string }
+      | { clearMetadata: true },
+  ) => void
   onClearQueue: () => void
 }
 
-export function QueueDrawer({ open, onOpenChange, onRemoveFromQueue, onReorderQueue, onClearQueue }: QueueDrawerProps) {
+export function QueueDrawer({
+  open,
+  onOpenChange,
+  onRemoveFromQueue,
+  onReorderQueue,
+  onUpdateBilibiliMetadata,
+  onClearQueue,
+}: QueueDrawerProps) {
   const queue = useRoomStore((s) => s.room?.queue ?? EMPTY_QUEUE)
+  const roomId = useRoomStore((s) => s.room?.id)
   const currentTrack = usePlayerStore((s) => s.currentTrack)
   const { socket } = useSocketContext()
   const isMobile = useIsMobile() // layout: Drawer direction, height
@@ -43,6 +60,7 @@ export function QueueDrawer({ open, onOpenChange, onRemoveFromQueue, onReorderQu
   const isTouch = !hasHover
   const ability = useContext(AbilityContext)
   const canRemove = ability.can('remove', 'Queue')
+  const canAdd = ability.can('add', 'Queue')
   const canReorder = ability.can('reorder', 'Queue')
   const canPlay = ability.can('play', 'Player')
   const canVote = ability.can('vote', 'Player')
@@ -52,6 +70,7 @@ export function QueueDrawer({ open, onOpenChange, onRemoveFromQueue, onReorderQu
   const [activeTrackId, setActiveTrackId] = useState<string | null>(null)
   // Desktop: after clicking an action, temporarily suppress the hover toolbar until the cursor leaves the item
   const [dismissedHoverTrackId, setDismissedHoverTrackId] = useState<string | null>(null)
+  const [metadataTrack, setMetadataTrack] = useState<Track | null>(null)
 
   const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
   const virtualizer = useVirtualizer({
@@ -233,179 +252,218 @@ export function QueueDrawer({ open, onOpenChange, onRemoveFromQueue, onReorderQu
                         'group relative flex h-full items-center gap-2 rounded-lg px-2 transition-colors hover:bg-accent/50',
                         currentTrack?.id === track.id && 'bg-primary/10',
                       )}
-                    onClick={() => {
-                      if (isTouch) {
-                        setActiveTrackId((prev) => (prev === track.id ? null : track.id))
-                      }
-                    }}
-                    onMouseLeave={() => {
-                      if (!isTouch && dismissedHoverTrackId === track.id) setDismissedHoverTrackId(null)
-                    }}
-                  >
-                    {/* Index */}
-                    <span className="w-5 shrink-0 text-center text-xs tabular-nums text-muted-foreground">{i + 1}</span>
+                      onClick={() => {
+                        if (isTouch) {
+                          setActiveTrackId((prev) => (prev === track.id ? null : track.id))
+                        }
+                      }}
+                      onMouseLeave={() => {
+                        if (!isTouch && dismissedHoverTrackId === track.id) setDismissedHoverTrackId(null)
+                      }}
+                    >
+                      {/* Index */}
+                      <span className="w-5 shrink-0 text-center text-xs tabular-nums text-muted-foreground">
+                        {i + 1}
+                      </span>
 
-                    {/* Cover + source badge */}
-                    <div className="relative shrink-0">
-                      {track.cover ? (
-                        <img
-                          src={track.cover}
-                          alt={track.title}
-                          className="h-9 w-9 rounded object-cover"
-                          onError={(e) => {
-                            e.currentTarget.style.display = 'none'
-                            e.currentTarget.nextElementSibling?.classList.remove('hidden')
-                          }}
-                        />
-                      ) : null}
-                      <div
-                        className={cn(
-                          'flex h-9 w-9 items-center justify-center rounded bg-muted',
-                          track.cover && 'hidden',
-                        )}
-                      >
-                        <Music className="h-4 w-4 text-muted-foreground" />
-                      </div>
-                      {track.source && SOURCE_STYLE[track.source] && (
-                        <span
+                      {/* Cover + source badge */}
+                      <div className="relative shrink-0">
+                        {track.cover ? (
+                          <img
+                            src={getProxiedCoverUrl(track.cover)}
+                            alt={track.title}
+                            className="h-9 w-9 rounded object-cover"
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none'
+                              e.currentTarget.nextElementSibling?.classList.remove('hidden')
+                            }}
+                          />
+                        ) : null}
+                        <div
                           className={cn(
-                            'absolute -bottom-1 -right-1 rounded px-0.5 text-[8px] font-bold leading-tight ring-1',
-                            SOURCE_STYLE[track.source].className,
+                            'flex h-9 w-9 items-center justify-center rounded bg-muted',
+                            track.cover && 'hidden',
                           )}
                         >
-                          {SOURCE_STYLE[track.source].label}
-                        </span>
-                      )}
-                    </div>
+                          <Music className="h-4 w-4 text-muted-foreground" />
+                        </div>
+                        {track.source && SOURCE_STYLE[track.source] && (
+                          <span
+                            className={cn(
+                              'absolute -bottom-1 -right-1 rounded px-0.5 text-[8px] font-bold leading-tight ring-1',
+                              SOURCE_STYLE[track.source].className,
+                            )}
+                          >
+                            {SOURCE_STYLE[track.source].label}
+                          </span>
+                        )}
+                      </div>
 
-                    {/* Track info */}
-                    <div className="min-w-0 flex-1">
-                      <MarqueeText
-                        className={cn('text-sm', currentTrack?.id === track.id && 'font-medium text-primary')}
+                      {/* Track info */}
+                      <div className="min-w-0 flex-1">
+                        <MarqueeText
+                          className={cn('text-sm', currentTrack?.id === track.id && 'font-medium text-primary')}
+                        >
+                          {track.title}
+                        </MarqueeText>
+                        <MarqueeText className="text-xs text-muted-foreground">{track.artist.join(' / ')}</MarqueeText>
+                      </div>
+
+                      {/* Requester badge — absolute top-right inside item */}
+                      {track.requestedBy && (
+                        <Badge
+                          variant="outline"
+                          className="absolute right-2 top-1.5 z-10 h-4 gap-0.5 border-primary/30 bg-primary/10 px-1.5 py-0 text-[10px] font-normal text-primary"
+                        >
+                          <User className="h-2.5 w-2.5" />
+                          {track.requestedBy}
+                        </Badge>
+                      )}
+
+                      {/* Actions — visible on hover (desktop) or tap (mobile) */}
+                      <div
+                        className={cn(
+                          'absolute right-1 top-1/2 z-20 flex -translate-y-1/2 items-center gap-0.5',
+                          'rounded-md border border-border/50 bg-popover px-1 py-0.5 shadow-md backdrop-blur-md',
+                          'opacity-0 pointer-events-none transition-opacity',
+                          'group-hover:opacity-100 group-hover:pointer-events-auto',
+                          'group-focus-within:opacity-100 group-focus-within:pointer-events-auto',
+                          isTouch && activeTrackId === track.id && 'opacity-100 pointer-events-auto',
+                          !isTouch && dismissedHoverTrackId === track.id && 'opacity-0 pointer-events-none',
+                        )}
+                        onClick={(e) => e.stopPropagation()}
                       >
-                        {track.title}
-                      </MarqueeText>
-                      <MarqueeText className="text-xs text-muted-foreground">{track.artist.join(' / ')}</MarqueeText>
-                    </div>
-
-                    {/* Requester badge — absolute top-right inside item */}
-                    {track.requestedBy && (
-                      <Badge
-                        variant="outline"
-                        className="absolute right-2 top-1.5 z-10 h-4 gap-0.5 border-primary/30 bg-primary/10 px-1.5 py-0 text-[10px] font-normal text-primary"
-                      >
-                        <User className="h-2.5 w-2.5" />
-                        {track.requestedBy}
-                      </Badge>
-                    )}
-
-                    {/* Actions — visible on hover (desktop) or tap (mobile) */}
-                    <div
-                      className={cn(
-                        'absolute right-1 top-1/2 z-20 flex -translate-y-1/2 items-center gap-0.5',
-                        'rounded-md border border-border/50 bg-popover px-1 py-0.5 shadow-md backdrop-blur-md',
-                        'opacity-0 pointer-events-none transition-opacity',
-                        'group-hover:opacity-100 group-hover:pointer-events-auto',
-                        'group-focus-within:opacity-100 group-focus-within:pointer-events-auto',
-                        isTouch && activeTrackId === track.id && 'opacity-100 pointer-events-auto',
-                        !isTouch && dismissedHoverTrackId === track.id && 'opacity-0 pointer-events-none',
-                      )}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      {/* Play button — hidden for currently playing track */}
-                      {currentTrack?.id !== track.id && (canPlay || canVote) && (
-                        <Tooltip delayDuration={400}>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6 min-h-9 min-w-9 sm:min-h-0 sm:min-w-0"
-                              onClick={() => handlePlayTrack(track)}
-                              aria-label={canPlay ? `播放 ${track.title}` : `投票播放 ${track.title}`}
-                            >
-                              <Play className="h-3 w-3" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom">{canPlay ? '播放' : '投票播放'}</TooltipContent>
-                        </Tooltip>
-                      )}
-
-                      {canReorder && (
-                        <>
+                        {/* Play button — hidden for currently playing track */}
+                        {currentTrack?.id !== track.id && (canPlay || canVote) && (
                           <Tooltip delayDuration={400}>
                             <TooltipTrigger asChild>
                               <Button
                                 variant="ghost"
                                 size="icon"
                                 className="h-6 w-6 min-h-9 min-w-9 sm:min-h-0 sm:min-w-0"
-                                disabled={i === 0}
-                                onClick={() => handleMoveUp(i)}
-                                aria-label={`上移 ${track.title}`}
+                                onClick={() => handlePlayTrack(track)}
+                                aria-label={canPlay ? `播放 ${track.title}` : `投票播放 ${track.title}`}
                               >
-                                <ChevronUp className="h-3 w-3" />
+                                <Play className="h-3 w-3" />
                               </Button>
                             </TooltipTrigger>
-                            <TooltipContent side="bottom">上移</TooltipContent>
+                            <TooltipContent side="bottom">{canPlay ? '播放' : '投票播放'}</TooltipContent>
                           </Tooltip>
+                        )}
 
+                        {track.source === 'bilibili' && canAdd && (
                           <Tooltip delayDuration={400}>
                             <TooltipTrigger asChild>
                               <Button
                                 variant="ghost"
                                 size="icon"
                                 className="h-6 w-6 min-h-9 min-w-9 sm:min-h-0 sm:min-w-0"
-                                disabled={i === queue.length - 1}
-                                onClick={() => handleMoveDown(i)}
-                                aria-label={`下移 ${track.title}`}
+                                onClick={() => setMetadataTrack(track)}
+                                aria-label={`重选 ${track.title} 的歌词和封面`}
                               >
-                                <ChevronDown className="h-3 w-3" />
+                                <RefreshCw className="h-3 w-3" />
                               </Button>
                             </TooltipTrigger>
-                            <TooltipContent side="bottom">下移</TooltipContent>
+                            <TooltipContent side="bottom">重选歌词和封面</TooltipContent>
                           </Tooltip>
+                        )}
 
+                        {canReorder && (
+                          <>
+                            <Tooltip delayDuration={400}>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 min-h-9 min-w-9 sm:min-h-0 sm:min-w-0"
+                                  disabled={i === 0}
+                                  onClick={() => handleMoveUp(i)}
+                                  aria-label={`上移 ${track.title}`}
+                                >
+                                  <ChevronUp className="h-3 w-3" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent side="bottom">上移</TooltipContent>
+                            </Tooltip>
+
+                            <Tooltip delayDuration={400}>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 min-h-9 min-w-9 sm:min-h-0 sm:min-w-0"
+                                  disabled={i === queue.length - 1}
+                                  onClick={() => handleMoveDown(i)}
+                                  aria-label={`下移 ${track.title}`}
+                                >
+                                  <ChevronDown className="h-3 w-3" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent side="bottom">下移</TooltipContent>
+                            </Tooltip>
+
+                            <Tooltip delayDuration={400}>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 min-h-9 min-w-9 sm:min-h-0 sm:min-w-0"
+                                  onClick={(e) => handleInsertAfterCurrent(track, e)}
+                                  aria-label={`置顶 ${track.title}`}
+                                >
+                                  <ArrowUpToLine className="h-3 w-3" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent side="bottom">置顶到当前播放下方</TooltipContent>
+                            </Tooltip>
+                          </>
+                        )}
+
+                        {(canRemove || canVote) && (
                           <Tooltip delayDuration={400}>
                             <TooltipTrigger asChild>
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                className="h-6 w-6 min-h-9 min-w-9 sm:min-h-0 sm:min-w-0"
-                                onClick={(e) => handleInsertAfterCurrent(track, e)}
-                                aria-label={`置顶 ${track.title}`}
+                                className="h-6 w-6 min-h-9 min-w-9 sm:min-h-0 sm:min-w-0 text-destructive hover:text-destructive"
+                                onClick={() => handleRemoveTrack(track)}
+                                aria-label={canRemove ? `移除 ${track.title}` : `投票移除 ${track.title}`}
                               >
-                                <ArrowUpToLine className="h-3 w-3" />
+                                <Trash2 className="h-3 w-3" />
                               </Button>
                             </TooltipTrigger>
-                            <TooltipContent side="bottom">置顶到当前播放下方</TooltipContent>
+                            <TooltipContent side="bottom">{canRemove ? '移除' : '投票移除'}</TooltipContent>
                           </Tooltip>
-                        </>
-                      )}
-
-                      {(canRemove || canVote) && (
-                        <Tooltip delayDuration={400}>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6 min-h-9 min-w-9 sm:min-h-0 sm:min-w-0 text-destructive hover:text-destructive"
-                              onClick={() => handleRemoveTrack(track)}
-                              aria-label={canRemove ? `移除 ${track.title}` : `投票移除 ${track.title}`}
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom">{canRemove ? '移除' : '投票移除'}</TooltipContent>
-                        </Tooltip>
-                      )}
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              )
-            })}
+                )
+              })}
             </div>
           )}
         </div>
       </DrawerContent>
+      <BilibiliMetadataDialog
+        track={metadataTrack}
+        roomId={roomId}
+        onOpenChange={(isOpen) => !isOpen && setMetadataTrack(null)}
+        onSelect={(metadata, metadataSource) => {
+          if (!metadataTrack) return
+          onUpdateBilibiliMetadata(metadataTrack.id, {
+            metadataSource,
+            lyricId: metadata.lyricId,
+            picId: metadata.picId,
+            cover: metadata.cover || metadataTrack.cover,
+          })
+          setMetadataTrack(null)
+        }}
+        onSkip={() => {
+          if (!metadataTrack) return
+          onUpdateBilibiliMetadata(metadataTrack.id, { clearMetadata: true })
+          setMetadataTrack(null)
+        }}
+      />
     </Drawer>
   )
 }

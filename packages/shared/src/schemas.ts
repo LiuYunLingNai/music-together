@@ -88,11 +88,13 @@ const trackSchema = z.object({
   album: z.string().max(500),
   duration: z.number().finite().nonnegative(),
   cover: z.string().max(2000),
-  source: z.enum(['netease', 'tencent', 'kugou']),
+  bilibiliCover: z.string().max(2000).optional(),
+  source: z.enum(['netease', 'tencent', 'kugou', 'bilibili']),
   sourceId: z.string().max(200),
   urlId: z.string().max(200),
   lyricId: z.string().max(200).optional(),
   picId: z.string().max(200).optional(),
+  metadataSource: z.enum(['netease', 'tencent']).optional(),
   streamUrl: z.string().max(2000).optional(),
   vip: z.boolean().optional(),
 })
@@ -112,6 +114,14 @@ export const queueRemoveSchema = z.object({ trackId: z.string().max(200) })
 export const queueReorderSchema = z.object({
   trackIds: z.array(z.string().max(200)).max(LIMITS.QUEUE_MAX_SIZE),
 })
+export const queueUpdateMetadataSchema = z.object({
+  trackId: z.string().max(200),
+  metadataSource: z.enum(['netease', 'tencent']).optional(),
+  lyricId: z.string().max(200).optional(),
+  picId: z.string().max(200).optional(),
+  cover: z.string().max(2000).optional(),
+  clearMetadata: z.boolean().optional(),
+})
 
 // ---------------------------------------------------------------------------
 // Chat
@@ -125,7 +135,7 @@ export const chatMessageSchema = z.object({
 // REST API – Music routes
 // ---------------------------------------------------------------------------
 
-const musicSourceSchema = z.enum(['netease', 'tencent', 'kugou'])
+const musicSourceSchema = z.enum(['netease', 'tencent', 'kugou', 'bilibili'])
 
 export const searchQuerySchema = z.object({
   source: musicSourceSchema,

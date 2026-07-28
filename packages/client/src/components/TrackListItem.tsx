@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { formatDuration } from '@/lib/format'
+import { getProxiedCoverUrl } from '@/lib/cover'
 import { cn } from '@/lib/utils'
 import type { Track } from '@music-together/shared'
 import { ArrowUpToLine, Check, Music2, Plus } from 'lucide-react'
@@ -27,6 +28,7 @@ export const TrackListItem = memo(function TrackListItem({
   style,
   className,
 }: TrackListItemProps) {
+  const coverUrl = track.cover ? getProxiedCoverUrl(track.cover) : ''
   return (
     <div
       style={style}
@@ -36,8 +38,8 @@ export const TrackListItem = memo(function TrackListItem({
       <span className="w-6 shrink-0 text-center text-xs tabular-nums text-muted-foreground">{index + 1}</span>
 
       {/* Cover thumbnail */}
-      {track.cover ? (
-        <img src={track.cover} alt="" className="h-10 w-10 shrink-0 rounded object-cover" loading="lazy" />
+      {coverUrl ? (
+        <img src={coverUrl} alt="" className="h-10 w-10 shrink-0 rounded object-cover" loading="lazy" />
       ) : (
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-muted">
           <Music2 className="h-4 w-4 text-muted-foreground" />

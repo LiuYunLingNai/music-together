@@ -98,6 +98,8 @@ export function useRoomState() {
           return 'QQ音乐'
         case 'kugou':
           return '酷狗音乐'
+        case 'bilibili':
+          return 'B站'
       }
     }
 

@@ -161,6 +161,19 @@ export function usePlayer() {
     }
   }, [socket, loadTrack, fetchLyric])
 
+  useEffect(() => {
+    const onTrackMetadataUpdated = (data: { track: Track }) => {
+      const currentTrack = usePlayerStore.getState().currentTrack
+      if (currentTrack?.id !== data.track.id) return
+      usePlayerStore.getState().setCurrentTrack(data.track)
+      useRoomStore.getState().updateRoom({ currentTrack: data.track })
+      fetchLyric(data.track)
+    }
+
+    socket.on(EVENTS.PLAYER_TRACK_METADATA_UPDATED, onTrackMetadataUpdated)
+    return () => socket.off(EVENTS.PLAYER_TRACK_METADATA_UPDATED, onTrackMetadataUpdated)
+  }, [socket, fetchLyric])
+
   // Recovery: auto-sync player state from room state when desync is detected
   // (e.g. after HMR resets stores, or reconnection where PLAYER_PLAY was missed)
   useEffect(() => {

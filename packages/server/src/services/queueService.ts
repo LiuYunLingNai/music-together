@@ -84,6 +84,28 @@ export function reorderTracks(roomId: string, trackIds: string[]): void {
   roomRepo.persist(roomId)
 }
 
+export function updateBilibiliMetadata(
+  roomId: string,
+  trackId: string,
+  metadata: Pick<Track, 'metadataSource' | 'lyricId' | 'picId' | 'cover'>,
+): Track | null {
+  const room = roomRepo.get(roomId)
+  if (!room) return null
+  const index = room.queue.findIndex((track) => track.id === trackId)
+  const existing = room.queue[index]
+  if (!existing || existing.source !== 'bilibili') return null
+
+  const updated = { ...existing, ...metadata }
+  room.queue[index] = updated
+  if (room.currentTrack?.id === trackId) {
+    // The current track includes the resolved, short-lived stream URL while
+    // the queue entry normally does not. Preserve it when refreshing metadata.
+    room.currentTrack = { ...room.currentTrack, ...metadata }
+  }
+  roomRepo.persist(roomId)
+  return updated
+}
+
 /**
  * Get the next track based on the play mode.
  *

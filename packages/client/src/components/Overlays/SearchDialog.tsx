@@ -18,18 +18,22 @@ import { useIsMobile } from '@/hooks/useIsMobile'
 import { useSocketContext } from '@/providers/SocketProvider'
 import { EVENTS } from '@music-together/shared'
 import type { MusicSource, Track, Playlist } from '@music-together/shared'
+import type { BilibiliMetadataSource } from '@music-together/shared'
 import { Loader2, Music2, Search, ListMusic } from 'lucide-react'
 import { motion } from 'motion/react'
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, useEffect } from 'react'
 import { toast } from 'sonner'
 import { PlaylistDetail } from './Settings/PlaylistDetail'
+import { BilibiliMetadataDialog } from './BilibiliMetadataDialog'
 
 const EMPTY_QUEUE: Track[] = []
+type BilibiliQueueAction = 'add' | 'insert'
 
 const SOURCES: { id: MusicSource; label: string }[] = [
   { id: 'netease', label: '网易云' },
   { id: 'tencent', label: 'QQ' },
   { id: 'kugou', label: '酷狗' },
+  { id: 'bilibili', label: 'B站' },
 ]
 
 interface SearchDialogProps {
@@ -42,6 +46,7 @@ interface SearchDialogProps {
 export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCurrent }: SearchDialogProps) {
   const [source, setSource] = useState<MusicSource>('netease')
   const [searchType, setSearchType] = useState<'song' | 'album' | 'playlist'>('song')
+  const [bilibiliMatch, setBilibiliMatch] = useState<{ track: Track; action: BilibiliQueueAction } | null>(null)
   const [keyword, setKeyword] = useState('')
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set())
   const listRef = useRef<VirtualTrackListRef>(null)
@@ -102,7 +107,11 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
     loadMoreTracks,
   } = usePlaylist()
 
-  const { results, loading, loadingMore, hasMore, hasSearched, search, loadMore, resetState } = useSearch(source, searchType, roomId)
+  const { results, loading, loadingMore, hasMore, hasSearched, search, loadMore, resetState } = useSearch(
+    source,
+    searchType,
+    roomId,
+  )
 
   // Auto re-search when source or type changes
   const prevSourceRef = useRef(source)
@@ -153,6 +162,42 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
     }
   }
 
+  const beginBilibiliMetadataMatch = useCallback((track: Track, action: BilibiliQueueAction) => {
+    setBilibiliMatch({ track, action })
+  }, [])
+
+  const applyBilibiliMetadataMatch = useCallback(
+    (metadataTrack: Track, metadataSource: BilibiliMetadataSource) => {
+      if (!bilibiliMatch) return
+      const track = {
+        ...bilibiliMatch.track,
+        metadataSource,
+        lyricId: metadataTrack.lyricId,
+        picId: metadataTrack.picId,
+        cover: metadataTrack.cover || bilibiliMatch.track.cover,
+      }
+      if (bilibiliMatch.action === 'insert') {
+        onInsertAfterCurrent(track)
+      } else {
+        onAddToQueue(track)
+      }
+      setAddedIds((prev) => new Set(prev).add(trackKey(track)))
+      setBilibiliMatch(null)
+    },
+    [bilibiliMatch, onAddToQueue, onInsertAfterCurrent],
+  )
+
+  const skipBilibiliMetadataMatch = useCallback(() => {
+    if (!bilibiliMatch) return
+    if (bilibiliMatch.action === 'insert') {
+      onInsertAfterCurrent(bilibiliMatch.track)
+    } else {
+      onAddToQueue(bilibiliMatch.track)
+    }
+    setAddedIds((prev) => new Set(prev).add(trackKey(bilibiliMatch.track)))
+    setBilibiliMatch(null)
+  }, [bilibiliMatch, onAddToQueue, onInsertAfterCurrent])
+
   const handleAdd = useCallback(
     (track: Track) => {
       const key = trackKey(track)
@@ -160,12 +205,16 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
         toast.info(`「${track.title}」已在队列中`)
         return
       }
+      if (track.source === 'bilibili') {
+        beginBilibiliMetadataMatch(track, 'add')
+        return
+      }
       onAddToQueue(track)
       setAddedIds((prev) => new Set(prev).add(key))
-      // Removed duplicate toast.success since onAddToQueue (from useQueue) usually already handles it 
+      // Removed duplicate toast.success since onAddToQueue (from useQueue) usually already handles it
       // or the UI handles feedback.
     },
-    [onAddToQueue, queueKeys, addedIds],
+    [onAddToQueue, queueKeys, addedIds, beginBilibiliMetadataMatch],
   )
 
   const handleInsertAfterCurrent = useCallback(
@@ -175,11 +224,15 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
         toast.info(`「${track.title}」已在队列中`)
         return
       }
+      if (track.source === 'bilibili') {
+        beginBilibiliMetadataMatch(track, 'insert')
+        return
+      }
       onInsertAfterCurrent(track)
       setAddedIds((prev) => new Set(prev).add(key))
       // Removed duplicate toast.success
     },
-    [onInsertAfterCurrent, queueKeys, addedIds],
+    [onInsertAfterCurrent, queueKeys, addedIds, beginBilibiliMetadataMatch],
   )
 
   const handleAddBatch = useCallback(
@@ -193,7 +246,7 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
       })
       toast.success(`已添加 ${tracks.length} 首歌曲`)
     },
-    [socket]
+    [socket],
   )
 
   const isTrackAdded = useCallback(
@@ -237,6 +290,7 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                     )}
                     onClick={() => {
                       setSource(s.id)
+                      if (s.id === 'bilibili') setSearchType('song')
                       resetState()
                       setAddedIds(new Set())
                     }}
@@ -266,26 +320,41 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
             />
           ) : (
             <>
-              {/* Type tabs */}
-              <Tabs
-                value={searchType}
-                onValueChange={(v) => {
-                  setSearchType(v as 'song' | 'album' | 'playlist')
-                  resetState()
-                  setAddedIds(new Set())
-                }}
-              >
-                <TabsList className="w-full">
-                  <TabsTrigger value="song" className="flex-1 text-xs sm:text-sm">单曲</TabsTrigger>
-                  <TabsTrigger value="album" className="flex-1 text-xs sm:text-sm">专辑</TabsTrigger>
-                  <TabsTrigger value="playlist" className="flex-1 text-xs sm:text-sm">歌单</TabsTrigger>
-                </TabsList>
-              </Tabs>
+              {source !== 'bilibili' && (
+                <Tabs
+                  value={searchType}
+                  onValueChange={(v) => {
+                    setSearchType(v as 'song' | 'album' | 'playlist')
+                    resetState()
+                    setAddedIds(new Set())
+                  }}
+                >
+                  <TabsList className="w-full">
+                    <TabsTrigger value="song" className="flex-1 text-xs sm:text-sm">
+                      单曲
+                    </TabsTrigger>
+                    <TabsTrigger value="album" className="flex-1 text-xs sm:text-sm">
+                      专辑
+                    </TabsTrigger>
+                    <TabsTrigger value="playlist" className="flex-1 text-xs sm:text-sm">
+                      歌单
+                    </TabsTrigger>
+                  </TabsList>
+                </Tabs>
+              )}
 
               {/* Search input */}
               <div className="flex gap-2">
                 <Input
-                  placeholder={searchType === 'song' ? '搜索歌曲、歌手...' : searchType === 'album' ? '搜索专辑...' : '搜索歌单...'}
+                  placeholder={
+                    source === 'bilibili'
+                      ? '搜索 B 站视频...'
+                      : searchType === 'song'
+                        ? '搜索歌曲、歌手...'
+                        : searchType === 'album'
+                          ? '搜索专辑...'
+                          : '搜索歌单...'
+                  }
                   value={keyword}
                   onChange={(e) => setKeyword(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
@@ -385,6 +454,14 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
           )}
         </ResponsiveDialogBody>
       </ResponsiveDialogContent>
+
+      <BilibiliMetadataDialog
+        track={bilibiliMatch?.track ?? null}
+        roomId={roomId}
+        onOpenChange={(isOpen) => !isOpen && setBilibiliMatch(null)}
+        onSelect={applyBilibiliMetadataMatch}
+        onSkip={skipBilibiliMetadataMatch}
+      />
     </ResponsiveDialog>
   )
 }

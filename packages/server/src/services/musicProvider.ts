@@ -206,6 +206,19 @@ interface TencentStreamSpec {
   fileSize: number
 }
 
+interface BilibiliSearchVideo {
+  bvid?: unknown
+  title?: unknown
+  author?: unknown
+  duration?: unknown
+  pic?: unknown
+}
+
+interface BilibiliViewData {
+  cid: number
+  cover: string
+}
+
 /** External API timeout (ms) */
 const API_TIMEOUT_MS = 15_000
 
@@ -234,6 +247,15 @@ function normalizeKugouCoverUrl(value: unknown, size = 300): string {
   // imgessl is already handled by the client's cover proxy and is equivalent
   // to the older imge host returned in trans_param.union_cover.
   return url.replace(/^https:\/\/imge\.kugou\.com/i, 'https://imgessl.kugou.com')
+}
+
+function normalizeBilibiliCoverUrl(value: unknown): string {
+  let url = String(value ?? '').trim()
+  if (!url) return ''
+  if (url.startsWith('//')) url = `https:${url}`
+  if (url.startsWith('http://')) url = url.replace(/^http:\/\//, 'https://')
+  if (!/^https?:\/\//i.test(url)) url = `https://${url.replace(/^\/+/, '')}`
+  return url
 }
 
 /** Normalize provider bitrate values (some APIs use bps, others use kbps). */
@@ -359,6 +381,7 @@ const SEARCH_PATHS: Record<MusicSource, string> = {
   netease: 'result.songs',
   tencent: 'data.song.list',
   kugou: 'data.info',
+  bilibili: '',
 }
 
 // Path to song list in raw playlist API response per platform
@@ -366,6 +389,7 @@ const PLAYLIST_PATHS: Record<MusicSource, string> = {
   netease: 'playlist.tracks', // Not used (Netease uses ncmApi)
   tencent: 'data.cdlist.0.songlist', // JS arrays support string numeric index
   kugou: 'data.info',
+  bilibili: '',
 }
 
 // ---------------------------------------------------------------------------
@@ -417,6 +441,8 @@ class MusicProvider {
     max: 500,
     ttl: 24 * HOUR,
   })
+  private bilibiliViewCache = new LRUCache<string, BilibiliViewData>({ max: 500, ttl: 1 * HOUR })
+  private bilibiliWbiMixinKey: { value: string; expiresAt: number } | null = null
 
   private getInstance(source: MusicSource): MetingInstance {
     let m = this.instances.get(source)
@@ -449,6 +475,9 @@ class MusicProvider {
           cover: existing.cover || meta.cover,
           duration: existing.duration || meta.duration,
           vip: existing.vip || meta.vip,
+          lyricId: meta.lyricId ?? existing.lyricId,
+          picId: meta.picId ?? existing.picId,
+          metadataSource: meta.metadataSource ?? existing.metadataSource,
         }
         this.trackRegistry.set(key, merged)
       } else {
@@ -489,6 +518,178 @@ class MusicProvider {
   // ---------------------------------------------------------------------------
   // Public API — Search
   // ---------------------------------------------------------------------------
+
+  private static stripBilibiliMarkup(value: unknown): string {
+    return String(value ?? '')
+      .replace(/<[^>]*>/g, '')
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .trim()
+  }
+
+  private static readonly BILIBILI_WBI_KEY_TABLE = [
+    46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38,
+    41, 13, 37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36,
+    20, 34, 44, 52,
+  ]
+
+  private static encodeBilibiliWbiParam(value: string): string {
+    return encodeURIComponent(value).replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)
+  }
+
+  private async fetchBilibiliJson(
+    url: string,
+    referer = 'https://www.bilibili.com/',
+  ): Promise<Record<string, any> | null> {
+    const response = await withTimeout(
+      fetch(url, {
+        headers: {
+          Accept: 'application/json, text/plain, */*',
+          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36',
+          Referer: referer,
+        },
+      }).then(async (res) => {
+        const contentType = res.headers.get('content-type') ?? ''
+        if (!res.ok || !contentType.includes('json')) {
+          logger.warn('Bilibili API returned a non-JSON response', {
+            status: res.status,
+            contentType,
+            path: new URL(url).pathname,
+          })
+          return null
+        }
+        try {
+          return (await res.json()) as Record<string, any>
+        } catch {
+          logger.warn('Bilibili API returned invalid JSON', { path: new URL(url).pathname })
+          return null
+        }
+      }),
+    )
+    return response ?? null
+  }
+
+  private async getBilibiliWbiMixinKey(): Promise<string | null> {
+    if (this.bilibiliWbiMixinKey && this.bilibiliWbiMixinKey.expiresAt > Date.now()) {
+      return this.bilibiliWbiMixinKey.value
+    }
+    const nav = await this.fetchBilibiliJson('https://api.bilibili.com/x/web-interface/nav')
+    const imgUrl = String(nav?.data?.wbi_img?.img_url ?? '')
+    const subUrl = String(nav?.data?.wbi_img?.sub_url ?? '')
+    const imgKey = imgUrl.split('/').pop()?.split('.')[0] ?? ''
+    const subKey = subUrl.split('/').pop()?.split('.')[0] ?? ''
+    const rawKey = `${imgKey}${subKey}`
+    if (rawKey.length < 64) return null
+
+    const mixinKey = MusicProvider.BILIBILI_WBI_KEY_TABLE.map((index) => rawKey[index] ?? '')
+      .join('')
+      .slice(0, 32)
+    if (!mixinKey) return null
+    this.bilibiliWbiMixinKey = { value: mixinKey, expiresAt: Date.now() + HOUR }
+    return mixinKey
+  }
+
+  private async searchBilibiliWbi(keyword: string, limit: number, page: number): Promise<Record<string, any> | null> {
+    const mixinKey = await this.getBilibiliWbiMixinKey()
+    if (!mixinKey) return null
+
+    const params: Record<string, string> = {
+      keyword,
+      page: String(page),
+      page_size: String(limit),
+      search_type: 'video',
+      wts: String(Math.floor(Date.now() / 1000)),
+    }
+    const query = Object.entries(params)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(
+        ([key, value]) => `${MusicProvider.encodeBilibiliWbiParam(key)}=${MusicProvider.encodeBilibiliWbiParam(value)}`,
+      )
+      .join('&')
+    const wRid = MusicProvider.md5(`${query}${mixinKey}`)
+    return this.fetchBilibiliJson(`https://api.bilibili.com/x/web-interface/wbi/search/type?${query}&w_rid=${wRid}`)
+  }
+
+  private static parseBilibiliDuration(value: unknown): number {
+    const parts = String(value ?? '')
+      .trim()
+      .split(':')
+      .map((part) => Number(part))
+    if (!parts.length || parts.some((part) => !Number.isFinite(part))) return 0
+    return parts.reduce((total, part) => total * 60 + part, 0)
+  }
+
+  /** Search public Bilibili video results. The audio URL is resolved only when queued for playback. */
+  private async searchBilibili(keyword: string, limit = 20, page = 1): Promise<Track[]> {
+    try {
+      let response = await this.searchBilibiliWbi(keyword, limit, page)
+      if (!response || response.code !== 0) {
+        const params = new URLSearchParams({
+          search_type: 'video',
+          keyword,
+          page: String(page),
+          page_size: String(limit),
+        })
+        response = await this.fetchBilibiliJson(`https://api.bilibili.com/x/web-interface/search/type?${params}`)
+      }
+      if (!response || response.code !== 0) return []
+      const videos = (response?.data?.result ?? []) as BilibiliSearchVideo[]
+      const tracks: Track[] = videos.flatMap((video) => {
+        const bvid = String(video.bvid ?? '').trim()
+        if (!bvid) return []
+        const cover = normalizeBilibiliCoverUrl(video.pic)
+        return [
+          {
+            id: nanoid(),
+            source: 'bilibili' as const,
+            sourceId: bvid,
+            urlId: bvid,
+            title: MusicProvider.stripBilibiliMarkup(video.title) || 'Unknown',
+            artist: [MusicProvider.stripBilibiliMarkup(video.author) || 'Bilibili'],
+            album: 'Bilibili',
+            duration: MusicProvider.parseBilibiliDuration(video.duration),
+            cover,
+            bilibiliCover: cover,
+          },
+        ]
+      })
+      this.registerTracks(tracks)
+      return tracks
+    } catch (err) {
+      logger.error('Bilibili search failed', err, { keyword, page })
+      return []
+    }
+  }
+
+  private async getBilibiliView(bvid: string): Promise<BilibiliViewData | null> {
+    const cached = this.bilibiliViewCache.get(bvid)
+    if (cached) return cached
+    const params = new URLSearchParams({ bvid })
+    const response = await this.fetchBilibiliJson(`https://api.bilibili.com/x/web-interface/view?${params}`)
+    const cid = Number(response?.data?.cid)
+    if (!Number.isFinite(cid) || cid <= 0) return null
+    const value = { cid, cover: normalizeBilibiliCoverUrl(response?.data?.pic) }
+    this.bilibiliViewCache.set(bvid, value)
+    return value
+  }
+
+  private async getBilibiliStreamUrl(bvid: string): Promise<CachedStreamUrl | null> {
+    const view = await this.getBilibiliView(bvid)
+    if (!view) return null
+    const params = new URLSearchParams({ bvid, cid: String(view.cid), fnval: '16', fnver: '0', fourk: '1' })
+    const response = await this.fetchBilibiliJson(
+      `https://api.bilibili.com/x/player/playurl?${params}`,
+      `https://www.bilibili.com/video/${bvid}/`,
+    )
+    const audio = response?.data?.dash?.audio?.[0]
+    const url = String(audio?.baseUrl ?? audio?.base_url ?? response?.data?.durl?.[0]?.url ?? '').replace(
+      /^http:\/\//,
+      'https://',
+    )
+    return url ? { url, actualBitrate: normalizeBitrate(audio?.bandwidth) } : null
+  }
 
   /**
    * Search Kugou using the native mobile API.
@@ -653,7 +854,12 @@ class MusicProvider {
   }
 
   /** Search QQ Music through the native desktop API when no external API is configured. */
-  private async searchTencentNative(keyword: string, limit: number, page: number, cookie?: string | null): Promise<Track[]> {
+  private async searchTencentNative(
+    keyword: string,
+    limit: number,
+    page: number,
+    cookie?: string | null,
+  ): Promise<Track[]> {
     const payload = {
       comm: {
         ct: '6',
@@ -702,8 +908,9 @@ class MusicProvider {
           source: 'tencent' as const,
           sourceId: mid,
           title: song.name || song.title || 'Unknown',
-          artist:
-            song.singer?.map((singer) => singer.name).filter((name): name is string => Boolean(name)) || ['Unknown'],
+          artist: song.singer?.map((singer) => singer.name).filter((name): name is string => Boolean(name)) || [
+            'Unknown',
+          ],
           album: song.album?.name || '',
           duration: song.interval || 0,
           cover: song.album?.pmid ? `https://y.gtimg.cn/music/photo_new/T002R300x300M000${song.album.pmid}.jpg` : '',
@@ -744,6 +951,8 @@ class MusicProvider {
     if (!keyword.trim()) return []
 
     try {
+      if (source === 'bilibili') return []
+
       if (source === 'tencent') {
         const url = 'https://u.y.qq.com/cgi-bin/musicu.fcg'
         const payload = {
@@ -849,6 +1058,8 @@ class MusicProvider {
     if (!keyword.trim()) return []
 
     try {
+      if (source === 'bilibili') return []
+
       if (source === 'tencent') {
         const url = 'https://u.y.qq.com/cgi-bin/musicu.fcg'
         const payload = {
@@ -961,6 +1172,12 @@ class MusicProvider {
     }
 
     try {
+      if (source === 'bilibili') {
+        const tracks = await this.searchBilibili(keyword, limit, page)
+        this.registerTracks(tracks)
+        return tracks
+      }
+
       // QQ 音乐单曲搜索使用配置的 API；专辑和歌单搜索走各自的独立方法。
       if (source === 'tencent') {
         const tracks = await this.searchTencent(keyword, limit, page, cookie)
@@ -1459,6 +1676,15 @@ class MusicProvider {
     }
 
     try {
+      if (source === 'bilibili') {
+        const result = await this.getBilibiliStreamUrl(urlId)
+        if (result) {
+          this.streamUrlCache.set(`${source}:${urlId}:${qualityCacheKey}`, result)
+          return { ...result, fromCache: false }
+        }
+        return null
+      }
+
       if (source === 'tencent') {
         const result = await this.getTencentStreamUrl(urlId, quality, cookie)
         if (result) {
@@ -1558,6 +1784,8 @@ class MusicProvider {
     const empty = { lyric: '', tlyric: '', romalrc: '', yrc: '' as string }
 
     try {
+      if (source === 'bilibili') return empty
+
       let result: { lyric: string; tlyric: string; romalrc: string; yrc: string; wordByWord?: AmllLyricLine[] } = {
         ...empty,
       }
@@ -1645,6 +1873,10 @@ class MusicProvider {
     }
 
     try {
+      if (source === 'bilibili') {
+        const view = await this.getBilibiliView(picId)
+        return view?.cover ?? ''
+      }
       const meting = this.getInstance(source)
       const raw = await withTimeout(meting.pic(picId, size))
       if (raw === null || raw === undefined) {
@@ -2174,6 +2406,9 @@ class MusicProvider {
           vip: ((s.privilege ?? 0) & 8) !== 0 || (s.pay_type ?? 0) > 0,
         }
       }
+
+      case 'bilibili':
+        throw new Error('Bilibili tracks are created by the native video search')
 
       default: {
         // Exhaustive check — if a new MusicSource is added, TypeScript will error here

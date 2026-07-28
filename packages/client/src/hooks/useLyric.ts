@@ -147,11 +147,13 @@ export function useLyric() {
       // 1. 优先：TTML 在线逐词歌词（如果开启）
       // ========================================
       const { ttmlEnabled, ttmlDbUrl } = useSettingsStore.getState()
-      const folder = TTML_FOLDER_MAP[track.source]
+      const lyricSource = track.metadataSource ?? track.source
+      const folder = TTML_FOLDER_MAP[lyricSource]
       if (ttmlEnabled && folder) {
         try {
           // URL 模板：%s 替换为歌曲 ID，ncm-lyrics 适配平台
-          const ttmlUrl = ttmlDbUrl.replace('ncm-lyrics', folder).replace('%s', track.sourceId)
+          const lyricTrackId = track.metadataSource ? track.lyricId : track.sourceId
+          const ttmlUrl = ttmlDbUrl.replace('ncm-lyrics', folder).replace('%s', lyricTrackId ?? '')
           // 绑定主 controller：切歌/卸载时取消 TTML，避免过时响应写回 store；同时 8s 超时
           const timeoutSignal = typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(TTML_TIMEOUT_MS) : null
           const SignalFactory = AbortSignal as typeof AbortSignal & {
@@ -195,7 +197,7 @@ export function useLyric() {
       if (track.lyricId) {
         try {
           const res = await fetch(
-            `${SERVER_URL}/api/music/lyric?source=${track.source}&lyricId=${encodeURIComponent(track.lyricId)}`,
+            `${SERVER_URL}/api/music/lyric?source=${lyricSource}&lyricId=${encodeURIComponent(track.lyricId)}`,
             { signal: controller.signal, credentials: 'include' },
           )
           if (res.ok) {

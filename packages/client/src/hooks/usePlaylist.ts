@@ -64,6 +64,8 @@ export function parsePlaylistInput(input: string, source: MusicSource): string |
         if (kgMatch) return kgMatch[1]
         break
       }
+      case 'bilibili':
+        break
     }
   } catch {
     // Not a URL, try to extract numbers
@@ -80,11 +82,13 @@ export function usePlaylist() {
     netease: [],
     tencent: [],
     kugou: [],
+    bilibili: [],
   })
   const [playlistsLoading, setPlaylistsLoading] = useState<Record<MusicSource, boolean>>({
     netease: false,
     tencent: false,
     kugou: false,
+    bilibili: false,
   })
 
   // Paginated playlist tracks state
@@ -124,7 +128,12 @@ export function usePlaylist() {
    * Resets all track state immediately to prevent stale data from flashing.
    */
   const fetchPlaylistTracks = useCallback(
-    async (source: MusicSource, playlistId: string, trackCount?: number, type: 'playlist' | 'album' = 'playlist'): Promise<Track[]> => {
+    async (
+      source: MusicSource,
+      playlistId: string,
+      trackCount?: number,
+      type: 'playlist' | 'album' = 'playlist',
+    ): Promise<Track[]> => {
       // Reset state immediately — prevents flashing old data when switching playlists
       setPlaylistTracks([])
       setPlaylistTotal(0)

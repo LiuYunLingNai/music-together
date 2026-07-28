@@ -6,6 +6,7 @@ import {
   queueInsertAfterCurrentSchema,
   queueRemoveSchema,
   queueReorderSchema,
+  queueUpdateMetadataSchema,
 } from '@music-together/shared'
 import type { Track } from '@music-together/shared'
 import type { TypedServer, TypedSocket } from '../middleware/types.js'
@@ -193,6 +194,52 @@ export function registerQueueController(io: TypedServer, socket: TypedSocket) {
         operatorId: ctx.user.id,
         operator: ctx.user.nickname,
         queueSize: ctx.room.queue.length,
+      })
+    }),
+  )
+
+  socket.on(
+    EVENTS.QUEUE_UPDATE_METADATA,
+    withPermission('add', 'Queue', async (ctx, raw) => {
+      if (!(await checkSocketRateLimit(ctx.socket))) return
+      const parsed = queueUpdateMetadataSchema.safeParse(raw)
+      if (!parsed.success) {
+        socket.emit(EVENTS.ROOM_ERROR, { code: ERROR_CODE.INVALID_DATA, message: '无效的歌词和封面数据' })
+        return
+      }
+
+      const { trackId, metadataSource, lyricId, picId, cover, clearMetadata } = parsed.data
+      const existing = ctx.room.queue.find((track) => track.id === trackId)
+      if (!existing || existing.source !== 'bilibili') {
+        socket.emit(EVENTS.ROOM_ERROR, { code: ERROR_CODE.INVALID_DATA, message: '只能更新队列中的 B 站视频' })
+        return
+      }
+      if (!clearMetadata && (!metadataSource || !cover)) {
+        socket.emit(EVENTS.ROOM_ERROR, { code: ERROR_CODE.INVALID_DATA, message: '无效的歌词和封面数据' })
+        return
+      }
+
+      const updated = queueService.updateBilibiliMetadata(ctx.roomId, trackId, {
+        metadataSource: clearMetadata ? undefined : metadataSource,
+        lyricId: clearMetadata ? undefined : lyricId,
+        picId: clearMetadata ? undefined : picId,
+        cover: clearMetadata ? existing.bilibiliCover || existing.cover : cover!,
+      })
+      if (!updated) {
+        socket.emit(EVENTS.ROOM_ERROR, { code: ERROR_CODE.INVALID_DATA, message: '只能更新队列中的 B 站视频' })
+        return
+      }
+
+      io.to(ctx.roomId).emit(EVENTS.QUEUE_UPDATED, { queue: ctx.room.queue })
+      if (ctx.room.currentTrack?.id === trackId) {
+        io.to(ctx.roomId).emit(EVENTS.PLAYER_TRACK_METADATA_UPDATED, { track: ctx.room.currentTrack })
+      }
+      logger.info(`“${ctx.user.nickname}”更新了《${updated.title}》的歌词和封面`, {
+        event: 'queue.bilibili_metadata_updated',
+        roomId: ctx.roomId,
+        trackId,
+        metadataSource: metadataSource ?? 'bilibili',
+        operatorId: ctx.user.id,
       })
     }),
   )

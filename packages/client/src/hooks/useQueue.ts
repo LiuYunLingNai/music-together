@@ -28,7 +28,25 @@ export function useQueue() {
 
   const reorderTracks = useCallback((trackIds: string[]) => socket.emit(EVENTS.QUEUE_REORDER, { trackIds }), [socket])
 
+  const updateBilibiliMetadata = useCallback(
+    (
+      trackId: string,
+      metadata:
+        | { metadataSource: 'netease' | 'tencent'; lyricId?: string; picId?: string; cover: string }
+        | { clearMetadata: true },
+    ) => socket.emit(EVENTS.QUEUE_UPDATE_METADATA, { trackId, ...metadata }),
+    [socket],
+  )
+
   const clearQueue = useCallback(() => socket.emit(EVENTS.QUEUE_CLEAR), [socket])
 
-  return { addTrack, insertAfterCurrent, addBatchTracks, removeTrack, reorderTracks, clearQueue }
+  return {
+    addTrack,
+    insertAfterCurrent,
+    addBatchTracks,
+    removeTrack,
+    reorderTracks,
+    updateBilibiliMetadata,
+    clearQueue,
+  }
 }

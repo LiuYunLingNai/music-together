@@ -41,6 +41,7 @@ export interface ServerToClientEvents {
   [EVENTS.PLAYER_PAUSE]: (data: { playState: ScheduledPlayState }) => void
   [EVENTS.PLAYER_RESUME]: (data: { playState: ScheduledPlayState }) => void
   [EVENTS.PLAYER_SEEK]: (data: { playState: ScheduledPlayState }) => void
+  [EVENTS.PLAYER_TRACK_METADATA_UPDATED]: (data: { track: Track }) => void
   [EVENTS.PLAYER_SYNC_RESPONSE]: (data: { currentTime: number; isPlaying: boolean; serverTimestamp: number }) => void
 
   // NTP clock sync
@@ -98,6 +99,14 @@ export interface ClientToServerEvents {
   [EVENTS.QUEUE_INSERT_AFTER_CURRENT]: (data: { track: Track }) => void
   [EVENTS.QUEUE_REMOVE]: (data: { trackId: string }) => void
   [EVENTS.QUEUE_REORDER]: (data: { trackIds: string[] }) => void
+  [EVENTS.QUEUE_UPDATE_METADATA]: (data: {
+    trackId: string
+    metadataSource?: 'netease' | 'tencent'
+    lyricId?: string
+    picId?: string
+    cover?: string
+    clearMetadata?: boolean
+  }) => void
   [EVENTS.QUEUE_CLEAR]: () => void
 
   // Queue batch

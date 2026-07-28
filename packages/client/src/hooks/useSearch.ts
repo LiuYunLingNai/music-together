@@ -11,11 +11,7 @@ type SearchResult = Track | Playlist
  * 搜索逻辑 hook — 管理搜索/翻页/abort/竞态保护。
  * 从 SearchDialog 中提取，使 UI 组件只关注渲染。
  */
-export function useSearch(
-  source: MusicSource,
-  type: 'song' | 'album' | 'playlist' = 'song',
-  roomId?: string,
-) {
+export function useSearch(source: MusicSource, type: 'song' | 'album' | 'playlist' = 'song', roomId?: string) {
   const [results, setResults] = useState<SearchResult[]>([])
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -41,7 +37,7 @@ export function useSearch(
       searchKeyword: string,
       searchPage: number,
       signal: AbortSignal,
-      searchType: 'song' | 'album' | 'playlist'
+      searchType: 'song' | 'album' | 'playlist',
     ): Promise<{ tracks: SearchResult[]; hasMore: boolean }> => {
       const params = new URLSearchParams({
         source: searchSource,
@@ -51,10 +47,7 @@ export function useSearch(
         type: searchType,
       })
       if (roomId) params.set('roomId', roomId)
-      const res = await fetch(
-        `${SERVER_URL}/api/music/search?${params.toString()}`,
-        { signal, credentials: 'include' },
-      )
+      const res = await fetch(`${SERVER_URL}/api/music/search?${params.toString()}`, { signal, credentials: 'include' })
       if (!res.ok) throw new Error('Search failed')
       const data = await res.json()
       const tracks = data.tracks || []

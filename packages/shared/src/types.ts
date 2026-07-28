@@ -20,7 +20,10 @@ export const ERROR_CODE = {
 
 export type ErrorCode = (typeof ERROR_CODE)[keyof typeof ERROR_CODE]
 
-export type MusicSource = 'netease' | 'tencent' | 'kugou'
+export type MusicSource = 'netease' | 'tencent' | 'kugou' | 'bilibili'
+
+/** Music platforms that can supply lyrics and cover art for Bilibili videos. */
+export type BilibiliMetadataSource = 'netease' | 'tencent'
 
 export type AutoFallbackStatus = 'trying' | 'success' | 'failed'
 
@@ -65,11 +68,18 @@ export interface Track {
   album: string
   duration: number
   cover: string
+  /** Original Bilibili video cover, retained when third-party metadata is selected. */
+  bilibiliCover?: string
   source: MusicSource
   sourceId: string
   urlId: string
   lyricId?: string
   picId?: string
+  /**
+   * Bilibili is the playback source; this records the user-selected music
+   * platform used to match its lyrics and cover art.
+   */
+  metadataSource?: BilibiliMetadataSource
   streamUrl?: string
   /** 是否为 VIP / 付费歌曲（可能无法播放或仅试听） */
   vip?: boolean

@@ -109,6 +109,7 @@ const SOURCE_LABELS: Record<MusicSource, string> = {
   netease: '网易云音乐',
   tencent: 'QQ 音乐',
   kugou: '酷狗音乐',
+  bilibili: 'B站',
 }
 
 function qualityToBitrate(quality: AudioQuality): BitrateQuality {
@@ -303,6 +304,7 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
                   resolved.urlId = replacement.urlId
                   resolved.lyricId = replacement.lyricId
                   resolved.picId = replacement.picId
+                  resolved.metadataSource = replacement.metadataSource
                   resolved.vip = replacement.vip
                   resolved.album = replacement.album
                   resolved.artist = replacement.artist
@@ -363,7 +365,7 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
   // Fetch cover if missing
   if (!resolved.cover && resolved.picId) {
     try {
-      const cover = await musicProvider.getCover(resolved.source, resolved.picId)
+      const cover = await musicProvider.getCover(resolved.metadataSource ?? resolved.source, resolved.picId)
       if (cover) resolved.cover = cover
     } catch {
       // Non-critical, leave cover empty

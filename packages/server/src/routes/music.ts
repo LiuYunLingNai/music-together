@@ -130,6 +130,9 @@ const ALLOWED_COVER_HOSTS = [
   'p3.music.126.net',
   'p4.music.126.net',
   'imgessl.kugou.com',
+  'i0.hdslb.com',
+  'i1.hdslb.com',
+  'i2.hdslb.com',
 ]
 
 router.get('/cover-proxy', async (req: Request, res: Response) => {
@@ -141,14 +144,18 @@ router.get('/cover-proxy', async (req: Request, res: Response) => {
 
   try {
     const parsed = new URL(imageUrl)
-    if (!ALLOWED_COVER_HOSTS.includes(parsed.hostname)) {
+    const isBilibiliCover = parsed.hostname.endsWith('.hdslb.com')
+    if (!ALLOWED_COVER_HOSTS.includes(parsed.hostname) && !isBilibiliCover) {
       res.status(403).json({ error: 'Host not allowed' })
       return
     }
 
     const response = await fetch(imageUrl, {
       signal: AbortSignal.timeout(10_000),
-      headers: { 'User-Agent': 'Mozilla/5.0' },
+      headers: {
+        'User-Agent': 'Mozilla/5.0',
+        ...(isBilibiliCover ? { Referer: 'https://www.bilibili.com/' } : {}),
+      },
     })
 
     if (!response.ok) {

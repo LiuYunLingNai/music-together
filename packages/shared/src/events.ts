@@ -27,11 +27,13 @@ export const EVENTS = {
   PLAYER_SYNC_REQUEST: 'player:sync_request',
   PLAYER_SYNC_RESPONSE: 'player:sync_response',
   PLAYER_SET_MODE: 'player:set_mode',
+  PLAYER_TRACK_METADATA_UPDATED: 'player:track_metadata_updated',
 
   // Queue management
   QUEUE_ADD: 'queue:add',
   QUEUE_REMOVE: 'queue:remove',
   QUEUE_REORDER: 'queue:reorder',
+  QUEUE_UPDATE_METADATA: 'queue:update_metadata',
   QUEUE_CLEAR: 'queue:clear',
   QUEUE_UPDATED: 'queue:updated',
 

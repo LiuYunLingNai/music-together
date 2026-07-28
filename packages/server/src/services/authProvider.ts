@@ -45,6 +45,21 @@ export interface AuthProvider {
   getUserPlaylists(cookie: string): Promise<Playlist[]>
 }
 
+const unsupportedAuthProvider: AuthProvider = {
+  async generateQrCode() {
+    return null
+  },
+  async checkQrStatus() {
+    return { status: 800, message: '暂不支持该平台登录' }
+  },
+  async getUserInfo() {
+    return { ok: false, reason: 'error' }
+  },
+  async getUserPlaylists() {
+    return []
+  },
+}
+
 // ---------------------------------------------------------------------------
 // 平台策略映射
 // ---------------------------------------------------------------------------
@@ -59,4 +74,5 @@ export const AUTH_PROVIDERS: Record<MusicSource, AuthProvider> = {
   netease: neteaseAuth,
   kugou: kugouAuth,
   tencent: tencentAuth,
+  bilibili: unsupportedAuthProvider,
 }
