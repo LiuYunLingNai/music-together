@@ -21,8 +21,8 @@ android {
         applicationId = "io.github.yueby.musictogether"
         minSdk = 26
         targetSdk = 36
-        versionCode = 15
-        versionName = "2.2.0"
+        versionCode = 16
+        versionName = "2.2.1"
     }
 
     flavorDimensions += "distribution"
