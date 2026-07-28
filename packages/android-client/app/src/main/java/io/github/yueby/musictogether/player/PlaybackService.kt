@@ -3,6 +3,7 @@ package io.github.yueby.musictogether.player
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.ExoPlayer
@@ -12,6 +13,7 @@ import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionResult
 import io.github.yueby.musictogether.logging.AppLogger
 
+@OptIn(UnstableApi::class)
 class PlaybackService : MediaSessionService() {
     private lateinit var player: ExoPlayer
     private lateinit var mediaSession: MediaSession
