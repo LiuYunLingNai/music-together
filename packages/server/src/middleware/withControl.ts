@@ -1,8 +1,13 @@
 import { EVENTS, ERROR_CODE, defineAbilityFor } from '@music-together/shared'
-import type { Actions, Subjects } from '@music-together/shared'
+import type { Actions, Subjects, UserRole } from '@music-together/shared'
 import type { HandlerContext, TypedServer } from './types.js'
 import { createWithRoom } from './withRoom.js'
 import { userRepo } from '../repositories/userRepository.js'
+
+/** Server administrators have full room permissions regardless of room role. */
+export function defineAbilityForRoomUser(userId: string, roomRole: UserRole) {
+  return defineAbilityFor(userRepo.isServerAdmin(userId) ? 'owner' : roomRole)
+}
 
 /**
  * Socket 中间件：基于 CASL 权限检查。
@@ -17,8 +22,7 @@ export function createWithPermission(io: TypedServer) {
     handler: (ctx: HandlerContext, data: T) => void | Promise<void>,
   ) {
     return withRoom<T>((ctx, data) => {
-      const role = userRepo.isServerAdmin(ctx.user.id) ? 'owner' : ctx.user.role
-      const ability = defineAbilityFor(role)
+      const ability = defineAbilityForRoomUser(ctx.user.id, ctx.user.role)
       if (!ability.can(action, subject)) {
         ctx.socket.emit(EVENTS.ROOM_ERROR, {
           code: ERROR_CODE.NO_PERMISSION,

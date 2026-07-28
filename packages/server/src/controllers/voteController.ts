@@ -2,13 +2,13 @@ import {
   EVENTS,
   ERROR_CODE,
   TIMING,
-  defineAbilityFor,
   voteStartSchema,
   voteCastSchema,
   playerSetModeSchema,
 } from '@music-together/shared'
 import type { Actions, Subjects, PlayMode, VoteAction } from '@music-together/shared'
 import { createWithRoom } from '../middleware/withRoom.js'
+import { defineAbilityForRoomUser } from '../middleware/withControl.js'
 import { checkSocketRateLimit } from '../middleware/socketRateLimiter.js'
 import { roomRepo } from '../repositories/roomRepository.js'
 import * as voteService from '../services/voteService.js'
@@ -139,7 +139,7 @@ export function registerVoteController(io: TypedServer, socket: TypedSocket) {
         'play-track': { action: 'play', subject: 'Player' },
         'remove-track': { action: 'remove', subject: 'Queue' },
       }
-      const ability = defineAbilityFor(ctx.user.role)
+      const ability = defineAbilityForRoomUser(ctx.user.id, ctx.user.role)
       const perm = PERM_MAP[action]
       const permAction = perm?.action ?? action
       const permSubject = perm?.subject ?? 'Player'

@@ -1,6 +1,7 @@
 import { useSocketContext } from '@/providers/SocketProvider'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
+import { useAccountStore } from '@/stores/accountStore'
 import type { VoteAction } from '@music-together/shared'
 import { defineAbilityFor, EVENTS, TIMING } from '@music-together/shared'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
@@ -49,7 +50,8 @@ export function useMediaSession({ play, pause, next, prev, seek }: MediaSessionC
   // *outside* <AbilityProvider>'s subtree — useContext would always return
   // the default member ability regardless of the user's actual role.
   const role = useRoomStore((s) => s.currentUser?.role ?? 'member')
-  const ability = useMemo(() => defineAbilityFor(role), [role])
+  const isServerAdmin = useAccountStore((state) => state.profile?.role === 'admin')
+  const ability = useMemo(() => defineAbilityFor(isServerAdmin ? 'owner' : role), [isServerAdmin, role])
   const canPlay = ability.can('play', 'Player')
   const canSeek = ability.can('seek', 'Player')
   const canNext = ability.can('next', 'Player')

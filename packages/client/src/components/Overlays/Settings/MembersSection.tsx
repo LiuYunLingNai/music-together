@@ -4,7 +4,7 @@ import { Separator } from '@/components/ui/separator'
 import { useRoomStore } from '@/stores/roomStore'
 import { useAccountStore } from '@/stores/accountStore'
 import type { UserRole } from '@music-together/shared'
-import { Crown, Shield, User } from 'lucide-react'
+import { Crown, Shield, ShieldCheck, User } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { resolveAvatarUrl } from '@/lib/profileApi'
 
@@ -19,6 +19,14 @@ const ROLE_LABELS: Record<UserRole, string> = {
 }
 
 const ROLE_ORDER: Record<string, number> = { owner: 0, admin: 1, member: 2 }
+
+function compareUsers(
+  a: { role: UserRole; isServerAdmin: boolean },
+  b: { role: UserRole; isServerAdmin: boolean },
+) {
+  if (a.isServerAdmin !== b.isServerAdmin) return a.isServerAdmin ? -1 : 1
+  return (ROLE_ORDER[a.role] ?? 9) - (ROLE_ORDER[b.role] ?? 9)
+}
 
 function getRoleIcon(role: UserRole) {
   switch (role) {
@@ -45,14 +53,18 @@ export function MembersSection({ onSetUserRole }: MembersSectionProps) {
 
         <div className="space-y-1">
           {[...(room?.users ?? [])]
-            .sort((a, b) => (ROLE_ORDER[a.role] ?? 9) - (ROLE_ORDER[b.role] ?? 9))
+            .sort(compareUsers)
             .map((user) => (
               <div key={user.id} className="flex items-center gap-2 rounded-lg px-3 py-1.5">
                 <Avatar size="sm">
                   <AvatarImage src={resolveAvatarUrl(user.avatarUrl)} alt="" />
                   <AvatarFallback>{user.nickname.slice(0, 1).toUpperCase()}</AvatarFallback>
                 </Avatar>
-                {getRoleIcon(user.role)}
+                {user.isServerAdmin ? (
+                  <ShieldCheck className="h-4 w-4 text-emerald-400" />
+                ) : (
+                  getRoleIcon(user.role)
+                )}
                 <span className="text-sm">{user.nickname}</span>
                 {user.id === currentUser?.id && (
                   <Badge variant="secondary" className="text-xs">
@@ -60,21 +72,25 @@ export function MembersSection({ onSetUserRole }: MembersSectionProps) {
                   </Badge>
                 )}
                 <Badge variant="outline" className="text-xs">
-                  {ROLE_LABELS[user.role]}
+                  {user.isServerAdmin ? '服务器管理员' : ROLE_LABELS[user.role]}
                 </Badge>
 
                 {/* Owner can change other users' roles (not their own, not other owners) */}
-                {isOwner && user.role !== 'owner' && user.id !== currentUser?.id && onSetUserRole && (
-                  <Select value={user.role} onValueChange={(v) => onSetUserRole(user.id, v as 'admin' | 'member')}>
-                    <SelectTrigger className="ml-auto h-7 w-24 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="admin">管理员</SelectItem>
-                      <SelectItem value="member">成员</SelectItem>
-                    </SelectContent>
-                  </Select>
-                )}
+                {isOwner &&
+                  !user.isServerAdmin &&
+                  user.role !== 'owner' &&
+                  user.id !== currentUser?.id &&
+                  onSetUserRole && (
+                    <Select value={user.role} onValueChange={(v) => onSetUserRole(user.id, v as 'admin' | 'member')}>
+                      <SelectTrigger className="ml-auto h-7 w-24 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="admin">管理员</SelectItem>
+                        <SelectItem value="member">成员</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
               </div>
             ))}
         </div>
