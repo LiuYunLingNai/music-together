@@ -43,6 +43,7 @@ import io.github.yueby.musictogether.model.RoomState
 import io.github.yueby.musictogether.model.Track
 import io.github.yueby.musictogether.model.VoteState
 import io.github.yueby.musictogether.player.PlayerUiState
+import io.github.yueby.musictogether.ui.rememberCoverImageRequest
 @Composable
 internal fun PlayerPane(
     room: RoomState,
@@ -183,7 +184,7 @@ private fun MobilePlayerSurface(
 
         if (!track?.cover.isNullOrBlank()) {
             AsyncImage(
-                model = track?.cover,
+                model = rememberCoverImageRequest(track?.cover),
                 contentDescription = null,
                 modifier = Modifier
                     .fillMaxSize()
