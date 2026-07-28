@@ -683,11 +683,32 @@ class MusicProvider {
       `https://api.bilibili.com/x/player/playurl?${params}`,
       `https://www.bilibili.com/video/${bvid}/`,
     )
-    const audio = response?.data?.dash?.audio?.[0]
-    const url = String(audio?.baseUrl ?? audio?.base_url ?? response?.data?.durl?.[0]?.url ?? '').replace(
-      /^http:\/\//,
-      'https://',
-    )
+    const audios = (response?.data?.dash?.audio ?? []) as Record<string, unknown>[]
+    // The first DASH audio entry is often 44 kbps HE-AAC (mp4a.40.5), which
+    // is not reliably decoded by all browsers. Prefer AAC-LC and its highest
+    // available bitrate. Some mobile-CDN primary URLs use port 8082, so use
+    // Bilibili's HTTPS backup address when the primary is unsuitable.
+    const candidates = [...audios].sort((left, right) => Number(right.bandwidth ?? 0) - Number(left.bandwidth ?? 0))
+    const preferredAudio = candidates.find((audio) => String(audio.codecs ?? '').includes('mp4a.40.2'))
+    const audio = preferredAudio ?? candidates[0]
+    const rawUrls = [
+      audio?.baseUrl,
+      audio?.base_url,
+      ...(Array.isArray(audio?.backupUrl) ? audio.backupUrl : []),
+      ...(Array.isArray(audio?.backup_url) ? audio.backup_url : []),
+      response?.data?.durl?.[0]?.url,
+    ]
+    const url = rawUrls
+      .map((value) => String(value ?? '').replace(/^http:\/\//, 'https://'))
+      .find((value) => {
+        try {
+          const parsed = new URL(value)
+          return parsed.protocol === 'https:' && (!parsed.port || parsed.port === '443')
+        } catch {
+          return false
+        }
+      })
+
     return url ? { url, actualBitrate: normalizeBitrate(audio?.bandwidth) } : null
   }
 
@@ -1660,8 +1681,10 @@ class MusicProvider {
   ): Promise<StreamUrlResult | null> {
     const bitrate = qualityToBitrate(quality)
     const qualityCacheKey = String(quality)
-    // Skip cache when cookie is provided (VIP URLs are user-specific)
-    if (!cookie) {
+    // Skip cache when cookie is provided (VIP URLs are user-specific). Bilibili
+    // DASH responses vary by CDN node and codec, so always resolve a fresh
+    // compatible audio track when playback starts.
+    if (!cookie && source !== 'bilibili') {
       const cacheKey = `${source}:${urlId}:${qualityCacheKey}`
       const cached = this.streamUrlCache.get(cacheKey)
       if (cached) {
@@ -1679,7 +1702,6 @@ class MusicProvider {
       if (source === 'bilibili') {
         const result = await this.getBilibiliStreamUrl(urlId)
         if (result) {
-          this.streamUrlCache.set(`${source}:${urlId}:${qualityCacheKey}`, result)
           return { ...result, fromCache: false }
         }
         return null
