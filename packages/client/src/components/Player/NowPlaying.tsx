@@ -31,6 +31,7 @@ export function NowPlaying({ compact = false, onCoverClick }: NowPlayingProps) {
     <img
       src={currentTrack.cover}
       alt={currentTrack.title}
+      referrerPolicy="no-referrer"
       className="h-full w-full object-cover"
       onError={() => setFailedCoverTrackId(currentTrack.id)}
     />
