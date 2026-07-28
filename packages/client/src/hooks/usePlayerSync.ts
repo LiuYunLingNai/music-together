@@ -9,7 +9,6 @@ import {
   SYNC_REQUEST_INTERVAL_MS,
   DRIFT_SEEK_RTT_MARGIN_MS,
   HARD_SEEK_CONFIRM_COUNT,
-  HARD_SEEK_FADE_MS,
 } from '@/lib/constants'
 import { useSocketContext } from '@/providers/SocketProvider'
 import { usePlayerStore } from '@/stores/playerStore'
@@ -47,7 +46,7 @@ function clamp(value: number, limit: number): number {
  * with periodic **pitch-preserving drift correction + EMA smoothing**:
  *
  *   small drift           -> SoundTouch tempo correction (max +/-1%)
- *   sustained large drift -> fade-protected seek correction (rare)
+ *   sustained large drift -> direct seek correction (rare)
  *
  * The EMA low-pass filter prevents a single noisy network sample from
  * triggering a seek. Native uncorrected playback rate is never used.
@@ -75,7 +74,6 @@ export function usePlayerSync(
   const emaColdStartRef = useRef(true)
   // Consecutive hard-seek triggers — require HARD_SEEK_CONFIRM_COUNT before actually seeking
   const hardSeekCountRef = useRef(0)
-  const hardSeekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const clearScheduled = () => {
     if (scheduledTimerRef.current) {
@@ -231,15 +229,17 @@ export function usePlayerSync(
         const soundId = soundIdRef.current
         const restoreVolume = usePlayerStore.getState().volume
         setPlaybackTempo(1)
-        if (hardSeekTimerRef.current) clearTimeout(hardSeekTimerRef.current)
-        howl.fade(howl.volume(), 0, HARD_SEEK_FADE_MS, soundId)
-        hardSeekTimerRef.current = setTimeout(() => {
-          hardSeekTimerRef.current = null
-          if (howlRef.current !== howl || !howl.playing()) return
-          howl.seek(expectedTime, soundId)
-          howl.fade(0, restoreVolume, HARD_SEEK_FADE_MS * 2, soundId)
-          setCurrentTime(expectedTime)
-        }, HARD_SEEK_FADE_MS)
+
+        // Howler's HTML5 seek briefly pauses and asynchronously restarts the
+        // media element. Pre-seek fading can therefore strand the sound at
+        // volume 0 when playback is temporarily reported as paused or the
+        // callback is cancelled. Seek directly and always restore the latest
+        // user volume so a correction can never leave the track muted.
+        if (soundId === undefined) howl.seek(expectedTime)
+        else howl.seek(expectedTime, soundId)
+        if (soundId === undefined) howl.volume(restoreVolume)
+        else howl.volume(restoreVolume, soundId)
+        setCurrentTime(expectedTime)
         smoothedDriftRef.current = 0
         emaColdStartRef.current = true
       } else if (absDrift > DRIFT_DEAD_ZONE_MS / 1000) {
@@ -260,10 +260,6 @@ export function usePlayerSync(
 
     return () => {
       clearScheduled()
-      if (hardSeekTimerRef.current) {
-        clearTimeout(hardSeekTimerRef.current)
-        hardSeekTimerRef.current = null
-      }
       socket.off(EVENTS.PLAYER_SEEK, onSeek)
       socket.off(EVENTS.PLAYER_PAUSE, onPause)
       socket.off(EVENTS.PLAYER_RESUME, onResume)

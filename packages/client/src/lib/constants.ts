@@ -37,9 +37,6 @@ export const DRIFT_SEEK_RTT_MARGIN_MS = 250
  *  noisy measurement from causing an audible jump. */
 export const HARD_SEEK_CONFIRM_COUNT = 2
 
-/** Fade duration used to mask the exceptional hard correction path. */
-export const HARD_SEEK_FADE_MS = 60
-
 /** Safety clamp for network delay estimation (seconds) — prevents clock-skew outliers */
 export const MAX_NETWORK_DELAY_S = 5
 

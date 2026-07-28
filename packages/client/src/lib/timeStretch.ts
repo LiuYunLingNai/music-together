@@ -93,8 +93,16 @@ function disableGraph(graph: StretchGraph, failed = false): void {
   graph.audio.playbackRate = 1
 }
 
+function resumeContext(graph: StretchGraph): void {
+  if (graph.context.state === 'running') return
+  void graph.context.resume().catch((error) => {
+    console.warn('Unable to resume time-stretch audio context', error)
+  })
+}
+
 function enableGraph(graph: StretchGraph): void {
   if (!graph.bypassed || graph.failed) return
+  resumeContext(graph)
   graph.source.disconnect()
   graph.source.connect(graph.node)
   graph.node.connect(graph.context.destination)
@@ -145,6 +153,14 @@ export async function attachTimeStretch(howl: Howl): Promise<TimeStretchControll
       lastUnderrunCount: 0,
     }
     graphByAudio.set(audio, graph)
+
+    // These Howls use HTML5 Audio, so Howler's auto-suspend scan does not
+    // count them as active WebAudio sounds. The media element is nevertheless
+    // routed through this context; allowing Howler to suspend it would leave
+    // currentTime advancing while producing no audio after about 30 seconds.
+    Howler.autoSuspend = false
+    resumeContext(graph)
+
     node.addEventListener('metrics', () => {
       const metrics = node.metrics
       if (!metrics) return
@@ -180,6 +196,7 @@ function createController(graph: StretchGraph): TimeStretchController {
     },
     setTempo: (tempo) => {
       if (graph.bypassed) return
+      resumeContext(graph)
       const clamped = Math.max(MIN_TEMPO, Math.min(MAX_TEMPO, tempo))
       graph.audio.playbackRate = clamped
       graph.node.playbackRate.setValueAtTime(clamped, graph.context.currentTime)
