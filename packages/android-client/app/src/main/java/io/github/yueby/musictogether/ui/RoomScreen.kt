@@ -108,6 +108,8 @@ fun RoomScreen(
                         immersive = false,
                         menuExpanded = roomMenuExpanded,
                         onMenuExpandedChange = { roomMenuExpanded = it },
+                        connectionStatus = appState.connectionStatus,
+                        pingMs = appState.pingMs,
                         viewModel = viewModel,
                         context = context,
                         onOpenOverlay = { activeOverlay = it },
@@ -185,6 +187,8 @@ fun RoomScreen(
                             roomMenuExpanded = it
                             if (it) landscapeChromeVisible = true
                         },
+                        connectionStatus = appState.connectionStatus,
+                        pingMs = appState.pingMs,
                         viewModel = viewModel,
                         context = context,
                         onOpenOverlay = {

@@ -14,14 +14,22 @@ class ClockSync {
     private var anchorElapsed = SystemClock.elapsedRealtime()
     private var anchorServerTime = System.currentTimeMillis().toDouble()
 
+    @get:Synchronized
     val calibrated: Boolean get() = samples.size >= 20
+    @get:Synchronized
     val medianRtt: Long
         get() = samples.map { it.rtt }.sorted().let { if (it.isEmpty()) 0 else it[it.size / 2] }
 
     @Synchronized
     fun recordPing(): Long {
+        val now = System.currentTimeMillis()
+        val staleBefore = now - 10_000
+        val iterator = pending.iterator()
+        while (iterator.hasNext()) {
+            if (iterator.next().value.wallTime < staleBefore) iterator.remove()
+        }
         val id = ++counter
-        pending[id] = Pending(SystemClock.elapsedRealtime(), System.currentTimeMillis())
+        pending[id] = Pending(SystemClock.elapsedRealtime(), now)
         return id
     }
 

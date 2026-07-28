@@ -24,7 +24,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlin.math.abs
 import kotlin.math.max
 
 @Immutable
@@ -42,8 +41,14 @@ class NativePlayer(
     context: Context,
     private val scope: CoroutineScope,
     private val clock: ClockSync,
+    initialTempoSyncEnabled: Boolean,
     private val onTrackEnded: () -> Unit,
 ) {
+    private companion object {
+        const val HARD_SEEK_FADE_MS = 60L
+        const val FADE_STEPS = 4
+    }
+
     private data class PendingLoad(
         val trackId: String,
         val basePositionMs: Long,
@@ -63,9 +68,12 @@ class NativePlayer(
     val state: StateFlow<PlayerUiState> = _state.asStateFlow()
     private var scheduledAction: Job? = null
     private var progressJob: Job? = null
-    private var hardSeekConfirmations = 0
-    private var trackLoadedAtMs = 0L
     private var pendingLoad: PendingLoad? = null
+    private val driftController = PlaybackDriftController()
+    private var tempoSyncEnabled = initialTempoSyncEnabled
+    private var hardSeekJob: Job? = null
+    private var hardSeekRestoreVolume: Float? = null
+    private var correctionGeneration = 0L
 
     init {
         controllerFuture.addListener({
@@ -119,7 +127,7 @@ class NativePlayer(
         }
         scheduledAction?.cancel()
         pendingLoad = null
-        hardSeekConfirmations = 0
+        resetPlaybackCorrection()
         _state.value = PlayerUiState(track = track, connectedToMediaSession = player != null)
         val elapsed = if (playState.isPlaying && playState.serverTimestamp > 0) {
             max(0.0, (clock.serverTime() - playState.serverTimestamp) / 1000.0)
@@ -166,52 +174,55 @@ class NativePlayer(
     }
 
     fun pause(playState: PlayState) = schedule(playState.serverTimeToExecute) {
+        resetPlaybackCorrection(it)
         it.pause()
         it.seekTo((playState.currentTime * 1000).toLong())
-        it.playbackParameters = PlaybackParameters.DEFAULT
     }
 
     fun resume(playState: PlayState) = schedule(playState.serverTimeToExecute) {
-        it.seekTo((playState.currentTime * 1000).toLong())
-        it.playbackParameters = PlaybackParameters.DEFAULT
+        resetPlaybackCorrection(it)
+        it.seekTo(positionAtExecution(playState, advanceIfLate = true))
         it.play()
     }
 
     fun seek(playState: PlayState) = schedule(playState.serverTimeToExecute) {
-        it.seekTo((playState.currentTime * 1000).toLong())
-        it.playbackParameters = PlaybackParameters.DEFAULT
+        resetPlaybackCorrection(it)
+        it.seekTo(positionAtExecution(playState, advanceIfLate = playState.isPlaying))
     }
 
-    /**
-     * Android decoders may audibly glitch when playback speed is changed every few seconds.
-     * We therefore keep 1.0x speed and only hard-seek after a large, sustained drift.
-     */
-    fun correctDrift(expectedSeconds: Double, serverIsPlaying: Boolean, adaptiveThresholdMs: Long) {
-        val controller = player ?: return
-        if (!controller.isPlaying || !serverIsPlaying || controller.playbackState != Player.STATE_READY) return
-        if (System.currentTimeMillis() - trackLoadedAtMs < 3_000) return
+    fun setTempoSyncEnabled(enabled: Boolean) {
+        tempoSyncEnabled = enabled
+        resetPlaybackCorrection()
+        AppLogger.info("Sync", "tempo correction enabled=$enabled")
+    }
+
+    fun correctDrift(expectedSeconds: Double, serverIsPlaying: Boolean, medianRttMs: Long): Double? {
+        val controller = player ?: return null
+        if (!serverIsPlaying) {
+            resetPlaybackCorrection(controller)
+            return 0.0
+        }
+        if (!controller.isPlaying || controller.playbackState != Player.STATE_READY) return null
         val current = controller.currentPosition / 1000.0
         val drift = current - expectedSeconds
-        val threshold = max(1_200L, adaptiveThresholdMs) / 1000.0
-        AppLogger.debug("Sync", "driftMs=${(drift * 1000).toLong()} thresholdMs=${(threshold * 1000).toLong()}")
-        controller.playbackParameters = PlaybackParameters.DEFAULT
-        if (abs(drift) > threshold) {
-            hardSeekConfirmations++
-            if (hardSeekConfirmations >= 2) {
-                AppLogger.warn("Sync", "hard seek from=${controller.currentPosition} to=${(expectedSeconds * 1000).toLong()}")
-                controller.seekTo((expectedSeconds * 1000).toLong().coerceAtLeast(0))
-                hardSeekConfirmations = 0
-            }
-        } else {
-            hardSeekConfirmations = 0
+        val correction = driftController.update(current, expectedSeconds, medianRttMs, tempoSyncEnabled)
+        val displayedDrift = driftController.currentDriftSeconds
+        AppLogger.debug(
+            "Sync",
+            "driftMs=${(drift * 1000).toLong()} rttMs=$medianRttMs correction=${correction.javaClass.simpleName}",
+        )
+        when (correction) {
+            DriftCorrection.None -> Unit
+            is DriftCorrection.Tempo -> setPlaybackSpeed(controller, correction.speed)
+            is DriftCorrection.Seek -> performHardSeek(controller, correction.positionSeconds)
         }
+        return displayedDrift
     }
-
-    fun currentPositionSeconds(): Double = player?.currentPosition?.coerceAtLeast(0)?.div(1000.0) ?: 0.0
 
     fun stop() {
         scheduledAction?.cancel()
         pendingLoad = null
+        resetPlaybackCorrection()
         withPlayer {
             it.stop()
             it.clearMediaItems()
@@ -223,6 +234,7 @@ class NativePlayer(
         progressJob?.cancel()
         scheduledAction?.cancel()
         pendingLoad = null
+        resetPlaybackCorrection()
         player?.removeListener(playerListener)
         MediaController.releaseFuture(controllerFuture)
         player = null
@@ -262,12 +274,82 @@ class NativePlayer(
                     "durationMs=${controller.duration} playing=${pending.autoPlay}",
             )
             withPlayer {
-                it.playbackParameters = PlaybackParameters.DEFAULT
+                resetPlaybackCorrection(it)
                 it.seekTo(expectedPositionMs)
                 if (pending.autoPlay) it.play() else it.pause()
             }
-            trackLoadedAtMs = System.currentTimeMillis()
             publish()
+        }
+    }
+
+    private fun positionAtExecution(playState: PlayState, advanceIfLate: Boolean): Long {
+        val lateByMs = if (advanceIfLate && playState.serverTimeToExecute != null && clock.calibrated) {
+            (clock.serverTime() - playState.serverTimeToExecute).coerceAtLeast(0)
+        } else {
+            0
+        }
+        return ((playState.currentTime * 1000).toLong() + lateByMs).coerceAtLeast(0)
+    }
+
+    private fun setPlaybackSpeed(controller: MediaController, speed: Float) {
+        val clamped = speed.coerceIn(0.99f, 1.01f)
+        if (kotlin.math.abs(controller.playbackParameters.speed - clamped) < 0.0001f &&
+            controller.playbackParameters.pitch == 1f
+        ) return
+        controller.playbackParameters = PlaybackParameters(clamped, 1f)
+    }
+
+    private fun resetPlaybackCorrection(controller: MediaController? = player) {
+        driftController.reset()
+        correctionGeneration++
+        hardSeekJob?.cancel()
+        hardSeekJob = null
+        controller?.let { current ->
+            hardSeekRestoreVolume?.let { current.volume = it }
+            setPlaybackSpeed(current, 1f)
+        }
+        hardSeekRestoreVolume = null
+    }
+
+    private fun performHardSeek(controller: MediaController, targetSeconds: Double) {
+        correctionGeneration++
+        val generation = correctionGeneration
+        hardSeekJob?.cancel()
+        val restoreVolume = hardSeekRestoreVolume ?: controller.volume
+        hardSeekRestoreVolume = restoreVolume
+        setPlaybackSpeed(controller, 1f)
+        AppLogger.warn(
+            "Sync",
+            "fade seek from=${controller.currentPosition} to=${(targetSeconds * 1000).toLong()}",
+        )
+        hardSeekJob = scope.launch {
+            try {
+                fadeVolume(controller, controller.volume, 0f, HARD_SEEK_FADE_MS, generation)
+                if (player !== controller || correctionGeneration != generation || !controller.isPlaying) return@launch
+                controller.seekTo((targetSeconds * 1000).toLong().coerceAtLeast(0))
+                fadeVolume(controller, 0f, restoreVolume, HARD_SEEK_FADE_MS * 2, generation)
+            } finally {
+                if (player === controller && correctionGeneration == generation) {
+                    controller.volume = restoreVolume
+                    hardSeekRestoreVolume = null
+                    hardSeekJob = null
+                }
+            }
+        }
+    }
+
+    private suspend fun fadeVolume(
+        controller: MediaController,
+        from: Float,
+        to: Float,
+        durationMs: Long,
+        generation: Long,
+    ) {
+        repeat(FADE_STEPS) { step ->
+            delay(durationMs / FADE_STEPS)
+            if (player !== controller || correctionGeneration != generation) return
+            val progress = (step + 1f) / FADE_STEPS
+            controller.volume = from + (to - from) * progress
         }
     }
 

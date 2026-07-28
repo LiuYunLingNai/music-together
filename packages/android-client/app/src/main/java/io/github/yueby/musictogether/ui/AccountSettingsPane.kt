@@ -455,7 +455,8 @@ private fun AdminRoomCard(room: AdminRoom, working: Boolean, onDissolve: () -> U
             Column(Modifier.weight(1f)) {
                 Text(room.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    "${room.id} · ${room.userCount} 人${room.currentTrackTitle?.let { " · $it" }.orEmpty()}",
+                    "${room.id} · ${room.userCount} 人 · ${if (room.hidden) "隐藏" else "公开"} · " +
+                        "${if (room.permanent) "永久" else "临时"}${room.currentTrackTitle?.let { " · $it" }.orEmpty()}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

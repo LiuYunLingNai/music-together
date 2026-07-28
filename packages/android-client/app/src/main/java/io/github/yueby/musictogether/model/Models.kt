@@ -8,6 +8,7 @@ data class User(
     val nickname: String,
     val role: String,
     val avatarUrl: String? = null,
+    val isServerAdmin: Boolean = false,
 )
 
 @Immutable
@@ -38,6 +39,8 @@ data class AdminRoom(
     val creatorId: String,
     val userCount: Int,
     val hasPassword: Boolean,
+    val hidden: Boolean = false,
+    val permanent: Boolean = false,
     val currentTrackTitle: String?,
 )
 
@@ -88,6 +91,7 @@ data class RoomState(
     val creatorId: String,
     val hostId: String,
     val hasPassword: Boolean,
+    val hidden: Boolean = false,
     val permanent: Boolean,
     val audioQuality: String,
     val users: List<User>,
@@ -282,6 +286,10 @@ data class AppState(
     val activeVote: VoteState? = null,
     val lyrics: LyricsState = LyricsState(),
     val platformHub: PlatformHubState = PlatformHubState(),
+    val playbackTempoSyncEnabled: Boolean = true,
+    val syncPacketIntervalSeconds: Int = 3,
+    val syncDriftSeconds: Double = 0.0,
+    val pingMs: Long? = null,
     val updateSource: UpdateDownloadSource = UpdateDownloadSource.GitHub,
     val updateInfo: AppUpdateInfo? = null,
     val updateChecking: Boolean = false,

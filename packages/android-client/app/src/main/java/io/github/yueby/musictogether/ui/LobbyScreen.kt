@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -55,6 +57,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -282,7 +285,7 @@ fun LobbyScreen(state: AppState, contentPadding: PaddingValues, viewModel: Music
                             Column {
                                 Text("加入房间", fontWeight = FontWeight.SemiBold)
                                 Text(
-                                    "输入房间号直接加入",
+                                    "输入房间号或粘贴邀请链接",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -294,14 +297,20 @@ fun LobbyScreen(state: AppState, contentPadding: PaddingValues, viewModel: Music
                         ) {
                             OutlinedTextField(
                                 value = directRoomId,
-                                onValueChange = { directRoomId = it.take(64) },
+                                onValueChange = { directRoomId = it.take(512) },
                                 modifier = Modifier.weight(1f),
                                 singleLine = true,
-                                placeholder = { Text("房间号") },
+                                placeholder = { Text("房间号或邀请链接") },
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(
+                                    onDone = {
+                                        if (directRoomId.isNotBlank()) viewModel.joinRoomInput(directRoomId)
+                                    },
+                                ),
                             )
                             Button(
-                                onClick = { viewModel.joinRoom(directRoomId.trim()) },
-                                enabled = state.connectionStatus == ConnectionStatus.Connected && directRoomId.isNotBlank(),
+                                onClick = { viewModel.joinRoomInput(directRoomId) },
+                                enabled = directRoomId.isNotBlank(),
                             ) {
                                 Text("加入")
                             }

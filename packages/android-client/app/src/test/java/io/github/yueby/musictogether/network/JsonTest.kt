@@ -33,6 +33,12 @@ class JsonTest {
     }
 
     @Test
+    fun roomStateParsesHiddenFlagWithLegacyFallback() {
+        assertTrue(roomJson().put("hidden", true).toRoomState().hidden)
+        assertFalse(roomJson().toRoomState().hidden)
+    }
+
+    @Test
     fun trackPreservesBilibiliMetadataFields() {
         val track = JSONObject(
             """{
@@ -56,6 +62,25 @@ class JsonTest {
         assertEquals("https://cover.example/video.jpg", track.bilibiliCover)
         assertEquals("netease", track.metadataSource)
         assertEquals("netease", track.toJson().getString("metadataSource"))
+    }
+
+    @Test
+    fun roomStatePreservesServerAdministratorFlag() {
+        val json = roomJson().put(
+            "users",
+            org.json.JSONArray().put(
+                JSONObject()
+                    .put("id", "server-admin")
+                    .put("nickname", "Admin")
+                    .put("role", "member")
+                    .put("isServerAdmin", true),
+            ),
+        )
+
+        val user = json.toRoomState().users.single()
+
+        assertEquals("member", user.role)
+        assertTrue(user.isServerAdmin)
     }
 
     private fun roomJson() = JSONObject(
