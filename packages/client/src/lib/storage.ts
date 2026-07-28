@@ -83,6 +83,7 @@ export const SETTING_DEFAULTS = {
   lyricFontSize: 90,
   lyricTranslationFontSize: 75,
   lyricRomanFontSize: 75,
+  lyricOffsets: {} as Record<string, number>,
   bgFps: 30,
   bgFlowSpeed: 2,
   bgRenderScale: 0.5,
@@ -152,6 +153,17 @@ export const storage = {
     return Math.max(10, Math.min(200, size))
   },
   setLyricRomanFontSize: (v: number) => safeSet('lyricRomanFontSize', String(v)),
+
+  getLyricOffsets: () => {
+    const stored = safeGetJSON<Record<string, unknown>>('lyricOffsets')
+    if (!stored) return {}
+    return Object.fromEntries(
+      Object.entries(stored).flatMap(([key, value]) =>
+        typeof value === 'number' && Number.isFinite(value) ? [[key, Math.max(-10_000, Math.min(10_000, value))]] : [],
+      ),
+    )
+  },
+  setLyricOffsets: (offsets: Record<string, number>) => safeSetJSON('lyricOffsets', offsets),
 
   // TTML 在线逐词歌词
   getTtmlEnabled: () => safeGet('ttmlEnabled') !== 'false', // 默认开启

@@ -4,11 +4,20 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator'
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
+import { getLyricOffsetKey } from '@/lib/lyricOffset'
+import { usePlayerStore } from '@/stores/playerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { SettingRow } from './SettingRow'
 
 export function LyricsSection() {
   const s = useSettingsStore()
+  const currentTrack = usePlayerStore((state) => state.currentTrack)
+  const lyricOffsetKey = getLyricOffsetKey(currentTrack)
+  const lyricOffsetMs = lyricOffsetKey ? (s.lyricOffsets[lyricOffsetKey] ?? 0) : 0
+  const lyricOffsetLabel =
+    lyricOffsetMs === 0
+      ? '未校正'
+      : `歌词${lyricOffsetMs > 0 ? '延后' : '提前'} ${Math.abs(lyricOffsetMs / 1000).toFixed(1)} 秒`
 
   return (
     <div className="space-y-6">
@@ -51,7 +60,10 @@ export function LyricsSection() {
           description="当前歌词行在视口中的锚定方式"
           onReset={s.lyricAlignAnchor !== s.lyricAlignAnchorDefault ? s.resetLyricAlignAnchor : undefined}
         >
-          <Select value={s.lyricAlignAnchor} onValueChange={(v) => s.setLyricAlignAnchor(v as 'top' | 'center' | 'bottom')}>
+          <Select
+            value={s.lyricAlignAnchor}
+            onValueChange={(v) => s.setLyricAlignAnchor(v as 'top' | 'center' | 'bottom')}
+          >
             <SelectTrigger className="w-28">
               <SelectValue />
             </SelectTrigger>
@@ -74,6 +86,24 @@ export function LyricsSection() {
             max={100}
             step={5}
             onValueChange={(v) => s.setLyricAlignPosition(v[0] / 100)}
+            className="w-32"
+          />
+        </SettingRow>
+
+        <SettingRow
+          label="歌词时间校正"
+          description={
+            lyricOffsetKey ? `当前歌曲：${currentTrack?.title}，${lyricOffsetLabel}` : '播放有歌词的歌曲后可进行校正'
+          }
+          onReset={lyricOffsetKey && lyricOffsetMs !== 0 ? () => s.clearLyricOffset(lyricOffsetKey) : undefined}
+        >
+          <Slider
+            value={[lyricOffsetMs / 1000]}
+            min={-10}
+            max={10}
+            step={0.1}
+            disabled={!lyricOffsetKey}
+            onValueChange={(value) => lyricOffsetKey && s.setLyricOffset(lyricOffsetKey, value[0] * 1000)}
             className="w-32"
           />
         </SettingRow>
@@ -133,7 +163,11 @@ export function LyricsSection() {
         <SettingRow
           label="翻译字体大小"
           description="翻译歌词相对主歌词的字号比例（10-200）"
-          onReset={s.lyricTranslationFontSize !== s.lyricTranslationFontSizeDefault ? s.resetLyricTranslationFontSize : undefined}
+          onReset={
+            s.lyricTranslationFontSize !== s.lyricTranslationFontSizeDefault
+              ? s.resetLyricTranslationFontSize
+              : undefined
+          }
         >
           <NumericInput value={s.lyricTranslationFontSize} onChange={s.setLyricTranslationFontSize} />
         </SettingRow>

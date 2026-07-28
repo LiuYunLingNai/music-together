@@ -37,8 +37,11 @@ type SettingsStore = ResettableFields<'playbackTempoSyncEnabled', boolean> &
   ResettableFields<'lyricFontWeight', number> &
   ResettableFields<'lyricFontSize', number> &
   ResettableFields<'lyricTranslationFontSize', number> &
-  ResettableFields<'lyricRomanFontSize', number> &
-  ResettableFields<'bgFps', number> &
+  ResettableFields<'lyricRomanFontSize', number> & {
+    lyricOffsets: Record<string, number>
+    setLyricOffset: (key: string, offsetMs: number) => void
+    clearLyricOffset: (key: string) => void
+  } & ResettableFields<'bgFps', number> &
   ResettableFields<'bgFlowSpeed', number> &
   ResettableFields<'bgRenderScale', number>
 
@@ -94,6 +97,26 @@ export const useSettingsStore = create<SettingsStore>((set) => {
     ...resettable('lyricFontSize', storage.getLyricFontSize, storage.setLyricFontSize),
     ...resettable('lyricTranslationFontSize', storage.getLyricTranslationFontSize, storage.setLyricTranslationFontSize),
     ...resettable('lyricRomanFontSize', storage.getLyricRomanFontSize, storage.setLyricRomanFontSize),
+    lyricOffsets: storage.getLyricOffsets(),
+    setLyricOffset: (key, offsetMs) => {
+      const value = Math.round(Math.max(-10_000, Math.min(10_000, offsetMs)))
+      set((state) => {
+        const lyricOffsets = { ...state.lyricOffsets }
+        if (value === 0) delete lyricOffsets[key]
+        else lyricOffsets[key] = value
+        storage.setLyricOffsets(lyricOffsets)
+        return { lyricOffsets }
+      })
+    },
+    clearLyricOffset: (key) => {
+      set((state) => {
+        if (!(key in state.lyricOffsets)) return state
+        const lyricOffsets = { ...state.lyricOffsets }
+        delete lyricOffsets[key]
+        storage.setLyricOffsets(lyricOffsets)
+        return { lyricOffsets }
+      })
+    },
     ...resettable('bgFps', storage.getBgFps, storage.setBgFps),
     ...resettable('bgFlowSpeed', storage.getBgFlowSpeed, storage.setBgFlowSpeed),
     ...resettable('bgRenderScale', storage.getBgRenderScale, storage.setBgRenderScale),

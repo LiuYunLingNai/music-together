@@ -1,5 +1,6 @@
 import { usePlayerStore } from '@/stores/playerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { getLyricOffsetKey } from '@/lib/lyricOffset'
 import type { LyricLine as AMLLLyricLine } from '@applemusic-like-lyrics/core'
 import '@applemusic-like-lyrics/core/style.css'
 import { LyricPlayer } from '@applemusic-like-lyrics/react'
@@ -102,6 +103,7 @@ export function LyricDisplay() {
   const ttmlLines = usePlayerStore((s) => s.ttmlLines)
   const currentTime = usePlayerStore((s) => s.currentTime)
   const isPlaying = usePlayerStore((s) => s.isPlaying)
+  const currentTrack = usePlayerStore((s) => s.currentTrack)
 
   const alignAnchor = useSettingsStore((s) => s.lyricAlignAnchor)
   const alignPosition = useSettingsStore((s) => s.lyricAlignPosition)
@@ -112,6 +114,8 @@ export function LyricDisplay() {
   const fontSize = useSettingsStore((s) => s.lyricFontSize)
   const translationFontSize = useSettingsStore((s) => s.lyricTranslationFontSize)
   const romanFontSize = useSettingsStore((s) => s.lyricRomanFontSize)
+  const lyricOffsets = useSettingsStore((s) => s.lyricOffsets)
+  const lyricOffsetMs = lyricOffsets[getLyricOffsetKey(currentTrack) ?? ''] ?? 0
 
   // LRC 解析（仅在没有 TTML 时使用）
   const lrcLines = useMemo(() => mergeLyrics(lyric, tlyric), [lyric, tlyric])
@@ -143,7 +147,7 @@ export function LyricDisplay() {
     >
       <LyricPlayer
         lyricLines={amllLines}
-        currentTime={Math.round(currentTime * 1000)}
+        currentTime={Math.max(0, Math.round(currentTime * 1000 - lyricOffsetMs))}
         playing={isPlaying}
         alignAnchor={alignAnchor}
         alignPosition={alignPosition}
@@ -155,4 +159,3 @@ export function LyricDisplay() {
     </div>
   )
 }
-

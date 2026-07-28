@@ -227,6 +227,7 @@ export function useHowl(onTrackEnd: () => void) {
         track.source === 'bilibili'
           ? `${SERVER_URL}/api/music/bilibili-audio-proxy?url=${encodeURIComponent(track.streamUrl)}&bvid=${encodeURIComponent(track.urlId)}`
           : track.streamUrl
+      const streamFormat = track.source === 'bilibili' ? ['m4a'] : ['flac', 'm4a', 'ogg', 'mp3']
 
       // Howler creates its HTMLMediaElement synchronously inside the
       // constructor. Configure CORS before it assigns the direct CDN URL so
@@ -236,7 +237,7 @@ export function useHowl(onTrackEnd: () => void) {
       const howl = new Howl({
         src: [playbackUrl],
         html5: true,
-        format: ['flac', 'm4a', 'ogg', 'mp3'],
+        format: streamFormat,
         volume: 0,
         onload: () => {
           if (howlRef.current !== howl) return // Stale instance guard
