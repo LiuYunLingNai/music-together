@@ -2,16 +2,26 @@ package io.github.yueby.musictogether.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -37,6 +47,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -56,6 +67,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.FastForward
@@ -97,6 +109,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -109,7 +122,6 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -130,11 +142,13 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -149,6 +163,7 @@ import io.github.yueby.musictogether.model.LyricWord
 import io.github.yueby.musictogether.model.LyricsState
 import io.github.yueby.musictogether.model.RoomState
 import io.github.yueby.musictogether.model.Track
+import io.github.yueby.musictogether.model.VoteState
 import io.github.yueby.musictogether.player.PlayerUiState
 import java.text.BreakIterator
 import java.text.SimpleDateFormat
@@ -162,10 +177,6 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlinx.coroutines.delay
 
-private enum class RoomTab(val label: String) {
-    Player("播放"), Queue("队列"), Search("点歌"), Account("账号"), Chat("聊天")
-}
-
 private enum class RoomOverlay {
     Queue, Search, Chat, Members, Accounts, AccountSettings, RoomSettings
 }
@@ -178,14 +189,14 @@ fun RoomScreen(
     viewModel: MusicTogetherViewModel,
 ) {
     val room = appState.room ?: return
-    var selectedTab by remember { mutableStateOf(RoomTab.Player) }
     var activeOverlay by remember { mutableStateOf<RoomOverlay?>(null) }
+    var landscapeChromeVisible by remember(room.id) { mutableStateOf(true) }
+    var roomMenuExpanded by remember(room.id) { mutableStateOf(false) }
     val overlaySheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
     val navigateBack = {
         when {
             activeOverlay != null -> activeOverlay = null
-            selectedTab != RoomTab.Player -> selectedTab = RoomTab.Player
             else -> viewModel.leaveRoom()
         }
     }
@@ -198,200 +209,375 @@ fun RoomScreen(
         onDispose { viewModel.setChatVisible(false) }
     }
 
-    Scaffold(
-        modifier = Modifier.padding(outerPadding),
-        topBar = {
-            var menuExpanded by remember { mutableStateOf(false) }
-            val dividerColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.50f)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-                    .background(MaterialTheme.colorScheme.background.copy(alpha = 0.95f))
-                    .drawWithContent {
-                        drawContent()
-                        drawLine(
-                            color = dividerColor,
-                            start = androidx.compose.ui.geometry.Offset(0f, size.height - 1f),
-                            end = androidx.compose.ui.geometry.Offset(size.width, size.height - 1f),
-                            strokeWidth = 1f,
-                        )
-                    }
-                    .padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = room.name,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { activeOverlay = RoomOverlay.Members }
-                        .padding(horizontal = 6.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(3.dp),
-                ) {
-                    Icon(
-                        Icons.Default.Groups,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        room.users.size.toString(),
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (room.hasPassword) {
-                        Icon(
-                            Icons.Default.Lock,
-                            contentDescription = "密码房间",
-                            modifier = Modifier.size(14.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                Spacer(Modifier.size(6.dp))
-                IconButton(onClick = { activeOverlay = RoomOverlay.Search }) {
-                    Icon(Icons.Default.Search, "搜索点歌", Modifier.size(20.dp))
-                }
-                Box {
-                    IconButton(onClick = { menuExpanded = true }) {
-                        Icon(Icons.Default.MoreVert, "更多操作", Modifier.size(20.dp))
-                    }
-                    DropdownMenu(
-                        expanded = menuExpanded,
-                        onDismissRequest = { menuExpanded = false },
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("个人账号") },
-                            onClick = {
-                                menuExpanded = false
-                                activeOverlay = RoomOverlay.AccountSettings
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("房间与音质") },
-                            onClick = {
-                                menuExpanded = false
-                                activeOverlay = RoomOverlay.RoomSettings
-                            },
-                        )
-                        DropdownMenuItem(
-                            leadingIcon = { Icon(Icons.Default.ContentCopy, null) },
-                            text = { Text("复制房间链接") },
-                            onClick = {
-                                menuExpanded = false
-                                viewModel.copyRoomLink()
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("音源账号与歌单") },
-                            onClick = {
-                                menuExpanded = false
-                                activeOverlay = RoomOverlay.Accounts
-                            },
-                        )
-                        if (BuildConfig.DEBUG) {
-                            DropdownMenuItem(
-                                text = { Text("导出日志") },
-                                onClick = {
-                                    menuExpanded = false
-                                    AppLogger.export(context)
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("清空日志") },
-                                onClick = {
-                                    menuExpanded = false
-                                    viewModel.clearLogs()
-                                },
-                            )
-                        }
-                        DropdownMenuItem(
-                            text = { Text("离开房间") },
-                            onClick = {
-                                menuExpanded = false
-                                viewModel.leaveRoom()
-                            },
-                        )
-                    }
-                }
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val landscape = maxWidth > maxHeight
+
+        LaunchedEffect(landscape, landscapeChromeVisible, roomMenuExpanded, activeOverlay) {
+            if (landscape && landscapeChromeVisible && !roomMenuExpanded && activeOverlay == null) {
+                delay(3_500)
+                landscapeChromeVisible = false
             }
-        },
-    ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
-            when (selectedTab) {
-                RoomTab.Player, RoomTab.Account -> PlayerPane(
+        }
+        LaunchedEffect(landscape) {
+            if (landscape) landscapeChromeVisible = true
+        }
+
+        Scaffold(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(if (landscape) PaddingValues(0.dp) else outerPadding),
+            containerColor = Color.Transparent,
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
+            topBar = {
+                if (!landscape) {
+                    RoomHeader(
+                        room = room,
+                        immersive = false,
+                        menuExpanded = roomMenuExpanded,
+                        onMenuExpandedChange = { roomMenuExpanded = it },
+                        viewModel = viewModel,
+                        context = context,
+                        onOpenOverlay = { activeOverlay = it },
+                    )
+                }
+            },
+        ) { padding ->
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .padding(if (landscape) PaddingValues(0.dp) else padding),
+            ) {
+                PlayerPane(
                     room = room,
-                    userId = appState.userId,
                     lyrics = appState.lyrics,
+                    activeVote = appState.activeVote,
+                    userId = appState.userId,
                     viewModel = viewModel,
+                    immersiveLandscape = landscape,
+                    landscapeChromeVisible = landscapeChromeVisible,
+                    safeContentPadding =
+                        if (landscape) outerPadding else PaddingValues(0.dp),
+                    onSurfaceTap = {
+                        if (landscape) landscapeChromeVisible = !landscapeChromeVisible
+                    },
                     onOpenQueue = { activeOverlay = RoomOverlay.Queue },
                     onOpenChat = { activeOverlay = RoomOverlay.Chat },
                 )
-                else -> Unit
-            }
-            appState.activeVote?.let { vote ->
-                val hasVoted = appState.userId?.let(vote.votes::containsKey) == true
-                val approveCount = vote.votes.values.count { it }
-                val rejectCount = vote.votes.values.count { !it }
-                Card(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(12.dp)) {
-                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("${vote.initiatorNickname} 发起了“${voteActionLabel(vote.action)}”投票", fontWeight = FontWeight.SemiBold)
-                        vote.payload["trackTitle"]?.takeIf { it.isNotBlank() }?.let {
-                            Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                        Text("赞成 $approveCount · 反对 $rejectCount · 需要 ${vote.requiredVotes} 票", style = MaterialTheme.typography.bodySmall)
-                        if (hasVoted) {
-                            Text(
-                                if (vote.initiatorId == appState.userId) "你发起了投票，已自动计入赞成票" else "你已投票",
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                        } else {
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Button(onClick = { viewModel.castVote(true) }) { Text("同意") }
-                                OutlinedButton(onClick = { viewModel.castVote(false) }) { Text("反对") }
+                if (!landscape) appState.activeVote?.let { vote ->
+                    val hasVoted = appState.userId?.let(vote.votes::containsKey) == true
+                    val approveCount = vote.votes.values.count { it }
+                    val rejectCount = vote.votes.values.count { !it }
+                    Card(
+                        Modifier
+                            .align(Alignment.TopCenter)
+                            .fillMaxWidth()
+                            .padding(if (landscape) outerPadding else PaddingValues(0.dp))
+                            .padding(12.dp),
+                    ) {
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("${vote.initiatorNickname} 发起了“${voteActionLabel(vote.action)}”投票", fontWeight = FontWeight.SemiBold)
+                            vote.payload["trackTitle"]?.takeIf { it.isNotBlank() }?.let {
+                                Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
+                            Text("赞成 $approveCount · 反对 $rejectCount · 需要 ${vote.requiredVotes} 票", style = MaterialTheme.typography.bodySmall)
+                            if (hasVoted) {
+                                Text(
+                                    if (vote.initiatorId == appState.userId) "你发起了投票，已自动计入赞成票" else "你已投票",
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            } else {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(onClick = { viewModel.castVote(true) }) { Text("同意") }
+                                    OutlinedButton(onClick = { viewModel.castVote(false) }) { Text("反对") }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                AnimatedVisibility(
+                    visible = landscape && landscapeChromeVisible,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                    enter = fadeIn(tween(220)) + slideInVertically(tween(260)) { -it / 3 },
+                    exit = fadeOut(tween(180)) + slideOutVertically(tween(220)) { -it / 3 },
+                ) {
+                    RoomHeader(
+                        room = room,
+                        immersive = true,
+                        safeContentPadding = outerPadding,
+                        menuExpanded = roomMenuExpanded,
+                        onMenuExpandedChange = {
+                            roomMenuExpanded = it
+                            if (it) landscapeChromeVisible = true
+                        },
+                        viewModel = viewModel,
+                        context = context,
+                        onOpenOverlay = {
+                            landscapeChromeVisible = false
+                            activeOverlay = it
+                        },
+                    )
+                }
+            }
+        }
+
+        activeOverlay?.let { overlay ->
+            if (landscape && (overlay == RoomOverlay.Queue || overlay == RoomOverlay.Chat)) {
+                LandscapeRoomSidePanel(
+                    overlay = overlay,
+                    room = room,
+                    messages = appState.messages,
+                    viewModel = viewModel,
+                    safeContentPadding = outerPadding,
+                    onDismiss = { activeOverlay = null },
+                )
+            } else {
+                ModalBottomSheet(
+                    onDismissRequest = { activeOverlay = null },
+                    sheetState = overlaySheetState,
+                    containerColor = MaterialTheme.colorScheme.surface,
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .fillMaxHeight(
+                                when (overlay) {
+                                    RoomOverlay.Queue, RoomOverlay.Chat, RoomOverlay.Members -> 0.70f
+                                    RoomOverlay.Accounts, RoomOverlay.AccountSettings, RoomOverlay.RoomSettings -> 0.90f
+                                    RoomOverlay.Search -> 0.96f
+                                },
+                            ),
+                    ) {
+                        when (overlay) {
+                            RoomOverlay.Queue -> QueuePane(room, viewModel)
+                            RoomOverlay.Search -> SearchPane(appState, viewModel)
+                            RoomOverlay.Chat -> ChatPane(appState.messages, viewModel)
+                            RoomOverlay.Members -> MembersPane(room, appState.userId)
+                            RoomOverlay.Accounts -> PlatformPane(appState, viewModel)
+                            RoomOverlay.AccountSettings -> AccountSettingsPane(appState, viewModel)
+                            RoomOverlay.RoomSettings -> RoomSettingsPane(appState, viewModel)
                         }
                     }
                 }
             }
         }
     }
+}
 
-    activeOverlay?.let { overlay ->
-        ModalBottomSheet(
-            onDismissRequest = { activeOverlay = null },
-            sheetState = overlaySheetState,
-            containerColor = MaterialTheme.colorScheme.surface,
-        ) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .fillMaxHeight(
-                        when (overlay) {
-                            RoomOverlay.Queue, RoomOverlay.Chat, RoomOverlay.Members -> 0.70f
-                            RoomOverlay.Accounts, RoomOverlay.AccountSettings, RoomOverlay.RoomSettings -> 0.90f
-                            RoomOverlay.Search -> 0.96f
-                        },
-                    ),
-            ) {
-                when (overlay) {
-                    RoomOverlay.Queue -> QueuePane(room, viewModel)
-                    RoomOverlay.Search -> SearchPane(appState, viewModel)
-                    RoomOverlay.Chat -> ChatPane(appState.messages, viewModel)
-                    RoomOverlay.Members -> MembersPane(room, appState.userId)
-                    RoomOverlay.Accounts -> PlatformPane(appState, viewModel)
-                    RoomOverlay.AccountSettings -> AccountSettingsPane(appState, viewModel)
-                    RoomOverlay.RoomSettings -> RoomSettingsPane(appState, viewModel)
+@Composable
+private fun RoomHeader(
+    room: RoomState,
+    immersive: Boolean,
+    safeContentPadding: PaddingValues = PaddingValues(0.dp),
+    menuExpanded: Boolean,
+    onMenuExpandedChange: (Boolean) -> Unit,
+    viewModel: MusicTogetherViewModel,
+    context: android.content.Context,
+    onOpenOverlay: (RoomOverlay) -> Unit,
+) {
+    val layoutDirection = LocalLayoutDirection.current
+    val safeTop = if (immersive) safeContentPadding.calculateTopPadding() else 0.dp
+    val safeStart =
+        if (immersive) safeContentPadding.calculateLeftPadding(layoutDirection) else 0.dp
+    val safeEnd =
+        if (immersive) safeContentPadding.calculateRightPadding(layoutDirection) else 0.dp
+    val contentColor =
+        if (immersive) Color.White.copy(alpha = 0.92f) else MaterialTheme.colorScheme.onSurface
+    val secondaryColor =
+        if (immersive) Color.White.copy(alpha = 0.74f) else MaterialTheme.colorScheme.onSurfaceVariant
+    val dividerColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.50f)
+    val backgroundModifier =
+        if (immersive) {
+            Modifier.background(
+                Brush.verticalGradient(
+                    0f to Color.Black.copy(alpha = 0.70f),
+                    0.72f to Color.Black.copy(alpha = 0.34f),
+                    1f to Color.Transparent,
+                ),
+            )
+        } else {
+            Modifier
+                .background(MaterialTheme.colorScheme.background.copy(alpha = 0.95f))
+                .drawWithContent {
+                    drawContent()
+                    drawLine(
+                        color = dividerColor,
+                        start = androidx.compose.ui.geometry.Offset(0f, size.height - 1f),
+                        end = androidx.compose.ui.geometry.Offset(size.width, size.height - 1f),
+                        strokeWidth = 1f,
+                    )
                 }
+        }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(if (immersive) 64.dp + safeTop else 56.dp)
+            .then(backgroundModifier)
+            .padding(
+                start = (if (immersive) 18.dp else 8.dp) + safeStart,
+                top = safeTop,
+                end = (if (immersive) 24.dp else 8.dp) + safeEnd,
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = room.name,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            fontSize = if (immersive) 16.sp else 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = contentColor,
+        )
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .clickable { onOpenOverlay(RoomOverlay.Members) }
+                .padding(horizontal = 6.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Icon(
+                Icons.Default.Groups,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = secondaryColor,
+            )
+            Text(
+                room.users.size.toString(),
+                fontSize = 12.sp,
+                color = secondaryColor,
+            )
+            if (room.hasPassword) {
+                Icon(
+                    Icons.Default.Lock,
+                    contentDescription = "密码房间",
+                    modifier = Modifier.size(14.dp),
+                    tint = secondaryColor,
+                )
+            }
+        }
+        Spacer(Modifier.size(6.dp))
+        IconButton(onClick = { onOpenOverlay(RoomOverlay.Search) }) {
+            Icon(Icons.Default.Search, "搜索点歌", Modifier.size(20.dp), tint = contentColor)
+        }
+        Box {
+            IconButton(onClick = { onMenuExpandedChange(true) }) {
+                Icon(Icons.Default.MoreVert, "更多操作", Modifier.size(20.dp), tint = contentColor)
+            }
+            DropdownMenu(
+                expanded = menuExpanded,
+                onDismissRequest = { onMenuExpandedChange(false) },
+            ) {
+                DropdownMenuItem(
+                    text = { Text("个人账号") },
+                    onClick = {
+                        onMenuExpandedChange(false)
+                        onOpenOverlay(RoomOverlay.AccountSettings)
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("房间与音质") },
+                    onClick = {
+                        onMenuExpandedChange(false)
+                        onOpenOverlay(RoomOverlay.RoomSettings)
+                    },
+                )
+                DropdownMenuItem(
+                    leadingIcon = { Icon(Icons.Default.ContentCopy, null) },
+                    text = { Text("复制房间链接") },
+                    onClick = {
+                        onMenuExpandedChange(false)
+                        viewModel.copyRoomLink()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("音源账号与歌单") },
+                    onClick = {
+                        onMenuExpandedChange(false)
+                        onOpenOverlay(RoomOverlay.Accounts)
+                    },
+                )
+                if (BuildConfig.DEBUG) {
+                    DropdownMenuItem(
+                        text = { Text("导出日志") },
+                        onClick = {
+                            onMenuExpandedChange(false)
+                            AppLogger.export(context)
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("清空日志") },
+                        onClick = {
+                            onMenuExpandedChange(false)
+                            viewModel.clearLogs()
+                        },
+                    )
+                }
+                DropdownMenuItem(
+                    text = { Text("离开房间") },
+                    onClick = {
+                        onMenuExpandedChange(false)
+                        viewModel.leaveRoom()
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LandscapeRoomSidePanel(
+    overlay: RoomOverlay,
+    room: RoomState,
+    messages: List<ChatMessage>,
+    viewModel: MusicTogetherViewModel,
+    safeContentPadding: PaddingValues,
+    onDismiss: () -> Unit,
+) {
+    val layoutDirection = LocalLayoutDirection.current
+    val safeTop = safeContentPadding.calculateTopPadding()
+    val safeBottom = safeContentPadding.calculateBottomPadding()
+    val safeEnd = safeContentPadding.calculateRightPadding(layoutDirection)
+    val panelInteraction = remember { MutableInteractionSource() }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.34f))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onDismiss,
+            ),
+    ) {
+        Surface(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxWidth(0.48f)
+                .widthIn(min = 320.dp, max = 460.dp)
+                .fillMaxHeight()
+                .padding(
+                    top = safeTop + 8.dp,
+                    end = safeEnd + 8.dp,
+                    bottom = safeBottom + 8.dp,
+                )
+                .clickable(
+                    interactionSource = panelInteraction,
+                    indication = null,
+                    onClick = {},
+                ),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f),
+            tonalElevation = 8.dp,
+            shadowElevation = 18.dp,
+        ) {
+            when (overlay) {
+                RoomOverlay.Queue -> QueuePane(room, viewModel, onClose = onDismiss)
+                RoomOverlay.Chat -> ChatPane(messages, viewModel, onClose = onDismiss)
+                else -> Unit
             }
         }
     }
@@ -400,9 +586,14 @@ fun RoomScreen(
 @Composable
 private fun PlayerPane(
     room: RoomState,
-    userId: String?,
     lyrics: LyricsState,
+    activeVote: VoteState?,
+    userId: String?,
     viewModel: MusicTogetherViewModel,
+    immersiveLandscape: Boolean,
+    landscapeChromeVisible: Boolean,
+    safeContentPadding: PaddingValues,
+    onSurfaceTap: () -> Unit,
     onOpenQueue: () -> Unit,
     onOpenChat: () -> Unit,
 ) {
@@ -416,13 +607,59 @@ private fun PlayerPane(
         track = track,
         room = room,
         lyrics = lyrics,
+        activeVote = activeVote,
+        userId = userId,
         player = player,
         viewModel = viewModel,
+        immersiveLandscape = immersiveLandscape,
+        landscapeChromeVisible = landscapeChromeVisible,
+        safeContentPadding = safeContentPadding,
+        onSurfaceTap = onSurfaceTap,
         lyricsExpanded = lyricsExpanded,
         onToggleLyrics = { lyricsExpanded = !lyricsExpanded },
         onOpenQueue = onOpenQueue,
         onOpenChat = onOpenChat,
     )
+}
+
+private data class PlayerLayoutMetrics(
+    val horizontalPadding: Dp,
+    val verticalPadding: Dp,
+    val sectionGap: Dp,
+    val compactGap: Dp,
+    val columnGap: Dp,
+    val controlsScale: Float,
+)
+
+private fun playerLayoutMetrics(width: Dp, height: Dp, portrait: Boolean): PlayerLayoutMetrics {
+    return if (portrait) {
+        val scale = minOf(
+            width.value / 400f,
+            height.value / 680f,
+        ).coerceIn(0.82f, 1.08f)
+        PlayerLayoutMetrics(
+            horizontalPadding = (20f * scale).dp,
+            verticalPadding = (18f * scale).dp,
+            sectionGap = (16f * scale).dp,
+            compactGap = (10f * scale).dp,
+            columnGap = 0.dp,
+            controlsScale = scale,
+        )
+    } else {
+        val inset = (minOf(width.value, height.value) * 0.05f).coerceIn(12f, 28f)
+        val scale = minOf(
+            width.value / 900f,
+            height.value / 420f,
+        ).coerceIn(0.72f, 1f)
+        PlayerLayoutMetrics(
+            horizontalPadding = inset.dp,
+            verticalPadding = inset.dp,
+            sectionGap = (14f * scale).dp,
+            compactGap = (10f * scale).dp,
+            columnGap = (width.value * 0.03f).coerceIn(24f, 48f).dp,
+            controlsScale = scale,
+        )
+    }
 }
 
 @OptIn(ExperimentalSharedTransitionApi::class)
@@ -431,8 +668,14 @@ private fun MobilePlayerSurface(
     track: Track?,
     room: RoomState,
     lyrics: LyricsState,
+    activeVote: VoteState?,
+    userId: String?,
     player: PlayerUiState,
     viewModel: MusicTogetherViewModel,
+    immersiveLandscape: Boolean,
+    landscapeChromeVisible: Boolean,
+    safeContentPadding: PaddingValues,
+    onSurfaceTap: () -> Unit,
     lyricsExpanded: Boolean,
     onToggleLyrics: () -> Unit,
     onOpenQueue: () -> Unit,
@@ -444,13 +687,36 @@ private fun MobilePlayerSurface(
         animationSpec = tween(3200),
         label = "background-scale",
     )
-    Box(
+    val backgroundFlow = rememberInfiniteTransition(label = "background-flow")
+    val backgroundDrift by backgroundFlow.animateFloat(
+        initialValue = -1f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(12_000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "background-drift",
+    )
+    val backgroundPulse by backgroundFlow.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(9_000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "background-pulse",
+    )
+    BoxWithConstraints(
         Modifier
             .fillMaxSize()
-            .padding(8.dp)
-            .clip(playerShape)
+            .padding(if (immersiveLandscape) 0.dp else 8.dp)
+            .clip(if (immersiveLandscape) RoundedCornerShape(0.dp) else playerShape)
             .background(Color(0xFF111111)),
     ) {
+        val driftDistancePx = with(LocalDensity.current) {
+            (minOf(maxWidth, maxHeight) * 0.035f).toPx()
+        }
+
         if (!track?.cover.isNullOrBlank()) {
             AsyncImage(
                 model = track?.cover,
@@ -458,8 +724,13 @@ private fun MobilePlayerSurface(
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
-                        scaleX = backgroundScale
-                        scaleY = backgroundScale
+                        val flowScale = if (player.playing) backgroundPulse * 0.045f else 0f
+                        scaleX = backgroundScale + flowScale
+                        scaleY = backgroundScale + flowScale
+                        translationX = if (player.playing) backgroundDrift * driftDistancePx else 0f
+                        translationY =
+                            if (player.playing) -backgroundDrift * driftDistancePx * 0.62f else 0f
+                        rotationZ = if (player.playing) backgroundDrift * 0.12f else 0f
                         alpha = 0.68f
                     }
                     .blur(32.dp),
@@ -473,80 +744,666 @@ private fun MobilePlayerSurface(
                     Brush.radialGradient(
                         colors = listOf(
                             Color.Transparent,
-                            Color.Black.copy(alpha = 0.14f),
-                            Color.Black.copy(alpha = 0.46f),
+                            Color.Black.copy(alpha = 0.10f),
+                            Color.Black.copy(alpha = 0.38f),
                         ),
                         radius = 1250f,
                     ),
                 )
                 .background(
                     Brush.verticalGradient(
-                        0f to Color.Black.copy(alpha = 0.24f),
-                        0.50f to Color.Black.copy(alpha = 0.08f),
-                        1f to Color.Black.copy(alpha = 0.48f),
+                        0f to Color.Black.copy(alpha = 0.18f),
+                        0.50f to Color.Black.copy(alpha = 0.04f),
+                        1f to Color.Black.copy(alpha = 0.30f),
                     ),
                 ),
         )
+        if (immersiveLandscape) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onSurfaceTap,
+                    ),
+            )
+        }
 
-        Column(
+        BoxWithConstraints(
             modifier = Modifier
-                .align(Alignment.TopCenter)
-                .widthIn(max = 448.dp)
-                .fillMaxHeight()
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 18.dp),
+                .fillMaxSize()
+                .padding(
+                    if (immersiveLandscape) safeContentPadding else PaddingValues(0.dp),
+                ),
         ) {
-            SharedTransitionLayout(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-            ) {
-                AnimatedContent(
-                    targetState = lyricsExpanded && track != null,
-                    transitionSpec = {
-                        fadeIn(tween(360, delayMillis = 80)) togetherWith fadeOut(tween(180))
-                    },
-                    modifier = Modifier.fillMaxSize(),
-                    label = "player-visual",
-                ) { showLyrics ->
-                    if (showLyrics && track != null) {
-                        MobileLyricsHero(
-                            track = track,
-                            lyrics = lyrics,
-                            player = player,
-                            onShowCover = onToggleLyrics,
-                            onOpenChat = onOpenChat,
-                            onSeek = viewModel::seek,
-                            sharedTransitionScope = this@SharedTransitionLayout,
-                            animatedVisibilityScope = this,
-                        )
+            val portrait = maxHeight >= maxWidth
+            val metrics = playerLayoutMetrics(maxWidth, maxHeight, portrait)
+            if (portrait) {
+                PortraitPlayerContent(
+                    track = track,
+                    room = room,
+                    lyrics = lyrics,
+                    player = player,
+                    viewModel = viewModel,
+                    lyricsExpanded = lyricsExpanded,
+                    onToggleLyrics = onToggleLyrics,
+                    onOpenQueue = onOpenQueue,
+                    onOpenChat = onOpenChat,
+                    metrics = metrics,
+                )
+            } else {
+                LandscapePlayerContent(
+                    track = track,
+                    room = room,
+                    lyrics = lyrics,
+                    activeVote = activeVote,
+                    userId = userId,
+                    player = player,
+                    viewModel = viewModel,
+                    onOpenQueue = onOpenQueue,
+                    onOpenChat = onOpenChat,
+                    chromeVisible = landscapeChromeVisible,
+                    metrics = metrics,
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+private fun PortraitPlayerContent(
+    track: Track?,
+    room: RoomState,
+    lyrics: LyricsState,
+    player: PlayerUiState,
+    viewModel: MusicTogetherViewModel,
+    lyricsExpanded: Boolean,
+    onToggleLyrics: () -> Unit,
+    onOpenQueue: () -> Unit,
+    onOpenChat: () -> Unit,
+    metrics: PlayerLayoutMetrics,
+) {
+    Column(
+        modifier = Modifier
+            .widthIn(max = 448.dp)
+            .fillMaxHeight()
+            .fillMaxWidth()
+            .padding(
+                horizontal = metrics.horizontalPadding,
+                vertical = metrics.verticalPadding,
+            ),
+    ) {
+        SharedTransitionLayout(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+        ) {
+            AnimatedContent(
+                targetState = lyricsExpanded && track != null,
+                transitionSpec = {
+                    if (targetState) {
+                        (
+                            fadeIn(tween(300, delayMillis = 60)) +
+                                slideInVertically(tween(300)) { it / 14 }
+                            ) togetherWith fadeOut(tween(170))
                     } else {
+                        fadeIn(tween(260)) togetherWith (
+                            fadeOut(tween(180)) +
+                                slideOutVertically(tween(220)) { it / 14 }
+                            )
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+                label = "player-visual",
+            ) { showLyrics ->
+                if (showLyrics && track != null) {
+                    MobileLyricsHero(
+                        track = track,
+                        lyrics = lyrics,
+                        player = player,
+                        onShowCover = onToggleLyrics,
+                        onOpenChat = onOpenChat,
+                        onSeek = viewModel::seek,
+                        sharedTransitionScope = this@SharedTransitionLayout,
+                        animatedVisibilityScope = this,
+                    )
+                } else {
+                    val visibilityScope = this
+                    Column(Modifier.fillMaxSize()) {
                         MobileCoverHero(
                             track = track,
                             onShowLyrics = onToggleLyrics,
                             sharedTransitionScope = this@SharedTransitionLayout,
-                            animatedVisibilityScope = this,
+                            animatedVisibilityScope = visibilityScope,
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                        )
+                        Spacer(Modifier.height(metrics.sectionGap))
+                        if (track != null) {
+                            Box(
+                                modifier = with(this@SharedTransitionLayout) {
+                                    Modifier.sharedElement(
+                                        sharedContentState =
+                                            rememberSharedContentState("player-info-${track.id}"),
+                                        animatedVisibilityScope = visibilityScope,
+                                    )
+                                },
+                            ) {
+                                MobileSongInfo(
+                                    track = track,
+                                    error = player.error,
+                                    onOpenChat = onOpenChat,
+                                )
+                            }
+                        } else {
+                            MobileSongInfo(
+                                track = null,
+                                error = player.error,
+                                onOpenChat = onOpenChat,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(if (lyricsExpanded) metrics.compactGap else metrics.sectionGap))
+        MobilePlayerControls(
+            track = track,
+            room = room,
+            player = player,
+            viewModel = viewModel,
+            onOpenQueue = onOpenQueue,
+            layoutScale = metrics.controlsScale,
+        )
+    }
+}
+
+@Composable
+private fun LandscapePlayerContent(
+    track: Track?,
+    room: RoomState,
+    lyrics: LyricsState,
+    activeVote: VoteState?,
+    userId: String?,
+    player: PlayerUiState,
+    viewModel: MusicTogetherViewModel,
+    onOpenQueue: () -> Unit,
+    onOpenChat: () -> Unit,
+    chromeVisible: Boolean,
+    metrics: PlayerLayoutMetrics,
+) {
+    var artworkHorizontalInset by remember { mutableStateOf(0.dp) }
+    val transportScale = metrics.controlsScale.coerceIn(0.78f, 1f)
+    val railInternalStartPadding = (8f * transportScale).dp
+    val railStartPadding =
+        (artworkHorizontalInset - railInternalStartPadding).coerceAtLeast(0.dp)
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(
+                horizontal = metrics.horizontalPadding,
+                vertical = metrics.verticalPadding,
+            ),
+    ) {
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+        ) {
+            LandscapeCoverArtwork(
+                track = track,
+                modifier = Modifier
+                    .weight(0.40f)
+                    .fillMaxHeight(),
+                onHorizontalInsetChanged = { artworkHorizontalInset = it },
+            )
+            Spacer(Modifier.width(metrics.columnGap))
+            Column(
+                modifier = Modifier
+                    .weight(0.60f)
+                    .fillMaxHeight(),
+            ) {
+                LandscapeSongHeader(
+                    track = track,
+                    error = player.error,
+                    onOpenChat = onOpenChat,
+                    chromeVisible = chromeVisible,
+                    layoutScale = metrics.controlsScale,
+                )
+                Spacer(Modifier.height(metrics.compactGap))
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                ) {
+                    LyricsPanel(
+                        lyrics = lyrics,
+                        positionSeconds = player.positionSeconds,
+                        isPlaying = player.playing,
+                        onSeek = viewModel::seek,
+                    )
+                    activeVote?.let { vote ->
+                        LandscapeVotePrompt(
+                            vote = vote,
+                            userId = userId,
+                            onCastVote = viewModel::castVote,
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(horizontal = 18.dp, vertical = 4.dp),
                         )
                     }
                 }
             }
-
-            if (!lyricsExpanded) {
-                Spacer(Modifier.height(14.dp))
-                MobileSongInfo(
-                    track = track,
-                    error = player.error,
-                    onOpenChat = onOpenChat,
-                )
-            }
-            Spacer(Modifier.height(if (lyricsExpanded) 10.dp else 16.dp))
-            MobilePlayerControls(
+        }
+        Spacer(Modifier.height(metrics.compactGap))
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.CenterEnd,
+        ) {
+            LandscapeTransportRail(
                 track = track,
                 room = room,
                 player = player,
                 viewModel = viewModel,
                 onOpenQueue = onOpenQueue,
+                layoutScale = metrics.controlsScale,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = railStartPadding, end = 12.dp),
             )
+        }
+    }
+}
+
+@Composable
+private fun LandscapeCoverArtwork(
+    track: Track?,
+    modifier: Modifier = Modifier,
+    onHorizontalInsetChanged: (Dp) -> Unit = {},
+) {
+    BoxWithConstraints(
+        modifier = modifier,
+        contentAlignment = Alignment.Center,
+    ) {
+        val artworkSize = minOf(maxWidth, maxHeight).coerceAtMost(430.dp)
+        val horizontalInset = ((maxWidth - artworkSize) / 2f).coerceAtLeast(0.dp)
+        LaunchedEffect(horizontalInset) {
+            onHorizontalInsetChanged(horizontalInset)
+        }
+        if (track != null && track.cover.isNotBlank()) {
+            AsyncImage(
+                model = track.cover,
+                contentDescription = track.title,
+                modifier = Modifier
+                    .size(artworkSize)
+                    .graphicsLayer {
+                        shadowElevation = 18.dp.toPx()
+                        shape = RoundedCornerShape(24.dp)
+                        clip = true
+                    },
+                contentScale = ContentScale.Crop,
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(artworkSize)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(Color.White.copy(alpha = 0.10f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Default.LibraryMusic,
+                    contentDescription = null,
+                    modifier = Modifier.size((artworkSize * 0.28f).coerceAtLeast(40.dp)),
+                    tint = Color.White.copy(alpha = 0.72f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LandscapeSongHeader(
+    track: Track?,
+    error: String?,
+    onOpenChat: () -> Unit,
+    chromeVisible: Boolean,
+    layoutScale: Float,
+) {
+    val scale = layoutScale.coerceIn(0.78f, 1f)
+    val chatAlpha by animateFloatAsState(
+        targetValue = if (chromeVisible) 0f else 1f,
+        animationSpec = tween(180),
+        label = "landscape-chat-chrome-avoidance",
+    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 18.dp, end = 20.dp),
+        verticalAlignment = Alignment.Bottom,
+        horizontalArrangement = Arrangement.spacedBy((10f * scale).dp),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = track?.title ?: "暂无歌曲",
+                modifier = Modifier.basicMarquee(),
+                color = Color.White.copy(alpha = 0.94f),
+                fontSize = (23f * scale).sp,
+                lineHeight = (27f * scale).sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Clip,
+            )
+            Text(
+                text = error ?: track?.artist?.joinToString(" / ") ?: "点击搜索添加歌曲到队列",
+                modifier = Modifier.basicMarquee(),
+                color =
+                    if (error == null) Color.White.copy(alpha = 0.52f) else Color(0xFFFF8A80),
+                fontSize = (13f * scale).sp,
+                lineHeight = (17f * scale).sp,
+                maxLines = 1,
+                overflow = TextOverflow.Clip,
+            )
+        }
+        IconButton(
+            onClick = onOpenChat,
+            enabled = !chromeVisible,
+            modifier = Modifier.size((42f * scale).dp),
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.Chat,
+                contentDescription = "打开聊天",
+                modifier = Modifier
+                    .size((22f * scale).dp)
+                    .graphicsLayer { alpha = chatAlpha },
+                tint = Color.White.copy(alpha = 0.72f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun LandscapeVotePrompt(
+    vote: VoteState,
+    userId: String?,
+    onCastVote: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val hasVoted = userId?.let(vote.votes::containsKey) == true
+    val approveCount = vote.votes.values.count { it }
+    val rejectCount = vote.votes.values.count { !it }
+
+    Surface(
+        modifier = modifier.widthIn(max = 390.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = Color.Black.copy(alpha = 0.72f),
+        tonalElevation = 0.dp,
+        shadowElevation = 12.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 14.dp, top = 8.dp, end = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = "${vote.initiatorNickname} 发起“${voteActionLabel(vote.action)}”投票",
+                    color = Color.White.copy(alpha = 0.92f),
+                    fontSize = 13.sp,
+                    lineHeight = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = buildString {
+                        vote.payload["trackTitle"]?.takeIf { it.isNotBlank() }?.let {
+                            append(it)
+                            append(" · ")
+                        }
+                        append("赞成 $approveCount · 反对 $rejectCount · 需要 ${vote.requiredVotes} 票")
+                    },
+                    color = Color.White.copy(alpha = 0.54f),
+                    fontSize = 10.sp,
+                    lineHeight = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (hasVoted) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    Icon(
+                        Icons.Default.Check,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = Color.White.copy(alpha = 0.76f),
+                    )
+                    Text(
+                        if (vote.initiatorId == userId) "已发起" else "已投票",
+                        color = Color.White.copy(alpha = 0.68f),
+                        fontSize = 11.sp,
+                    )
+                }
+            } else {
+                TextButton(onClick = { onCastVote(false) }) {
+                    Text("反对", color = Color.White.copy(alpha = 0.68f), fontSize = 12.sp)
+                }
+                FilledTonalButton(onClick = { onCastVote(true) }) {
+                    Text("同意", fontSize = 12.sp)
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LandscapeTransportRail(
+    track: Track?,
+    room: RoomState,
+    player: PlayerUiState,
+    viewModel: MusicTogetherViewModel,
+    onOpenQueue: () -> Unit,
+    layoutScale: Float,
+    modifier: Modifier = Modifier,
+) {
+    val scale = layoutScale.coerceIn(0.78f, 1f)
+    var seeking by remember(track?.id) { mutableStateOf(false) }
+    var seekPosition by remember(track?.id) { mutableDoubleStateOf(player.positionSeconds) }
+    LaunchedEffect(player.positionSeconds) {
+        if (!seeking) seekPosition = player.positionSeconds
+    }
+    val reportedDuration = maxOf(track?.duration ?: 0.0, player.durationSeconds)
+    val seekRangeDuration = reportedDuration.coerceAtLeast(1.0)
+    val seekThumbSize by animateDpAsState(
+        targetValue = ((if (seeking) 10f else 7f) * scale).dp,
+        animationSpec = spring(dampingRatio = 0.72f, stiffness = 520f),
+        label = "landscape-seek-thumb-size",
+    )
+    val playInteraction = remember { MutableInteractionSource() }
+    val playPressed by playInteraction.collectIsPressedAsState()
+    val playButtonScale by animateFloatAsState(
+        targetValue = if (playPressed) 0.92f else 1f,
+        animationSpec = spring(dampingRatio = 0.76f, stiffness = 520f),
+        label = "landscape-play-button-press",
+    )
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = (8f * scale).dp, vertical = (4f * scale).dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Slider(
+            value = seekPosition.coerceIn(0.0, seekRangeDuration).toFloat(),
+            onValueChange = {
+                seeking = true
+                seekPosition = it.toDouble()
+            },
+            onValueChangeFinished = {
+                seeking = false
+                viewModel.seek(seekPosition)
+            },
+            valueRange = 0f..seekRangeDuration.toFloat(),
+            enabled = track != null && viewModel.canControl(),
+            modifier = Modifier
+                .weight(1f)
+                .height((32f * scale).dp),
+            thumb = {
+                Box(
+                    Modifier
+                        .size(seekThumbSize)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = if (seeking) 0.96f else 0.78f)),
+                )
+            },
+            track = { sliderState ->
+                SliderDefaults.Track(
+                    sliderState = sliderState,
+                    modifier = Modifier.height((3f * scale).dp),
+                    colors = SliderDefaults.colors(
+                        activeTrackColor = Color.White.copy(alpha = 0.72f),
+                        inactiveTrackColor = Color.White.copy(alpha = 0.20f),
+                    ),
+                    thumbTrackGapSize = 0.dp,
+                    trackInsideCornerSize = 1.5.dp,
+                    drawStopIndicator = null,
+                )
+            },
+        )
+        Spacer(Modifier.width((14f * scale).dp))
+        Text(
+            text =
+                "${formatTime(if (track == null) 0.0 else seekPosition)} / " +
+                    formatTime(reportedDuration),
+            modifier = Modifier.widthIn(min = (74f * scale).dp),
+            color = Color.White.copy(alpha = 0.56f),
+            fontSize = (11f * scale).sp,
+            maxLines = 1,
+        )
+        Spacer(Modifier.width((12f * scale).dp))
+        IconButton(
+            onClick = {
+                val modes = listOf("sequential", "loop-all", "loop-one", "shuffle")
+                val current = modes.indexOf(room.playMode).coerceAtLeast(0)
+                viewModel.setPlayMode(modes[(current + 1) % modes.size])
+            },
+            enabled = track != null,
+            modifier = Modifier.size((40f * scale).dp),
+        ) {
+            AnimatedContent(
+                targetState = room.playMode,
+                transitionSpec = {
+                    (
+                        fadeIn(tween(150)) +
+                            scaleIn(tween(150), initialScale = 0.6f)
+                        ) togetherWith (
+                        fadeOut(tween(120)) +
+                            scaleOut(tween(120), targetScale = 0.6f)
+                        )
+                },
+                label = "landscape-play-mode-icon",
+            ) { mode ->
+                Icon(
+                    imageVector = when (mode) {
+                        "sequential" -> Icons.Default.VerticalAlignTop
+                        "loop-one" -> Icons.Default.RepeatOne
+                        "shuffle" -> Icons.Default.Shuffle
+                        else -> Icons.Default.Repeat
+                    },
+                    contentDescription = "切换播放模式",
+                    modifier = Modifier
+                        .size((20f * scale).dp)
+                        .graphicsLayer {
+                            rotationZ = if (mode == "sequential") 90f else 0f
+                        },
+                    tint = Color.White.copy(alpha = 0.72f),
+                )
+            }
+        }
+        IconButton(
+            onClick = viewModel::previous,
+            enabled = track != null,
+            modifier = Modifier.size((40f * scale).dp),
+        ) {
+            Icon(
+                Icons.Default.FastRewind,
+                contentDescription = "上一首",
+                modifier = Modifier.size((23f * scale).dp),
+                tint = Color.White.copy(alpha = 0.84f),
+            )
+        }
+        IconButton(
+            onClick = viewModel::togglePlayback,
+            enabled = track != null,
+            interactionSource = playInteraction,
+            modifier = Modifier
+                .size((54f * scale).dp)
+                .graphicsLayer {
+                    scaleX = playButtonScale
+                    scaleY = playButtonScale
+                }
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.20f)),
+        ) {
+            Icon(
+                if (player.playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                contentDescription = if (player.playing) "暂停" else "播放",
+                modifier = Modifier.size((29f * scale).dp),
+                tint = Color.White.copy(alpha = 0.94f),
+            )
+        }
+        IconButton(
+            onClick = viewModel::next,
+            enabled = track != null,
+            modifier = Modifier.size((40f * scale).dp),
+        ) {
+            Icon(
+                Icons.Default.FastForward,
+                contentDescription = "下一首",
+                modifier = Modifier.size((23f * scale).dp),
+                tint = Color.White.copy(alpha = 0.84f),
+            )
+        }
+        IconButton(
+            onClick = onOpenQueue,
+            modifier = Modifier.size((40f * scale).dp),
+        ) {
+            Box(Modifier.size((28f * scale).dp)) {
+                Icon(
+                    Icons.AutoMirrored.Filled.QueueMusic,
+                    contentDescription = "打开播放队列",
+                    modifier = Modifier.align(Alignment.Center),
+                    tint = Color.White.copy(alpha = 0.72f),
+                )
+                if (room.queue.isNotEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .height((15f * scale).dp)
+                            .widthIn(min = (15f * scale).dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.90f))
+                            .padding(horizontal = (2f * scale).dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = if (room.queue.size > 99) "99+" else room.queue.size.toString(),
+                            color = Color.Black,
+                            fontSize = (7f * scale).sp,
+                            lineHeight = (7f * scale).sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -558,6 +1415,7 @@ private fun MobileCoverHero(
     onShowLyrics: () -> Unit,
     sharedTransitionScope: SharedTransitionScope,
     animatedVisibilityScope: AnimatedVisibilityScope,
+    modifier: Modifier = Modifier,
 ) {
     val coverInteraction = remember { MutableInteractionSource() }
     val coverPressed by coverInteraction.collectIsPressedAsState()
@@ -567,7 +1425,7 @@ private fun MobileCoverHero(
         label = "cover-press-scale",
     )
     BoxWithConstraints(
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier,
         contentAlignment = Alignment.Center,
     ) {
         val artworkSize = minOf(maxWidth, maxHeight).coerceAtMost(430.dp)
@@ -677,7 +1535,16 @@ private fun MobileLyricsHero(
                     ),
                 contentScale = ContentScale.Crop,
             )
-            Column(Modifier.weight(1f)) {
+            Column(
+                modifier = with(sharedTransitionScope) {
+                    Modifier
+                        .weight(1f)
+                        .sharedElement(
+                            sharedContentState = rememberSharedContentState("player-info-${track.id}"),
+                            animatedVisibilityScope = animatedVisibilityScope,
+                        )
+                },
+            ) {
                 Text(
                     text = track.title,
                     modifier = Modifier.basicMarquee(),
@@ -728,18 +1595,20 @@ private fun MobileSongInfo(
     track: Track?,
     error: String?,
     onOpenChat: () -> Unit,
+    layoutScale: Float = 1f,
 ) {
+    val scale = layoutScale.coerceIn(0.52f, 1.08f)
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.Bottom,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy((8f * scale).dp),
     ) {
         Column(Modifier.weight(1f)) {
             Text(
                 text = track?.title ?: "暂无歌曲",
                 modifier = Modifier.basicMarquee(),
                 color = Color.White.copy(alpha = 0.94f),
-                fontSize = 20.sp,
+                fontSize = (20f * scale).sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Clip,
@@ -748,18 +1617,19 @@ private fun MobileSongInfo(
                 text = error ?: track?.artist?.joinToString(" / ") ?: "点击搜索添加歌曲到队列",
                 modifier = Modifier.basicMarquee(),
                 color = if (error == null) Color.White.copy(alpha = 0.52f) else Color(0xFFFF8A80),
-                fontSize = 14.sp,
+                fontSize = (14f * scale).sp,
                 maxLines = 1,
                 overflow = TextOverflow.Clip,
             )
         }
         IconButton(
             onClick = onOpenChat,
-            modifier = Modifier.size(40.dp),
+            modifier = Modifier.size((40f * scale).dp),
         ) {
             Icon(
                 Icons.AutoMirrored.Filled.Chat,
                 contentDescription = "打开聊天",
+                modifier = Modifier.size((22f * scale).dp),
                 tint = Color.White.copy(alpha = 0.72f),
             )
         }
@@ -774,7 +1644,9 @@ private fun MobilePlayerControls(
     player: PlayerUiState,
     viewModel: MusicTogetherViewModel,
     onOpenQueue: () -> Unit,
+    layoutScale: Float = 1f,
 ) {
+    val scale = layoutScale.coerceIn(0.52f, 1.08f)
     var seeking by remember(track?.id) { mutableStateOf(false) }
     var seekPosition by remember(track?.id) { mutableDoubleStateOf(player.positionSeconds) }
     LaunchedEffect(player.positionSeconds) {
@@ -783,9 +1655,16 @@ private fun MobilePlayerControls(
     val reportedDuration = maxOf(track?.duration ?: 0.0, player.durationSeconds)
     val seekRangeDuration = reportedDuration.coerceAtLeast(1.0)
     val seekThumbSize by animateDpAsState(
-        targetValue = if (seeking) 10.dp else 7.dp,
+        targetValue = ((if (seeking) 10f else 7f) * scale).dp,
         animationSpec = spring(dampingRatio = 0.72f, stiffness = 520f),
         label = "seek-thumb-size",
+    )
+    val playInteraction = remember { MutableInteractionSource() }
+    val playPressed by playInteraction.collectIsPressedAsState()
+    val playButtonScale by animateFloatAsState(
+        targetValue = if (playPressed) 0.92f else 1f,
+        animationSpec = spring(dampingRatio = 0.76f, stiffness = 520f),
+        label = "play-button-press",
     )
 
     Column(Modifier.fillMaxWidth()) {
@@ -803,7 +1682,7 @@ private fun MobilePlayerControls(
             enabled = track != null && viewModel.canControl(),
             modifier = Modifier
                 .fillMaxWidth()
-                .height(32.dp),
+                .height((32f * scale).dp),
             thumb = {
                 Box(
                     Modifier
@@ -815,7 +1694,7 @@ private fun MobilePlayerControls(
             track = { sliderState ->
                 SliderDefaults.Track(
                     sliderState = sliderState,
-                    modifier = Modifier.height(3.dp),
+                    modifier = Modifier.height((3f * scale).dp),
                     colors = SliderDefaults.colors(
                         activeTrackColor = Color.White.copy(alpha = 0.72f),
                         inactiveTrackColor = Color.White.copy(alpha = 0.20f),
@@ -830,16 +1709,16 @@ private fun MobilePlayerControls(
             Text(
                 formatTime(if (track == null) 0.0 else seekPosition),
                 color = Color.White.copy(alpha = 0.52f),
-                fontSize = 11.sp,
+                fontSize = (11f * scale).sp,
             )
             Spacer(Modifier.weight(1f))
             Text(
                 formatTime(reportedDuration),
                 color = Color.White.copy(alpha = 0.52f),
-                fontSize = 11.sp,
+                fontSize = (11f * scale).sp,
             )
         }
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height((16f * scale).dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -852,66 +1731,100 @@ private fun MobilePlayerControls(
                         viewModel.setPlayMode(modes[(current + 1) % modes.size])
                     },
                     enabled = track != null,
+                    modifier = Modifier.size((42f * scale).dp),
                 ) {
-                    Icon(
-                        imageVector = when (room.playMode) {
-                            "loop-one" -> Icons.Default.RepeatOne
-                            "shuffle" -> Icons.Default.Shuffle
-                            else -> Icons.Default.Repeat
+                    AnimatedContent(
+                        targetState = room.playMode,
+                        transitionSpec = {
+                            (
+                                fadeIn(tween(150)) +
+                                    scaleIn(tween(150), initialScale = 0.6f)
+                                ) togetherWith (
+                                fadeOut(tween(120)) +
+                                    scaleOut(tween(120), targetScale = 0.6f)
+                                )
                         },
-                        contentDescription = "切换播放模式",
-                        modifier = Modifier.size(21.dp),
-                        tint = Color.White.copy(alpha = 0.72f),
-                    )
+                        label = "play-mode-icon",
+                    ) { mode ->
+                        Icon(
+                            imageVector = when (mode) {
+                                "sequential" -> Icons.Default.VerticalAlignTop
+                                "loop-one" -> Icons.Default.RepeatOne
+                                "shuffle" -> Icons.Default.Shuffle
+                                else -> Icons.Default.Repeat
+                            },
+                            contentDescription = when (mode) {
+                                "sequential" -> "顺序播放"
+                                "loop-all" -> "列表循环"
+                                "loop-one" -> "单曲循环"
+                                "shuffle" -> "随机播放"
+                                else -> "切换播放模式"
+                            },
+                            modifier = Modifier
+                                .size((21f * scale).dp)
+                                .graphicsLayer {
+                                    rotationZ = if (mode == "sequential") 90f else 0f
+                                },
+                            tint = Color.White.copy(alpha = 0.72f),
+                        )
+                    }
                 }
             }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy((8f * scale).dp),
             ) {
                 IconButton(
                     onClick = viewModel::previous,
                     enabled = track != null,
-                    modifier = Modifier.size(42.dp),
+                    modifier = Modifier.size((42f * scale).dp),
                 ) {
                     Icon(
                         Icons.Default.FastRewind,
                         contentDescription = "上一首",
-                        modifier = Modifier.size(24.dp),
+                        modifier = Modifier.size((24f * scale).dp),
                         tint = Color.White.copy(alpha = 0.84f),
                     )
                 }
                 IconButton(
                     onClick = viewModel::togglePlayback,
                     enabled = track != null,
+                    interactionSource = playInteraction,
                     modifier = Modifier
-                        .size(56.dp)
+                        .size((56f * scale).dp)
+                        .graphicsLayer {
+                            scaleX = playButtonScale
+                            scaleY = playButtonScale
+                        }
                         .clip(CircleShape)
                         .background(Color.White.copy(alpha = 0.20f)),
                 ) {
                     Icon(
                         if (player.playing) Icons.Default.Pause else Icons.Default.PlayArrow,
                         contentDescription = if (player.playing) "暂停" else "播放",
-                        modifier = Modifier.size(30.dp),
+                        modifier = Modifier.size((30f * scale).dp),
                         tint = Color.White.copy(alpha = 0.94f),
                     )
                 }
                 IconButton(
                     onClick = viewModel::next,
                     enabled = track != null,
-                    modifier = Modifier.size(42.dp),
+                    modifier = Modifier.size((42f * scale).dp),
                 ) {
                     Icon(
                         Icons.Default.FastForward,
                         contentDescription = "下一首",
-                        modifier = Modifier.size(24.dp),
+                        modifier = Modifier.size((24f * scale).dp),
                         tint = Color.White.copy(alpha = 0.84f),
                     )
                 }
             }
             Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
-                IconButton(onClick = onOpenQueue) {
-                    Box(Modifier.size(30.dp)) {
+                IconButton(
+                    onClick = onOpenQueue,
+                    modifier = Modifier.size((42f * scale).dp),
+                ) {
+                    Box(Modifier.size((30f * scale).dp)) {
                         Icon(
                             Icons.AutoMirrored.Filled.QueueMusic,
                             contentDescription = "打开播放队列",
@@ -922,16 +1835,18 @@ private fun MobilePlayerControls(
                             Box(
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
-                                    .size(15.dp)
+                                    .height((15f * scale).dp)
+                                    .widthIn(min = (15f * scale).dp)
                                     .clip(CircleShape)
-                                    .background(Color.White.copy(alpha = 0.90f)),
+                                    .background(Color.White.copy(alpha = 0.90f))
+                                    .padding(horizontal = (2f * scale).dp),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Text(
                                     text = if (room.queue.size > 99) "99+" else room.queue.size.toString(),
                                     color = Color.Black,
-                                    fontSize = 7.sp,
-                                    lineHeight = 7.sp,
+                                    fontSize = (7f * scale).sp,
+                                    lineHeight = (7f * scale).sp,
                                     fontWeight = FontWeight.Bold,
                                     maxLines = 1,
                                 )
@@ -1021,7 +1936,11 @@ private fun MembersPane(room: RoomState, userId: String?) {
 }
 
 @Composable
-private fun QueuePane(room: RoomState, viewModel: MusicTogetherViewModel) {
+private fun QueuePane(
+    room: RoomState,
+    viewModel: MusicTogetherViewModel,
+    onClose: (() -> Unit)? = null,
+) {
     val listState = rememberLazyListState()
     var confirmClear by remember { mutableStateOf(false) }
     val currentIndex = room.queue.indexOfFirst { it.id == room.currentTrack?.id }
@@ -1066,6 +1985,11 @@ private fun QueuePane(room: RoomState, viewModel: MusicTogetherViewModel) {
                             color = if (confirmClear) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                             fontSize = 12.sp,
                         )
+                    }
+                }
+                onClose?.let { close ->
+                    IconButton(onClick = close) {
+                        Icon(Icons.Default.Close, contentDescription = "关闭播放列表")
                     }
                 }
             }
@@ -1234,7 +2158,11 @@ private fun SearchTrackActions(isAdded: Boolean, onAdd: () -> Unit, onPin: () ->
 }
 
 @Composable
-private fun ChatPane(messages: List<ChatMessage>, viewModel: MusicTogetherViewModel) {
+private fun ChatPane(
+    messages: List<ChatMessage>,
+    viewModel: MusicTogetherViewModel,
+    onClose: (() -> Unit)? = null,
+) {
     var content by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
     LaunchedEffect(messages.size) { if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex) }
@@ -1254,9 +2182,15 @@ private fun ChatPane(messages: List<ChatMessage>, viewModel: MusicTogetherViewMo
             )
             Text(
                 "聊天",
+                modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
+            onClose?.let { close ->
+                IconButton(onClick = close) {
+                    Icon(Icons.Default.Close, contentDescription = "关闭聊天")
+                }
+            }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
         LazyColumn(
@@ -1549,7 +2483,21 @@ private fun LyricsPanel(
             )
         }
         else -> BoxWithConstraints(Modifier.fillMaxSize()) {
-            val lineGap = with(LocalDensity.current) { 9.6.sp.toDp() }
+            val portrait = maxHeight >= maxWidth
+            val minimumFontSize = if (portrait) 20f else 16f
+            val mainFontSize = (
+                minOf(
+                    maxHeight.value * 0.05f,
+                    maxWidth.value * 0.07f,
+                ) * 0.90f
+                ).coerceIn(minimumFontSize, 42f)
+            val translationFontSize = (mainFontSize * 0.75f).coerceAtLeast(10f)
+            val romanFontSize = (mainFontSize * 0.62f).coerceAtLeast(9f)
+            val backgroundFontSize = (mainFontSize * 0.70f).coerceAtLeast(12f)
+            val lineGap = with(LocalDensity.current) {
+                (mainFontSize * 0.40f).sp.toDp()
+            }
+            val focusFraction = if (portrait) 0.38f else 0.32f
             LaunchedEffect(focusedListIndex, listItems.size) {
                 if (focusedListIndex >= 0) {
                     listState.animateScrollToItem(
@@ -1560,13 +2508,29 @@ private fun LyricsPanel(
             }
 
             LazyColumn(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        compositingStrategy = CompositingStrategy.Offscreen
+                    }
+                    .drawWithContent {
+                        drawContent()
+                        drawRect(
+                            brush = Brush.verticalGradient(
+                                0f to Color.Transparent,
+                                0.08f to Color.Black,
+                                0.92f to Color.Black,
+                                1f to Color.Transparent,
+                            ),
+                            blendMode = BlendMode.DstIn,
+                        )
+                    },
                 state = listState,
                 contentPadding = PaddingValues(
                     start = 18.dp,
-                    top = maxHeight * 0.37f,
+                    top = maxHeight * focusFraction,
                     end = 18.dp,
-                    bottom = maxHeight * 0.57f,
+                    bottom = maxHeight * (1f - focusFraction),
                 ),
                 verticalArrangement = Arrangement.spacedBy(lineGap),
             ) {
@@ -1616,6 +2580,10 @@ private fun LyricsPanel(
                                     onClick = onSeek?.let { seek ->
                                         { seek(main.startTimeMs / 1000.0) }
                                     },
+                                    mainFontSize = mainFontSize,
+                                    translationFontSize = translationFontSize,
+                                    romanFontSize = romanFontSize,
+                                    backgroundFontSize = backgroundFontSize,
                                 )
                             }
                             is AmllLyricListItem.Interlude -> {
@@ -1643,6 +2611,10 @@ private fun AmllLyricLineItem(
     distanceFromActive: Int,
     passed: Boolean,
     onClick: (() -> Unit)?,
+    mainFontSize: Float,
+    translationFontSize: Float,
+    romanFontSize: Float,
+    backgroundFontSize: Float,
 ) {
     val line = group.main
     val currentPositionMs = if (active) positionMs.value else 0f
@@ -1709,7 +2681,7 @@ private fun AmllLyricLineItem(
             line = line,
             positionMs = currentPositionMs,
             active = active,
-            fontSize = 24f,
+            fontSize = mainFontSize,
             fontWeight = mainWeight,
         )
         line.translatedLyric.takeIf { it.isNotBlank() }?.let { translated ->
@@ -1717,8 +2689,8 @@ private fun AmllLyricLineItem(
                 text = translated,
                 modifier = Modifier.fillMaxWidth(),
                 textAlign = textAlign,
-                fontSize = 14.sp,
-                lineHeight = 18.sp,
+                fontSize = translationFontSize.sp,
+                lineHeight = (translationFontSize * 1.28f).sp,
                 color = Color.White.copy(alpha = if (active) 0.66f else 0.48f),
             )
         }
@@ -1726,13 +2698,13 @@ private fun AmllLyricLineItem(
             .takeIf { it.isNotBlank() && line.words.none { word -> word.romanText.isNotBlank() } }
             ?.let { roman ->
                 Text(
-                    text = roman,
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = textAlign,
-                    fontSize = 12.sp,
-                    lineHeight = 16.sp,
-                    color = Color.White.copy(alpha = if (active) 0.50f else 0.38f),
-                )
+                text = roman,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = textAlign,
+                fontSize = romanFontSize.sp,
+                lineHeight = (romanFontSize * 1.30f).sp,
+                color = Color.White.copy(alpha = if (active) 0.50f else 0.38f),
+            )
             }
 
         if (group.backgrounds.isNotEmpty()) {
@@ -1750,7 +2722,7 @@ private fun AmllLyricLineItem(
                         line = background,
                         positionMs = currentPositionMs,
                         active = backgroundActive,
-                        fontSize = 17f,
+                        fontSize = backgroundFontSize,
                         fontWeight = FontWeight.SemiBold,
                         subdued = true,
                     )
