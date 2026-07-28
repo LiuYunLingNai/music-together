@@ -2,11 +2,19 @@ import { SERVER_URL } from './config'
 
 const PROXY_COVER_HOSTS = new Set(['y.gtimg.cn', 'imgessl.kugou.com'])
 
-/** Route upstream cover CDNs that reject browser-origin image requests through our cover proxy. */
+export function isBilibiliCoverUrl(coverUrl: string): boolean {
+  try {
+    return new URL(coverUrl).hostname.endsWith('.hdslb.com')
+  } catch {
+    return false
+  }
+}
+
+/** Route non-Bilibili cover CDNs that reject browser-origin image requests through our cover proxy. */
 export function getProxiedCoverUrl(coverUrl: string): string {
   try {
     const { hostname } = new URL(coverUrl)
-    if (PROXY_COVER_HOSTS.has(hostname) || hostname.endsWith('.hdslb.com')) {
+    if (PROXY_COVER_HOSTS.has(hostname)) {
       return `${SERVER_URL}/api/music/cover-proxy?url=${encodeURIComponent(coverUrl)}`
     }
   } catch {

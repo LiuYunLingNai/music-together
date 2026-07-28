@@ -78,6 +78,7 @@ export function PlaylistSection({
                     <img
                       src={pl.cover}
                       alt={pl.name}
+                      referrerPolicy="no-referrer"
                       className="h-12 w-12 shrink-0 rounded-md object-cover"
                       loading="lazy"
                     />

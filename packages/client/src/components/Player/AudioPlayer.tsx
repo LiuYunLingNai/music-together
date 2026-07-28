@@ -8,7 +8,7 @@ import { useSettingsStore } from '@/stores/settingsStore'
 
 import { BackgroundRender } from '@applemusic-like-lyrics/react'
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { VoteBanner } from '../Vote/VoteBanner'
 import { LyricDisplay } from './LyricDisplay'
 import { NowPlaying } from './NowPlaying'
@@ -55,6 +55,15 @@ export function AudioPlayer({
 
   // 封面 URL 代理：解决 QQ 音乐 / 酷狗等 CDN 的 CORS 限制
   const proxiedCover = currentTrack?.cover ? getProxiedCoverUrl(currentTrack.cover) : undefined
+  // Suppress the document referrer for the renderer's own image request.
+  const backgroundCover = useMemo(() => {
+    if (!proxiedCover || typeof Image === 'undefined') return undefined
+    const image = new Image()
+    image.crossOrigin = 'anonymous'
+    image.referrerPolicy = 'no-referrer'
+    image.src = proxiedCover
+    return image
+  }, [proxiedCover])
 
   // Mobile: toggle between cover view and lyric view
   const [lyricExpanded, setLyricExpanded] = useState(false)
@@ -99,10 +108,10 @@ export function AudioPlayer({
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
       {/* AMLL fluid dynamic background powered by pixi.js */}
-      {proxiedCover && (
+      {backgroundCover && (
         <div className="pointer-events-none absolute inset-0 z-0 opacity-80 saturate-[1.3]">
           <BackgroundRender
-            album={proxiedCover}
+            album={backgroundCover}
             playing
             fps={bgFps}
             flowSpeed={bgFlowSpeed}

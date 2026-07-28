@@ -410,6 +410,7 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                               <img
                                 src={album.cover}
                                 alt={album.name}
+                                referrerPolicy="no-referrer"
                                 className="h-12 w-12 shrink-0 rounded-md object-cover"
                                 loading="lazy"
                               />

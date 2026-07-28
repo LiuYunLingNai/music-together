@@ -274,6 +274,7 @@ export function QueueDrawer({
                           <img
                             src={getProxiedCoverUrl(track.cover)}
                             alt={track.title}
+                            referrerPolicy="no-referrer"
                             className="h-9 w-9 rounded object-cover"
                             onError={(e) => {
                               e.currentTarget.style.display = 'none'

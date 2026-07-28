@@ -98,6 +98,7 @@ export function BilibiliMetadataDialog({ track, roomId, onOpenChange, onSelect, 
                       <img
                         src={metadataTrack.cover}
                         alt=""
+                        referrerPolicy="no-referrer"
                         className="h-10 w-10 shrink-0 rounded object-cover"
                         loading="lazy"
                       />

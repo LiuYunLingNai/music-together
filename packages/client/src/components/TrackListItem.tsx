@@ -39,7 +39,13 @@ export const TrackListItem = memo(function TrackListItem({
 
       {/* Cover thumbnail */}
       {coverUrl ? (
-        <img src={coverUrl} alt="" className="h-10 w-10 shrink-0 rounded object-cover" loading="lazy" />
+        <img
+          src={coverUrl}
+          alt=""
+          referrerPolicy="no-referrer"
+          className="h-10 w-10 shrink-0 rounded object-cover"
+          loading="lazy"
+        />
       ) : (
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-muted">
           <Music2 className="h-4 w-4 text-muted-foreground" />

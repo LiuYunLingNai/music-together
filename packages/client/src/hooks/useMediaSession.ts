@@ -2,6 +2,7 @@ import { useSocketContext } from '@/providers/socket-context'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
 import { useAccountStore } from '@/stores/accountStore'
+import { isBilibiliCoverUrl } from '@/lib/cover'
 import type { VoteAction } from '@music-together/shared'
 import { defineAbilityFor, EVENTS, TIMING } from '@music-together/shared'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
@@ -145,12 +146,48 @@ export function useMediaSession({ play, pause, next, prev, seek }: MediaSessionC
     const ms = navigator.mediaSession
 
     if (currentTrack) {
-      ms.metadata = new MediaMetadata({
+      const metadata = {
         title: currentTrack.title,
         artist: currentTrack.artist.join(' / '),
         album: currentTrack.album || '',
-        artwork: currentTrack.cover ? [{ src: currentTrack.cover, sizes: '512x512', type: 'image/jpeg' }] : [],
-      })
+      }
+      const directArtwork = currentTrack.cover
+        ? [{ src: currentTrack.cover, sizes: '512x512', type: 'image/jpeg' }]
+        : []
+
+      if (!currentTrack.cover || !isBilibiliCoverUrl(currentTrack.cover)) {
+        ms.metadata = new MediaMetadata({ ...metadata, artwork: directArtwork })
+      } else {
+        const controller = new AbortController()
+        let objectUrl: string | null = null
+
+        ms.metadata = new MediaMetadata(metadata)
+        void fetch(currentTrack.cover, {
+          signal: controller.signal,
+          referrerPolicy: 'no-referrer',
+        })
+          .then((response) => {
+            if (!response.ok) throw new Error(`Artwork request failed: ${response.status}`)
+            return response.blob()
+          })
+          .then((blob) => {
+            if (controller.signal.aborted) return
+            objectUrl = URL.createObjectURL(blob)
+            ms.metadata = new MediaMetadata({
+              ...metadata,
+              artwork: [{ src: objectUrl, sizes: '512x512', type: blob.type || 'image/jpeg' }],
+            })
+          })
+          .catch(() => {
+            // Keep text-only metadata when artwork is unavailable or the track changes.
+          })
+
+        return () => {
+          controller.abort()
+          if (objectUrl) URL.revokeObjectURL(objectUrl)
+          ms.metadata = null
+        }
+      }
     } else {
       ms.metadata = null
     }
