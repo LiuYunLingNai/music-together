@@ -1,6 +1,7 @@
 package io.github.yueby.musictogether.lyrics
 
 import io.github.yueby.musictogether.model.LyricLine
+import io.github.yueby.musictogether.model.LyricRuby
 import io.github.yueby.musictogether.model.LyricWord
 import org.json.JSONArray
 import org.json.JSONObject
@@ -11,14 +12,16 @@ import java.io.StringReader
 import javax.xml.XMLConstants
 import javax.xml.parsers.DocumentBuilderFactory
 import kotlin.math.abs
+import kotlin.math.roundToLong
 
 object LyricsParser {
     private const val TTM_NS = "http://www.w3.org/ns/ttml#metadata"
+    private val TTML_TIME_REGEX =
+        Regex("""^(?:(?:(\d+):)?(\d+):)?(\d+(?:\.\d+)?)$""")
     private const val ACCESS_EXTERNAL_DTD =
         "http://javax.xml.XMLConstants/property/accessExternalDTD"
     private const val ACCESS_EXTERNAL_SCHEMA =
         "http://javax.xml.XMLConstants/property/accessExternalSchema"
-    private const val INTERLUDE_MIN_GAP_MS = 2_000L
 
     private data class LrcEntry(val timeMs: Long, val text: String)
 
@@ -27,11 +30,11 @@ object LyricsParser {
         val roman = data.optString("romalrc")
         val wordByWord = data.optJSONArray("wordByWord")?.let(::parseWordByWord).orEmpty()
         if (wordByWord.isNotEmpty()) {
-            return addInterludes(mergeAuxiliary(wordByWord, translation, roman)) to "wordByWord"
+            return mergeAuxiliary(wordByWord, translation, roman) to "wordByWord"
         }
         val yrc = parseYrc(data.optString("yrc"))
         if (yrc.isNotEmpty()) {
-            return addInterludes(mergeAuxiliary(yrc, translation, roman)) to "yrc"
+            return mergeAuxiliary(yrc, translation, roman) to "yrc"
         }
         return mergeLrc(data.optString("lyric"), translation, roman) to "lrc"
     }
@@ -73,11 +76,22 @@ object LyricsParser {
                         when (role) {
                             "x-translation" -> translation = child.textContent.trim()
                             "x-roman" -> roman = child.textContent.trim()
-                            "x-bg" -> parseWordContainer(child, start, end).takeIf { it.isNotEmpty() }?.let { words ->
+                            "x-bg" -> parseWordContainer(child, start, end)
+                                .let(::trimBackgroundParentheses)
+                                .takeIf { it.isNotEmpty() }
+                                ?.let { words ->
+                                val backgroundStart =
+                                    parseTime(attribute(child, null, "begin"))
+                                        .takeIf { it > 0 }
+                                        ?: words.first().startTimeMs
+                                val backgroundEnd =
+                                    parseTime(attribute(child, null, "end"))
+                                        .takeIf { it > 0 }
+                                        ?: words.last().endTimeMs
                                 result += LyricLine(
                                     words = words,
-                                    startTimeMs = words.first().startTimeMs,
-                                    endTimeMs = words.last().endTimeMs,
+                                    startTimeMs = backgroundStart,
+                                    endTimeMs = backgroundEnd,
                                     isBackground = true,
                                     isDuet = duet,
                                 )
@@ -86,6 +100,7 @@ object LyricsParser {
                                 val wordStart = parseTime(attribute(child, null, "begin")).takeIf { it > 0 } ?: start
                                 val wordEnd = parseTime(attribute(child, null, "end")).takeIf { it > 0 } ?: end
                                 val romanWord = nestedRoleText(child, "x-roman")
+                                val ruby = nestedRuby(child, wordStart, wordEnd)
                                 val text = lyricTextWithoutMetadata(child)
                                 if (text.isNotEmpty()) {
                                     mainWords += LyricWord(
@@ -93,17 +108,14 @@ object LyricsParser {
                                         startTimeMs = wordStart,
                                         endTimeMs = wordEnd,
                                         romanText = romanWord,
+                                        ruby = ruby,
                                     )
                                 }
                             }
                         }
                     }
-                    else -> if (child.nodeType == Node.TEXT_NODE && mainWords.isNotEmpty()) {
-                        val whitespace = child.nodeValue
-                        if (whitespace.isNotEmpty() && whitespace.all(Char::isWhitespace) && '\n' !in whitespace && '\r' !in whitespace) {
-                            val last = mainWords.removeAt(mainWords.lastIndex)
-                            mainWords += last.copy(text = last.text + whitespace)
-                        }
+                    else -> if (child.nodeType == Node.TEXT_NODE) {
+                        appendSemanticWhitespace(mainWords, child.nodeValue)
                     }
                 }
             }
@@ -122,27 +134,100 @@ object LyricsParser {
                 )
             }
         }
-        return addInterludes(result)
+        return result.sortedWith(
+            compareBy<LyricLine> { it.startTimeMs }.thenBy { it.isBackground },
+        )
     }
 
     private fun parseWordContainer(element: Element, fallbackStart: Long, fallbackEnd: Long): List<LyricWord> {
         val words = mutableListOf<LyricWord>()
-        val spans = element.getElementsByTagNameNS("*", "span")
-        repeat(spans.length) { index ->
-            val span = spans.item(index) as? Element ?: return@repeat
-            if (span === element) return@repeat
-            val role = attribute(span, TTM_NS, "role")
-            if (role in setOf("x-roman", "x-translation")) return@repeat
-            val text = lyricTextWithoutMetadata(span)
-            if (text.isEmpty()) return@repeat
-            words += LyricWord(
-                text = text,
-                startTimeMs = parseTime(attribute(span, null, "begin")).takeIf { it > 0 } ?: fallbackStart,
-                endTimeMs = parseTime(attribute(span, null, "end")).takeIf { it > 0 } ?: fallbackEnd,
-                romanText = nestedRoleText(span, "x-roman"),
-            )
+        val containerStart =
+            parseTime(attribute(element, null, "begin")).takeIf { it > 0 } ?: fallbackStart
+        val containerEnd =
+            parseTime(attribute(element, null, "end")).takeIf { it > 0 } ?: fallbackEnd
+        val children = element.childNodes
+        repeat(children.length) { index ->
+            when (val child = children.item(index)) {
+                is Element -> {
+                    if ((child.localName ?: child.tagName.substringAfter(':')) != "span") {
+                        return@repeat
+                    }
+                    val role = attribute(child, TTM_NS, "role")
+                    if (role in setOf("x-roman", "x-translation")) return@repeat
+                    val text = lyricTextWithoutMetadata(child)
+                    if (text.isEmpty()) return@repeat
+                    words += LyricWord(
+                        text = text,
+                        startTimeMs =
+                            parseTime(attribute(child, null, "begin"))
+                                .takeIf { it > 0 }
+                                ?: containerStart,
+                        endTimeMs =
+                            parseTime(attribute(child, null, "end"))
+                                .takeIf { it > 0 }
+                                ?: containerEnd,
+                        romanText = nestedRoleText(child, "x-roman"),
+                        ruby = nestedRuby(
+                            child,
+                            parseTime(attribute(child, null, "begin"))
+                                .takeIf { it > 0 }
+                                ?: containerStart,
+                            parseTime(attribute(child, null, "end"))
+                                .takeIf { it > 0 }
+                                ?: containerEnd,
+                        ),
+                    )
+                }
+
+                else -> if (child.nodeType == Node.TEXT_NODE) {
+                    appendSemanticWhitespace(words, child.nodeValue)
+                }
+            }
+        }
+        if (words.isEmpty()) {
+            lyricTextWithoutMetadata(element)
+                .trim()
+                .takeIf(String::isNotEmpty)
+                ?.let { text ->
+                    words += LyricWord(
+                        text = text,
+                        startTimeMs = containerStart,
+                        endTimeMs = containerEnd,
+                    )
+                }
         }
         return words
+    }
+
+    private fun appendSemanticWhitespace(words: MutableList<LyricWord>, value: String?) {
+        val whitespace = value.orEmpty()
+        if (
+            words.isNotEmpty() &&
+            whitespace.isNotEmpty() &&
+            whitespace.all(Char::isWhitespace) &&
+            '\n' !in whitespace &&
+            '\r' !in whitespace
+        ) {
+            val last = words.removeAt(words.lastIndex)
+            words += last.copy(text = last.text + " ")
+        }
+    }
+
+    private fun trimBackgroundParentheses(words: List<LyricWord>): List<LyricWord> {
+        if (words.isEmpty()) return words
+        val result = words.toMutableList()
+        result[0] = result.first().copy(
+            text = result.first().text
+                .replace(Regex("""^[（(]+"""), "")
+                .trimStart(),
+        )
+        val lastIndex = result.lastIndex
+        result[lastIndex] = result[lastIndex].copy(
+            text = result[lastIndex].text
+                .replace(Regex("""[）)]+$"""), "")
+                .trimEnd(),
+        )
+        return result.filter { it.text.isNotEmpty() }
     }
 
     private fun parseWordByWord(array: JSONArray): List<LyricLine> = List(array.length()) { index ->
@@ -156,6 +241,22 @@ object LyricsParser {
                     startTimeMs = word.optLong("startTime"),
                     endTimeMs = word.optLong("endTime"),
                     romanText = word.optString("romanWord"),
+                    ruby = word.optJSONArray("ruby")?.let { rubyArray ->
+                        List(rubyArray.length()) { rubyIndex ->
+                            val ruby = rubyArray.getJSONObject(rubyIndex)
+                            LyricRuby(
+                                text = ruby.optString("word"),
+                                startTimeMs = ruby.optLong(
+                                    "startTime",
+                                    word.optLong("startTime"),
+                                ),
+                                endTimeMs = ruby.optLong(
+                                    "endTime",
+                                    word.optLong("endTime"),
+                                ),
+                            )
+                        }.filter { it.text.isNotBlank() }
+                    }.orEmpty(),
                 )
             },
             translatedLyric = line.optString("translatedLyric"),
@@ -205,7 +306,7 @@ object LyricsParser {
                 endTimeMs = end,
             )
         }
-        return addInterludes(lines)
+        return lines
     }
 
     private fun mergeAuxiliary(lines: List<LyricLine>, translated: String, roman: String): List<LyricLine> {
@@ -234,44 +335,24 @@ object LyricsParser {
     private fun parseLrcMap(value: String): List<Pair<Long, String>> =
         parseLrcTimeline(value).filter { it.text.isNotBlank() }.map { it.timeMs to it.text }
 
-    private fun addInterludes(lines: List<LyricLine>): List<LyricLine> {
-        val sorted = lines
-            .filterNot { it.isInterlude }
-            .sortedWith(compareBy<LyricLine> { it.startTimeMs }.thenBy { it.isBackground })
-        val foreground = sorted.filterNot { it.isBackground }
-        if (foreground.isEmpty()) return sorted
-
-        val interludes = mutableListOf<LyricLine>()
-        var coveredUntil = 0L
-        foreground.forEach { line ->
-            if (line.startTimeMs - coveredUntil >= INTERLUDE_MIN_GAP_MS) {
-                interludes += LyricLine(
-                    words = emptyList(),
-                    startTimeMs = coveredUntil,
-                    endTimeMs = line.startTimeMs,
-                    isInterlude = true,
-                )
-            }
-            coveredUntil = maxOf(coveredUntil, line.endTimeMs, line.words.maxOfOrNull { it.endTimeMs } ?: 0L)
-        }
-
-        return (sorted + interludes)
-            .sortedWith(compareBy<LyricLine> { it.startTimeMs }.thenBy { it.isBackground })
-    }
-
     private fun nearest(values: List<Pair<Long, String>>, target: Long): String =
         values.minByOrNull { abs(it.first - target) }?.takeIf { abs(it.first - target) <= 500 }?.second.orEmpty()
 
     private fun parseTime(value: String): Long {
-        if (value.isBlank()) return 0
-        if (value.endsWith("ms")) return value.removeSuffix("ms").toDoubleOrNull()?.toLong() ?: 0
-        if (value.endsWith("s")) return ((value.removeSuffix("s").toDoubleOrNull() ?: 0.0) * 1000).toLong()
-        val parts = value.split(':')
-        if (parts.size !in 2..3) return 0
-        val hours = if (parts.size == 3) parts[0].toDoubleOrNull() ?: return 0 else 0.0
-        val minutes = parts[parts.size - 2].toDoubleOrNull() ?: return 0
-        val seconds = parts.last().toDoubleOrNull() ?: return 0
-        return ((hours * 3600 + minutes * 60 + seconds) * 1000).toLong()
+        val cleanValue = value.trim()
+        if (cleanValue.isEmpty()) return 0
+        if (cleanValue.endsWith("ms")) {
+            return cleanValue.removeSuffix("ms").toDoubleOrNull()?.roundToLong() ?: 0
+        }
+        if (cleanValue.endsWith("s")) {
+            return ((cleanValue.removeSuffix("s").toDoubleOrNull() ?: return 0) * 1000).roundToLong()
+        }
+
+        val match = TTML_TIME_REGEX.matchEntire(cleanValue) ?: return 0
+        val hours = match.groupValues[1].toLongOrNull() ?: 0L
+        val minutes = match.groupValues[2].toLongOrNull() ?: 0L
+        val seconds = match.groupValues[3].toDoubleOrNull() ?: return 0
+        return ((hours * 3600 + minutes * 60 + seconds) * 1000).roundToLong()
     }
 
     private fun attribute(element: Element, namespace: String?, name: String): String {
@@ -292,13 +373,68 @@ object LyricsParser {
         return ""
     }
 
+    private fun nestedRuby(
+        element: Element,
+        fallbackStart: Long,
+        fallbackEnd: Long,
+    ): List<LyricRuby> {
+        val spans = element.getElementsByTagNameNS("*", "span")
+        return buildList {
+            repeat(spans.length) { index ->
+                val span = spans.item(index) as? Element ?: return@repeat
+                if (span === element || attribute(span, TTM_NS, "role") != "x-ruby") {
+                    return@repeat
+                }
+                val nestedSpans = span.getElementsByTagNameNS("*", "span")
+                var addedNested = false
+                repeat(nestedSpans.length) { nestedIndex ->
+                    val part = nestedSpans.item(nestedIndex) as? Element ?: return@repeat
+                    if (part === span) return@repeat
+                    val text = lyricTextWithoutMetadata(part).trim()
+                    if (text.isBlank()) return@repeat
+                    add(
+                        LyricRuby(
+                            text = text,
+                            startTimeMs =
+                                parseTime(attribute(part, null, "begin"))
+                                    .takeIf { it > 0 }
+                                    ?: fallbackStart,
+                            endTimeMs =
+                                parseTime(attribute(part, null, "end"))
+                                    .takeIf { it > 0 }
+                                    ?: fallbackEnd,
+                        ),
+                    )
+                    addedNested = true
+                }
+                if (!addedNested) {
+                    span.textContent.trim().takeIf(String::isNotBlank)?.let { text ->
+                        add(
+                            LyricRuby(
+                                text = text,
+                                startTimeMs =
+                                    parseTime(attribute(span, null, "begin"))
+                                        .takeIf { it > 0 }
+                                        ?: fallbackStart,
+                                endTimeMs =
+                                    parseTime(attribute(span, null, "end"))
+                                        .takeIf { it > 0 }
+                                        ?: fallbackEnd,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     private fun lyricTextWithoutMetadata(element: Element): String = buildString {
         val children = element.childNodes
         repeat(children.length) { index ->
             when (val child = children.item(index)) {
                 is Element -> {
                     val role = attribute(child, TTM_NS, "role")
-                    if (role !in setOf("x-roman", "x-translation")) {
+                    if (role !in setOf("x-roman", "x-translation", "x-ruby")) {
                         append(lyricTextWithoutMetadata(child))
                     }
                 }

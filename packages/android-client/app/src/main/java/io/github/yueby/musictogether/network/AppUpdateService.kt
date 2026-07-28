@@ -114,7 +114,7 @@ class AppUpdateService(private val client: OkHttpClient) {
 
     internal fun UpdateDownloadSource.resolveAssetUrl(url: String): String = when (this) {
         UpdateDownloadSource.GitHub -> url
-        UpdateDownloadSource.Ghfast -> "https://ghfast.top/${url.removePrefix("https://")}".requireHttpsUrl()
+        UpdateDownloadSource.Ghfast -> "https://ghfast.top/$url".requireHttpsUrl()
     }
 
     private fun JSONObject.toUpdateInfoOrNull(
