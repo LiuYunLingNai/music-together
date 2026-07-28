@@ -252,9 +252,26 @@ export function leaveRoom(
   room.users = room.users.filter((u) => u.id !== userId)
   roomRepo.deleteSocketMapping(socketId)
 
-  // If room is empty, schedule deletion after grace period
+  // An empty room has no conductor to report playback progress or advance the
+  // queue. Freeze the server-authoritative position as soon as the last user
+  // leaves so permanent rooms do not keep accumulating playback time while
+  // nobody is listening. Persist before scheduling cleanup because permanent
+  // rooms return early from scheduleDeletion().
   if (room.users.length === 0) {
     reconcileRoomRoles(room)
+    if (room.playState.isPlaying) {
+      room.playState = {
+        isPlaying: false,
+        currentTime: estimateCurrentTime(roomId),
+        serverTimestamp: Date.now(),
+      }
+      roomRepo.persist(roomId)
+      logger.info(`房间 ${roomId} 已无人在线，播放已自动暂停`, {
+        event: 'player.auto_paused_empty_room',
+        roomId,
+        currentTime: room.playState.currentTime,
+      })
+    }
     scheduleDeletion(roomId, io)
     return { roomId, user, room, hostChanged: false, roleChanged: false, voteUpdated: false, staleSocketOnly: false }
   }
