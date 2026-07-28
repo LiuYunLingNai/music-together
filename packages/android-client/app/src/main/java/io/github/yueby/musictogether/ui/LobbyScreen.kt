@@ -108,7 +108,6 @@ fun LobbyScreen(state: AppState, contentPadding: PaddingValues, viewModel: Music
                 }
                 IconButton(
                     onClick = { accountSettingsOpen = true },
-                    enabled = state.connectionStatus == ConnectionStatus.Connected,
                 ) {
                     if (state.accountProfile?.avatarUrl != null) {
                         AsyncImage(

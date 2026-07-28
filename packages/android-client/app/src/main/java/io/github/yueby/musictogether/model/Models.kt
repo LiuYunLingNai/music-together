@@ -259,6 +259,26 @@ data class AppState(
     val activeVote: VoteState? = null,
     val lyrics: LyricsState = LyricsState(),
     val platformHub: PlatformHubState = PlatformHubState(),
+    val updateSource: UpdateDownloadSource = UpdateDownloadSource.GitHub,
+    val updateInfo: AppUpdateInfo? = null,
+    val updateChecking: Boolean = false,
+    val updateDownloading: Boolean = false,
+    val updateDownloadProgress: Int? = null,
+    val updateReadyToInstall: Boolean = false,
+    val updateError: String? = null,
     val notice: UiNotice? = null,
     val error: String? = null,
 )
+
+@Immutable
+data class AppUpdateInfo(
+    val versionName: String,
+    val releaseNotes: String,
+    val apkUrl: String,
+    val checksumUrl: String,
+)
+
+enum class UpdateDownloadSource {
+    GitHub,
+    Ghfast,
+}

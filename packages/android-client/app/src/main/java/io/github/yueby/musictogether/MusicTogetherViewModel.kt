@@ -23,6 +23,9 @@ import io.github.yueby.musictogether.model.ServerConnection
 import io.github.yueby.musictogether.model.Track
 import io.github.yueby.musictogether.model.UiNotice
 import io.github.yueby.musictogether.model.User
+import io.github.yueby.musictogether.model.UpdateDownloadSource
+import io.github.yueby.musictogether.network.AppUpdateInstaller
+import io.github.yueby.musictogether.network.AppUpdateService
 import io.github.yueby.musictogether.network.Events
 import io.github.yueby.musictogether.network.MusicTogetherApi
 import io.github.yueby.musictogether.network.MusicTogetherSocket
@@ -79,6 +82,8 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         const val DEFAULT_SERVER_URL = "https://sharemusic.lyln114514.com"
         const val SERVERS_KEY = "server_urls"
         const val MAX_SERVERS = 10
+        const val UPDATE_SOURCE_KEY = "update_download_source"
+        const val GITHUB_RELEASES_API = "https://api.github.com/repos/LiuYunLingNai/music-together/releases"
     }
 
     private val preferences = application.getSharedPreferences("music_together", Context.MODE_PRIVATE)
@@ -93,6 +98,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         .pingInterval(25, TimeUnit.SECONDS)
         .build()
     private val api = MusicTogetherApi(okHttp)
+    private val appUpdateService = AppUpdateService(okHttp)
     private val socket = MusicTogetherSocket(okHttp, this)
     private val chatNotifications = ChatNotificationManager(application)
     private val clock = ClockSync()
@@ -102,6 +108,9 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             selectedServerUrl = initialServerUrls.first(),
             servers = initialServerUrls.map { ServerConnection(it) },
             nickname = preferences.getString("nickname", "").orEmpty(),
+            updateSource = preferences.getString(UPDATE_SOURCE_KEY, null)
+                ?.let { runCatching { UpdateDownloadSource.valueOf(it) }.getOrNull() }
+                ?: UpdateDownloadSource.GitHub,
         ),
     )
     val state: StateFlow<AppState> = _state.asStateFlow()
@@ -135,6 +144,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private val pendingQueueActions = linkedMapOf<String, PendingQueueAction>()
     private val autoRestoringPlatforms = mutableSetOf<String>()
     private val loadedPlaylistPlatforms = mutableSetOf<String>()
+    private var downloadedUpdateApk: java.io.File? = null
     private val supportedPlatforms = listOf("netease", "tencent", "kugou")
 
     init {
@@ -143,6 +153,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             override fun onNext() = this@MusicTogetherViewModel.next()
             override fun onPrevious() = this@MusicTogetherViewModel.previous()
         }
+        checkForAppUpdate(silent = true)
         if (_state.value.serverUrl.isNotBlank()) connect()
     }
 
@@ -837,6 +848,83 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
 
     fun clearNotice() {
         _state.value = _state.value.copy(notice = null)
+    }
+
+    fun selectUpdateDownloadSource(source: UpdateDownloadSource) {
+        preferences.edit().putString(UPDATE_SOURCE_KEY, source.name).apply()
+        _state.value = _state.value.copy(updateSource = source)
+    }
+
+    fun checkForAppUpdate(silent: Boolean = false) {
+        if (_state.value.updateChecking || _state.value.updateDownloading) return
+        _state.value = _state.value.copy(updateChecking = true, updateError = null)
+        viewModelScope.launch {
+            runCatching {
+                appUpdateService.latestRelease(GITHUB_RELEASES_API, BuildConfig.VERSION_NAME)
+            }.onSuccess { update ->
+                val keepDownloadedApk = update?.versionName == _state.value.updateInfo?.versionName &&
+                    downloadedUpdateApk?.exists() == true
+                if (!keepDownloadedApk) downloadedUpdateApk = null
+                _state.value = _state.value.copy(
+                    updateChecking = false,
+                    updateInfo = update,
+                    updateReadyToInstall = keepDownloadedApk,
+                    updateError = null,
+                )
+                if (update != null && !silent) showNotice("发现新版本 v${update.versionName}")
+            }.onFailure { error ->
+                AppLogger.warn("Update", "release check failed: ${error.message}")
+                _state.value = _state.value.copy(
+                    updateChecking = false,
+                    updateError = if (silent) null else "更新检查失败，请检查网络后重试",
+                )
+            }
+        }
+    }
+
+    fun downloadAppUpdate() {
+        val update = _state.value.updateInfo ?: return
+        val source = _state.value.updateSource
+        if (_state.value.updateDownloading) return
+        downloadedUpdateApk = null
+        _state.value = _state.value.copy(
+            updateDownloading = true,
+            updateDownloadProgress = 0,
+            updateReadyToInstall = false,
+            updateError = null,
+        )
+        viewModelScope.launch {
+            runCatching {
+                appUpdateService.downloadAndVerify(getApplication<Application>(), update, source) { progress ->
+                    _state.value = _state.value.copy(updateDownloadProgress = progress)
+                }
+            }.onSuccess { apk ->
+                downloadedUpdateApk = apk
+                _state.value = _state.value.copy(
+                    updateDownloading = false,
+                    updateDownloadProgress = 100,
+                    updateReadyToInstall = true,
+                )
+                showNotice("更新包已下载并完成校验")
+            }.onFailure { error ->
+                AppLogger.warn("Update", "download failed: ${error.message}")
+                _state.value = _state.value.copy(
+                    updateDownloading = false,
+                    updateDownloadProgress = null,
+                    updateError = "更新下载或校验失败，请切换下载源后重试",
+                )
+            }
+        }
+    }
+
+    fun installDownloadedUpdate() {
+        val apk = downloadedUpdateApk?.takeIf { it.exists() } ?: run {
+            _state.value = _state.value.copy(updateError = "更新包不可用，请重新下载")
+            return
+        }
+        if (!AppUpdateInstaller.install(getApplication<Application>(), apk)) {
+            showNotice("请允许本应用安装未知来源应用后，再次点击安装")
+        }
     }
 
     fun clearLogs() {
