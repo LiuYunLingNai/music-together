@@ -21,10 +21,13 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-        val dataSourceFactory = ResolvingDataSource.Factory(DefaultHttpDataSource.Factory()) { dataSpec ->
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent(PlaybackRequestHeaders.USER_AGENT)
+        val dataSourceFactory = ResolvingDataSource.Factory(httpDataSourceFactory) { dataSpec ->
             val host = dataSpec.uri.host.orEmpty().lowercase()
-            if (host.endsWith(".bilivideo.com") || host.endsWith(".bilivideo.cn")) {
-                dataSpec.withRequestHeaders(BILIBILI_CDN_HEADERS)
+            val headers = PlaybackRequestHeaders.forHost(host)
+            if (headers.isNotEmpty()) {
+                dataSpec.withRequestHeaders(headers)
             } else {
                 dataSpec
             }
@@ -69,14 +72,6 @@ class PlaybackService : MediaSessionService() {
             })
             .build()
         AppLogger.info("MediaSession", "playback service created")
-    }
-
-    private companion object {
-        val BILIBILI_CDN_HEADERS = mapOf(
-            "Referer" to "https://www.bilibili.com/",
-            "Origin" to "https://www.bilibili.com",
-            "User-Agent" to "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/126 Mobile Safari/537.36",
-        )
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = mediaSession

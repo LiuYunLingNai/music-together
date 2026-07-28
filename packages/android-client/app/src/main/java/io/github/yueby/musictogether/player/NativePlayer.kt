@@ -10,6 +10,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import io.github.yueby.musictogether.logging.AppLogger
@@ -101,13 +102,18 @@ class NativePlayer(
         }
 
         override fun onPlayerError(error: PlaybackException) {
-            AppLogger.error("Player", "playback failed code=${error.errorCodeName}", error)
+            AppLogger.error(
+                "Player",
+                "playback failed code=${error.errorCodeName} status=${httpResponseCode(error) ?: "n/a"} " +
+                    "target=${currentPlaybackTarget()}",
+                error,
+            )
             _state.value = _state.value.copy(error = "播放失败：${error.errorCodeName}")
         }
     }
 
-    fun load(track: Track, playState: PlayState) {
-        val streamUrl = track.streamUrl ?: run {
+    fun load(track: Track, playState: PlayState, playbackUrl: String? = track.streamUrl) {
+        val streamUrl = playbackUrl ?: run {
             AppLogger.warn("Player", "track has no stream URL id=${track.id}")
             return
         }
@@ -269,6 +275,22 @@ class NativePlayer(
         val current = player
         if (current != null) action(current) else pendingOperations += { action(this) }
     }
+
+    private fun currentPlaybackTarget(): String {
+        val uri = player?.currentMediaItem?.localConfiguration?.uri ?: return "unknown"
+        return buildString {
+            append(uri.scheme ?: "unknown")
+            append("://")
+            append(uri.host ?: "unknown")
+            if (uri.port != -1) append(":${uri.port}")
+        }
+    }
+
+    private fun httpResponseCode(error: Throwable): Int? =
+        generateSequence(error) { it.cause }
+            .filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
+            .firstOrNull()
+            ?.responseCode
 
     private fun publish() {
         val controller = player ?: return

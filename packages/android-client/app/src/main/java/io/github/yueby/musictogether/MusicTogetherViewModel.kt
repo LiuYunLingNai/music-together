@@ -1205,7 +1205,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     if (needsRecovery) {
                         recoveredTrackId = if (isJoinSnapshot) room.currentTrack.id else null
                         AppLogger.info("Sync", "recover immediately from room state track=${room.currentTrack.id}")
-                        nativePlayer.load(room.currentTrack, room.playState)
+                        nativePlayer.load(room.currentTrack, room.playState, playbackUrl(room.currentTrack))
                     }
                     if (_state.value.lyrics.trackId != room.currentTrack.id) loadLyrics(room.currentTrack)
                 }
@@ -1309,7 +1309,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     AppLogger.info("Sync", "skip duplicate join PLAYER_PLAY track=${track.id}")
                     recoveredTrackId = null
                 } else {
-                    nativePlayer.load(track, playState)
+                    nativePlayer.load(track, playState, playbackUrl(track))
                 }
             }
             Events.PLAYER_TRACK_METADATA_UPDATED -> {
@@ -1775,6 +1775,9 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         updateRoom { it.copy(playState = playState) }
         action(playState)
     }
+
+    private fun playbackUrl(track: Track): String? =
+        activeServer?.let { api.playbackUrl(it, track) } ?: track.streamUrl
 
     private fun updateRoom(transform: (io.github.yueby.musictogether.model.RoomState) -> io.github.yueby.musictogether.model.RoomState) {
         val room = _state.value.room ?: return

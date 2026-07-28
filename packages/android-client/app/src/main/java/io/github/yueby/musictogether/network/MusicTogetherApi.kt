@@ -138,6 +138,16 @@ class MusicTogetherApi(private val client: OkHttpClient) {
         return if (path.startsWith("/")) server.httpBase.resolve(path)?.toString() else path
     }
 
+    fun playbackUrl(server: ServerAddress, track: Track): String? {
+        val streamUrl = track.streamUrl ?: return null
+        if (track.source != "bilibili" || track.urlId.isBlank()) return streamUrl
+        return server.api("music", "bilibili-audio-proxy").newBuilder()
+            .addQueryParameter("url", streamUrl)
+            .addQueryParameter("bvid", track.urlId)
+            .build()
+            .toString()
+    }
+
     suspend fun search(server: ServerAddress, keyword: String, source: String, roomId: String?, page: Int): SearchPage =
         withContext(Dispatchers.IO) {
             val url = server.api("music", "search").newBuilder()
