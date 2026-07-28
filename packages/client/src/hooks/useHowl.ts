@@ -6,6 +6,7 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { CURRENT_TIME_THROTTLE_MS } from '@/lib/constants'
 import { toast } from 'sonner'
 import { getServerTime } from '@/lib/clockSync'
+import { SERVER_URL } from '@/lib/config'
 import { attachTimeStretch, prepareDirectStreamForTimeStretch, type TimeStretchController } from '@/lib/timeStretch'
 
 /** Max wait (ms) for Howler `unlock` event before giving up and skipping */
@@ -222,14 +223,18 @@ export function useHowl(onTrackEnd: () => void) {
       if (!track.streamUrl) return
 
       const currentVolume = usePlayerStore.getState().volume
+      const playbackUrl =
+        track.source === 'bilibili'
+          ? `${SERVER_URL}/api/music/bilibili-audio-proxy?url=${encodeURIComponent(track.streamUrl)}&bvid=${encodeURIComponent(track.urlId)}`
+          : track.streamUrl
 
       // Howler creates its HTMLMediaElement synchronously inside the
       // constructor. Configure CORS before it assigns the direct CDN URL so
       // Web Audio is allowed to consume the stream.
-      const canTimeStretch = prepareDirectStreamForTimeStretch(track.streamUrl)
+      const canTimeStretch = prepareDirectStreamForTimeStretch(playbackUrl)
 
       const howl = new Howl({
-        src: [track.streamUrl],
+        src: [playbackUrl],
         html5: true,
         format: ['flac', 'm4a', 'ogg', 'mp3'],
         volume: 0,

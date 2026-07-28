@@ -6,6 +6,8 @@ import {
   playlistQuerySchema,
 } from '@music-together/shared'
 import { Router, type Router as RouterType, type Request, type Response } from 'express'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import type { ZodSchema } from 'zod'
 import { musicProvider } from '../services/musicProvider.js'
 import * as authService from '../services/authService.js'
@@ -135,6 +137,20 @@ const ALLOWED_COVER_HOSTS = [
   'i2.hdslb.com',
 ]
 
+const BILIBILI_AUDIO_HOST_SUFFIXES = ['bilivideo.com', 'bilivideo.cn']
+const BILIBILI_BVID_PATTERN = /^BV[0-9A-Za-z]{10}$/
+
+function isAllowedBilibiliAudioUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    if (url.protocol !== 'https:' || (url.port && url.port !== '443')) return false
+    const hostname = url.hostname.toLowerCase()
+    return BILIBILI_AUDIO_HOST_SUFFIXES.some((suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`))
+  } catch {
+    return false
+  }
+}
+
 router.get('/cover-proxy', async (req: Request, res: Response) => {
   const imageUrl = req.query.url as string | undefined
   if (!imageUrl) {
@@ -183,6 +199,81 @@ router.get('/cover-proxy', async (req: Request, res: Response) => {
     } else {
       res.end()
     }
+  }
+})
+
+/**
+ * Browsers cannot reliably request Bilibili's audio CDN directly: its CORS
+ * and referer rules vary between CDN nodes. Keep the upstream URL constrained
+ * to Bilibili-owned audio CDNs and proxy byte ranges for the HTML5 player.
+ */
+router.get('/bilibili-audio-proxy', async (req: Request, res: Response) => {
+  const audioUrl = typeof req.query.url === 'string' ? req.query.url : ''
+  const bvid = typeof req.query.bvid === 'string' ? req.query.bvid : ''
+  if (!isAllowedBilibiliAudioUrl(audioUrl) || !BILIBILI_BVID_PATTERN.test(bvid)) {
+    res.status(400).json({ error: 'Invalid Bilibili audio request' })
+    return
+  }
+
+  const controller = new AbortController()
+  req.once('aborted', () => controller.abort())
+
+  try {
+    const range = req.headers.range
+    const headers = {
+      Accept: '*/*',
+      'Accept-Encoding': 'identity',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36',
+      Referer: `https://www.bilibili.com/video/${bvid}/`,
+      ...(typeof range === 'string' ? { Range: range } : {}),
+    }
+    let upstream: globalThis.Response | null = null
+    let upstreamUrl = audioUrl
+
+    // Validate every redirect target instead of allowing fetch() to follow a
+    // Bilibili CDN response to an arbitrary host.
+    for (let redirects = 0; redirects < 4; redirects += 1) {
+      const response = await fetch(upstreamUrl, { signal: controller.signal, headers, redirect: 'manual' })
+      if (response.status < 300 || response.status >= 400) {
+        upstream = response
+        break
+      }
+      const location = response.headers.get('location')
+      if (!location) break
+      const nextUrl = new URL(location, upstreamUrl).toString()
+      if (!isAllowedBilibiliAudioUrl(nextUrl)) break
+      upstreamUrl = nextUrl
+    }
+
+    if (!upstream) {
+      res.status(502).json({ error: 'Invalid Bilibili audio redirect' })
+      return
+    }
+
+    if (!upstream.ok && upstream.status !== 206) {
+      logger.warn('Bilibili audio proxy upstream request failed', { status: upstream.status, bvid })
+      res.status(upstream.status).json({ error: 'Bilibili audio request failed' })
+      return
+    }
+    if (!upstream.body) {
+      res.status(502).json({ error: 'Bilibili audio response was empty' })
+      return
+    }
+
+    for (const header of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'content-encoding']) {
+      const value = upstream.headers.get(header)
+      if (value) res.setHeader(header, value)
+    }
+    res.setHeader('Cache-Control', 'private, no-store')
+    res.setHeader('Access-Control-Allow-Origin', '*')
+    res.status(upstream.status)
+
+    await pipeline(Readable.fromWeb(upstream.body as unknown as import('node:stream/web').ReadableStream), res)
+  } catch (err) {
+    if (controller.signal.aborted) return
+    logger.error('Bilibili audio proxy failed', err, { bvid })
+    if (!res.headersSent) res.status(502).json({ error: 'Bilibili audio proxy failed' })
+    else res.destroy(err instanceof Error ? err : undefined)
   }
 })
 
