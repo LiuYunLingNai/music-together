@@ -143,6 +143,7 @@ const ALLOWED_COVER_HOSTS = [
 const BILIBILI_AUDIO_HOST_SUFFIXES = ['bilivideo.com', 'bilivideo.cn']
 const BILIBILI_BVID_PATTERN = /^BV[0-9A-Za-z]{10}$/
 const KUGOU_AUDIO_HOST_SUFFIXES = ['kugou.com', 'kugou.net']
+const KUGOU_UPSTREAM_CONNECT_TIMEOUT_MS = 15_000
 
 function isAllowedBilibiliAudioUrl(value: string): boolean {
   try {
@@ -313,6 +314,11 @@ router.get('/kugou-audio-proxy', async (req: Request, res: Response) => {
 
   const controller = new AbortController()
   req.once('aborted', () => controller.abort())
+  let upstreamTimedOut = false
+  const upstreamTimeout = setTimeout(() => {
+    upstreamTimedOut = true
+    controller.abort()
+  }, KUGOU_UPSTREAM_CONNECT_TIMEOUT_MS)
 
   try {
     const encryptedAudio = getKugouEncryptedAudio(audioUrl)
@@ -339,6 +345,7 @@ router.get('/kugou-audio-proxy', async (req: Request, res: Response) => {
       if (!isAllowedKugouAudioUrl(nextUrl)) break
       upstreamUrl = nextUrl
     }
+    clearTimeout(upstreamTimeout)
 
     if (!upstream) {
       res.status(502).json({ error: 'Invalid Kugou audio redirect' })
@@ -376,10 +383,24 @@ router.get('/kugou-audio-proxy', async (req: Request, res: Response) => {
       await pipeline(source, res)
     }
   } catch (err) {
+    clearTimeout(upstreamTimeout)
+    if (upstreamTimedOut) {
+      const upstream = new URL(audioUrl)
+      logger.warn('酷狗音频代理连接上游超时', {
+        host: upstream.hostname,
+        protocol: upstream.protocol,
+        timeoutMs: KUGOU_UPSTREAM_CONNECT_TIMEOUT_MS,
+      })
+      if (!res.headersSent) res.status(504).json({ error: 'Kugou audio upstream timed out' })
+      else res.destroy()
+      return
+    }
     if (controller.signal.aborted) return
     logger.error('酷狗音频代理失败', err)
     if (!res.headersSent) res.status(502).json({ error: 'Kugou audio proxy failed' })
     else res.destroy(err instanceof Error ? err : undefined)
+  } finally {
+    clearTimeout(upstreamTimeout)
   }
 })
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react'
-import { Howl } from 'howler'
+import { Howl, Howler } from 'howler'
 import type { Track } from '@music-together/shared'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
@@ -12,6 +12,19 @@ import { attachTimeStretch, prepareDirectStreamForTimeStretch, type TimeStretchC
 
 /** Max wait (ms) for Howler `unlock` event before giving up and skipping */
 const PLAY_ERROR_TIMEOUT_MS = 3000
+
+/** HTMLMediaElement may wait forever when an upstream audio proxy cannot connect. */
+const LOAD_TIMEOUT_MS = 18_000
+
+/**
+ * Howler uses `canplaythrough` by default for HTML5 Audio. With a proxied
+ * Kugou stream that means waiting until the browser estimates the entire
+ * track can play uninterrupted, which can be tens of seconds when the server
+ * → CDN link is slow. `canplay` starts as soon as the media element has a
+ * usable buffer; the existing stalled-stream recovery still handles a later
+ * network interruption.
+ */
+;(Howler as typeof Howler & { _canPlayEvent: 'canplay' | 'canplaythrough' })._canPlayEvent = 'canplay'
 
 /** If playback reports playing() but currentTime doesn't advance for this
  *  many milliseconds, treat it as stalled (network drop mid-stream). */
@@ -40,6 +53,7 @@ export function useHowl(onTrackEnd: () => void) {
   const syncReadyRef = useRef(false)
   const unmuteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const playErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const loadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastTimeUpdateRef = useRef(0)
   const stalledRef = useRef<{ lastSeek: number; since: number }>({ lastSeek: -1, since: 0 })
   const trackTitleRef = useRef<string>('')
@@ -143,6 +157,10 @@ export function useHowl(onTrackEnd: () => void) {
 
   const stopPlayback = useCallback(() => {
     cancelScheduledPlayback()
+    if (loadTimerRef.current) {
+      clearTimeout(loadTimerRef.current)
+      loadTimerRef.current = null
+    }
     if (outgoingCleanupTimerRef.current) {
       clearTimeout(outgoingCleanupTimerRef.current)
       outgoingCleanupTimerRef.current = null
@@ -199,6 +217,10 @@ export function useHowl(onTrackEnd: () => void) {
         clearTimeout(playErrorTimerRef.current)
         playErrorTimerRef.current = null
       }
+      if (loadTimerRef.current) {
+        clearTimeout(loadTimerRef.current)
+        loadTimerRef.current = null
+      }
 
       if (howlRef.current) {
         // Keep one audible outgoing track alive while the replacement loads.
@@ -245,6 +267,10 @@ export function useHowl(onTrackEnd: () => void) {
         volume: 0,
         onload: () => {
           if (howlRef.current !== howl) return // Stale instance guard
+          if (loadTimerRef.current) {
+            clearTimeout(loadTimerRef.current)
+            loadTimerRef.current = null
+          }
           const d = howl.duration()
           if (!deferCommit && Number.isFinite(d) && d > 0) {
             usePlayerStore.getState().setDuration(d)
@@ -318,6 +344,10 @@ export function useHowl(onTrackEnd: () => void) {
             return
           }
           retryRef.current = false
+          if (loadTimerRef.current) {
+            clearTimeout(loadTimerRef.current)
+            loadTimerRef.current = null
+          }
           console.error('Howl load error (after retry):', msg)
           toast.error(`「${trackTitleRef.current}」加载失败，已跳到下一首`)
           onTrackEnd()
@@ -343,6 +373,15 @@ export function useHowl(onTrackEnd: () => void) {
       })
 
       howlRef.current = howl
+      loadTimerRef.current = setTimeout(() => {
+        if (howlRef.current !== howl || syncReadyRef.current) return
+        loadTimerRef.current = null
+        console.warn('Audio load timed out, skipping track')
+        disposeHowl(howl)
+        if (howlRef.current === howl) howlRef.current = null
+        toast.error(`「${trackTitleRef.current}」加载超时，已跳到下一首`)
+        onTrackEnd()
+      }, LOAD_TIMEOUT_MS)
       stretchReadyRef.current = (canTimeStretch ? attachTimeStretch(howl) : Promise.resolve(null)).then(
         (controller) => {
           if (howlRef.current === howl) stretchRef.current = controller

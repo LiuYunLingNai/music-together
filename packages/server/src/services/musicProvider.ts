@@ -752,15 +752,11 @@ class MusicProvider {
       requestCookie,
     )
     if (!query) return null
-    const response = await this.fetchBilibiliJson(
+    let response = await this.fetchBilibiliJson(
       `https://api.bilibili.com/x/player/wbi/playurl?${query}`,
       `https://www.bilibili.com/video/${bvid}/`,
       requestCookie,
     )
-    if (response?.code !== 0) {
-      logger.warn('Bilibili playurl request failed', { bvid, code: response?.code, authenticated: Boolean(cookie) })
-      return null
-    }
 
     const findUsableUrl = (audio: Record<string, unknown>): string | null => {
       const rawUrls = [
@@ -783,9 +779,51 @@ class MusicProvider {
       )
     }
 
-    const candidates = collectBilibiliAudioCandidates(response?.data?.dash).filter((candidate) =>
-      Boolean(findUsableUrl(candidate.raw)),
-    )
+    const getUsableCandidates = (payload: Record<string, any> | null) =>
+      collectBilibiliAudioCandidates(payload?.data?.dash).filter((candidate) =>
+        Boolean(findUsableUrl(candidate.raw)),
+      )
+    let candidates = getUsableCandidates(response)
+
+    // WBI playurl occasionally rejects an otherwise playable video because of
+    // a transient risk-control/device-signature mismatch. The established
+    // player endpoint returns the same DASH schema and is a safe compatibility
+    // fallback before treating the Bilibili source as unavailable.
+    if (response?.code !== 0 || candidates.length === 0) {
+      const fallbackParams = new URLSearchParams({
+        bvid,
+        cid: String(view.cid),
+        fnval: '16',
+        fnver: '0',
+        fourk: '1',
+      })
+      const fallback = await this.fetchBilibiliJson(
+        `https://api.bilibili.com/x/player/playurl?${fallbackParams}`,
+        `https://www.bilibili.com/video/${bvid}/`,
+        requestCookie,
+      )
+      const fallbackCandidates = getUsableCandidates(fallback)
+      if (fallback?.code === 0 && fallbackCandidates.length > 0) {
+        logger.info('Bilibili WBI playurl fell back to the compatibility endpoint', {
+          bvid,
+          wbiCode: response?.code,
+          authenticated: Boolean(cookie),
+          candidateCount: fallbackCandidates.length,
+        })
+        response = fallback
+        candidates = fallbackCandidates
+      } else {
+        logger.warn('Bilibili playurl returned no usable DASH audio', {
+          bvid,
+          wbiCode: response?.code,
+          wbiCandidateCount: candidates.length,
+          fallbackCode: fallback?.code,
+          fallbackCandidateCount: fallbackCandidates.length,
+          authenticated: Boolean(cookie),
+        })
+      }
+    }
+
     const audio = selectBilibiliAudioCandidate(candidates, quality)
     const url = audio ? findUsableUrl(audio.raw) : null
     if (!audio || !url) return null
