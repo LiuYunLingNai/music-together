@@ -1,7 +1,7 @@
 import { storage } from '@/lib/storage'
 import { useSocketContext } from '@/providers/socket-context'
 import type { MusicSource, MyPlatformAuth, PlatformAuthStatus } from '@music-together/shared'
-import { EVENTS } from '@music-together/shared'
+import { EVENTS, QR_STATUS } from '@music-together/shared'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
@@ -31,6 +31,7 @@ export function useAuth() {
   // Ref 跟踪最新的 qrPlatform，避免重建回调导致重启轮询
   const qrPlatformRef = useRef<MusicSource>(qrPlatform)
   const qrKeyRef = useRef<string | null>(null)
+  const qrCompletedRef = useRef(false)
 
   useEffect(() => {
     const onStatusUpdate = (data: PlatformAuthStatus[]) => {
@@ -43,6 +44,7 @@ export function useAuth() {
     }
 
     const onQrGenerated = (data: { key: string; qrimg: string }) => {
+      qrCompletedRef.current = false
       qrKeyRef.current = data.key
       setQrData(data)
       setQrStatus({ status: 801, message: '等待扫码' })
@@ -50,9 +52,14 @@ export function useAuth() {
     }
 
     const onQrStatus = (data: { status: number; message: string; key?: string }) => {
+      if (qrCompletedRef.current) return
       if (data.key && data.key !== qrKeyRef.current) return
+      if (data.status === QR_STATUS.SUCCESS || data.status === QR_STATUS.EXPIRED) {
+        qrCompletedRef.current = true
+        qrKeyRef.current = null
+      }
       setQrStatus(data)
-      if (data.status === 803 || data.status === 800) {
+      if (data.status === QR_STATUS.SUCCESS || data.status === QR_STATUS.EXPIRED) {
         setIsQrLoading(false)
       }
     }
@@ -84,6 +91,7 @@ export function useAuth() {
   const requestQrCode = useCallback(
     (platform: MusicSource) => {
       setQrData(null)
+      qrCompletedRef.current = false
       qrKeyRef.current = null
       setQrStatus(null)
       setIsQrLoading(true)
@@ -96,6 +104,7 @@ export function useAuth() {
 
   const checkQrStatus = useCallback(
     (key: string) => {
+      if (qrCompletedRef.current || qrKeyRef.current !== key) return
       socket.emit(EVENTS.AUTH_CHECK_QR, { key, platform: qrPlatformRef.current })
     },
     [socket],
@@ -117,6 +126,7 @@ export function useAuth() {
   )
 
   const resetQr = useCallback(() => {
+    qrCompletedRef.current = true
     qrKeyRef.current = null
     setQrData(null)
     setQrStatus(null)

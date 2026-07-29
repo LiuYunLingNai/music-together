@@ -29,12 +29,23 @@ export function QrLoginDialog({
 }: QrLoginDialogProps) {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const pollPendingAtRef = useRef<number>(0)
+  const onOpenChangeRef = useRef(onOpenChange)
+  const onCheckStatusRef = useRef(onCheckStatus)
   const label = PLATFORM_LABELS[platform] ?? platform
   const scanApp = platform === 'tencent' ? '手机QQ' : `${label} App`
+  const pollingStopped = qrStatus?.status === QR_STATUS.EXPIRED || qrStatus?.status === QR_STATUS.SUCCESS
+
+  useEffect(() => {
+    onOpenChangeRef.current = onOpenChange
+  }, [onOpenChange])
+
+  useEffect(() => {
+    onCheckStatusRef.current = onCheckStatus
+  }, [onCheckStatus])
 
   // Auto-poll QR status every 2 seconds when dialog is open and QR is generated
   useEffect(() => {
-    if (!open || !qrData?.key) {
+    if (!open || !qrData?.key || pollingStopped) {
       if (pollRef.current) {
         clearInterval(pollRef.current)
         pollRef.current = null
@@ -47,7 +58,7 @@ export function QrLoginDialog({
       const now = Date.now()
       if (pollPendingAtRef.current > 0 && now - pollPendingAtRef.current < 8_000) return
       pollPendingAtRef.current = now
-      onCheckStatus(qrData.key)
+      onCheckStatusRef.current(qrData.key)
     }
     poll()
     pollRef.current = setInterval(poll, QR_TIMING.POLL_INTERVAL_MS)
@@ -58,7 +69,7 @@ export function QrLoginDialog({
         pollRef.current = null
       }
     }
-  }, [open, qrData?.key, onCheckStatus])
+  }, [open, qrData?.key, pollingStopped])
 
   // On success or expiry: stop polling immediately + auto-close on success
   useEffect(() => {
@@ -71,10 +82,10 @@ export function QrLoginDialog({
       }
     }
     if (status === QR_STATUS.SUCCESS) {
-      const t = setTimeout(() => onOpenChange(false), QR_TIMING.SUCCESS_CLOSE_DELAY_MS)
+      const t = setTimeout(() => onOpenChangeRef.current(false), QR_TIMING.SUCCESS_CLOSE_DELAY_MS)
       return () => clearTimeout(t)
     }
-  }, [qrStatus?.status, onOpenChange])
+  }, [qrStatus?.status])
 
   const statusCode = qrStatus?.status ?? 0
 

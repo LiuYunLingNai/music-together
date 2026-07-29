@@ -79,6 +79,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
         logger.debug('AUTH_CHECK_QR: ignoring stale QR session', { platform })
         return
       }
+      if (qrSuccessHandled) return
       if (qrCheckInFlight) return
       qrCheckInFlight = true
 
@@ -96,6 +97,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
       }
       if (!result.cookie) {
         qrCheckInFlight = false
+        activeQr = null
         socket.emit(EVENTS.AUTH_QR_STATUS, {
           status: QR_STATUS.EXPIRED,
           message: '登录成功但未获取到凭据，请重新获取二维码',
@@ -158,6 +160,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
           })
         }
       }
+      activeQr = null
       qrCheckInFlight = false
     } catch (err) {
       logger.error('AUTH_CHECK_QR error', err, { socketId: socket.id })
