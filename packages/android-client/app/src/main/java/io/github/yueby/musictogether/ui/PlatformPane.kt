@@ -79,6 +79,7 @@ private val platformOptions = listOf(
     "netease" to "网易云",
     "tencent" to "QQ 音乐",
     "kugou" to "酷狗",
+    "bilibili" to "B站",
 )
 
 @Composable
@@ -105,6 +106,7 @@ private fun PlatformAccountList(state: AppState, viewModel: MusicTogetherViewMod
     var platform by remember { mutableStateOf("netease") }
     var cookieDialogOpen by remember { mutableStateOf(false) }
     var cookieText by remember { mutableStateOf("") }
+    val collectionLabel = platformCollectionLabel(platform)
     val hub = state.platformHub
     val myAuth = hub.myAuth.firstOrNull { it.platform == platform }
     val roomAuth = hub.authStatus.firstOrNull { it.platform == platform }
@@ -165,7 +167,7 @@ private fun PlatformAccountList(state: AppState, viewModel: MusicTogetherViewMod
                         Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("我的歌单", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text("我的$collectionLabel", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         Spacer(Modifier.weight(1f))
                         TextButton(onClick = { viewModel.fetchMyPlaylists(platform) }, enabled = !loading) {
                             if (loading) {
@@ -187,7 +189,7 @@ private fun PlatformAccountList(state: AppState, viewModel: MusicTogetherViewMod
                 } else if (playlists.isEmpty()) {
                     item {
                         Text(
-                            "暂无歌单",
+                            "暂无$collectionLabel",
                             Modifier.fillMaxWidth().padding(32.dp),
                             textAlign = TextAlign.Center,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -201,7 +203,7 @@ private fun PlatformAccountList(state: AppState, viewModel: MusicTogetherViewMod
             } else {
                 item {
                     Text(
-                        if (hub.statusLoaded) "登录后即可查看这个平台的个人歌单" else "正在获取登录状态…",
+                        if (hub.statusLoaded) "登录后即可查看这个平台的个人$collectionLabel" else "正在获取登录状态…",
                         Modifier.fillMaxWidth().padding(32.dp),
                         textAlign = TextAlign.Center,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -393,7 +395,10 @@ private fun PlaylistDetailPane(state: AppState, playlist: Playlist, viewModel: M
                 TextButton(onClick = { viewModel.openPlaylist(playlist) }) { Text("重试") }
             }
             hub.playlistTracks.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("歌单为空", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    if (playlist.source == "bilibili") "收藏夹为空" else "歌单为空",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             else -> LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -551,8 +556,12 @@ private fun platformLabel(platform: String): String = when (platform) {
     "netease" -> "网易云音乐"
     "tencent" -> "QQ 音乐"
     "kugou" -> "酷狗音乐"
+    "bilibili" -> "哔哩哔哩"
     else -> platform
 }
+
+private fun platformCollectionLabel(platform: String): String =
+    if (platform == "bilibili") "收藏夹" else "歌单"
 
 private fun vipLabel(type: Int): String = when (type) {
     10, 11 -> "黑胶 VIP"

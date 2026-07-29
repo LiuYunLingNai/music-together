@@ -151,7 +151,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private val autoRestoringPlatforms = mutableSetOf<String>()
     private val loadedPlaylistPlatforms = mutableSetOf<String>()
     private var downloadedUpdateApk: java.io.File? = null
-    private val supportedPlatforms = listOf("netease", "tencent", "kugou")
+    private val supportedPlatforms = listOf("netease", "tencent", "kugou", "bilibili")
 
     init {
         PlaybackCommandBridge.listener = object : PlaybackCommandBridge.Listener {
@@ -1652,6 +1652,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         "netease" -> "网易云音乐"
         "tencent" -> "QQ 音乐"
         "kugou" -> "酷狗音乐"
+        "bilibili" -> "哔哩哔哩"
         else -> platform
     }
 
