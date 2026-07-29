@@ -310,17 +310,42 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
         await new Promise((resolve) => setTimeout(resolve, 1_000))
         const info = await kugouAuth.conceptAuthProvider.getUserInfo(cookie)
         if (info.ok) {
-          authService.addCookie(
-            mapping.roomId,
-            'kugou_concept',
-            mapping.userId,
-            cookie,
-            info.data.nickname,
-            info.data.vipType,
-            true,
-          )
-          upgradeRoomAudioQualityForVip(io, mapping.roomId, 'kugou_concept', info.data.nickname, info.data.vipType)
-          broadcastAuthStatus(io, socket, mapping)
+          const currentMapping = getSocketMapping(socket.id)
+          const currentCookie = currentMapping
+            ? authService.getUserCookie(currentMapping.userId, 'kugou_concept', currentMapping.roomId)
+            : null
+          const canApplyRefresh =
+            currentMapping?.roomId === mapping.roomId &&
+            currentMapping.userId === mapping.userId &&
+            currentCookie === cookie
+
+          if (canApplyRefresh) {
+            authService.addCookie(
+              currentMapping.roomId,
+              'kugou_concept',
+              currentMapping.userId,
+              cookie,
+              info.data.nickname,
+              info.data.vipType,
+              true,
+              { vipLabel: info.data.vipLabel, vipLevel: info.data.vipLevel },
+            )
+            upgradeRoomAudioQualityForVip(
+              io,
+              currentMapping.roomId,
+              'kugou_concept',
+              info.data.nickname,
+              info.data.vipType,
+            )
+            broadcastAuthStatus(io, socket, currentMapping)
+          } else {
+            logger.info('领取酷狗概念版权益后用户状态已变化，已跳过房间账号刷新', {
+              event: 'auth.kugou_concept_claim_refresh_skipped',
+              roomId: mapping.roomId,
+              userId: mapping.userId,
+              currentRoomId: currentMapping?.roomId,
+            })
+          }
         }
       }
 
