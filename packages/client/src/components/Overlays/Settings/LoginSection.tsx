@@ -1,7 +1,7 @@
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import type { MusicSource, MyPlatformAuth, PlatformAuthStatus } from '@music-together/shared'
-import { Crown, KeyRound, Loader2, LogOut, ScanLine } from 'lucide-react'
+import { Crown, Gift, KeyRound, Loader2, LogOut, ScanLine } from 'lucide-react'
 
 const VIP_LABELS: Record<number, string> = {
   0: '',
@@ -23,6 +23,9 @@ interface LoginSectionProps {
   onQrLogin: () => void
   onCookieLogin: () => void
   onLogout: () => void
+  compactLabel?: string
+  onClaimConceptVip?: () => void
+  isClaimingConceptVip?: boolean
 }
 
 export function LoginSection({
@@ -33,6 +36,9 @@ export function LoginSection({
   onQrLogin,
   onCookieLogin,
   onLogout,
+  compactLabel,
+  onClaimConceptVip,
+  isClaimingConceptVip,
 }: LoginSectionProps) {
   const loggedInCount = status?.loggedInCount ?? 0
   const hasVip = status?.hasVip ?? false
@@ -43,6 +49,7 @@ export function LoginSection({
     <div className="flex items-center justify-between gap-2 overflow-hidden rounded-lg border p-3">
       <div className="min-w-0 flex-1 space-y-0.5">
         <div className="flex min-w-0 items-center gap-2">
+          {compactLabel && <span className="text-muted-foreground shrink-0 text-xs">{compactLabel}</span>}
           {isMyLoggedIn && myStatus?.nickname ? (
             <span className="truncate text-sm font-medium">{myStatus.nickname}</span>
           ) : isVerifying ? (
@@ -68,7 +75,11 @@ export function LoginSection({
       <div className="flex shrink-0 items-center gap-1.5">
         {!isMyLoggedIn && !isVerifying ? (
           <>
-            {(platform === 'netease' || platform === 'kugou' || platform === 'tencent' || platform === 'bilibili') && (
+            {(platform === 'netease' ||
+              platform === 'kugou' ||
+              platform === 'kugou_concept' ||
+              platform === 'tencent' ||
+              platform === 'bilibili') && (
               <Button variant="outline" size="icon" className="h-8 w-8" onClick={onQrLogin} title="扫码登录">
                 <ScanLine className="h-3.5 w-3.5" />
               </Button>
@@ -78,9 +89,28 @@ export function LoginSection({
             </Button>
           </>
         ) : isMyLoggedIn ? (
-          <Button variant="ghost" size="icon" className="text-destructive h-8 w-8" onClick={onLogout} title="登出">
-            <LogOut className="h-3.5 w-3.5" />
-          </Button>
+          <>
+            {platform === 'kugou_concept' && onClaimConceptVip && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1 px-2 text-xs"
+                onClick={onClaimConceptVip}
+                disabled={isClaimingConceptVip}
+                title="手动领取酷狗官方每日概念版权益"
+              >
+                {isClaimingConceptVip ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Gift className="h-3.5 w-3.5" />
+                )}
+                领权益
+              </Button>
+            )}
+            <Button variant="ghost" size="icon" className="text-destructive h-8 w-8" onClick={onLogout} title="登出">
+              <LogOut className="h-3.5 w-3.5" />
+            </Button>
+          </>
         ) : null}
       </div>
     </div>

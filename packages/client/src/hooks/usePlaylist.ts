@@ -82,12 +82,14 @@ export function usePlaylist() {
     netease: [],
     tencent: [],
     kugou: [],
+    kugou_concept: [],
     bilibili: [],
   })
   const [playlistsLoading, setPlaylistsLoading] = useState<Record<MusicSource, boolean>>({
     netease: false,
     tencent: false,
     kugou: false,
+    kugou_concept: false,
     bilibili: false,
   })
 

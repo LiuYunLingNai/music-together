@@ -33,6 +33,7 @@ const SOURCES: { id: MusicSource; label: string }[] = [
   { id: 'netease', label: '网易云' },
   { id: 'tencent', label: 'QQ' },
   { id: 'kugou', label: '酷狗' },
+  { id: 'kugou_concept', label: '概念版' },
   { id: 'bilibili', label: 'B站' },
 ]
 
@@ -290,7 +291,7 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                     )}
                     onClick={() => {
                       setSource(s.id)
-                      if (s.id === 'bilibili') setSearchType('song')
+                      if (s.id === 'bilibili' || s.id === 'kugou_concept') setSearchType('song')
                       resetState()
                       setAddedIds(new Set())
                     }}
@@ -320,7 +321,7 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
             />
           ) : (
             <>
-              {source !== 'bilibili' && (
+              {source !== 'bilibili' && source !== 'kugou_concept' && (
                 <Tabs
                   value={searchType}
                   onValueChange={(v) => {

@@ -30,6 +30,10 @@ const PLATFORM_OPTIONS: Record<MusicSource, AudioQualityOption[]> = {
     { value: 'kugou_hires', label: '酷狗 Hi-Res', platform: 'kugou' },
     { value: 'kugou_master', label: '酷狗臻品母带', platform: 'kugou' },
   ],
+  kugou_concept: [
+    { value: 'kugou_hires', label: '酷狗概念版 Hi-Res', platform: 'kugou_concept' },
+    { value: 'kugou_master', label: '酷狗概念版 臻品母带', platform: 'kugou_concept' },
+  ],
   bilibili: [],
 }
 

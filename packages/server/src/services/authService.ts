@@ -192,7 +192,7 @@ export function getUserCookie(userId: string, platform: MusicSource, roomId: str
  * Get aggregated auth status for all platforms in a specific room.
  */
 export function getAllPlatformStatus(roomId: string): PlatformAuthStatus[] {
-  const platforms: MusicSource[] = ['netease', 'tencent', 'kugou', 'bilibili']
+  const platforms: MusicSource[] = ['netease', 'tencent', 'kugou', 'kugou_concept', 'bilibili']
   const pool = roomCookiePool.get(roomId)
   return platforms.map((platform) => {
     const entries = pool?.get(platform) ?? []
@@ -210,7 +210,7 @@ export function getAllPlatformStatus(roomId: string): PlatformAuthStatus[] {
  * Get a specific user's auth status across all platforms in a specific room.
  */
 export function getUserAuthStatus(userId: string, roomId: string): MyPlatformAuth[] {
-  const platforms: MusicSource[] = ['netease', 'tencent', 'kugou', 'bilibili']
+  const platforms: MusicSource[] = ['netease', 'tencent', 'kugou', 'kugou_concept', 'bilibili']
   const pool = roomCookiePool.get(roomId)
   return platforms.map((platform) => {
     const entries = pool?.get(platform) ?? []

@@ -24,24 +24,29 @@ export function PlatformHub() {
   const [cookieDialogPlatform, setCookieDialogPlatform] = useState<MusicSource>('netease')
   const [viewState, setViewState] = useState<ViewState>({ type: 'list' })
 
+  // 概念版账户入口放在“酷狗”标签内，避免额外增加一个平台板块。
   const platforms: MusicSource[] = ['netease', 'tencent', 'kugou', 'bilibili']
+  const allAccountPlatforms: MusicSource[] = [...platforms, 'kugou_concept']
 
   // Show "verifying…" only while waiting for the first AUTH_MY_STATUS response.
   // Once the server responds, use the actual status — no more guessing from localStorage.
   const verifyingPlatforms = useMemo(() => {
     if (auth.statusLoaded) return {} // Server has responded — use actual myStatus
     const result: Partial<Record<MusicSource, boolean>> = {}
-    for (const p of platforms) {
+    for (const p of allAccountPlatforms) {
       result[p] = storage.hasAuthCookie(p)
     }
     return result
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth.statusLoaded, auth.myStatus])
 
-  const handleQrLogin = useCallback(() => {
-    auth.requestQrCode(activePlatform)
-    setQrDialogOpen(true)
-  }, [auth, activePlatform])
+  const handleQrLogin = useCallback(
+    (platform: MusicSource = activePlatform) => {
+      auth.requestQrCode(platform)
+      setQrDialogOpen(true)
+    },
+    [auth, activePlatform],
+  )
 
   const handleCookieLogin = useCallback((platform: MusicSource) => {
     setCookieDialogPlatform(platform)
@@ -58,10 +63,10 @@ export function PlatformHub() {
 
   const handleSelectPlaylist = useCallback(
     (pl: Playlist) => {
-      setViewState({ type: 'detail', playlist: pl, source: activePlatform })
-      playlist.fetchPlaylistTracks(activePlatform, pl.id, pl.trackCount)
+      setViewState({ type: 'detail', playlist: pl, source: pl.source })
+      playlist.fetchPlaylistTracks(pl.source, pl.id, pl.trackCount)
     },
-    [activePlatform, playlist],
+    [playlist],
   )
 
   const handleBack = useCallback(() => {
@@ -121,10 +126,26 @@ export function PlatformHub() {
                 status={getPlatformStatus(p, auth.platformStatus)}
                 myStatus={getMyPlatformStatus(p, auth.myStatus)}
                 isVerifying={verifyingPlatforms[p]}
-                onQrLogin={handleQrLogin}
+                onQrLogin={() => handleQrLogin(p)}
                 onCookieLogin={() => handleCookieLogin(p)}
                 onLogout={() => auth.logout(p)}
+                compactLabel={p === 'kugou' ? '标准版' : undefined}
               />
+
+              {p === 'kugou' && (
+                <LoginSection
+                  platform="kugou_concept"
+                  status={getPlatformStatus('kugou_concept', auth.platformStatus)}
+                  myStatus={getMyPlatformStatus('kugou_concept', auth.myStatus)}
+                  isVerifying={verifyingPlatforms.kugou_concept}
+                  onQrLogin={() => handleQrLogin('kugou_concept')}
+                  onCookieLogin={() => handleCookieLogin('kugou_concept')}
+                  onLogout={() => auth.logout('kugou_concept')}
+                  compactLabel="概念版"
+                  onClaimConceptVip={auth.claimKugouConceptVip}
+                  isClaimingConceptVip={auth.isClaimingKugouConceptVip}
+                />
+              )}
 
               <Separator />
 
@@ -137,6 +158,21 @@ export function PlatformHub() {
                 onFetchMyPlaylists={() => playlist.fetchMyPlaylists(p)}
                 onSelectPlaylist={handleSelectPlaylist}
               />
+
+              {p === 'kugou' && getMyPlatformStatus('kugou_concept', auth.myStatus)?.loggedIn && (
+                <>
+                  <Separator />
+                  <PlaylistSection
+                    platform="kugou_concept"
+                    myStatus={getMyPlatformStatus('kugou_concept', auth.myStatus)}
+                    playlists={playlist.myPlaylists.kugou_concept}
+                    loading={playlist.playlistsLoading.kugou_concept}
+                    onFetchMyPlaylists={() => playlist.fetchMyPlaylists('kugou_concept')}
+                    onSelectPlaylist={handleSelectPlaylist}
+                    title="概念版歌单"
+                  />
+                </>
+              )}
             </TabsContent>
           ))}
         </Tabs>

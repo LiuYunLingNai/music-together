@@ -26,6 +26,7 @@ const SOURCE_STYLE: Record<MusicSource, { label: string; className: string }> = 
   netease: { label: '网易', className: 'text-white bg-red-500 ring-red-600/50' },
   tencent: { label: 'QQ', className: 'text-white bg-green-500 ring-green-600/50' },
   kugou: { label: '酷狗', className: 'text-white bg-blue-500 ring-blue-600/50' },
+  kugou_concept: { label: '概念版', className: 'text-white bg-sky-500 ring-sky-600/50' },
   bilibili: { label: 'B站', className: 'text-white bg-pink-500 ring-pink-600/50' },
 }
 

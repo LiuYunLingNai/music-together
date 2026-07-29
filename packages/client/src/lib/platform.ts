@@ -5,6 +5,7 @@ export const PLATFORM_LABELS: Record<MusicSource, string> = {
   netease: '网易云音乐',
   tencent: 'QQ 音乐',
   kugou: '酷狗音乐',
+  kugou_concept: '酷狗概念版',
   bilibili: 'B站',
 }
 
@@ -13,6 +14,7 @@ export const PLATFORM_SHORT_LABELS: Record<MusicSource, string> = {
   netease: '网易云',
   tencent: 'QQ 音乐',
   kugou: '酷狗',
+  kugou_concept: '概念版',
   bilibili: 'B站',
 }
 
@@ -21,6 +23,7 @@ export const PLATFORM_COLORS: Record<MusicSource, string> = {
   netease: 'data-[state=active]:text-red-500',
   tencent: 'data-[state=active]:text-green-500',
   kugou: 'data-[state=active]:text-blue-500',
+  kugou_concept: 'data-[state=active]:text-sky-500',
   bilibili: 'data-[state=active]:text-pink-500',
 }
 
@@ -29,6 +32,7 @@ export const PLATFORM_ACTIVE: Record<MusicSource, string> = {
   netease: 'bg-red-500/15',
   tencent: 'bg-green-500/15',
   kugou: 'bg-blue-500/15',
+  kugou_concept: 'bg-sky-500/15',
   bilibili: 'bg-pink-500/15',
 }
 
@@ -37,6 +41,7 @@ export const PLATFORM_TEXT: Record<MusicSource, string> = {
   netease: 'text-red-500',
   tencent: 'text-green-500',
   kugou: 'text-blue-500',
+  kugou_concept: 'text-sky-500',
   bilibili: 'text-pink-500',
 }
 

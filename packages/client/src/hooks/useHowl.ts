@@ -226,7 +226,9 @@ export function useHowl(onTrackEnd: () => void) {
       const playbackUrl =
         track.source === 'bilibili'
           ? `${SERVER_URL}/api/music/bilibili-audio-proxy?url=${encodeURIComponent(track.streamUrl)}&bvid=${encodeURIComponent(track.urlId)}`
-          : track.streamUrl
+          : track.source === 'kugou' || track.source === 'kugou_concept'
+            ? `${SERVER_URL}/api/music/kugou-audio-proxy?url=${encodeURIComponent(track.streamUrl)}`
+            : track.streamUrl
       const streamFormat = track.source === 'bilibili' ? ['m4a'] : ['flac', 'm4a', 'ogg', 'mp3']
 
       // Howler creates its HTMLMediaElement synchronously inside the

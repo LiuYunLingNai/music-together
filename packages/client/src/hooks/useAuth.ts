@@ -3,6 +3,7 @@ import { useSocketContext } from '@/providers/socket-context'
 import type { MusicSource, MyPlatformAuth, PlatformAuthStatus } from '@music-together/shared'
 import { EVENTS } from '@music-together/shared'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 
 /**
  * Hook：管理平台认证 UI 状态
@@ -24,6 +25,7 @@ export function useAuth() {
   const [qrData, setQrData] = useState<{ key: string; qrimg: string } | null>(null)
   const [qrStatus, setQrStatus] = useState<{ status: number; message: string } | null>(null)
   const [isQrLoading, setIsQrLoading] = useState(false)
+  const [isClaimingKugouConceptVip, setIsClaimingKugouConceptVip] = useState(false)
   const [qrPlatform, setQrPlatform] = useState<MusicSource>('netease')
 
   // Ref 跟踪最新的 qrPlatform，避免重建回调导致重启轮询
@@ -55,10 +57,17 @@ export function useAuth() {
       }
     }
 
+    const onKugouConceptVipClaim = (data: { success: boolean; message: string }) => {
+      setIsClaimingKugouConceptVip(false)
+      if (data.success) toast.success(data.message)
+      else toast.error(data.message)
+    }
+
     socket.on(EVENTS.AUTH_STATUS_UPDATE, onStatusUpdate)
     socket.on(EVENTS.AUTH_MY_STATUS, onMyStatus)
     socket.on(EVENTS.AUTH_QR_GENERATED, onQrGenerated)
     socket.on(EVENTS.AUTH_QR_STATUS, onQrStatus)
+    socket.on(EVENTS.AUTH_CLAIM_KUGOU_CONCEPT_VIP_RESULT, onKugouConceptVipClaim)
 
     // 挂载时拉取当前状态（覆盖延迟挂载场景）
     socket.emit(EVENTS.AUTH_GET_STATUS)
@@ -68,6 +77,7 @@ export function useAuth() {
       socket.off(EVENTS.AUTH_MY_STATUS, onMyStatus)
       socket.off(EVENTS.AUTH_QR_GENERATED, onQrGenerated)
       socket.off(EVENTS.AUTH_QR_STATUS, onQrStatus)
+      socket.off(EVENTS.AUTH_CLAIM_KUGOU_CONCEPT_VIP_RESULT, onKugouConceptVipClaim)
     }
   }, [socket])
 
@@ -113,6 +123,12 @@ export function useAuth() {
     setIsQrLoading(false)
   }, [])
 
+  const claimKugouConceptVip = useCallback(() => {
+    if (isClaimingKugouConceptVip) return
+    setIsClaimingKugouConceptVip(true)
+    socket.emit(EVENTS.AUTH_CLAIM_KUGOU_CONCEPT_VIP)
+  }, [isClaimingKugouConceptVip, socket])
+
   return {
     platformStatus,
     myStatus,
@@ -126,5 +142,7 @@ export function useAuth() {
     setCookie,
     logout,
     resetQr,
+    claimKugouConceptVip,
+    isClaimingKugouConceptVip,
   }
 }

@@ -6,7 +6,7 @@ import { roomRepo } from '../repositories/roomRepository.js'
 import { logger } from '../utils/logger.js'
 import type { TypedServer, TypedSocket } from '../middleware/types.js'
 
-const VALID_PLATFORMS = new Set<MusicSource>(['netease', 'tencent', 'kugou', 'bilibili'])
+const VALID_PLATFORMS = new Set<MusicSource>(['netease', 'tencent', 'kugou', 'kugou_concept', 'bilibili'])
 
 export function registerPlaylistController(io: TypedServer, socket: TypedSocket) {
   socket.on(EVENTS.PLAYLIST_GET_MY, async (data) => {

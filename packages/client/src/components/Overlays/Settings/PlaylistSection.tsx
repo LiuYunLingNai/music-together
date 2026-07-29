@@ -11,6 +11,7 @@ interface PlaylistSectionProps {
   loading: boolean
   onFetchMyPlaylists: () => void
   onSelectPlaylist: (playlist: Playlist) => void
+  title?: string
 }
 
 function PlaylistSkeleton() {
@@ -31,6 +32,7 @@ export function PlaylistSection({
   loading,
   onFetchMyPlaylists,
   onSelectPlaylist,
+  title = '我的歌单',
 }: PlaylistSectionProps) {
   const isLoggedIn = myStatus?.loggedIn ?? false
 
@@ -47,7 +49,7 @@ export function PlaylistSection({
       {isLoggedIn && (
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <h4 className="text-sm font-medium">我的歌单</h4>
+            <h4 className="text-sm font-medium">{title}</h4>
             <Button
               variant="ghost"
               size="sm"

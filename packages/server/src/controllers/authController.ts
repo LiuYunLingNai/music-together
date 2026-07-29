@@ -2,6 +2,7 @@ import { EVENTS, HIGHEST_AUDIO_QUALITY, QR_STATUS } from '@music-together/shared
 import type { MusicSource } from '@music-together/shared'
 import * as authService from '../services/authService.js'
 import { AUTH_PROVIDERS } from '../services/authProvider.js'
+import * as kugouAuth from '../services/kugouAuthService.js'
 import * as chatService from '../services/chatService.js'
 import * as roomService from '../services/roomService.js'
 import { roomRepo } from '../repositories/roomRepository.js'
@@ -14,10 +15,10 @@ function getSocketMapping(socketId: string) {
 }
 
 /** 支持 QR 扫码登录的平台集合 */
-const QR_PLATFORMS = new Set<MusicSource>(['netease', 'kugou', 'tencent', 'bilibili'])
+const QR_PLATFORMS = new Set<MusicSource>(['netease', 'kugou', 'kugou_concept', 'tencent', 'bilibili'])
 
 /** 支持 Cookie 登录的平台集合 */
-const VALID_PLATFORMS = new Set<MusicSource>(['netease', 'tencent', 'kugou', 'bilibili'])
+const VALID_PLATFORMS = new Set<MusicSource>(['netease', 'tencent', 'kugou', 'kugou_concept', 'bilibili'])
 
 export function registerAuthController(io: TypedServer, socket: TypedSocket) {
   // 防止同一 QR 会话重复处理 803 成功状态
@@ -272,6 +273,54 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
         message: '设置 Cookie 失败，请重试',
         reason: 'error',
       })
+    }
+  })
+
+  // -------------------------------------------------------------------------
+  // 酷狗概念版：手动领取每日官方权益
+  // -------------------------------------------------------------------------
+
+  socket.on(EVENTS.AUTH_CLAIM_KUGOU_CONCEPT_VIP, async () => {
+    try {
+      const mapping = getSocketMapping(socket.id)
+      if (!mapping) {
+        socket.emit(EVENTS.AUTH_CLAIM_KUGOU_CONCEPT_VIP_RESULT, { success: false, message: '请先进入房间后再领取' })
+        return
+      }
+
+      const cookie = authService.getUserCookie(mapping.userId, 'kugou_concept', mapping.roomId)
+      if (!cookie) {
+        socket.emit(EVENTS.AUTH_CLAIM_KUGOU_CONCEPT_VIP_RESULT, {
+          success: false,
+          message: '请先登录酷狗概念版账号',
+        })
+        return
+      }
+
+      const result = await kugouAuth.claimConceptDailyVip(cookie)
+      if (result.ok) {
+        // Let Kugou apply the benefit, then refresh the room's account state.
+        await new Promise((resolve) => setTimeout(resolve, 1_000))
+        const info = await kugouAuth.conceptAuthProvider.getUserInfo(cookie)
+        if (info.ok) {
+          authService.addCookie(
+            mapping.roomId,
+            'kugou_concept',
+            mapping.userId,
+            cookie,
+            info.data.nickname,
+            info.data.vipType,
+            true,
+          )
+          upgradeRoomAudioQualityForVip(io, mapping.roomId, 'kugou_concept', info.data.nickname, info.data.vipType)
+          broadcastAuthStatus(io, socket, mapping)
+        }
+      }
+
+      socket.emit(EVENTS.AUTH_CLAIM_KUGOU_CONCEPT_VIP_RESULT, { success: result.ok, message: result.message })
+    } catch (err) {
+      logger.error('AUTH_CLAIM_KUGOU_CONCEPT_VIP error', err, { socketId: socket.id })
+      socket.emit(EVENTS.AUTH_CLAIM_KUGOU_CONCEPT_VIP_RESULT, { success: false, message: '领取失败，请稍后重试' })
     }
   })
 

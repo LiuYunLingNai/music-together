@@ -382,6 +382,7 @@ const SEARCH_PATHS: Record<MusicSource, string> = {
   netease: 'result.songs',
   tencent: 'data.song.list',
   kugou: 'data.info',
+  kugou_concept: 'data.info',
   bilibili: '',
 }
 
@@ -390,6 +391,7 @@ const PLAYLIST_PATHS: Record<MusicSource, string> = {
   netease: 'playlist.tracks', // Not used (Netease uses ncmApi)
   tencent: 'data.cdlist.0.songlist', // JS arrays support string numeric index
   kugou: 'data.info',
+  kugou_concept: 'data.info',
   bilibili: '',
 }
 
@@ -717,31 +719,94 @@ class MusicProvider {
    * Search Kugou using the native mobile API.
    * The legacy Meting API returns empty results, so we use the direct API.
    */
-  private async searchKugou(keyword: string, limit = 20, page = 1): Promise<Track[]> {
+  private async searchKugou(
+    keyword: string,
+    limit = 20,
+    page = 1,
+    source: 'kugou' | 'kugou_concept' = 'kugou',
+  ): Promise<Track[]> {
     if (!keyword.trim()) return []
 
     try {
-      const url = `http://mobilecdn.kugou.com/api/v3/search/song?api_ver=1&area_code=1&correct=1&pagesize=${limit}&plat=2&tag=1&sver=5&showtype=10&page=${page}&keyword=${encodeURIComponent(keyword)}&version=8990`
+      const concept = source === 'kugou_concept'
+      let response: Record<string, any>
+      let usedPublicSearchFallback = false
+      if (concept) {
+        const clienttime = Math.floor(Date.now() / 1000)
+        const params: Record<string, string | number> = {
+          dfid: '-',
+          mid: kugouAuth.getDeviceMid(),
+          uuid: '-',
+          appid: MusicProvider.KUGOU_CONCEPT_APP_ID,
+          clientver: MusicProvider.KUGOU_CONCEPT_CLIENT_VERSION,
+          clienttime,
+          albumhide: 0,
+          iscorrection: 1,
+          keyword,
+          nocollect: 0,
+          page,
+          pagesize: limit,
+          platform: 'AndroidFilter',
+        }
+        params.signature = MusicProvider.kugouAndroidSignature(params, true)
+        const query = new URLSearchParams(Object.entries(params).map(([key, value]) => [key, String(value)]))
+        response = await withTimeout(
+          fetch(`https://gateway.kugou.com/v3/search/song?${query}`, {
+            headers: {
+              'User-Agent': 'Android16-1070-11440-130-0-DiscoveryDRADProtocol-wifi',
+              'x-router': 'complexsearch.kugou.com',
+              mid: String(params.mid),
+              clienttime: String(clienttime),
+              dfid: '-',
+              'kg-rc': '1',
+              'kg-thash': '5d816a0',
+              'kg-rec': '1',
+              'kg-rf': 'B9EDA08A64250DEFFBCADDEE00F8F25F',
+            },
+          }).then((res) => res.json()),
+        )
 
-      const response = await withTimeout(fetch(url).then((res) => res.json()))
+        // The Concept Edition search gateway intermittently responds with
+        // error_code=152 and an empty list, even for common songs. Its stream
+        // endpoint still accepts the same hashes, so use the public Kugou
+        // index only to discover songs and retain the Concept Edition source
+        // for metadata, playback and account privileges.
+        const conceptSongs = response?.data?.info ?? response?.data?.lists
+        if (response?.error_code !== 0 || !Array.isArray(conceptSongs) || conceptSongs.length === 0) {
+          logger.warn('Kugou Concept search returned no usable results; falling back to public search index', {
+            keyword,
+            page,
+            errorCode: response?.error_code ?? response?.errcode,
+          })
+          const url = `http://mobilecdn.kugou.com/api/v3/search/song?api_ver=1&area_code=1&correct=1&pagesize=${limit}&plat=2&tag=1&sver=5&showtype=10&page=${page}&keyword=${encodeURIComponent(keyword)}&version=8990`
+          response = await withTimeout(fetch(url).then((res) => res.json()))
+          usedPublicSearchFallback = true
+        }
+      } else {
+        const url = `http://mobilecdn.kugou.com/api/v3/search/song?api_ver=1&area_code=1&correct=1&pagesize=${limit}&plat=2&tag=1&sver=5&showtype=10&page=${page}&keyword=${encodeURIComponent(keyword)}&version=8990`
+        response = await withTimeout(fetch(url).then((res) => res.json()))
+      }
 
-      if (!response || response.errcode !== 0 || !response.data?.info) {
-        logger.warn(`Kugou search failed: errcode=${response?.errcode}`)
+      const songList = response?.data?.info ?? response?.data?.lists
+      if (!response || (response.errcode !== 0 && response.status !== 1) || !Array.isArray(songList)) {
+        logger.warn(`Kugou search failed: errcode=${response?.errcode ?? response?.error_code}`)
         return []
       }
 
-      const songList = response.data.info as Array<Record<string, any>>
-
       const tracks: Track[] = []
       for (const song of songList) {
-        const hash = String(song.hash || '')
+        const hash = String(song.hash || song.FileHash || '')
         if (!hash) continue
 
-        const filename = String(song.filename || song.songname || '')
+        const filename = String(song.filename || song.songname || song.SongName || '')
         const parts = filename.split(' - ')
         let trackName = filename
-        const artists: string[] = []
+        const artists: string[] = String(song.SingerName || song.singername || '')
+          .split(/[,，、]/)
+          .map((artist) => artist.trim())
+          .filter(Boolean)
         if (parts.length >= 2) {
+          artists.length = 0
           for (const a of parts[0].split(/[、,，&]/)) {
             const trimmed = a.trim()
             if (trimmed) artists.push(trimmed)
@@ -749,11 +814,15 @@ class MusicProvider {
           trackName = parts.slice(1).join(' - ')
         }
 
-        let duration = Number(song.duration ?? song.timelen ?? 0)
+        let duration = Number(song.duration ?? song.Duration ?? song.timelen ?? 0)
         if (duration > 100000) duration = Math.floor(duration / 1000)
 
         const cover = normalizeKugouCoverUrl(
-          song.trans_param?.union_cover || song.audio_info?.trans_param?.union_cover || song.imgurl || song.album_img,
+          song.trans_param?.union_cover ||
+            song.audio_info?.trans_param?.union_cover ||
+            song.imgurl ||
+            song.Image ||
+            song.album_img,
         )
 
         const privilege = Number(song.privilege ?? song.pay_type ?? 0)
@@ -761,11 +830,11 @@ class MusicProvider {
 
         tracks.push({
           id: nanoid(),
-          source: 'kugou',
+          source,
           sourceId: hash,
           title: trackName || 'Unknown',
           artist: artists.length > 0 ? artists : ['Unknown'],
-          album: String(song.album_name || ''),
+          album: String(song.album_name || song.AlbumName || ''),
           duration,
           cover,
           urlId: hash,
@@ -779,9 +848,15 @@ class MusicProvider {
 
       logger.info(`在酷狗音乐搜索“${keyword}”，找到 ${tracks.length} 条结果`, {
         event: 'music.search_completed',
-        source: 'kugou',
+        source,
         keyword,
         resultCount: tracks.length,
+        provider:
+          source === 'kugou_concept'
+            ? usedPublicSearchFallback
+              ? 'public_index_fallback'
+              : 'concept_native'
+            : 'public_native',
       })
       return tracks
     } catch (error) {
@@ -1211,8 +1286,8 @@ class MusicProvider {
       }
 
       // 酷狗使用原生搜索 API (Meting API 已失效)
-      if (source === 'kugou') {
-        const tracks = await this.searchKugou(keyword, limit, page)
+      if (source === 'kugou' || source === 'kugou_concept') {
+        const tracks = await this.searchKugou(keyword, limit, page, source)
         this.searchIndex.set(cacheKey, {
           source,
           ids: tracks.map((t) => t.sourceId),
@@ -1277,18 +1352,23 @@ class MusicProvider {
   private static readonly KUGOU_TRACKER_CLIENT_VERSION = 11430
   private static readonly KUGOU_ANDROID_SIGNATURE_SALT = 'OIlwieks28dk2k092lksi2UIkp'
   private static readonly KUGOU_TRACKER_KEY_SALT = '57ae12eb6890223e355ccfcb74edf70d'
+  private static readonly KUGOU_CONCEPT_APP_ID = 3116
+  private static readonly KUGOU_CONCEPT_CLIENT_VERSION = 11440
+  private static readonly KUGOU_CONCEPT_TRACKER_CLIENT_VERSION = 11430
+  private static readonly KUGOU_CONCEPT_ANDROID_SIGNATURE_SALT = 'LnT6xpN3khm36zse0QzvmgTZ3waWdRSA'
+  private static readonly KUGOU_CONCEPT_TRACKER_KEY_SALT = '185672dd44712f60bb1736df5a377e82'
 
   private static md5(value: string): string {
     return crypto.createHash('md5').update(value).digest('hex')
   }
 
-  private static kugouAndroidSignature(params: Record<string, string | number>): string {
+  private static kugouAndroidSignature(params: Record<string, string | number>, concept = false): string {
     const joined = Object.keys(params)
       .sort()
       .map((key) => `${key}=${params[key]}`)
       .join('')
     return MusicProvider.md5(
-      `${MusicProvider.KUGOU_ANDROID_SIGNATURE_SALT}${joined}${MusicProvider.KUGOU_ANDROID_SIGNATURE_SALT}`,
+      `${concept ? MusicProvider.KUGOU_CONCEPT_ANDROID_SIGNATURE_SALT : MusicProvider.KUGOU_ANDROID_SIGNATURE_SALT}${joined}${concept ? MusicProvider.KUGOU_CONCEPT_ANDROID_SIGNATURE_SALT : MusicProvider.KUGOU_ANDROID_SIGNATURE_SALT}`,
     )
   }
 
@@ -1321,7 +1401,12 @@ class MusicProvider {
     return { hash: hash128 || hash, quality: '128', actualBitrate: 128 }
   }
 
-  private async getKugouStreamUrl(hash: string, bitrate: number, cookie?: string): Promise<CachedStreamUrl | null> {
+  private async getKugouStreamUrl(
+    hash: string,
+    bitrate: number,
+    cookie?: string,
+    concept = false,
+  ): Promise<CachedStreamUrl | null> {
     const cookieObj = cookie ? parseCookieString(cookie) : {}
     const token = cookieObj['token'] || ''
     const userid = cookieObj['userid'] || ''
@@ -1343,27 +1428,31 @@ class MusicProvider {
       const clienttime = Math.floor(Date.now() / 1000)
       const numericUserId = Number(userid || 0)
 
+      const appId = concept ? MusicProvider.KUGOU_CONCEPT_APP_ID : MusicProvider.KUGOU_APP_ID
+      const clientVersion = concept
+        ? MusicProvider.KUGOU_CONCEPT_TRACKER_CLIENT_VERSION
+        : MusicProvider.KUGOU_TRACKER_CLIENT_VERSION
       const params: Record<string, string | number> = {
         dfid,
         mid,
         uuid: '-',
-        appid: MusicProvider.KUGOU_APP_ID,
-        clientver: MusicProvider.KUGOU_TRACKER_CLIENT_VERSION,
+        appid: appId,
+        clientver: clientVersion,
         clienttime,
         album_id: Number(songInfo?.albumid ?? songInfo?.req_albumid ?? 0),
         area_code: 1,
         hash: selected.hash.toLowerCase(),
         ssa_flag: 'is_fromtrack',
-        version: MusicProvider.KUGOU_TRACKER_CLIENT_VERSION,
-        page_id: 151369488,
+        version: clientVersion,
+        page_id: concept ? 967177915 : 151369488,
         quality: selected.quality,
         album_audio_id: Number(songInfo?.album_audio_id ?? 0),
         behavior: 'play',
-        pid: 2,
+        pid: concept ? 411 : 2,
         cmd: 26,
         pidversion: 3001,
         IsFreePart: 0,
-        ppage_id: '463467626,350369493,788954147',
+        ppage_id: concept ? '356753938,823673182,967485191' : '463467626,350369493,788954147',
         cdnBackup: 1,
         module: '',
       }
@@ -1371,15 +1460,17 @@ class MusicProvider {
       if (userid) params.userid = userid
 
       params.key = MusicProvider.md5(
-        `${params.hash}${MusicProvider.KUGOU_TRACKER_KEY_SALT}${MusicProvider.KUGOU_APP_ID}${mid}${numericUserId}`,
+        `${params.hash}${concept ? MusicProvider.KUGOU_CONCEPT_TRACKER_KEY_SALT : MusicProvider.KUGOU_TRACKER_KEY_SALT}${appId}${mid}${numericUserId}`,
       )
-      params.signature = MusicProvider.kugouAndroidSignature(params)
+      params.signature = MusicProvider.kugouAndroidSignature(params, concept)
 
       const query = new URLSearchParams(Object.entries(params).map(([key, value]) => [key, String(value)]))
       const response = await withTimeout<Record<string, any>>(
         fetch(`https://gateway.kugou.com/v5/url?${query}`, {
           headers: {
-            'User-Agent': 'Android15-1070-11083-46-0-DiscoveryDRADProtocol-wifi',
+            'User-Agent': concept
+              ? 'Android16-1070-11440-130-0-DiscoveryDRADProtocol-wifi'
+              : 'Android15-1070-11083-46-0-DiscoveryDRADProtocol-wifi',
             'x-router': 'trackercdn.kugou.com',
             dfid,
             clienttime: String(clienttime),
@@ -1422,7 +1513,11 @@ class MusicProvider {
         return this.getKugouStreamUrlLegacy(hash, bitrate)
       }
 
-      const url = playUrl.startsWith('http://') ? playUrl.replace(/^http:\/\//, 'https://') : playUrl
+      // Some Kugou CDN nodes expose a valid HTTP endpoint but present a TLS
+      // certificate for a different hostname. The client routes Kugou streams
+      // through our audio proxy, so retain the upstream protocol here rather
+      // than forcing a TLS connection that will fail certificate validation.
+      const url = playUrl
       const actualBitrate = normalizeBitrate(response.bitrate ?? response.bitRate) ?? selected.actualBitrate
       logger.debug('酷狗播放地址解析成功', {
         source: 'kugou',
@@ -1498,7 +1593,9 @@ class MusicProvider {
       const url = Array.isArray(cdnRes.url) ? cdnRes.url[0] : cdnRes.url
       if (!url) return null
 
-      const urlStr = String(url).startsWith('http://') ? String(url).replace(/^http:\/\//, 'https://') : String(url)
+      // See the native tracker path above: preserve the upstream protocol for
+      // the server-side Kugou audio proxy.
+      const urlStr = String(url)
       const actualBitrate = normalizeBitrate(cdnRes.bitRate) ?? normalizeBitrate(bestItem.info?.bitrate)
       logger.debug('酷狗备用播放地址解析成功', { source: 'kugou', urlId: hash, actualBitrate })
       return { url: urlStr, actualBitrate }
@@ -1730,9 +1827,10 @@ class MusicProvider {
         if (typeof quality === 'string' || quality === 999) return null
       }
 
-      // Kugou: use native API that properly handles VIP authentication
-      if (source === 'kugou') {
-        const result = await this.getKugouStreamUrl(urlId, bitrate, cookie)
+      // Kugou: use native API that properly handles VIP authentication.
+      // Concept Edition has its own app ID, signature salt and tracker params.
+      if (source === 'kugou' || source === 'kugou_concept') {
+        const result = await this.getKugouStreamUrl(urlId, bitrate, cookie, source === 'kugou_concept')
         if (result) {
           if (!cookie) {
             this.streamUrlCache.set(`${source}:${urlId}:${qualityCacheKey}`, result)
@@ -1832,9 +1930,9 @@ class MusicProvider {
         if (result.yrc) {
           logger.debug('已获取网易云逐字歌词', { source: 'netease', lyricId })
         }
-      } else if (source === 'kugou') {
+      } else if (source === 'kugou' || source === 'kugou_concept') {
         // 酷狗：Meting 获取 LRC + kugou-lrc 获取 KRC 逐字歌词
-        const meting = this.getInstance(source)
+        const meting = this.getInstance('kugou')
         const raw = await withTimeout(meting.lyric(lyricId))
         if (raw === null || raw === undefined) {
           logger.warn(`Lyric fetch timeout for ${source}: ${lyricId}`)
@@ -1902,7 +2000,7 @@ class MusicProvider {
         const view = await this.getBilibiliView(picId)
         return view?.cover ?? ''
       }
-      const meting = this.getInstance(source)
+      const meting = this.getInstance(source === 'kugou_concept' ? 'kugou' : source)
       const raw = await withTimeout(meting.pic(picId, size))
       if (raw === null || raw === undefined) {
         logger.warn(`Cover fetch timeout for ${source}: ${picId}`)
@@ -1964,13 +2062,14 @@ class MusicProvider {
 
     // Kugou: try native API (works with global_collection_id from user playlists)
     // Falls back to Meting for public playlists / special IDs
-    if (source === 'kugou') {
+    if (source === 'kugou' || source === 'kugou_concept') {
       if (type === 'album') {
-        return this.fetchMetingPlaylist(source, playlistId, cacheKey, type)
+        return source === 'kugou' ? this.fetchMetingPlaylist(source, playlistId, cacheKey, type) : { ids: [], total: 0 }
       }
-      const result = await this.fetchKugouPlaylist(playlistId, cacheKey, cookie)
+      const result = await this.fetchKugouPlaylist(playlistId, cacheKey, cookie, source)
       if (result.total > 0) return result
-      logger.debug('酷狗原生歌单接口返回空结果，尝试备用接口', { source: 'kugou', playlistId })
+      logger.debug('酷狗原生歌单接口返回空结果，尝试备用接口', { source, playlistId })
+      if (source === 'kugou_concept') return result
     }
 
     // Tencent: use new native API (supports fav & custom lists)
@@ -2096,6 +2195,7 @@ class MusicProvider {
     playlistId: string,
     cacheKey: string,
     cookie?: string | null,
+    source: 'kugou' | 'kugou_concept' = 'kugou',
   ): Promise<{ ids: string[]; total: number }> {
     try {
       const PAGE_SIZE = 300
@@ -2105,13 +2205,16 @@ class MusicProvider {
 
       // Paginate until all tracks are fetched
       while (true) {
-        const { songs, total } = await kugouAuth.getPlaylistTracks(playlistId, page, PAGE_SIZE, cookie)
+        const { songs, total } =
+          source === 'kugou_concept'
+            ? await kugouAuth.getConceptPlaylistTracks(playlistId, page, PAGE_SIZE, cookie)
+            : await kugouAuth.getPlaylistTracks(playlistId, page, PAGE_SIZE, cookie)
         if (page === 1) totalFromApi = total
 
         if (songs.length === 0) break
 
         for (const song of songs) {
-          const track = this.kugouSongToTrack(song)
+          const track = this.kugouSongToTrack(song, source)
           if (track) allTracks.push(track)
         }
 
@@ -2125,10 +2228,10 @@ class MusicProvider {
       this.registerTracks(allTracks)
 
       const ids = allTracks.map((t) => t.sourceId)
-      this.playlistIndex.set(cacheKey, { source: 'kugou', ids })
+      this.playlistIndex.set(cacheKey, { source, ids })
 
       logger.info(`已获取酷狗歌单 ${playlistId}，共 ${ids.length} 首歌曲`, {
-        source: 'kugou',
+        source,
         playlistId,
         trackCount: ids.length,
         pages: page,
@@ -2193,7 +2296,7 @@ class MusicProvider {
 
   /** Convert a kugou song object from getPlaylistTracks to a Track. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- external Kugou API response shape
-  private kugouSongToTrack(song: Record<string, unknown>): Track | null {
+  private kugouSongToTrack(song: Record<string, unknown>, source: 'kugou' | 'kugou_concept' = 'kugou'): Track | null {
     // Cast for convenient dynamic property access
     const song_ = song as Record<string, any>
     const hash = song_.hash || song_.audio_info?.hash || ''
@@ -2223,7 +2326,7 @@ class MusicProvider {
 
     return {
       id: nanoid(),
-      source: 'kugou',
+      source,
       sourceId: hash,
       title,
       artist: artists,
@@ -2427,7 +2530,8 @@ class MusicProvider {
         }
       }
 
-      case 'kugou': {
+      case 'kugou':
+      case 'kugou_concept': {
         // Kugou encodes artist/title in filename: "Artist - Title"
         const filename = s.filename || s.fileName || ''
         const parts = filename.split(' - ')

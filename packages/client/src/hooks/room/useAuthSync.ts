@@ -10,6 +10,7 @@ const PLATFORM_NAMES: Record<MusicSource, string> = {
   netease: '网易云音乐',
   tencent: 'QQ 音乐',
   kugou: '酷狗音乐',
+  kugou_concept: '酷狗概念版',
   bilibili: 'B站',
 }
 

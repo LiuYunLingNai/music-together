@@ -74,6 +74,7 @@ const unsupportedAuthProvider: AuthProvider = {
 export const AUTH_PROVIDERS: Record<MusicSource, AuthProvider> = {
   netease: neteaseAuth,
   kugou: kugouAuth,
+  kugou_concept: kugouAuth.conceptAuthProvider,
   tencent: tencentAuth,
   bilibili: bilibiliAuth,
 }

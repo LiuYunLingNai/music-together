@@ -68,6 +68,7 @@ export interface ServerToClientEvents {
   }) => void
   [EVENTS.AUTH_STATUS_UPDATE]: (data: PlatformAuthStatus[]) => void
   [EVENTS.AUTH_MY_STATUS]: (data: MyPlatformAuth[]) => void
+  [EVENTS.AUTH_CLAIM_KUGOU_CONCEPT_VIP_RESULT]: (data: { success: boolean; message: string }) => void
 
   // Playlist
   [EVENTS.PLAYLIST_MY_LIST]: (data: { platform: MusicSource; playlists: Playlist[] }) => void
@@ -125,6 +126,7 @@ export interface ClientToServerEvents {
   [EVENTS.AUTH_SET_COOKIE]: (data: { platform: MusicSource; cookie: string; persist?: boolean }) => void
   [EVENTS.AUTH_LOGOUT]: (data: { platform: MusicSource }) => void
   [EVENTS.AUTH_GET_STATUS]: () => void
+  [EVENTS.AUTH_CLAIM_KUGOU_CONCEPT_VIP]: () => void
 
   // Playlist
   [EVENTS.PLAYLIST_GET_MY]: (data: { platform: MusicSource }) => void

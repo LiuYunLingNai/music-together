@@ -20,7 +20,7 @@ export const ERROR_CODE = {
 
 export type ErrorCode = (typeof ERROR_CODE)[keyof typeof ERROR_CODE]
 
-export type MusicSource = 'netease' | 'tencent' | 'kugou' | 'bilibili'
+export type MusicSource = 'netease' | 'tencent' | 'kugou' | 'kugou_concept' | 'bilibili'
 
 /** Music platforms that can supply lyrics and cover art for Bilibili videos. */
 export type BilibiliMetadataSource = 'netease' | 'tencent'

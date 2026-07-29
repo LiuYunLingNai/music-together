@@ -18,9 +18,20 @@ import { parseCookieString } from '../utils/cookieUtils.js'
 const APPID = 1005
 const SRCAPPID = 2919
 const CLIENTVER = 20489
+const CONCEPT_APPID = 3116
+const CONCEPT_CLIENTVER = 11440
 
 const WEB_SIGNATURE_SALT = 'NVPh5oo715z5DIWAeQlhMDsWXXQV4hwt'
 const ANDROID_SIGNATURE_SALT = 'OIlwieks28dk2k092lksi2UIkp'
+const CONCEPT_ANDROID_SIGNATURE_SALT = 'LnT6xpN3khm36zse0QzvmgTZ3waWdRSA'
+
+type KugouEdition = 'standard' | 'concept'
+
+function kugouEditionConfig(edition: KugouEdition) {
+  return edition === 'concept'
+    ? { appId: CONCEPT_APPID, clientVer: CONCEPT_CLIENTVER, signatureSalt: CONCEPT_ANDROID_SIGNATURE_SALT }
+    : { appId: APPID, clientVer: CLIENTVER, signatureSalt: ANDROID_SIGNATURE_SALT }
+}
 
 const RSA_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
 MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDIAG7QOELSYoIJvTFJhMpe1s/g
@@ -45,7 +56,11 @@ function signatureWebParams(params: Record<string, unknown>): string {
   return md5(`${WEB_SIGNATURE_SALT}${sorted}${WEB_SIGNATURE_SALT}`)
 }
 
-function signatureAndroidParams(params: Record<string, unknown>, data?: string): string {
+function signatureAndroidParams(
+  params: Record<string, unknown>,
+  data?: string,
+  edition: KugouEdition = 'standard',
+): string {
   const sorted = Object.keys(params)
     .sort()
     .map((key) => {
@@ -53,7 +68,8 @@ function signatureAndroidParams(params: Record<string, unknown>, data?: string):
       return `${key}=${typeof val === 'object' ? JSON.stringify(val) : val}`
     })
     .join('')
-  return md5(`${ANDROID_SIGNATURE_SALT}${sorted}${data || ''}${ANDROID_SIGNATURE_SALT}`)
+  const { signatureSalt } = kugouEditionConfig(edition)
+  return md5(`${signatureSalt}${sorted}${data || ''}${signatureSalt}`)
 }
 
 /**
@@ -120,6 +136,7 @@ interface KugouRequestConfig {
   encryptType: 'web' | 'android'
   cookie?: Record<string, string>
   headers?: Record<string, string>
+  edition?: KugouEdition
 }
 
 /** Kugou API response (loosely typed — external API). */
@@ -131,6 +148,8 @@ interface KugouApiResponse {
 }
 
 async function kugouRequest(config: KugouRequestConfig): Promise<KugouApiResponse> {
+  const edition = config.edition ?? 'standard'
+  const editionConfig = kugouEditionConfig(edition)
   const clienttime = Math.floor(Date.now() / 1000)
   const dfid = config.cookie?.dfid || '-'
   const method = config.method || 'GET'
@@ -139,8 +158,8 @@ async function kugouRequest(config: KugouRequestConfig): Promise<KugouApiRespons
     dfid,
     mid: MID,
     uuid: '-',
-    appid: APPID,
-    clientver: CLIENTVER,
+    appid: editionConfig.appId,
+    clientver: editionConfig.clientVer,
     clienttime,
   }
 
@@ -158,7 +177,7 @@ async function kugouRequest(config: KugouRequestConfig): Promise<KugouApiRespons
   if (config.encryptType === 'web') {
     merged['signature'] = signatureWebParams(merged)
   } else {
-    merged['signature'] = signatureAndroidParams(merged, bodyStr)
+    merged['signature'] = signatureAndroidParams(merged, bodyStr, edition)
   }
 
   const qs = Object.entries(merged)
@@ -168,7 +187,10 @@ async function kugouRequest(config: KugouRequestConfig): Promise<KugouApiRespons
   const fullUrl = `${config.baseURL}${config.url}?${qs}`
 
   const headers: Record<string, string> = {
-    'User-Agent': 'Android15-1070-11083-46-0-DiscoveryDRADProtocol-wifi',
+    'User-Agent':
+      edition === 'concept'
+        ? 'Android16-1070-11440-130-0-LOGIN-wifi'
+        : 'Android15-1070-11083-46-0-DiscoveryDRADProtocol-wifi',
     dfid,
     clienttime: String(clienttime),
     mid: MID,
@@ -205,19 +227,23 @@ async function kugouRequest(config: KugouRequestConfig): Promise<KugouApiRespons
 // QR Code Login
 // ---------------------------------------------------------------------------
 
-export async function generateQrCode(): Promise<{ key: string; qrimg: string } | null> {
+async function generateQrCodeForEdition(edition: KugouEdition): Promise<{ key: string; qrimg: string } | null> {
   try {
+    const { appId } = kugouEditionConfig(edition)
     const body = await kugouRequest({
       baseURL: 'https://login-user.kugou.com',
       url: '/v2/qrcode',
       params: {
-        appid: APPID,
+        // KuGou's QR-key endpoint expects the shared mobile client ID while
+        // the QR payload and subsequent poll identify the target edition.
+        appid: edition === 'concept' ? 1001 : APPID,
         type: 1,
         plat: 4,
-        qrcode_txt: `https://h5.kugou.com/apps/loginQRCode/html/index.html?appid=${APPID}&`,
+        qrcode_txt: `https://h5.kugou.com/apps/loginQRCode/html/index.html?appid=${appId}&`,
         srcappid: SRCAPPID,
       },
       encryptType: 'web',
+      edition,
     })
 
     const qrData = body?.data as Record<string, unknown> | undefined
@@ -238,6 +264,10 @@ export async function generateQrCode(): Promise<{ key: string; qrimg: string } |
   }
 }
 
+export async function generateQrCode(): Promise<{ key: string; qrimg: string } | null> {
+  return generateQrCodeForEdition('standard')
+}
+
 const STATUS_MAP: Record<number, number> = {
   0: 800,
   1: 801,
@@ -252,7 +282,10 @@ const STATUS_MESSAGES: Record<number, string> = {
   803: '登录成功',
 }
 
-export async function checkQrStatus(key: string): Promise<{
+async function checkQrStatusForEdition(
+  key: string,
+  edition: KugouEdition,
+): Promise<{
   status: number
   message: string
   cookie?: string
@@ -263,11 +296,12 @@ export async function checkQrStatus(key: string): Promise<{
       url: '/v2/get_userinfo_qrcode',
       params: {
         plat: 4,
-        appid: APPID,
+        appid: kugouEditionConfig(edition).appId,
         srcappid: SRCAPPID,
         qrcode: key,
       },
       encryptType: 'web',
+      edition,
     })
 
     const d = body?.data as Record<string, unknown> | undefined
@@ -289,6 +323,10 @@ export async function checkQrStatus(key: string): Promise<{
   }
 }
 
+export async function checkQrStatus(key: string): Promise<{ status: number; message: string; cookie?: string }> {
+  return checkQrStatusForEdition(key, 'standard')
+}
+
 // ---------------------------------------------------------------------------
 // User Detail (nickname via RSA-encrypted request)
 // ---------------------------------------------------------------------------
@@ -297,7 +335,7 @@ export async function checkQrStatus(key: string): Promise<{
  * Fetch user nickname from Kugou's user center API.
  * Requires RSA-encrypted auth payload.
  */
-async function fetchUserDetail(cookie: Record<string, string>): Promise<string | null> {
+async function fetchUserDetail(cookie: Record<string, string>, edition: KugouEdition): Promise<string | null> {
   try {
     const token = cookie['token']
     const userid = Number(cookie['userid'] || '0')
@@ -320,6 +358,7 @@ async function fetchUserDetail(cookie: Record<string, string>): Promise<string |
       encryptType: 'android',
       cookie,
       headers: { 'x-router': 'usercenter.kugou.com' },
+      edition,
     })
 
     const d = body?.data as Record<string, unknown> | undefined
@@ -345,7 +384,7 @@ async function fetchUserDetail(cookie: Record<string, string>): Promise<string |
 /**
  * Validate a Kugou cookie (token+userid) and get VIP info + nickname.
  */
-export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
+async function getUserInfoForEdition(cookie: string, edition: KugouEdition): Promise<GetUserInfoResult> {
   // 使用共享的 parseCookieString（已从 cookieUtils 导入）
   try {
     const cookieObj = parseCookieString(cookie)
@@ -364,6 +403,7 @@ export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
       params: { busi_type: 'concept' },
       encryptType: 'android',
       cookie: { token, userid },
+      edition,
     })
 
     if (!body?.data) {
@@ -376,7 +416,7 @@ export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
     const vipType = isVip ? Number(vipData.vip_type) || 1 : 0
 
     // Fetch nickname (non-blocking — fallback to userid if failed)
-    const nickname = await fetchUserDetail({ token, userid })
+    const nickname = await fetchUserDetail({ token, userid }, edition)
 
     return {
       ok: true,
@@ -392,6 +432,10 @@ export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
   }
 }
 
+export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
+  return getUserInfoForEdition(cookie, 'standard')
+}
+
 // ---------------------------------------------------------------------------
 // User Playlists
 // ---------------------------------------------------------------------------
@@ -399,7 +443,7 @@ export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
 /**
  * Fetch user's playlist list from Kugou.
  */
-export async function getUserPlaylists(cookie: string): Promise<Playlist[]> {
+async function getUserPlaylistsForEdition(cookie: string, edition: KugouEdition): Promise<Playlist[]> {
   try {
     const cookieObj = parseCookieString(cookie)
     const token = cookieObj['token']
@@ -426,6 +470,7 @@ export async function getUserPlaylists(cookie: string): Promise<Playlist[]> {
       encryptType: 'android',
       cookie: { token, userid },
       headers: { 'x-router': 'cloudlist.service.kugou.com' },
+      edition,
     })
 
     const d = body?.data as Record<string, unknown> | undefined
@@ -440,7 +485,7 @@ export async function getUserPlaylists(cookie: string): Promise<Playlist[]> {
       name: String(p.name || ''),
       cover: String(p.pic || p.img || ''),
       trackCount: Number(p.count ?? p.total ?? 0),
-      source: 'kugou' as const,
+      source: edition === 'concept' ? 'kugou_concept' : 'kugou',
     }))
 
     logger.info(`已获取酷狗用户的 ${mapped.length} 个歌单`, { platform: 'kugou', userId: userid, count: mapped.length })
@@ -448,6 +493,76 @@ export async function getUserPlaylists(cookie: string): Promise<Playlist[]> {
   } catch (err) {
     logger.error('Kugou getUserPlaylists failed', err)
     return []
+  }
+}
+
+export async function getUserPlaylists(cookie: string): Promise<Playlist[]> {
+  return getUserPlaylistsForEdition(cookie, 'standard')
+}
+
+export const conceptAuthProvider = {
+  generateQrCode: () => generateQrCodeForEdition('concept'),
+  checkQrStatus: (key: string) => checkQrStatusForEdition(key, 'concept'),
+  getUserInfo: (cookie: string) => getUserInfoForEdition(cookie, 'concept'),
+  getUserPlaylists: (cookie: string) => getUserPlaylistsForEdition(cookie, 'concept'),
+}
+
+function shanghaiDateKey(): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? ''
+  return `${value('year')}-${value('month')}-${value('day')}`
+}
+
+/**
+ * Manually claim the official daily Concept Edition listening benefit.
+ * This deliberately does not call the reference project's simulated ad/listen
+ * reporting endpoints: Kugou alone decides account eligibility and limits.
+ */
+export async function claimConceptDailyVip(cookie: string): Promise<{ ok: boolean; message: string }> {
+  try {
+    const cookieObj = parseCookieString(cookie)
+    const token = cookieObj['token']
+    const userid = cookieObj['userid']
+    if (!token || !userid) return { ok: false, message: '概念版登录已失效，请重新登录' }
+
+    const claim = await kugouRequest({
+      baseURL: 'https://gateway.kugou.com',
+      url: '/youth/v1/recharge/receive_vip_listen_song',
+      method: 'POST',
+      params: { source_id: 90139, receive_day: shanghaiDateKey() },
+      encryptType: 'android',
+      cookie: { token, userid },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      edition: 'concept',
+    })
+
+    if (claim.status !== 1) {
+      return { ok: false, message: String(claim.message || claim.error_msg || '当前账号暂不符合领取条件') }
+    }
+
+    // Kugou's official flow upgrades the claimed daily listening benefit to
+    // Concept Edition VIP. This is only reached after the user clicked the
+    // manual claim button above; the platform still enforces its own limits.
+    const upgrade = await kugouRequest({
+      baseURL: 'https://gateway.kugou.com',
+      url: '/youth/v1/listen_song/upgrade_vip_reward',
+      method: 'POST',
+      params: { kugouid: Number(userid), ad_type: 1 },
+      encryptType: 'android',
+      cookie: { token, userid },
+      edition: 'concept',
+    })
+
+    if (upgrade.status === 1) return { ok: true, message: '已领取并升级今日概念版 VIP 权益' }
+    return { ok: true, message: '已领取今日权益，升级结果请以酷狗账号状态为准' }
+  } catch (err) {
+    logger.error('Kugou Concept daily VIP claim failed', err)
+    return { ok: false, message: '领取失败，请稍后重试或前往酷狗客户端领取' }
   }
 }
 
@@ -469,11 +584,12 @@ export interface KugouPlaylistTrack {
  * Paginated — pass page (1-based) and pagesize.
  * Returns raw song objects for musicProvider to convert.
  */
-export async function getPlaylistTracks(
+async function getPlaylistTracksForEdition(
   playlistId: string,
   page = 1,
   pagesize = 300,
   cookie?: string | null,
+  edition: KugouEdition = 'standard',
 ): Promise<{ songs: KugouPlaylistTrack[]; total: number }> {
   try {
     const cookieObj = cookie ? parseCookieString(cookie) : {}
@@ -495,6 +611,7 @@ export async function getPlaylistTracks(
       },
       encryptType: 'android',
       cookie: cookieObj,
+      edition,
     })
 
     const d = body?.data as Record<string, unknown> | undefined
@@ -515,6 +632,24 @@ export async function getPlaylistTracks(
     logger.error('Kugou getPlaylistTracks failed', err)
     return { songs: [], total: 0 }
   }
+}
+
+export async function getPlaylistTracks(
+  playlistId: string,
+  page = 1,
+  pagesize = 300,
+  cookie?: string | null,
+): Promise<{ songs: KugouPlaylistTrack[]; total: number }> {
+  return getPlaylistTracksForEdition(playlistId, page, pagesize, cookie)
+}
+
+export async function getConceptPlaylistTracks(
+  playlistId: string,
+  page = 1,
+  pagesize = 300,
+  cookie?: string | null,
+): Promise<{ songs: KugouPlaylistTrack[]; total: number }> {
+  return getPlaylistTracksForEdition(playlistId, page, pagesize, cookie, 'concept')
 }
 
 // parseCookieString 已移至 utils/cookieUtils.ts 统一管理

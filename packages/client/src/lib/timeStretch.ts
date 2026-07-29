@@ -2,6 +2,7 @@ import { SoundTouchNode } from '@soundtouchjs/audio-worklet'
 import processorUrl from '@soundtouchjs/audio-worklet/processor?url'
 import { Howler } from 'howler'
 import type { Howl } from 'howler'
+import { SERVER_URL } from './config'
 
 const MIN_TEMPO = 0.99
 const MAX_TEMPO = 1.01
@@ -47,8 +48,12 @@ let obtainAudioPatched = false
 export function prepareDirectStreamForTimeStretch(streamUrl: string): boolean {
   let supportsCors = false
   try {
-    const hostname = new URL(streamUrl).hostname.toLowerCase()
-    supportsCors = CORS_AUDIO_HOST_SUFFIXES.some((suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`))
+    const stream = new URL(streamUrl)
+    const hostname = stream.hostname.toLowerCase()
+    supportsCors =
+      stream.origin === window.location.origin ||
+      stream.origin === new URL(SERVER_URL).origin ||
+      CORS_AUDIO_HOST_SUFFIXES.some((suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`))
   } catch {
     supportsCors = false
   }

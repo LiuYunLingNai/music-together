@@ -110,6 +110,7 @@ const SOURCE_LABELS: Record<MusicSource, string> = {
   netease: '网易云音乐',
   tencent: 'QQ 音乐',
   kugou: '酷狗音乐',
+  kugou_concept: '酷狗概念版',
   bilibili: 'B站',
 }
 
@@ -245,7 +246,10 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
         // -------------------------------------------------------------------
         if (
           config.autoFallback.enabled &&
-          (resolved.source === 'netease' || resolved.source === 'tencent' || resolved.source === 'kugou') &&
+          (resolved.source === 'netease' ||
+            resolved.source === 'tencent' ||
+            resolved.source === 'kugou' ||
+            resolved.source === 'kugou_concept') &&
           canAutoFallback(roomId, resolved.id)
         ) {
           // Prevent repeated fallback attempts for this queue item

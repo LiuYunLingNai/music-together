@@ -2,7 +2,7 @@ import type { MusicSource, Track } from '@music-together/shared'
 import { musicProvider } from './musicProvider.js'
 
 // Keep scope minimal: only support netease <-> tencent <-> kugou auto fallback.
-const SUPPORTED_SOURCES: ReadonlySet<MusicSource> = new Set(['netease', 'tencent', 'kugou'])
+const SUPPORTED_SOURCES: ReadonlySet<MusicSource> = new Set(['netease', 'tencent', 'kugou', 'kugou_concept'])
 
 export interface FallbackCandidate {
   track: Track
@@ -101,6 +101,7 @@ export function getFallbackTargetSource(from: MusicSource): MusicSource | null {
   if (from === 'netease') return 'tencent'
   if (from === 'tencent') return 'netease'
   if (from === 'kugou') return 'netease'
+  if (from === 'kugou_concept') return 'netease'
   return null
 }
 

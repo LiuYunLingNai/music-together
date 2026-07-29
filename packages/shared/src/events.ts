@@ -66,6 +66,8 @@ export const EVENTS = {
   AUTH_STATUS_UPDATE: 'auth:status_update',
   AUTH_MY_STATUS: 'auth:my_status',
   AUTH_GET_STATUS: 'auth:get_status',
+  AUTH_CLAIM_KUGOU_CONCEPT_VIP: 'auth:claim_kugou_concept_vip',
+  AUTH_CLAIM_KUGOU_CONCEPT_VIP_RESULT: 'auth:claim_kugou_concept_vip_result',
 
   // Playlist
   PLAYLIST_GET_MY: 'playlist:get_my',

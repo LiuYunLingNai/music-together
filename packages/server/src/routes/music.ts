@@ -136,6 +136,7 @@ const ALLOWED_COVER_HOSTS = [
 
 const BILIBILI_AUDIO_HOST_SUFFIXES = ['bilivideo.com', 'bilivideo.cn']
 const BILIBILI_BVID_PATTERN = /^BV[0-9A-Za-z]{10}$/
+const KUGOU_AUDIO_HOST_SUFFIXES = ['kugou.com', 'kugou.net']
 
 function isAllowedBilibiliAudioUrl(value: string): boolean {
   try {
@@ -143,6 +144,18 @@ function isAllowedBilibiliAudioUrl(value: string): boolean {
     if (url.protocol !== 'https:' || (url.port && url.port !== '443')) return false
     const hostname = url.hostname.toLowerCase()
     return BILIBILI_AUDIO_HOST_SUFFIXES.some((suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`))
+  } catch {
+    return false
+  }
+}
+
+function isAllowedKugouAudioUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    if (!['http:', 'https:'].includes(url.protocol) || (url.port && url.port !== '80' && url.port !== '443'))
+      return false
+    const hostname = url.hostname.toLowerCase()
+    return KUGOU_AUDIO_HOST_SUFFIXES.some((suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`))
   } catch {
     return false
   }
@@ -268,6 +281,77 @@ router.get('/bilibili-audio-proxy', async (req: Request, res: Response) => {
     if (controller.signal.aborted) return
     logger.error('Bilibili audio proxy failed', err, { bvid })
     if (!res.headersSent) res.status(502).json({ error: 'Bilibili audio proxy failed' })
+    else res.destroy(err instanceof Error ? err : undefined)
+  }
+})
+
+/**
+ * KuGou's CDN URLs are signed but frequently omit browser CORS headers,
+ * especially for Concept Edition's lossless resources. Proxy only Kugou-owned
+ * hosts and preserve byte ranges so the HTML5 player can seek normally.
+ */
+router.get('/kugou-audio-proxy', async (req: Request, res: Response) => {
+  const audioUrl = typeof req.query.url === 'string' ? req.query.url : ''
+  if (!isAllowedKugouAudioUrl(audioUrl)) {
+    res.status(400).json({ error: 'Invalid Kugou audio URL' })
+    return
+  }
+
+  const controller = new AbortController()
+  req.once('aborted', () => controller.abort())
+
+  try {
+    const range = req.headers.range
+    const headers = {
+      Accept: '*/*',
+      'Accept-Encoding': 'identity',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36',
+      Referer: 'https://www.kugou.com/',
+      ...(typeof range === 'string' ? { Range: range } : {}),
+    }
+    let upstream: globalThis.Response | null = null
+    let upstreamUrl = audioUrl
+
+    for (let redirects = 0; redirects < 4; redirects += 1) {
+      const response = await fetch(upstreamUrl, { signal: controller.signal, headers, redirect: 'manual' })
+      if (response.status < 300 || response.status >= 400) {
+        upstream = response
+        break
+      }
+      const location = response.headers.get('location')
+      if (!location) break
+      const nextUrl = new URL(location, upstreamUrl).toString()
+      if (!isAllowedKugouAudioUrl(nextUrl)) break
+      upstreamUrl = nextUrl
+    }
+
+    if (!upstream) {
+      res.status(502).json({ error: 'Invalid Kugou audio redirect' })
+      return
+    }
+    if (!upstream.ok && upstream.status !== 206) {
+      logger.warn('Kugou audio proxy upstream request failed', { status: upstream.status })
+      res.status(upstream.status).json({ error: 'Kugou audio request failed' })
+      return
+    }
+    if (!upstream.body) {
+      res.status(502).json({ error: 'Kugou audio response was empty' })
+      return
+    }
+
+    for (const header of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'content-encoding']) {
+      const value = upstream.headers.get(header)
+      if (value) res.setHeader(header, value)
+    }
+    res.setHeader('Cache-Control', 'private, no-store')
+    res.setHeader('Access-Control-Allow-Origin', '*')
+    res.status(upstream.status)
+
+    await pipeline(Readable.fromWeb(upstream.body as unknown as import('node:stream/web').ReadableStream), res)
+  } catch (err) {
+    if (controller.signal.aborted) return
+    logger.error('Kugou audio proxy failed', err)
+    if (!res.headersSent) res.status(502).json({ error: 'Kugou audio proxy failed' })
     else res.destroy(err instanceof Error ? err : undefined)
   }
 })
