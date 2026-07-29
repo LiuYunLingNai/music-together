@@ -5,6 +5,7 @@ import {
   kugouProviderQualityToAudioQuality,
   selectKugouV6Good,
 } from '../src/services/kugouAudioQuality.js'
+import { normalizeKugouAudioUrl } from '../src/services/kugouAudioUrl.js'
 
 function good(quality: string, info: Record<string, unknown> = {}) {
   return {
@@ -58,4 +59,28 @@ test('maps provider labels to the room quality telemetry labels', () => {
   assert.equal(kugouProviderQualityToAudioQuality('viper_clear'), 'kugou_hires')
   assert.equal(kugouProviderQualityToAudioQuality('flac'), 999)
   assert.equal(kugouProviderQualityToAudioQuality('320'), 320)
+})
+
+test('keeps Concept Edition CDN URLs on HTTP while upgrading standard Kugou CDN URLs', () => {
+  assert.equal(
+    normalizeKugouAudioUrl('https://fs.youthandroid2.kugou.com:443/audio/test.flac?token=abc'),
+    'http://fs.youthandroid2.kugou.com/audio/test.flac?token=abc',
+  )
+  assert.equal(
+    normalizeKugouAudioUrl('http://fsandroid.kugou.com/audio/test.flac'),
+    'https://fsandroid.kugou.com/audio/test.flac',
+  )
+})
+
+test('normalizes Concept Edition tracker URLs before they reach the audio proxy', () => {
+  const goods = collectKugouV6Goods({
+    data: [
+      good('flac', {
+        bitrate: 940,
+        tracker_url: 'https://fs.youthandroid.kugou.com/audio/concept.flac',
+      }),
+    ],
+  })
+
+  assert.equal(goods[0]?.plainUrl, 'http://fs.youthandroid.kugou.com/audio/concept.flac')
 })

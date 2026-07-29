@@ -18,6 +18,7 @@ import {
   getKugouEncryptedAudio,
   kugouAudioContentType,
 } from '../services/kugouEncryptedAudio.js'
+import { normalizeKugouAudioUrl } from '../services/kugouAudioUrl.js'
 
 const router: RouterType = Router()
 
@@ -324,7 +325,7 @@ router.get('/kugou-audio-proxy', async (req: Request, res: Response) => {
       ...(typeof range === 'string' ? { Range: range } : {}),
     }
     let upstream: globalThis.Response | null = null
-    let upstreamUrl = audioUrl
+    let upstreamUrl = normalizeKugouAudioUrl(audioUrl)
 
     for (let redirects = 0; redirects < 4; redirects += 1) {
       const response = await fetch(upstreamUrl, { signal: controller.signal, headers, redirect: 'manual' })
@@ -334,7 +335,7 @@ router.get('/kugou-audio-proxy', async (req: Request, res: Response) => {
       }
       const location = response.headers.get('location')
       if (!location) break
-      const nextUrl = new URL(location, upstreamUrl).toString()
+      const nextUrl = normalizeKugouAudioUrl(new URL(location, upstreamUrl).toString())
       if (!isAllowedKugouAudioUrl(nextUrl)) break
       upstreamUrl = nextUrl
     }

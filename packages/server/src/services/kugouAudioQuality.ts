@@ -1,4 +1,5 @@
 import type { AudioQuality } from '@music-together/shared'
+import { normalizeKugouAudioUrl } from './kugouAudioUrl.js'
 
 export type KugouProviderQuality =
   | '128'
@@ -56,9 +57,9 @@ const TECHNICAL_STEREO_QUALITIES = new Set<KugouProviderQuality>([
 function firstUrl(value: unknown): string | undefined {
   if (Array.isArray(value)) {
     const url = value.find((item) => typeof item === 'string' && item.length > 0)
-    return typeof url === 'string' ? url.replace(/^http:\/\//, 'https://') : undefined
+    return typeof url === 'string' ? normalizeKugouAudioUrl(url) : undefined
   }
-  return typeof value === 'string' && value ? value.replace(/^http:\/\//, 'https://') : undefined
+  return typeof value === 'string' && value ? normalizeKugouAudioUrl(value) : undefined
 }
 
 function positiveNumber(value: unknown): number | undefined {
