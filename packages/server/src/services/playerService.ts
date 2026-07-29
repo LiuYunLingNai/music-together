@@ -1,5 +1,5 @@
 import type { AudioQuality, MusicSource, PlayMode, PlayState, ScheduledPlayState, Track } from '@music-together/shared'
-import { EVENTS, ERROR_CODE, NTP } from '@music-together/shared'
+import { EVENTS, ERROR_CODE, NTP, TIMING } from '@music-together/shared'
 import { roomRepo } from '../repositories/roomRepository.js'
 import { nanoid } from 'nanoid'
 import { musicProvider } from './musicProvider.js'
@@ -19,6 +19,7 @@ import type { TypedServer, TypedSocket } from '../middleware/types.js'
 // ---------------------------------------------------------------------------
 
 const playMutexes = new Map<string, Promise<unknown>>()
+const lastStreamUrlRefreshAt = new Map<string, number>()
 
 // ---------------------------------------------------------------------------
 // Auto fallback cooldown (prevents repeated attempts / ping-pong)
@@ -162,14 +163,15 @@ async function resolveStreamUrl(
   urlId: string,
   bitrate: AudioQuality,
   cookie?: string,
+  forceRefresh = false,
 ): Promise<ResolvedStreamUrl | null> {
-  const result = await musicProvider.getStreamInfo(source, urlId, bitrate, cookie)
+  const result = await musicProvider.getStreamInfo(source, urlId, bitrate, cookie, forceRefresh)
   if (result) return { ...result, attemptedBitrate: bitrate }
 
   // Fallback to lower bitrates
   const fallbacks = QUALITY_FALLBACKS[bitrate] ?? BITRATE_FALLBACKS[qualityToBitrate(bitrate)]
   for (const fallback of fallbacks) {
-    const fallbackResult = await musicProvider.getStreamInfo(source, urlId, fallback, cookie)
+    const fallbackResult = await musicProvider.getStreamInfo(source, urlId, fallback, cookie, forceRefresh)
     if (fallbackResult) {
       logger.warn('音质自动降级后获取到可播放资源', {
         source,
@@ -375,6 +377,7 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
   // Update room state — align serverTimestamp with the scheduled execution time
   // so estimateCurrentTime() is accurate from the first scheduled frame.
   room.currentTrack = resolved
+  lastStreamUrlRefreshAt.set(roomId, Date.now())
   const scheduleTime = getScheduleTime(roomId)
   room.playState = {
     isPlaying: true,
@@ -477,6 +480,7 @@ export function setCurrentTrack(roomId: string, track: Track | null): void {
   const room = roomRepo.get(roomId)
   if (room) {
     room.currentTrack = track
+    if (!track?.streamUrl) lastStreamUrlRefreshAt.delete(roomId)
     room.playState = {
       isPlaying: track !== null,
       currentTime: 0,
@@ -590,6 +594,50 @@ export function playPrevTrackInRoom(
 // Playback sync for newly-joined clients
 // ---------------------------------------------------------------------------
 
+/** Refresh an old permanent-room URL only when a user joins. */
+export function refreshStreamUrlForJoin(roomId: string): Promise<boolean> {
+  return withPlayMutex(roomId, async () => {
+    const room = roomRepo.get(roomId)
+    const track = room?.currentTrack
+    if (!room?.permanent || !track) return false
+
+    const now = Date.now()
+    const lastRefreshAt = lastStreamUrlRefreshAt.get(roomId) ?? 0
+    const refreshInterval = track.streamUrl
+      ? TIMING.STREAM_URL_REFRESH_INTERVAL_MS
+      : TIMING.STREAM_URL_REFRESH_RETRY_INTERVAL_MS
+    if (now - lastRefreshAt < refreshInterval) return false
+
+    // Record the attempt up front so failed upstream requests are also throttled.
+    lastStreamUrlRefreshAt.set(roomId, now)
+    try {
+      const cookie = authService.getAnyCookie(track.source, roomId)
+      const refreshed = await resolveStreamUrl(track.source, track.urlId, room.audioQuality, cookie ?? undefined, true)
+      if (!refreshed) {
+        if (room.currentTrack?.id === track.id) room.currentTrack = { ...room.currentTrack, streamUrl: undefined }
+        return false
+      }
+
+      if (room.currentTrack?.id !== track.id) return false
+      room.currentTrack = { ...room.currentTrack, streamUrl: refreshed.url }
+      logger.info('Refreshed stale stream URL when user joined permanent room', {
+        event: 'player.stream_url_refreshed_on_join',
+        roomId,
+        trackId: track.id,
+      })
+      return true
+    } catch (err) {
+      if (room.currentTrack?.id === track.id) room.currentTrack = { ...room.currentTrack, streamUrl: undefined }
+      logger.warn('Failed to refresh stale stream URL when user joined permanent room', {
+        roomId,
+        trackId: track.id,
+        err,
+      })
+      return false
+    }
+  })
+}
+
 /**
  * Resume a paused track before the first room state is sent to a user joining
  * an empty room. The client uses that initial state to recover playback when
@@ -643,7 +691,7 @@ export async function syncPlaybackToSocket(
         serverTimeToExecute: scheduleTime,
       },
     })
-  } else if (isAloneInRoom && room.queue.length > 0) {
+  } else if (isAloneInRoom && !room.currentTrack && room.queue.length > 0) {
     // No current track but queue has items → start playing from queue
     const firstTrack = room.queue[0]
     await playTrackInRoom(io, roomId, firstTrack)
@@ -660,6 +708,7 @@ const lastNextTimestamp = new Map<string, number>()
 /** Remove per-room entries for a deleted room */
 export function cleanupRoom(roomId: string): void {
   lastNextTimestamp.delete(roomId)
+  lastStreamUrlRefreshAt.delete(roomId)
   playMutexes.delete(roomId)
 }
 

@@ -73,7 +73,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
   })
 
   // ---- Join room (含密码校验) ----
-  socket.on(EVENTS.ROOM_JOIN, (raw) => {
+  socket.on(EVENTS.ROOM_JOIN, async (raw) => {
     try {
       const parsed = roomJoinSchema.safeParse(raw)
       if (!parsed.success) {
@@ -117,8 +117,13 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
       const rejoin = issueRejoinTicket(roomId, user.id)
 
       socket.leave('lobby')
-      socket.join(roomId)
       authService.restoreUserCookies(roomId, user.id)
+
+      // Permanent rooms can retain a short-lived URL while empty. Refresh it
+      // on demand before exposing room state, with service-level throttling.
+      await playerService.refreshStreamUrlForJoin(roomId)
+      if (!socket.connected) return
+      socket.join(roomId)
 
       // Send history before ROOM_STATE. The lobby navigates as soon as it receives
       // ROOM_STATE, which creates a brief gap before the room listeners mount.

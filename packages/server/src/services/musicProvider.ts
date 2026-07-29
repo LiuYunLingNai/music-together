@@ -1678,6 +1678,7 @@ class MusicProvider {
     urlId: string,
     quality: AudioQuality = 320,
     cookie?: string,
+    forceRefresh = false,
   ): Promise<StreamUrlResult | null> {
     const bitrate = qualityToBitrate(quality)
     const qualityCacheKey = String(quality)
@@ -1686,8 +1687,9 @@ class MusicProvider {
     // compatible audio track when playback starts.
     if (!cookie && source !== 'bilibili') {
       const cacheKey = `${source}:${urlId}:${qualityCacheKey}`
+      if (forceRefresh) this.streamUrlCache.delete(cacheKey)
       const cached = this.streamUrlCache.get(cacheKey)
-      if (cached) {
+      if (!forceRefresh && cached) {
         logger.debug('命中播放地址缓存', {
           source,
           urlId,
