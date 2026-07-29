@@ -58,7 +58,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
       socket.leave('lobby')
       socket.join(room.id)
       authService.restoreUserCookies(room.id, user.id)
-      refreshRestoredMembershipDetails(io, socket, room.id, user.id)
+      void refreshRestoredMembershipDetails(io, socket, room.id, user.id)
       socket.emit(EVENTS.ROOM_CREATED, { roomId: room.id, userId: user.id })
       // 创建者是 owner，发送含密码的完整状态
       socket.emit(EVENTS.ROOM_STATE, roomService.toPublicRoomStateForOwner(room))
@@ -120,12 +120,17 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
       socket.leave('lobby')
       authService.restoreUserCookies(roomId, user.id)
 
+      // Legacy persisted accounts may still carry a coarse membership tier.
+      // Refresh it before resolving the permanent room stream so an SVIP
+      // account does not get its first URL capped at the old VIP quality.
+      await refreshRestoredMembershipDetails(io, socket, roomId, user.id)
+      if (!socket.connected) return
+
       // Permanent rooms can retain a short-lived URL while empty. Refresh it
       // on demand before exposing room state, with service-level throttling.
       await playerService.refreshStreamUrlForJoin(roomId)
       if (!socket.connected) return
       socket.join(roomId)
-      refreshRestoredMembershipDetails(io, socket, roomId, user.id)
 
       // Send history before ROOM_STATE. The lobby navigates as soon as it receives
       // ROOM_STATE, which creates a brief gap before the room listeners mount.
@@ -307,25 +312,28 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
   })
 }
 
-function refreshRestoredMembershipDetails(io: TypedServer, socket: TypedSocket, roomId: string, userId: string): void {
-  void authService
-    .refreshMissingMembershipDetails(roomId, userId)
-    .then((updatedPlatforms) => {
-      if (updatedPlatforms.length === 0) return
-      io.to(roomId).emit(EVENTS.AUTH_STATUS_UPDATE, authService.getAllPlatformStatus(roomId))
-      const mapping = roomRepo.getSocketMapping(socket.id)
-      if (mapping?.roomId === roomId && mapping.userId === userId) {
-        socket.emit(EVENTS.AUTH_MY_STATUS, authService.getUserAuthStatus(userId, roomId))
-      }
+async function refreshRestoredMembershipDetails(
+  io: TypedServer,
+  socket: TypedSocket,
+  roomId: string,
+  userId: string,
+): Promise<void> {
+  try {
+    const updatedPlatforms = await authService.refreshMissingMembershipDetails(roomId, userId)
+    if (updatedPlatforms.length === 0) return
+    io.to(roomId).emit(EVENTS.AUTH_STATUS_UPDATE, authService.getAllPlatformStatus(roomId))
+    const mapping = roomRepo.getSocketMapping(socket.id)
+    if (mapping?.roomId === roomId && mapping.userId === userId) {
+      socket.emit(EVENTS.AUTH_MY_STATUS, authService.getUserAuthStatus(userId, roomId))
+    }
+  } catch (error) {
+    logger.warn('自动刷新恢复账号的会员详情失败', {
+      event: 'auth.membership_refresh_failed',
+      roomId,
+      userId,
+      error: error instanceof Error ? error.message : String(error),
     })
-    .catch((error) => {
-      logger.warn('自动刷新恢复账号的会员详情失败', {
-        event: 'auth.membership_refresh_failed',
-        roomId,
-        userId,
-        error: error instanceof Error ? error.message : String(error),
-      })
-    })
+  }
 }
 
 // ---------------------------------------------------------------------------

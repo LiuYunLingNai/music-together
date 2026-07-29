@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { getEffectiveQuality } from '../src/services/audioQualityPolicy.js'
+import { getEffectiveQuality, getKugouQualityFallbacks } from '../src/services/audioQualityPolicy.js'
 
 test('selects one provider quality from the highest logged-in membership tier', () => {
   assert.equal(getEffectiveQuality('netease', 'highest', 0), 320)
@@ -10,8 +10,19 @@ test('selects one provider quality from the highest logged-in membership tier', 
   assert.equal(getEffectiveQuality('tencent', 'highest', 2), 'tencent_master')
   assert.equal(getEffectiveQuality('kugou', 'highest', 1), 'kugou_hires')
   assert.equal(getEffectiveQuality('kugou', 'highest', 2), 'kugou_master')
-  assert.equal(getEffectiveQuality('kugou_concept', 'highest', 1), 'kugou_hires')
+  assert.equal(getEffectiveQuality('kugou_concept', 'highest', 1), 999)
   assert.equal(getEffectiveQuality('kugou_concept', 'highest', 2), 'kugou_master')
+})
+
+test('falls back within Kugou before giving up on the platform', () => {
+  assert.deepEqual(getKugouQualityFallbacks('kugou_master'), ['kugou_master', 'kugou_hires', 999, 320, 128])
+  assert.deepEqual(getKugouQualityFallbacks('kugou_hires'), ['kugou_hires', 999, 320, 128])
+  assert.deepEqual(getKugouQualityFallbacks(999), [999, 320, 128])
+})
+
+test('normalizes legacy provider membership codes before applying highest quality', () => {
+  assert.equal(getEffectiveQuality('netease', 'highest', 11 as 0 | 1 | 2), 'netease_jyeffect')
+  assert.equal(getEffectiveQuality('tencent', 'highest', 110 as 0 | 1 | 2), 'tencent_master')
 })
 
 test('caps explicit and cross-platform master preferences at the account tier', () => {

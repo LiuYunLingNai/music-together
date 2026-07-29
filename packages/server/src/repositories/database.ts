@@ -45,6 +45,11 @@ db.exec(`
     chat_history_json TEXT NOT NULL DEFAULT '[]',
     updated_at INTEGER NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS schema_migrations (
+    id TEXT PRIMARY KEY,
+    applied_at INTEGER NOT NULL
+  );
 `)
 
 interface TableColumn {
@@ -66,5 +71,71 @@ ensureColumn('platform_auth', 'vip_type', 'vip_type INTEGER NOT NULL DEFAULT 0')
 ensureColumn('platform_auth', 'vip_label', 'vip_label TEXT')
 ensureColumn('platform_auth', 'vip_level', 'vip_level INTEGER')
 ensureColumn('permanent_rooms', 'chat_history_json', "chat_history_json TEXT NOT NULL DEFAULT '[]'")
+
+const findMigration = db.prepare<[string], { id: string }>('SELECT id FROM schema_migrations WHERE id = ?')
+const recordMigration = db.prepare('INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)')
+
+function runMigrationOnce(id: string, migrate: () => void): void {
+  if (findMigration.get(id)) return
+  db.transaction(() => {
+    if (findMigration.get(id)) return
+    migrate()
+    recordMigration.run(id, Date.now())
+  })()
+}
+
+runMigrationOnce('20260729_normalize_platform_membership', () => {
+  // Older databases persisted raw provider membership codes (notably
+  // Netease 10/11). Runtime policy uses only 0 = none, 1 = VIP, 2 = SVIP.
+  db.prepare(
+    `
+    UPDATE platform_auth
+    SET vip_type = CASE
+      WHEN platform = 'netease' THEN CASE WHEN vip_type = 2 THEN 2 ELSE 1 END
+      ELSE CASE WHEN vip_type >= 2 THEN 2 ELSE 1 END
+    END
+    WHERE vip_type > 0 AND vip_type NOT IN (1, 2)
+  `,
+  ).run()
+
+  // Old builds persisted only a generic label. Clear it once so account
+  // restore fetches the detailed provider label and persists the result.
+  db.prepare(
+    `
+    UPDATE platform_auth
+    SET vip_label = NULL
+    WHERE platform IN ('tencent', 'kugou', 'kugou_concept')
+      AND vip_type > 0
+      AND vip_label IS NOT NULL
+      AND UPPER(TRIM(vip_label)) IN ('VIP', 'SVIP')
+  `,
+  ).run()
+})
+
+// Earlier builds classified the non-paid Concept Edition daily benefit as
+// SVIP. Queue those rows for an authoritative refresh so they receive the
+// corrected listening-VIP tier and FLAC quality cap.
+runMigrationOnce('20260729_reclassify_kugou_concept_listening_vip', () => {
+  db.prepare(
+    `
+    UPDATE platform_auth
+    SET vip_label = NULL
+    WHERE platform = 'kugou_concept' AND vip_type > 0
+  `,
+  ).run()
+})
+
+// vip_type is a provider product code (for example 6), not a normalized
+// VIP/SVIP tier. Revalidate existing standard Kugou rows with explicit SVIP
+// status and expiry fields before using their quality cap.
+runMigrationOnce('20260729_revalidate_kugou_standard_membership', () => {
+  db.prepare(
+    `
+    UPDATE platform_auth
+    SET vip_label = NULL
+    WHERE platform = 'kugou' AND vip_type > 0
+  `,
+  ).run()
+})
 
 export const databasePath = dbPath

@@ -23,7 +23,16 @@ const MEMBERSHIP_QUALITY_CAP: Record<Exclude<MusicSource, 'bilibili'>, Record<Me
   netease: { 0: 320, 1: 'netease_jyeffect', 2: 'netease_master' },
   tencent: { 0: 320, 1: 'tencent_flac', 2: 'tencent_master' },
   kugou: { 0: 320, 1: 'kugou_hires', 2: 'kugou_master' },
-  kugou_concept: { 0: 320, 1: 'kugou_hires', 2: 'kugou_master' },
+  // The daily Concept Edition listening benefit is a non-paid business VIP.
+  // Live provider verification shows it permits FLAC but not viper_clear/tape.
+  kugou_concept: { 0: 320, 1: 999, 2: 'kugou_master' },
+}
+
+export function getKugouQualityFallbacks(requested: AudioQuality): AudioQuality[] {
+  const ladder: AudioQuality[] = [128, 320, 999, 'kugou_hires', 'kugou_master']
+  const exactIndex = ladder.indexOf(requested)
+  const highestIndex = exactIndex >= 0 ? exactIndex : Math.min(ladder.indexOf(qualityForClass('kugou', requestedQualityClass(requested))), ladder.length - 1)
+  return ladder.slice(0, highestIndex + 1).reverse()
 }
 
 type QualityClass = 'standard' | 'higher' | 'high' | 'lossless' | 'hires' | 'vip' | 'svip'
@@ -89,7 +98,12 @@ export function getEffectiveQuality(
   if (source === 'bilibili') return requested
 
   const ladder = PROVIDER_QUALITY_LADDERS[source]
-  const cap = MEMBERSHIP_QUALITY_CAP[source][vipType]
+  // Persisted accounts from older versions used provider-specific numbers
+  // (for example Netease 10/11). Keep the policy total even if one reaches
+  // this function before the account restore path normalizes that value.
+  const normalizedVipType: MembershipTier =
+    source === 'netease' ? (vipType === 2 ? 2 : vipType > 0 ? 1 : 0) : vipType >= 2 ? 2 : vipType > 0 ? 1 : 0
+  const cap = MEMBERSHIP_QUALITY_CAP[source][normalizedVipType]
   const providerSpecific = ladder.includes(requested) ? requested : null
   const desired =
     requested === 'highest' ? cap : (providerSpecific ?? qualityForClass(source, requestedQualityClass(requested)))

@@ -9,6 +9,7 @@ import ncmApi from '@neteasecloudmusicapienhanced/api'
 import * as kugouAuth from './kugouAuthService.js'
 import * as tencentAuth from './tencentAuthService.js'
 import * as bilibiliAuth from './bilibiliAuthService.js'
+import { getKugouQualityFallbacks } from './audioQualityPolicy.js'
 import { config } from '../config.js'
 import { parseCookieString } from '../utils/cookieUtils.js'
 import { logger } from '../utils/logger.js'
@@ -1444,7 +1445,6 @@ class MusicProvider {
       // KuGouMusicApi resolves album_audio_id and the quality-specific hash
       // before calling trackercdn. /play/songinfo rejects a raw hash with 30020.
       const songInfo = await this.getKugouSongInfo(hash)
-      const selected = MusicProvider.selectKugouQuality(hash, quality, songInfo)
       const mid = cookieObj['mid'] || cookieObj['kg_mid'] || kugouAuth.getDeviceMid()
       // A dfid must either be issued by Kugou's device-registration endpoint or
       // be the official anonymous sentinel. A locally generated random dfid is
@@ -1457,100 +1457,110 @@ class MusicProvider {
       const clientVersion = concept
         ? MusicProvider.KUGOU_CONCEPT_TRACKER_CLIENT_VERSION
         : MusicProvider.KUGOU_TRACKER_CLIENT_VERSION
-      const params: Record<string, string | number> = {
-        dfid,
-        mid,
-        uuid: '-',
-        appid: appId,
-        clientver: clientVersion,
-        clienttime,
-        album_id: Number(songInfo?.albumid ?? songInfo?.req_albumid ?? 0),
-        area_code: 1,
-        hash: selected.hash.toLowerCase(),
-        ssa_flag: 'is_fromtrack',
-        version: clientVersion,
-        page_id: concept ? 967177915 : 151369488,
-        quality: selected.quality,
-        album_audio_id: Number(songInfo?.album_audio_id ?? 0),
-        behavior: 'play',
-        pid: concept ? 411 : 2,
-        cmd: 26,
-        pidversion: 3001,
-        IsFreePart: 0,
-        ppage_id: concept ? '356753938,823673182,967485191' : '463467626,350369493,788954147',
-        cdnBackup: 1,
-        module: '',
-      }
-      if (token) params.token = token
-      if (userid) params.userid = userid
+      const attemptedSelections = new Set<string>()
+      for (const fallbackQuality of getKugouQualityFallbacks(quality)) {
+        const selected = MusicProvider.selectKugouQuality(hash, fallbackQuality, songInfo)
+        const selectionKey = `${selected.quality}:${selected.hash.toLowerCase()}`
+        if (attemptedSelections.has(selectionKey)) continue
+        attemptedSelections.add(selectionKey)
 
-      params.key = MusicProvider.md5(
-        `${params.hash}${concept ? MusicProvider.KUGOU_CONCEPT_TRACKER_KEY_SALT : MusicProvider.KUGOU_TRACKER_KEY_SALT}${appId}${mid}${numericUserId}`,
-      )
-      params.signature = MusicProvider.kugouAndroidSignature(params, concept)
-
-      const query = new URLSearchParams(Object.entries(params).map(([key, value]) => [key, String(value)]))
-      const response = await withTimeout<Record<string, any>>(
-        fetch(`https://gateway.kugou.com/v5/url?${query}`, {
-          headers: {
-            'User-Agent': concept
-              ? 'Android16-1070-11440-130-0-DiscoveryDRADProtocol-wifi'
-              : 'Android15-1070-11083-46-0-DiscoveryDRADProtocol-wifi',
-            'x-router': 'trackercdn.kugou.com',
-            dfid,
-            clienttime: String(clienttime),
-            mid,
-            'kg-rc': '1',
-            'kg-thash': '5d816a0',
-            'kg-rec': '1',
-            'kg-rf': 'B9EDA08A64250DEFFBCADDEE00F8F25F',
-          },
-        }).then(async (res) => {
-          if (!res.ok) throw new Error(`HTTP ${res.status}`)
-          return res.json() as Promise<Record<string, any>>
-        }),
-        10_000,
-      )
-
-      if (!response) {
-        logger.warn('酷狗音源接口请求超时，尝试备用接口', { source: 'kugou', urlId: hash })
-        return this.getKugouStreamUrlLegacy(hash, bitrate)
-      }
-
-      const candidates = [response.url, response.backupUrl, response.backup_url]
-      let playUrl = ''
-      for (const candidate of candidates) {
-        if (Array.isArray(candidate)) {
-          playUrl = String(candidate.find(Boolean) || '')
-        } else if (candidate) {
-          playUrl = String(candidate)
-        }
-        if (playUrl) break
-      }
-
-      if (!playUrl) {
-        logger.warn('Kugou tracker returned no playable URL', {
-          status: response.status,
-          errorCode: response.error_code ?? response.errcode,
-          error: response.error ?? response.message,
+        const params: Record<string, string | number> = {
+          dfid,
+          mid,
+          uuid: '-',
+          appid: appId,
+          clientver: clientVersion,
+          clienttime,
+          album_id: Number(songInfo?.albumid ?? songInfo?.req_albumid ?? 0),
+          area_code: 1,
+          hash: selected.hash.toLowerCase(),
+          ssa_flag: 'is_fromtrack',
+          version: clientVersion,
+          page_id: concept ? 967177915 : 151369488,
           quality: selected.quality,
+          album_audio_id: Number(songInfo?.album_audio_id ?? 0),
+          behavior: 'play',
+          pid: concept ? 411 : 2,
+          cmd: 26,
+          pidversion: 3001,
+          IsFreePart: 0,
+          ppage_id: concept ? '356753938,823673182,967485191' : '463467626,350369493,788954147',
+          cdnBackup: 1,
+          module: '',
+        }
+        if (token) params.token = token
+        if (userid) params.userid = userid
+
+        params.key = MusicProvider.md5(
+          `${params.hash}${concept ? MusicProvider.KUGOU_CONCEPT_TRACKER_KEY_SALT : MusicProvider.KUGOU_TRACKER_KEY_SALT}${appId}${mid}${numericUserId}`,
+        )
+        params.signature = MusicProvider.kugouAndroidSignature(params, concept)
+
+        const query = new URLSearchParams(Object.entries(params).map(([key, value]) => [key, String(value)]))
+        const response = await withTimeout<Record<string, any>>(
+          fetch(`https://gateway.kugou.com/v5/url?${query}`, {
+            headers: {
+              'User-Agent': concept
+                ? 'Android16-1070-11440-130-0-DiscoveryDRADProtocol-wifi'
+                : 'Android15-1070-11083-46-0-DiscoveryDRADProtocol-wifi',
+              'x-router': 'trackercdn.kugou.com',
+              dfid,
+              clienttime: String(clienttime),
+              mid,
+              'kg-rc': '1',
+              'kg-thash': '5d816a0',
+              'kg-rec': '1',
+              'kg-rf': 'B9EDA08A64250DEFFBCADDEE00F8F25F',
+            },
+          }).then(async (res) => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`)
+            return res.json() as Promise<Record<string, any>>
+          }),
+          10_000,
+        )
+
+        if (!response) {
+          logger.warn('酷狗音源接口请求超时，尝试较低音质', {
+            source: concept ? 'kugou_concept' : 'kugou',
+            urlId: hash,
+            quality: selected.quality,
+          })
+          continue
+        }
+
+        const candidates = [response.url, response.backupUrl, response.backup_url]
+        let playUrl = ''
+        for (const candidate of candidates) {
+          if (Array.isArray(candidate)) {
+            playUrl = String(candidate.find(Boolean) || '')
+          } else if (candidate) {
+            playUrl = String(candidate)
+          }
+          if (playUrl) break
+        }
+
+        if (!playUrl) {
+          logger.warn('Kugou tracker returned no playable URL; trying lower quality', {
+            status: response.status,
+            errorCode: response.error_code ?? response.errcode,
+            error: response.error ?? response.message,
+            quality: selected.quality,
+          })
+          continue
+        }
+
+        const actualBitrate = normalizeBitrate(response.bitrate ?? response.bitRate) ?? selected.actualBitrate
+        logger.debug('酷狗播放地址解析成功', {
+          source: concept ? 'kugou_concept' : 'kugou',
+          urlId: hash,
+          requestedQuality: quality,
+          actualQuality: selected.actualQuality,
+          actualBitrate,
         })
-        return this.getKugouStreamUrlLegacy(hash, bitrate)
+        return { url: playUrl, actualBitrate, actualQuality: selected.actualQuality }
       }
 
-      // Some Kugou CDN nodes expose a valid HTTP endpoint but present a TLS
-      // certificate for a different hostname. The client routes Kugou streams
-      // through our audio proxy, so retain the upstream protocol here rather
-      // than forcing a TLS connection that will fail certificate validation.
-      const url = playUrl
-      const actualBitrate = normalizeBitrate(response.bitrate ?? response.bitRate) ?? selected.actualBitrate
-      logger.debug('酷狗播放地址解析成功', {
-        source: 'kugou',
-        urlId: hash,
-        actualBitrate,
-        quality: selected.quality,
-      })
-      return { url, actualBitrate, actualQuality: selected.actualQuality }
+      return this.getKugouStreamUrlLegacy(hash, bitrate)
     } catch (err) {
       logger.error('Kugou tracker URL error:', err)
       return this.getKugouStreamUrlLegacy(hash, bitrate)

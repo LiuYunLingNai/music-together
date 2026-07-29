@@ -37,16 +37,15 @@ const PLATFORM_OPTIONS: Record<MusicSource, AudioQualityOption[]> = {
   bilibili: [],
 }
 
-export function getAudioQualityOptions(statuses: PlatformAuthStatus[]): AudioQualityOption[] {
-  const options = [...BASE_OPTIONS]
-  for (const status of statuses) {
-    if (status.hasVip) options.push(...PLATFORM_OPTIONS[status.platform])
-  }
-  if (!options.some((option) => option.value === 999)) {
-    options.push({ value: 999, label: '无损 SQ', description: '需要 VIP 账号' })
-  }
-  options.push({ value: 'highest', label: '尽量高' })
-  return options
+export function getAudioQualityOptions(_statuses: PlatformAuthStatus[]): AudioQualityOption[] {
+  // Room quality is shared by all providers. Provider-specific formats are
+  // selected by the server from `highest`; exposing them here made a Tencent
+  // or Kugou room appear to offer unrelated Netease formats.
+  return [
+    ...BASE_OPTIONS,
+    { value: 999, label: '无损 SQ', description: '需要 VIP 账号' },
+    { value: 'highest', label: '尽量高' },
+  ]
 }
 
 export function getAudioQualityLabel(quality: AudioQuality, statuses: PlatformAuthStatus[] = []): string {

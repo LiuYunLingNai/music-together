@@ -21,6 +21,8 @@ db.prepare('INSERT INTO users (id, nickname, created_at, updated_at, last_seen_a
 
 after(() => {
   authService.cleanupRoom('refresh-room')
+  authService.cleanupRoom('concept-refresh-room')
+  authService.cleanupRoom('standard-refresh-room')
   db.close()
   rmSync(testDataDir, { recursive: true, force: true })
 })
@@ -78,4 +80,87 @@ test('keeps restored account data when membership refresh temporarily fails', as
   assert.equal(status?.loggedIn, true)
   assert.equal(status?.vipType, 1)
   assert.equal(status?.vipLabel, undefined)
+})
+
+test('refreshes a restored Concept Edition account even when its stored tier is zero', async () => {
+  authService.addCookie(
+    'concept-refresh-room',
+    'kugou_concept',
+    'refresh-user',
+    'concept-cookie',
+    '概念版用户',
+    0,
+    true,
+  )
+
+  const refreshed = await authService.refreshMissingMembershipDetails(
+    'concept-refresh-room',
+    'refresh-user',
+    async (platform, cookie) => {
+      assert.equal(platform, 'kugou_concept')
+      assert.equal(cookie, 'concept-cookie')
+      return {
+        ok: true,
+        data: {
+          nickname: '概念版用户',
+          vipType: 1,
+          vipLabel: 'VIP',
+          userId: 123,
+        },
+      }
+    },
+  )
+
+  assert.deepEqual(refreshed, ['kugou_concept'])
+  const status = authService
+    .getUserAuthStatus('refresh-user', 'concept-refresh-room')
+    .find((entry) => entry.platform === 'kugou_concept')
+  assert.equal(status?.vipType, 1)
+  assert.equal(status?.vipLabel, 'VIP')
+})
+
+test('revalidates a detailed standard Kugou account and persists an expired membership', async () => {
+  authService.addCookie(
+    'standard-refresh-room',
+    'kugou',
+    'refresh-user',
+    'standard-cookie',
+    '酷狗用户',
+    2,
+    true,
+    { vipLabel: 'SVIP·Lv5', vipLevel: 5 },
+  )
+  let attempts = 0
+
+  const refreshed = await authService.refreshMissingMembershipDetails(
+    'standard-refresh-room',
+    'refresh-user',
+    async (platform, cookie) => {
+      attempts++
+      assert.equal(platform, 'kugou')
+      assert.equal(cookie, 'standard-cookie')
+      return {
+        ok: true,
+        data: { nickname: '酷狗用户', vipType: 0, userId: 123 },
+      }
+    },
+  )
+
+  assert.deepEqual(refreshed, ['kugou'])
+  const status = authService
+    .getUserAuthStatus('refresh-user', 'standard-refresh-room')
+    .find((entry) => entry.platform === 'kugou')
+  assert.equal(status?.vipType, 0)
+  assert.equal(status?.vipLabel, undefined)
+
+  const repeated = await authService.refreshMissingMembershipDetails(
+    'standard-refresh-room',
+    'refresh-user',
+    async () => {
+      attempts++
+      return { ok: false, reason: 'error' }
+    },
+  )
+  assert.deepEqual(repeated, [])
+  assert.equal(attempts, 1)
 })

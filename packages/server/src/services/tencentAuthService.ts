@@ -18,10 +18,35 @@ interface TencentApiResponse {
 }
 
 interface VipLoginData {
+  vip?: number
+  svip?: number
   identity?: {
     vip?: number
     svip?: number
+    HugeVip?: number
+    level?: number
   }
+}
+
+export function formatTencentVipLabel(vipType: number, vipLevel?: number): string | undefined {
+  if (vipType <= 0) return undefined
+  const tier = vipType >= 2 ? '豪华绿钻' : '绿钻'
+  return vipLevel ? `${tier}·Lv${vipLevel}` : tier
+}
+
+export function parseTencentMembership(vipData: VipLoginData | undefined): {
+  vipType: 0 | 1 | 2
+  vipLabel?: string
+  vipLevel?: number
+} {
+  const identity = vipData?.identity
+  const isEnabled = (...values: unknown[]) => values.some((value) => value === true || Number(value) > 0)
+  const isSvip = isEnabled(vipData?.svip, identity?.svip, identity?.HugeVip)
+  const isVip = isEnabled(vipData?.vip, identity?.vip)
+  const vipType = isSvip ? 2 : isVip ? 1 : 0
+  const rawVipLevel = Number(identity?.level ?? 0)
+  const vipLevel = vipType > 0 && Number.isInteger(rawVipLevel) && rawVipLevel > 0 ? rawVipLevel : undefined
+  return { vipType, vipLabel: formatTencentVipLabel(vipType, vipLevel), vipLevel }
 }
 
 interface ProfileData {
@@ -513,7 +538,7 @@ export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
     const nickname = rawNick
 
     // 检查 VIP 状态
-    let vipType = 0
+    let membership = parseTencentMembership(undefined)
     try {
       const vipData = await tencentApiRequest<VipLoginData>({
         module: 'VipLogin.VipLoginInter',
@@ -522,9 +547,7 @@ export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
         param: {},
       })
       logger.debug('QQ 音乐 VIP 信息响应', { vipData })
-      // vip_login_base 返回的格式中含有 identity.vip 及 identity.svip
-      const isVip = vipData?.identity?.svip ? 2 : vipData?.identity?.vip ? 1 : 0
-      vipType = isVip
+      membership = parseTencentMembership(vipData)
     } catch (err: unknown) {
       logger.error('QQ VIP Check failed:', err instanceof Error ? err.message : String(err))
     }
@@ -533,8 +556,7 @@ export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
       ok: true,
       data: {
         nickname,
-        vipType,
-        vipLabel: vipType === 2 ? 'SVIP' : vipType === 1 ? 'VIP' : undefined,
+        ...membership,
         userId: Number(uin),
       },
     }

@@ -307,49 +307,73 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
         return
       }
 
-      const result = await kugouAuth.claimConceptDailyVip(cookie)
-      if (result.ok) {
-        // Let Kugou apply the benefit, then refresh the room's account state.
-        await new Promise((resolve) => setTimeout(resolve, 1_000))
-        const info = await kugouAuth.conceptAuthProvider.getUserInfo(cookie)
-        if (info.ok) {
-          const currentMapping = getSocketMapping(socket.id)
-          const currentCookie = currentMapping
-            ? authService.getUserCookie(currentMapping.userId, 'kugou_concept', currentMapping.roomId)
-            : null
-          const canApplyRefresh =
-            currentMapping?.roomId === mapping.roomId &&
-            currentMapping.userId === mapping.userId &&
-            currentCookie === cookie
-
-          if (canApplyRefresh) {
-            authService.addCookie(
-              currentMapping.roomId,
-              'kugou_concept',
-              currentMapping.userId,
-              cookie,
-              info.data.nickname,
-              info.data.vipType,
-              true,
-              { vipLabel: info.data.vipLabel, vipLevel: info.data.vipLevel },
-            )
-            upgradeRoomAudioQualityForVip(
-              io,
-              currentMapping.roomId,
-              'kugou_concept',
-              info.data.nickname,
-              info.data.vipType,
-            )
-            broadcastAuthStatus(io, socket, currentMapping)
-          } else {
-            logger.info('领取酷狗概念版权益后用户状态已变化，已跳过房间账号刷新', {
-              event: 'auth.kugou_concept_claim_refresh_skipped',
-              roomId: mapping.roomId,
-              userId: mapping.userId,
-              currentRoomId: currentMapping?.roomId,
-            })
-          }
+      let result = await kugouAuth.claimConceptDailyVip(cookie)
+      const claimAccepted = result.ok
+      let info: Awaited<ReturnType<typeof kugouAuth.conceptAuthProvider.getUserInfo>> | null = null
+      if (claimAccepted) {
+        // The daily benefit is eventually consistent. Do not report success or
+        // overwrite the account with vipType=0 until Kugou confirms it.
+        for (const delayMs of [500, 1_000, 2_000]) {
+          await new Promise((resolve) => setTimeout(resolve, delayMs))
+          info = await kugouAuth.conceptAuthProvider.getUserInfo(cookie)
+          if (info.ok && info.data.vipType > 0) break
         }
+      } else {
+        // The claim endpoint may reject a duplicate claim even though today's
+        // benefit is already active. Query the authoritative membership state.
+        info = await kugouAuth.conceptAuthProvider.getUserInfo(cookie)
+      }
+
+      if (info?.ok && info.data.vipType > 0) {
+        if (!claimAccepted) result = { ok: true, message: '今日概念版畅听 VIP 权益已生效' }
+        const currentMapping = getSocketMapping(socket.id)
+        const currentCookie = currentMapping
+          ? authService.getUserCookie(currentMapping.userId, 'kugou_concept', currentMapping.roomId)
+          : null
+        const canApplyRefresh =
+          currentMapping?.roomId === mapping.roomId &&
+          currentMapping.userId === mapping.userId &&
+          currentCookie === cookie
+
+        if (canApplyRefresh) {
+          authService.addCookie(
+            currentMapping.roomId,
+            'kugou_concept',
+            currentMapping.userId,
+            cookie,
+            info.data.nickname,
+            info.data.vipType,
+            true,
+            { vipLabel: info.data.vipLabel, vipLevel: info.data.vipLevel },
+          )
+          upgradeRoomAudioQualityForVip(
+            io,
+            currentMapping.roomId,
+            'kugou_concept',
+            info.data.nickname,
+            info.data.vipType,
+          )
+          broadcastAuthStatus(io, socket, currentMapping)
+        } else {
+          logger.info('领取酷狗概念版权益后用户状态已变化，已跳过房间账号刷新', {
+            event: 'auth.kugou_concept_claim_refresh_skipped',
+            roomId: mapping.roomId,
+            userId: mapping.userId,
+            currentRoomId: currentMapping?.roomId,
+          })
+        }
+      } else if (claimAccepted) {
+        result = {
+          ok: false,
+          message: '领取接口已返回成功，但酷狗尚未确认畅听 VIP 生效，请稍后重新领取或重新登录概念版',
+        }
+        logger.warn('领取酷狗概念版权益后会员状态未生效', {
+          event: 'auth.kugou_concept_claim_not_effective',
+          roomId: mapping.roomId,
+          userId: mapping.userId,
+          refreshed: Boolean(info?.ok),
+          vipType: info?.ok ? info.data.vipType : null,
+        })
       }
 
       socket.emit(EVENTS.AUTH_CLAIM_KUGOU_CONCEPT_VIP_RESULT, { success: result.ok, message: result.message })

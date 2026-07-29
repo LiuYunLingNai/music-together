@@ -27,6 +27,12 @@ const CONCEPT_ANDROID_SIGNATURE_SALT = 'LnT6xpN3khm36zse0QzvmgTZ3waWdRSA'
 
 type KugouEdition = 'standard' | 'concept'
 
+export function getKugouVipQueryParams(edition: KugouEdition): Record<string, string> {
+  return edition === 'concept'
+    ? { busi_type: 'concept', opt_product_types: 'dvip,qvip', product_type: 'svip' }
+    : { busi_type: 'concept' }
+}
+
 function kugouEditionConfig(edition: KugouEdition) {
   return edition === 'concept'
     ? { appId: CONCEPT_APPID, clientVer: CONCEPT_CLIENTVER, signatureSalt: CONCEPT_ANDROID_SIGNATURE_SALT }
@@ -381,6 +387,113 @@ async function fetchUserDetail(cookie: Record<string, string>, edition: KugouEdi
 
 // UserInfoData 和 GetUserInfoResult 从 authProvider.ts 统一导入
 
+export function formatKugouVipLabel(vipType: number, vipLevel?: number): string | undefined {
+  if (vipType <= 0) return undefined
+  const tier = vipType >= 2 ? 'SVIP' : 'VIP'
+  return vipLevel ? `${tier}·Lv${vipLevel}` : tier
+}
+
+function parseKugouExpiry(value: unknown): number {
+  const text = String(value ?? '').trim()
+  if (!text) return 0
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(text)) {
+    return Date.parse(`${text.replace(' ', 'T')}+08:00`)
+  }
+  const timestamp = Date.parse(text)
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function hasActiveKugouExpiry(data: Record<string, unknown>, fields: string[], now: number): boolean {
+  return fields.some((field) => parseKugouExpiry(data[field]) > now)
+}
+
+export function parseKugouMembership(
+  vipData: Record<string, unknown>,
+  includeBusinessMemberships = true,
+  now = Date.now(),
+): {
+  vipType: 0 | 1 | 2
+  vipLabel?: string
+  vipLevel?: number
+} {
+  const nestedVipInfo =
+    vipData.vipinfo && typeof vipData.vipinfo === 'object'
+      ? (vipData.vipinfo as Record<string, unknown>)
+      : vipData.vip_info && typeof vipData.vip_info === 'object'
+        ? (vipData.vip_info as Record<string, unknown>)
+        : {}
+  const membershipSources = [nestedVipInfo, vipData]
+  const businessMemberships = includeBusinessMemberships
+    ? membershipSources.flatMap((source) =>
+        Array.isArray(source.busi_vip)
+          ? source.busi_vip.filter(
+              (item): item is Record<string, unknown> =>
+                Boolean(item) && typeof item === 'object' && Number((item as Record<string, unknown>).is_vip) === 1,
+            )
+          : [],
+      )
+    : []
+  const hasBusinessVip = businessMemberships.length > 0
+  const hasPaidBusinessSvip = businessMemberships.some(
+    (item) =>
+      String(item.product_type ?? '').toLowerCase() === 'svip' &&
+      (Number(item.is_paid_vip) === 1 || Number(item.purchased_type) > 0 || Number(item.purchased_ios_type) > 0),
+  )
+  const hasRegularVipExpiry = membershipSources.some((source) =>
+    hasActiveKugouExpiry(source, ['vip_end_time', 'vip_y_endtime', 'm_end_time', 'm_y_endtime', 'vip_clearday'], now),
+  )
+  const hasSvipExpiry = membershipSources.some((source) =>
+    hasActiveKugouExpiry(source, ['su_vip_end_time', 'su_vip_y_endtime', 'su_vip_clearday'], now),
+  )
+  const hasProviderVip =
+    membershipSources.some((source) => Number(source.is_vip) === 1) || hasRegularVipExpiry
+  const isVip = hasProviderVip || hasBusinessVip
+  const isSvip =
+    membershipSources.some(
+      (source) =>
+        Number(source.is_svip) === 1 || Number(source.svip_type) > 0 || Number(source.super_vip_type) > 0,
+    ) ||
+    hasSvipExpiry ||
+    hasPaidBusinessSvip
+  const vipType = isSvip ? 2 : isVip ? 1 : 0
+  const rawVipLevel = membershipSources
+    .map((source) => Number(source.vip_level ?? source.svip_level ?? source.level ?? 0))
+    .find((level) => Number.isInteger(level) && level > 0) ?? 0
+  const vipLevel = vipType > 0 && Number.isInteger(rawVipLevel) && rawVipLevel > 0 ? rawVipLevel : undefined
+  const vipLabel = hasBusinessVip && !hasProviderVip && !hasPaidBusinessSvip ? '畅听VIP' : formatKugouVipLabel(vipType, vipLevel)
+  return { vipType, vipLabel, vipLevel }
+}
+
+export function getKugouMembershipResponseData(body: KugouApiResponse): Record<string, unknown> | null {
+  const data = body?.data
+  if (
+    body?.status === 0 ||
+    (typeof body?.error_code === 'number' && body.error_code !== 0) ||
+    !data ||
+    typeof data !== 'object' ||
+    data.errmsg ||
+    data.error_msg
+  ) {
+    return null
+  }
+  return data
+}
+
+export function isKugouInvalidParamsResponse(body: KugouApiResponse): boolean {
+  const data = body?.data
+  const message = String(
+    body?.message ??
+      body?.error_msg ??
+      (data && typeof data === 'object' ? (data.errmsg ?? data.error_msg) : '') ??
+      '',
+  ).toLowerCase()
+  return Number(body?.error_code) === 20017 || message.includes('params invalid')
+}
+
+export function getKugouMembershipRequestEditions(edition: KugouEdition): KugouEdition[] {
+  return edition === 'concept' ? ['concept', 'standard'] : ['standard', 'concept']
+}
+
 /**
  * Validate a Kugou cookie (token+userid) and get VIP info + nickname.
  */
@@ -397,30 +510,38 @@ async function getUserInfoForEdition(cookie: string, edition: KugouEdition): Pro
     }
 
     // Fetch VIP info
-    const body = await kugouRequest({
-      baseURL: 'https://kugouvip.kugou.com',
-      url: '/v1/get_union_vip',
-      params: { busi_type: 'concept' },
-      encryptType: 'android',
-      cookie: { token, userid },
-      edition,
-    })
-
-    if (!body?.data) {
-      logger.warn('Kugou getUserInfo: no data in VIP response', body)
-      return { ok: false, reason: 'expired' }
+    let body: KugouApiResponse | null = null
+    let vipData: Record<string, unknown> | null = null
+    for (const requestEdition of getKugouMembershipRequestEditions(edition)) {
+      body = await kugouRequest({
+        baseURL: 'https://kugouvip.kugou.com',
+        url: '/v1/get_union_vip',
+        params: getKugouVipQueryParams(edition),
+        encryptType: 'android',
+        cookie: { token, userid },
+        edition: requestEdition,
+      })
+      vipData = getKugouMembershipResponseData(body)
+      if (vipData || !isKugouInvalidParamsResponse(body)) break
+      logger.info('Kugou membership request did not match the credential edition; retrying', {
+        accountEdition: edition,
+        requestEdition,
+      })
     }
 
-    const vipData = body.data as Record<string, unknown>
-    const isVip = Number(vipData.is_vip) === 1 || Number(vipData.vip_type) > 0
-    const isSvip =
-      Number(vipData.is_svip) === 1 ||
-      Number(vipData.svip_type) > 0 ||
-      Number(vipData.super_vip_type) > 0 ||
-      Number(vipData.vip_type) >= 2
-    const vipType = isSvip ? 2 : isVip ? 1 : 0
-    const rawVipLevel = Number(vipData.vip_level ?? vipData.level ?? 0)
-    const vipLevel = Number.isInteger(rawVipLevel) && rawVipLevel > 0 ? rawVipLevel : undefined
+    if (!vipData) {
+      logger.warn('Kugou getUserInfo: invalid VIP response', {
+        edition,
+        status: body?.status,
+        errorCode: body?.error_code,
+        message: body?.message ?? body?.error_msg,
+        dataMessage:
+          body?.data && typeof body.data === 'object' ? (body.data.errmsg ?? body.data.error_msg) : undefined,
+      })
+      return { ok: false, reason: 'error' }
+    }
+
+    const membership = parseKugouMembership(vipData, edition === 'concept')
 
     // Fetch nickname (non-blocking — fallback to userid if failed)
     const nickname = await fetchUserDetail({ token, userid }, edition)
@@ -429,9 +550,7 @@ async function getUserInfoForEdition(cookie: string, edition: KugouEdition): Pro
       ok: true,
       data: {
         nickname: nickname || `酷狗用户${userid}`,
-        vipType,
-        vipLabel: vipType === 2 ? 'SVIP' : vipType === 1 ? 'VIP' : undefined,
-        vipLevel,
+        ...membership,
         userId: Number(userid),
       },
     }
@@ -568,7 +687,10 @@ export async function claimConceptDailyVip(cookie: string): Promise<{ ok: boolea
     })
 
     if (upgrade.status === 1) return { ok: true, message: '已领取并升级今日概念版 VIP 权益' }
-    return { ok: true, message: '已领取今日权益，升级结果请以酷狗账号状态为准' }
+    return {
+      ok: false,
+      message: String(upgrade.message || upgrade.error_msg || '今日权益已领取，但升级畅听 VIP 失败'),
+    }
   } catch (err) {
     logger.error('Kugou Concept daily VIP claim failed', err)
     return { ok: false, message: '领取失败，请稍后重试或前往酷狗客户端领取' }

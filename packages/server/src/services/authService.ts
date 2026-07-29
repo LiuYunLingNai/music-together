@@ -53,6 +53,8 @@ function isHigherMembership(candidate: CookieEntry, current: CookieEntry | undef
 /** roomId -> (platform -> list of cookie entries) */
 const roomCookiePool = new Map<string, Map<MusicSource, CookieEntry[]>>()
 const membershipRefreshPool = new Map<string, Promise<boolean>>()
+const membershipRefreshHistory = new Map<string, { cookie: string; refreshedAt: number }>()
+const MEMBERSHIP_REFRESH_COOLDOWN_MS = 60_000
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -114,6 +116,7 @@ export function addCookie(
 }
 
 export function removeCookie(roomId: string, platform: MusicSource, userId: string): boolean {
+  membershipRefreshHistory.delete(`${roomId}:${platform}:${userId}`)
   const removedPersisted = platformAuthRepo.remove(userId, platform)
   const pool = roomCookiePool.get(roomId)
   if (!pool) return removedPersisted
@@ -156,6 +159,13 @@ async function refreshMembershipEntry(
   const refreshKey = `${roomId}:${platform}:${userId}`
   const inFlight = membershipRefreshPool.get(refreshKey)
   if (inFlight) return inFlight
+  const previousRefresh = membershipRefreshHistory.get(refreshKey)
+  if (
+    previousRefresh?.cookie === cookie &&
+    Date.now() - previousRefresh.refreshedAt < MEMBERSHIP_REFRESH_COOLDOWN_MS
+  ) {
+    return false
+  }
 
   const refresh = (async () => {
     try {
@@ -180,13 +190,14 @@ async function refreshMembershipEntry(
         ?.find((entry) => entry.userId === userId)
       // The user may have logged out or replaced the credential while the
       // provider request was in flight. Never restore a stale credential.
-      if (!current || current.cookie !== cookie || current.vipLabel) return false
+      if (!current || current.cookie !== cookie) return false
 
       const userInfo = result.data
       addCookie(roomId, platform, userId, cookie, userInfo.nickname, userInfo.vipType, true, {
         vipLabel: userInfo.vipLabel,
         vipLevel: userInfo.vipLevel,
       })
+      membershipRefreshHistory.set(refreshKey, { cookie, refreshedAt: Date.now() })
       logger.info('已自动刷新恢复账号的会员详情', {
         event: 'auth.membership_refreshed',
         roomId,
@@ -215,7 +226,7 @@ async function refreshMembershipEntry(
   return refresh
 }
 
-/** Refresh legacy restored accounts whose detailed membership fields are empty. */
+/** Refresh restored accounts against the provider before their tier is used. */
 export async function refreshMissingMembershipDetails(
   roomId: string,
   userId: string,
@@ -223,7 +234,7 @@ export async function refreshMissingMembershipDetails(
 ): Promise<MusicSource[]> {
   const candidates = [...(roomCookiePool.get(roomId)?.entries() ?? [])].flatMap(([platform, entries]) =>
     entries
-      .filter((entry) => entry.userId === userId && entry.vipType > 0 && !entry.vipLabel)
+      .filter((entry) => entry.userId === userId && platform !== 'bilibili')
       .map((entry) => ({ platform, cookie: entry.cookie })),
   )
 
@@ -270,6 +281,10 @@ export function replaceUserId(oldUserId: string, newUserId: string): void {
 export function cleanupRoom(roomId: string): void {
   if (roomCookiePool.delete(roomId)) {
     logger.debug('已清理销毁房间的账号凭据池', { roomId })
+  }
+  const prefix = `${roomId}:`
+  for (const key of membershipRefreshHistory.keys()) {
+    if (key.startsWith(prefix)) membershipRefreshHistory.delete(key)
   }
 }
 
