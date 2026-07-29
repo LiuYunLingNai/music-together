@@ -24,7 +24,7 @@ export function PlatformHub() {
   const [cookieDialogPlatform, setCookieDialogPlatform] = useState<MusicSource>('netease')
   const [viewState, setViewState] = useState<ViewState>({ type: 'list' })
 
-  const platforms: MusicSource[] = ['netease', 'tencent', 'kugou']
+  const platforms: MusicSource[] = ['netease', 'tencent', 'kugou', 'bilibili']
 
   // Show "verifying…" only while waiting for the first AUTH_MY_STATUS response.
   // Once the server responds, use the actual status — no more guessing from localStorage.
@@ -105,13 +105,9 @@ export function PlatformHub() {
           onValueChange={(v) => setActivePlatform(v as MusicSource)}
           className="overflow-hidden"
         >
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             {platforms.map((p) => (
-              <TabsTrigger
-                key={p}
-                value={p}
-                className={PLATFORM_COLORS[p]}
-              >
+              <TabsTrigger key={p} value={p} className={PLATFORM_COLORS[p]}>
                 {PLATFORM_SHORT_LABELS[p]}
               </TabsTrigger>
             ))}

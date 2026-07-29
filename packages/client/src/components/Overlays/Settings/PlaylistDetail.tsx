@@ -1,15 +1,17 @@
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
+import { BilibiliMetadataDialog } from '@/components/Overlays/BilibiliMetadataDialog'
 import { VirtualTrackList } from '@/components/VirtualTrackList'
 import { trackKey } from '@/lib/utils'
 import { useRoomStore } from '@/stores/roomStore'
-import type { Playlist, Track } from '@music-together/shared'
+import type { BilibiliMetadataSource, Playlist, Track } from '@music-together/shared'
 import { LIMITS } from '@music-together/shared'
 import { ArrowLeft, ListPlus, Music } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
 const EMPTY_QUEUE: Track[] = []
+type BilibiliQueueAction = 'add' | 'insert'
 
 interface PlaylistDetailProps {
   playlist: Playlist | null
@@ -39,7 +41,9 @@ export function PlaylistDetail({
   onLoadMore,
 }: PlaylistDetailProps) {
   const queue = useRoomStore((s) => s.room?.queue ?? EMPTY_QUEUE)
+  const roomId = useRoomStore((s) => s.room?.id)
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set())
+  const [bilibiliMatch, setBilibiliMatch] = useState<{ track: Track; action: BilibiliQueueAction } | null>(null)
   const queueKeys = useMemo(() => new Set(queue.map(trackKey)), [queue])
 
   const isTrackAdded = useCallback(
@@ -57,6 +61,10 @@ export function PlaylistDetail({
         toast.info(`「${track.title}」已在队列中`)
         return
       }
+      if (track.source === 'bilibili') {
+        setBilibiliMatch({ track, action: 'add' })
+        return
+      }
       onAddTrack(track)
       setAddedIds((prev) => new Set(prev).add(key))
     },
@@ -68,6 +76,10 @@ export function PlaylistDetail({
       const key = trackKey(track)
       if (queueKeys.has(key) || addedIds.has(key)) {
         toast.info(`「${track.title}」已在队列中`)
+        return
+      }
+      if (track.source === 'bilibili') {
+        setBilibiliMatch({ track, action: 'insert' })
         return
       }
       onInsertAfterCurrent?.(track)
@@ -97,6 +109,32 @@ export function PlaylistDetail({
       toast.success(`已添加全部 ${addCount} 首到队列`)
     }
   }, [addCount, uniqueTracks, onAddAll, playlist?.name])
+
+  const applyBilibiliMetadataMatch = useCallback(
+    (metadataTrack: Track, metadataSource: BilibiliMetadataSource) => {
+      if (!bilibiliMatch) return
+      const track = {
+        ...bilibiliMatch.track,
+        metadataSource,
+        lyricId: metadataTrack.lyricId,
+        picId: metadataTrack.picId,
+        cover: metadataTrack.cover || bilibiliMatch.track.cover,
+      }
+      if (bilibiliMatch.action === 'insert') onInsertAfterCurrent?.(track)
+      else onAddTrack(track)
+      setAddedIds((prev) => new Set(prev).add(trackKey(track)))
+      setBilibiliMatch(null)
+    },
+    [bilibiliMatch, onAddTrack, onInsertAfterCurrent],
+  )
+
+  const skipBilibiliMetadataMatch = useCallback(() => {
+    if (!bilibiliMatch) return
+    if (bilibiliMatch.action === 'insert') onInsertAfterCurrent?.(bilibiliMatch.track)
+    else onAddTrack(bilibiliMatch.track)
+    setAddedIds((prev) => new Set(prev).add(trackKey(bilibiliMatch.track)))
+    setBilibiliMatch(null)
+  }, [bilibiliMatch, onAddTrack, onInsertAfterCurrent])
 
   // Button label
   let addAllLabel: string
@@ -158,6 +196,14 @@ export function PlaylistDetail({
         emptyIcon={<Music className="h-8 w-8" />}
         emptyMessage="歌单为空"
         className="border-0 rounded-none"
+      />
+
+      <BilibiliMetadataDialog
+        track={bilibiliMatch?.track ?? null}
+        roomId={roomId}
+        onOpenChange={(open) => !open && setBilibiliMatch(null)}
+        onSelect={applyBilibiliMetadataMatch}
+        onSkip={skipBilibiliMetadataMatch}
       />
     </div>
   )

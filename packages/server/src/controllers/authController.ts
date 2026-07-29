@@ -14,10 +14,10 @@ function getSocketMapping(socketId: string) {
 }
 
 /** 支持 QR 扫码登录的平台集合 */
-const QR_PLATFORMS = new Set<MusicSource>(['netease', 'kugou', 'tencent'])
+const QR_PLATFORMS = new Set<MusicSource>(['netease', 'kugou', 'tencent', 'bilibili'])
 
 /** 支持 Cookie 登录的平台集合 */
-const VALID_PLATFORMS = new Set<MusicSource>(['netease', 'tencent', 'kugou'])
+const VALID_PLATFORMS = new Set<MusicSource>(['netease', 'tencent', 'kugou', 'bilibili'])
 
 export function registerAuthController(io: TypedServer, socket: TypedSocket) {
   // 防止同一 QR 会话重复处理 803 成功状态
@@ -188,7 +188,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
           platform,
           cookie,
         })
-      } else if (platform === 'netease' && infoResult.reason === 'expired') {
+      } else if ((platform === 'netease' || platform === 'bilibili') && infoResult.reason === 'expired') {
         // 仅网易云：明确过期时拒绝保存
         socket.emit(EVENTS.AUTH_SET_COOKIE_RESULT, {
           success: false,

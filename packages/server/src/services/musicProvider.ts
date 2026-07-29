@@ -8,6 +8,7 @@ import pLimit from 'p-limit'
 import ncmApi from '@neteasecloudmusicapienhanced/api'
 import * as kugouAuth from './kugouAuthService.js'
 import * as tencentAuth from './tencentAuthService.js'
+import * as bilibiliAuth from './bilibiliAuthService.js'
 import { config } from '../config.js'
 import { parseCookieString } from '../utils/cookieUtils.js'
 import { logger } from '../utils/logger.js'
@@ -2307,6 +2308,33 @@ class MusicProvider {
     cookie?: string | null,
     type: 'playlist' | 'album' = 'playlist',
   ): Promise<{ tracks: Track[]; total: number; hasMore: boolean }> {
+    if (source === 'bilibili') {
+      if (type !== 'playlist' || !cookie) return { tracks: [], total: 0, hasMore: false }
+      // Bilibili's favorite-resource endpoint accepts at most 20 videos per
+      // request. Native clients request 100 by default, which Bilibili rejects
+      // as an invalid parameter and previously surfaced as an empty folder.
+      const pageSize = Math.min(limit, 20)
+      const page = Math.floor(offset / pageSize) + 1
+      const result = await bilibiliAuth.getFavoriteVideos(playlistId, page, pageSize, cookie)
+      const tracks: Track[] = result.videos.map((video) => {
+        const cover = normalizeBilibiliCoverUrl(video.cover)
+        return {
+          id: nanoid(),
+          source: 'bilibili',
+          sourceId: video.bvid,
+          urlId: video.bvid,
+          title: video.title,
+          artist: [video.author],
+          album: 'Bilibili 收藏夹',
+          duration: video.duration,
+          cover,
+          bilibiliCover: cover,
+        }
+      })
+      this.registerTracks(tracks)
+      return { tracks, total: result.total, hasMore: offset + tracks.length < result.total }
+    }
+
     const { ids, total } = await this.fetchFullPlaylist(source, playlistId, playlistTotal, cookie, type)
     if (total === 0) return { tracks: [], total: 0, hasMore: false }
 
