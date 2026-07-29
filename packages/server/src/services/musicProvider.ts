@@ -800,7 +800,11 @@ class MusicProvider {
       const fallback = await this.fetchBilibiliJson(
         `https://api.bilibili.com/x/player/playurl?${fallbackParams}`,
         `https://www.bilibili.com/video/${bvid}/`,
-        requestCookie,
+        // A valid signed-in Cookie can still receive Bilibili's -351 risk
+        // response on the legacy endpoint. This fallback is only for public
+        // streams after the authenticated WBI request found no audio, so make
+        // it anonymous instead of letting one account's device fingerprint
+        // turn a playable public video into a hard failure.
       )
       const fallbackCandidates = getUsableCandidates(fallback)
       if (fallback?.code === 0 && fallbackCandidates.length > 0) {
