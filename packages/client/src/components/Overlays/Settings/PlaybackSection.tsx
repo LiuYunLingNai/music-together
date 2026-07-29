@@ -52,7 +52,7 @@ export function PlaybackSection() {
 
         <SettingRow
           label="自动变速校准"
-          description="开启后会在不改变音高的前提下，以最多 ±1% 的速度差平滑消除客户端间的微小时间偏移。关闭后始终以 1.0× 原速播放，并可单独选择是否在偏差过大时直接定位同步。"
+          description="开启后会在不改变音高的前提下，以最多 ±1% 的速度差平滑消除客户端间的微小时间偏移。关闭后始终以 1.0× 原速播放，并可单独选择是否在偏差过大时直接定位同步。但是开启后有可能导致音质变差。"
           onReset={
             s.playbackTempoSyncEnabled !== s.playbackTempoSyncEnabledDefault
               ? s.resetPlaybackTempoSyncEnabled
@@ -69,7 +69,7 @@ export function PlaybackSection() {
         {!s.playbackTempoSyncEnabled && (
           <SettingRow
             label="大偏差直接同步"
-            description="自动变速关闭时，平滑偏差连续两次超过动态阈值后直接定位同步。阈值最低为 500 ms，高延迟时会提高到中位 RTT + 250 ms。"
+            description="自动变速关闭时，平滑偏差连续两次超过动态阈值后直接定位同步。阈值最低为 500 ms，高延迟时会提高到中位 RTT + 250 ms。如果你的网络环境(延迟)不好 开启后可能导致一直同步导致体验不佳。"
             onReset={
               s.playbackHardSeekSyncEnabled !== s.playbackHardSeekSyncEnabledDefault
                 ? s.resetPlaybackHardSeekSyncEnabled
