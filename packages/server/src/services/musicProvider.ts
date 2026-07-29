@@ -11,6 +11,12 @@ import * as tencentAuth from './tencentAuthService.js'
 import * as bilibiliAuth from './bilibiliAuthService.js'
 import { getKugouQualityFallbacks } from './audioQualityPolicy.js'
 import { collectBilibiliAudioCandidates, selectBilibiliAudioCandidate } from './bilibiliAudioQuality.js'
+import {
+  collectKugouV6Goods,
+  kugouProviderQualityToAudioQuality,
+  selectKugouV6Good,
+} from './kugouAudioQuality.js'
+import { registerKugouEncryptedAudio, type KugouDecryptedFormat } from './kugouEncryptedAudio.js'
 import { config } from '../config.js'
 import { parseCookieString } from '../utils/cookieUtils.js'
 import { logger } from '../utils/logger.js'
@@ -1452,13 +1458,17 @@ class MusicProvider {
     return crypto.createHash('md5').update(value).digest('hex')
   }
 
-  private static kugouAndroidSignature(params: Record<string, string | number>, concept = false): string {
+  private static kugouAndroidSignature(
+    params: Record<string, string | number>,
+    concept = false,
+    body = '',
+  ): string {
     const joined = Object.keys(params)
       .sort()
       .map((key) => `${key}=${params[key]}`)
       .join('')
     return MusicProvider.md5(
-      `${concept ? MusicProvider.KUGOU_CONCEPT_ANDROID_SIGNATURE_SALT : MusicProvider.KUGOU_ANDROID_SIGNATURE_SALT}${joined}${concept ? MusicProvider.KUGOU_CONCEPT_ANDROID_SIGNATURE_SALT : MusicProvider.KUGOU_ANDROID_SIGNATURE_SALT}`,
+      `${concept ? MusicProvider.KUGOU_CONCEPT_ANDROID_SIGNATURE_SALT : MusicProvider.KUGOU_ANDROID_SIGNATURE_SALT}${joined}${body}${concept ? MusicProvider.KUGOU_CONCEPT_ANDROID_SIGNATURE_SALT : MusicProvider.KUGOU_ANDROID_SIGNATURE_SALT}`,
     )
   }
 
@@ -1487,7 +1497,7 @@ class MusicProvider {
     actualQuality: AudioQuality
   } {
     if (requested === 'kugou_master') {
-      return { hash, quality: 'viper_tape', actualBitrate: 999, actualQuality: 'kugou_master' }
+      return { hash, quality: 'viper_tape', actualBitrate: 320, actualQuality: 'kugou_master' }
     }
     if (requested === 'kugou_hires') {
       return { hash, quality: 'viper_clear', actualBitrate: 999, actualQuality: 'kugou_hires' }
@@ -1513,6 +1523,7 @@ class MusicProvider {
     quality: AudioQuality,
     cookie?: string,
     concept = false,
+    vipType = 0,
   ): Promise<CachedStreamUrl | null> {
     const bitrate = qualityToBitrate(quality)
     const cookieObj = cookie ? parseCookieString(cookie) : {}
@@ -1520,7 +1531,7 @@ class MusicProvider {
     const userid = cookieObj['userid'] || ''
 
     if (!token || !userid) {
-      logger.warn('Kugou URL: no valid VIP cookie, VIP songs will fail')
+      logger.warn('酷狗音源解析未找到有效会员凭证，会员歌曲可能无法播放')
     }
 
     try {
@@ -1537,6 +1548,165 @@ class MusicProvider {
 
       const appId = concept ? MusicProvider.KUGOU_CONCEPT_APP_ID : MusicProvider.KUGOU_APP_ID
       const clientVersion = concept
+        ? MusicProvider.KUGOU_CONCEPT_CLIENT_VERSION
+        : 20489
+
+      const v6Body = {
+        area_code: '1',
+        behavior: 'play',
+        qualities: ['128', '320', 'flac', 'high', 'multitrack', 'viper_atmos', 'viper_tape', 'viper_clear', 'super'],
+        resource: {
+          // v6 rejects a JSON number here with error 20010 even though the v5
+          // endpoint accepts one.
+          album_audio_id: String(songInfo?.album_audio_id ?? 0),
+          collect_list_id: '3',
+          collect_time: Date.now(),
+          hash,
+          id: 0,
+          page_id: 1,
+          type: 'audio',
+        },
+        token,
+        tracker_param: {
+          all_m: 1,
+          auth: '',
+          is_free_part: 0,
+          key: MusicProvider.md5(
+            `${hash}${concept ? MusicProvider.KUGOU_CONCEPT_TRACKER_KEY_SALT : MusicProvider.KUGOU_TRACKER_KEY_SALT}${appId}${mid}${numericUserId}`,
+          ),
+          module_id: 0,
+          need_climax: 1,
+          need_xcdn: 1,
+          open_time: '',
+          pid: concept ? '411' : '2',
+          pidversion: '3001',
+          priv_vip_type: '6',
+          viptoken: cookieObj['vip_token'] || '',
+        },
+        userid: String(numericUserId),
+        vip: Math.max(0, Math.min(2, Math.trunc(vipType))),
+      }
+      const v6BodyText = JSON.stringify(v6Body)
+      const v6Params: Record<string, string | number> = {
+        dfid,
+        mid,
+        uuid: '-',
+        appid: appId,
+        clientver: clientVersion,
+        clienttime,
+      }
+      if (token) v6Params.token = token
+      if (userid) v6Params.userid = userid
+      v6Params.signature = MusicProvider.kugouAndroidSignature(v6Params, concept, v6BodyText)
+      const v6Query = new URLSearchParams(Object.entries(v6Params).map(([key, value]) => [key, String(value)]))
+
+      try {
+        const v6Response = await withTimeout<Record<string, unknown>>(
+          fetch(`https://tracker.kugou.com/v6/priv_url?${v6Query}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'User-Agent': concept
+                ? 'Android16-1070-11440-130-0-DiscoveryDRADProtocol-wifi'
+                : 'Android15-1070-11083-46-0-DiscoveryDRADProtocol-wifi',
+              dfid,
+              clienttime: String(clienttime),
+              mid,
+              'kg-rc': '1',
+              'kg-thash': '5d816a0',
+              'kg-rec': '1',
+              'kg-rf': 'B9EDA08A64250DEFFBCADDEE00F8F25F',
+            },
+            body: v6BodyText,
+          }).then(async (res) => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`)
+            return res.json() as Promise<Record<string, unknown>>
+          }),
+          10_000,
+        )
+
+        if (v6Response) {
+          const selected = selectKugouV6Good(collectKugouV6Goods(v6Response), quality)
+          if (selected) {
+            let playUrl = selected.plainUrl
+            let fileSize = selected.fileSize
+            let streamFormat = String(selected.raw.info?.extname ?? '').toLowerCase().replace(/^\./, '')
+            let encrypted = false
+
+            if (!playUrl && selected.encryptedUrl && selected.ekey) {
+              const decryptedFormat: KugouDecryptedFormat | null =
+                selected.encryptedExtension === 'mflac'
+                  ? 'flac'
+                  : selected.encryptedExtension === 'mgg'
+                    ? 'ogg'
+                    : null
+              if (decryptedFormat) {
+                try {
+                  registerKugouEncryptedAudio(
+                    selected.encryptedUrl,
+                    selected.ekey,
+                    decryptedFormat,
+                    selected.encryptedFileSize,
+                  )
+                  playUrl = selected.encryptedUrl
+                  fileSize = selected.encryptedFileSize
+                  streamFormat = decryptedFormat
+                  encrypted = true
+                } catch (err) {
+                  // v6 occasionally returns an ekey envelope used by the
+                  // mobile player rather than the public QMC2 file format.
+                  // Never return an undecodable URL; v5 below can still yield
+                  // a plain CDN URL for the same quality.
+                  logger.debug('酷狗 v6 加密密钥格式暂不支持，正在尝试 v5 回退', {
+                    source: concept ? 'kugou_concept' : 'kugou',
+                    urlId: hash,
+                    requestedQuality: quality,
+                    providerQuality: selected.quality,
+                    encryptedExtension: selected.encryptedExtension,
+                    err,
+                  })
+                }
+              }
+            }
+
+            if (playUrl) {
+              if (!streamFormat) {
+                const extension = new URL(playUrl).pathname.split('.').pop()?.toLowerCase()
+                streamFormat = extension && extension.length <= 8 ? extension : 'unknown'
+              }
+              const actualQuality = kugouProviderQualityToAudioQuality(selected.quality)
+              logger.debug('酷狗 v6 音源解析成功', {
+                source: concept ? 'kugou_concept' : 'kugou',
+                urlId: hash,
+                requestedQuality: quality,
+                providerQuality: selected.quality,
+                actualQuality,
+                actualBitrate: selected.bitrate,
+                providerFormat: streamFormat,
+                fileSize,
+                encrypted,
+              })
+              return {
+                url: playUrl,
+                actualBitrate: selected.bitrate,
+                actualQuality,
+                providerFormat: `${selected.quality}/${streamFormat}${encrypted ? ' (QMC2)' : ''}`,
+                fileSize,
+              }
+            }
+          }
+        }
+      } catch (err) {
+        logger.warn('酷狗 v6 音源接口失败，正在尝试 v5 回退', {
+          source: concept ? 'kugou_concept' : 'kugou',
+          urlId: hash,
+          requestedQuality: quality,
+          err,
+        })
+      }
+
+      // v5 remains a compatibility fallback for transient v6/provider errors.
+      const v5ClientVersion = concept
         ? MusicProvider.KUGOU_CONCEPT_TRACKER_CLIENT_VERSION
         : MusicProvider.KUGOU_TRACKER_CLIENT_VERSION
       const attemptedSelections = new Set<string>()
@@ -1551,13 +1721,13 @@ class MusicProvider {
           mid,
           uuid: '-',
           appid: appId,
-          clientver: clientVersion,
+          clientver: v5ClientVersion,
           clienttime,
           album_id: Number(songInfo?.albumid ?? songInfo?.req_albumid ?? 0),
           area_code: 1,
           hash: selected.hash.toLowerCase(),
           ssa_flag: 'is_fromtrack',
-          version: clientVersion,
+          version: v5ClientVersion,
           page_id: concept ? 967177915 : 151369488,
           quality: selected.quality,
           album_audio_id: Number(songInfo?.album_audio_id ?? 0),
@@ -1622,7 +1792,7 @@ class MusicProvider {
         }
 
         if (!playUrl) {
-          logger.warn('Kugou tracker returned no playable URL; trying lower quality', {
+          logger.warn('酷狗音源接口未返回可播放地址，正在尝试较低音质', {
             status: response.status,
             errorCode: response.error_code ?? response.errcode,
             error: response.error ?? response.message,
@@ -1644,7 +1814,7 @@ class MusicProvider {
 
       return this.getKugouStreamUrlLegacy(hash, bitrate)
     } catch (err) {
-      logger.error('Kugou tracker URL error:', err)
+      logger.error('酷狗音源地址解析失败', err)
       return this.getKugouStreamUrlLegacy(hash, bitrate)
     }
   }
@@ -1703,7 +1873,7 @@ class MusicProvider {
         8_000,
       )
       if (!cdnRes || cdnRes.status !== 2) {
-        logger.warn('Kugou legacy CDN: no URL (status=' + cdnRes?.status + ')')
+        logger.warn('酷狗旧版音源接口未返回地址', { status: cdnRes?.status })
         return null
       }
 
@@ -1717,7 +1887,7 @@ class MusicProvider {
       logger.debug('酷狗备用播放地址解析成功', { source: 'kugou', urlId: hash, actualBitrate })
       return { url: urlStr, actualBitrate }
     } catch (err) {
-      logger.error('Kugou legacy URL error:', err)
+      logger.error('酷狗旧版音源地址解析失败', err)
       return null
     }
   }
@@ -1898,6 +2068,7 @@ class MusicProvider {
     quality: AudioQuality = 320,
     cookie?: string,
     forceRefresh = false,
+    vipType = 0,
   ): Promise<StreamUrlResult | null> {
     const bitrate = qualityToBitrate(quality)
     const qualityCacheKey = String(quality)
@@ -1951,7 +2122,7 @@ class MusicProvider {
       // Kugou: use native API that properly handles VIP authentication.
       // Concept Edition has its own app ID, signature salt and tracker params.
       if (source === 'kugou' || source === 'kugou_concept') {
-        const result = await this.getKugouStreamUrl(urlId, quality, cookie, source === 'kugou_concept')
+        const result = await this.getKugouStreamUrl(urlId, quality, cookie, source === 'kugou_concept', vipType)
         if (result) {
           if (!cookie) {
             this.streamUrlCache.set(`${source}:${urlId}:${qualityCacheKey}`, result)

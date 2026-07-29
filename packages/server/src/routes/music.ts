@@ -13,6 +13,11 @@ import { musicProvider } from '../services/musicProvider.js'
 import * as authService from '../services/authService.js'
 import { roomRepo } from '../repositories/roomRepository.js'
 import { logger } from '../utils/logger.js'
+import {
+  createKugouDecryptStream,
+  getKugouEncryptedAudio,
+  kugouAudioContentType,
+} from '../services/kugouEncryptedAudio.js'
 
 const router: RouterType = Router()
 
@@ -309,6 +314,7 @@ router.get('/kugou-audio-proxy', async (req: Request, res: Response) => {
   req.once('aborted', () => controller.abort())
 
   try {
+    const encryptedAudio = getKugouEncryptedAudio(audioUrl)
     const range = req.headers.range
     const headers = {
       Accept: '*/*',
@@ -338,7 +344,7 @@ router.get('/kugou-audio-proxy', async (req: Request, res: Response) => {
       return
     }
     if (!upstream.ok && upstream.status !== 206) {
-      logger.warn('Kugou audio proxy upstream request failed', { status: upstream.status })
+      logger.warn('酷狗音频代理的上游请求失败', { status: upstream.status })
       res.status(upstream.status).json({ error: 'Kugou audio request failed' })
       return
     }
@@ -347,18 +353,30 @@ router.get('/kugou-audio-proxy', async (req: Request, res: Response) => {
       return
     }
 
-    for (const header of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'content-encoding']) {
+    for (const header of ['content-length', 'content-range', 'accept-ranges', 'content-encoding']) {
       const value = upstream.headers.get(header)
       if (value) res.setHeader(header, value)
     }
+    const contentType = encryptedAudio
+      ? kugouAudioContentType(encryptedAudio.format)
+      : upstream.headers.get('content-type') || 'application/octet-stream'
+    res.setHeader('Content-Type', contentType)
     res.setHeader('Cache-Control', 'private, no-store')
     res.setHeader('Access-Control-Allow-Origin', '*')
     res.status(upstream.status)
 
-    await pipeline(Readable.fromWeb(upstream.body as unknown as import('node:stream/web').ReadableStream), res)
+    const source = Readable.fromWeb(upstream.body as unknown as import('node:stream/web').ReadableStream)
+    if (encryptedAudio) {
+      const contentRange = upstream.headers.get('content-range')
+      const rangeStart = contentRange?.match(/^bytes (\d+)-\d+\/\d+$/i)?.[1]
+      const startOffset = rangeStart ? Number(rangeStart) : 0
+      await pipeline(source, createKugouDecryptStream(encryptedAudio.cipher, startOffset), res)
+    } else {
+      await pipeline(source, res)
+    }
   } catch (err) {
     if (controller.signal.aborted) return
-    logger.error('Kugou audio proxy failed', err)
+    logger.error('酷狗音频代理失败', err)
     if (!res.headersSent) res.status(502).json({ error: 'Kugou audio proxy failed' })
     else res.destroy(err instanceof Error ? err : undefined)
   }

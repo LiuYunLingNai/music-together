@@ -122,8 +122,10 @@ export function getEffectiveQuality(
     source === 'netease' ? (vipType === 2 ? 2 : vipType > 0 ? 1 : 0) : vipType >= 2 ? 2 : vipType > 0 ? 1 : 0
   const cap = MEMBERSHIP_QUALITY_CAP[source][normalizedVipType]
   const providerSpecific = ladder.includes(requested) ? requested : null
+  const highest =
+    (source === 'kugou' || source === 'kugou_concept') && normalizedVipType >= 2 ? 'kugou_hires' : cap
   const desired =
-    requested === 'highest' ? cap : (providerSpecific ?? qualityForClass(source, requestedQualityClass(requested)))
+    requested === 'highest' ? highest : (providerSpecific ?? qualityForClass(source, requestedQualityClass(requested)))
   return ladder[Math.min(ladder.indexOf(desired), ladder.indexOf(cap))]
 }
 

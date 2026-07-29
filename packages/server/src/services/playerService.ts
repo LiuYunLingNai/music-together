@@ -113,7 +113,7 @@ function formatAudioQuality(bitrate: AudioQuality | number | null): string {
     tencent_flac: '无损',
     tencent_master: '臻品母带',
     kugou_hires: '酷狗 Hi-Res',
-    kugou_master: '酷狗臻品母带',
+    kugou_master: '酷狗蝰蛇母带 2.0',
     bilibili_64: 'B站 64K',
     bilibili_132: 'B站 132K',
     bilibili_192: 'B站 192K',
@@ -176,7 +176,7 @@ async function resolveStreamUrl(
       vipType,
     })
   }
-  const result = await musicProvider.getStreamInfo(source, urlId, attemptedBitrate, cookie, forceRefresh)
+  const result = await musicProvider.getStreamInfo(source, urlId, attemptedBitrate, cookie, forceRefresh, vipType)
   return result ? { ...result, attemptedBitrate } : null
 }
 
