@@ -3,6 +3,53 @@ import type { Playlist } from '@music-together/shared'
 import type { GetUserInfoResult } from './authProvider.js'
 import { logger } from '../utils/logger.js'
 
+interface NeteaseVipInfoApi {
+  vip_info_v2(params: { uid: number; cookie: string; timestamp: number }): Promise<{
+    body?: { data?: Record<string, unknown> }
+  }>
+}
+
+const NETEASE_VIP_LEVEL_NAMES: Record<number, string> = {
+  1: '壹',
+  2: '贰',
+  3: '叁',
+  4: '肆',
+  5: '伍',
+  6: '陆',
+  7: '柒',
+}
+
+export function formatNeteaseVipLabel(vipType: number, vipLevel?: number): string | undefined {
+  if (vipType <= 0) return undefined
+  const tier = vipType >= 2 ? 'SVIP' : 'VIP'
+  const level = vipLevel ? NETEASE_VIP_LEVEL_NAMES[vipLevel] : undefined
+  return level ? `${tier}·${level}` : tier
+}
+
+export function parseNeteaseMembership(
+  profileVipType: number,
+  vipData: Record<string, unknown> | undefined,
+  now = Date.now(),
+): { vipType: 0 | 1 | 2; vipLabel?: string; vipLevel?: number } {
+  const redplusValue = vipData?.redplus ?? vipData?.redPlus
+  const redplus =
+    redplusValue && typeof redplusValue === 'object' ? (redplusValue as Record<string, unknown>) : undefined
+  const expireTime = Number(redplus?.expireTime ?? redplus?.expire_time ?? 0)
+  const isSvip =
+    Boolean(redplus) &&
+    Number(redplus?.vipCode ?? redplus?.vip_code ?? 0) > 0 &&
+    (expireTime > now || redplus?.isVip === true || Number(redplus?.vipStatus ?? 0) === 1)
+  const rawVipLevel = Number(vipData?.redVipLevel ?? vipData?.red_vip_level ?? 0)
+  const vipType = isSvip ? 2 : profileVipType > 0 ? 1 : 0
+  const vipLevel = vipType > 0 && Number.isInteger(rawVipLevel) && rawVipLevel > 0 ? rawVipLevel : undefined
+
+  return {
+    vipType,
+    vipLabel: formatNeteaseVipLabel(vipType, vipLevel),
+    vipLevel,
+  }
+}
+
 /**
  * 网易云音乐认证服务
  * 封装 @neteasecloudmusicapienhanced/api 实现 QR 登录和 Cookie 验证
@@ -90,14 +137,25 @@ export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
       return { ok: false, reason: 'expired' }
     }
 
-    // vipType: 0=无, 1=VIP, 10=黑胶VIP, 11=黑胶VIP (alias)
-    const vipType = profile.vipType ?? 0
+    const profileVipType = Number(profile.vipType ?? 0)
+    let vipData: Record<string, unknown> | undefined
+    try {
+      const vipInfoApi = ncmApi as unknown as NeteaseVipInfoApi
+      const vipRes = await vipInfoApi.vip_info_v2({ uid: Number(profile.userId ?? 0), cookie, timestamp: Date.now() })
+      vipData = vipRes?.body?.data
+    } catch (err) {
+      // Membership detail failure must not invalidate an otherwise valid login.
+      logger.warn('Netease SVIP status check failed', { err })
+    }
+    const { vipType, vipLabel, vipLevel } = parseNeteaseMembership(profileVipType, vipData)
 
     return {
       ok: true,
       data: {
         nickname: profile.nickname || 'Unknown',
         vipType,
+        vipLabel,
+        vipLevel,
         userId: profile.userId ?? 0,
       },
     }

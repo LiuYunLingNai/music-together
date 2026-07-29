@@ -24,6 +24,7 @@ interface BilibiliNavData {
   mid?: number
   uname?: string
   vipStatus?: number
+  vipType?: number
 }
 
 interface BilibiliFavoriteFolder {
@@ -185,11 +186,13 @@ export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
     const user = body.data
     if (!response.ok || body.code !== 0 || !user?.isLogin || !user.mid) return { ok: false, reason: 'expired' }
 
+    const vipType = user.vipStatus ? 1 : 0
     return {
       ok: true,
       data: {
         nickname: user.uname || 'B站用户',
-        vipType: user.vipStatus ? 1 : 0,
+        vipType,
+        vipLabel: vipType ? (user.vipType === 2 ? 'VIP · 年度大会员' : 'VIP · 大会员') : undefined,
         userId: user.mid,
       },
     }

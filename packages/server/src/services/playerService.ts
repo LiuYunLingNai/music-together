@@ -13,6 +13,7 @@ import { config } from '../config.js'
 import { logger } from '../utils/logger.js'
 import type { RoomData } from '../repositories/types.js'
 import type { TypedServer, TypedSocket } from '../middleware/types.js'
+import { getEffectiveQuality, providerQualityRank, type MembershipTier } from './audioQualityPolicy.js'
 
 // ---------------------------------------------------------------------------
 // Per-room mutex for playTrackInRoom (prevents concurrent execution)
@@ -79,21 +80,6 @@ function scheduled(ps: PlayState, roomId: string, scheduleTime?: number): Schedu
 // Audio quality fallback
 // ---------------------------------------------------------------------------
 
-/** Ordered fallback bitrates for each quality tier */
-type BitrateQuality = 128 | 192 | 320 | 999
-
-const BITRATE_FALLBACKS: Record<BitrateQuality, BitrateQuality[]> = {
-  999: [320, 192, 128],
-  320: [192, 128],
-  192: [128],
-  128: [],
-}
-
-const QUALITY_FALLBACKS: Partial<Record<AudioQuality, AudioQuality[]>> = {
-  tencent_master: ['tencent_flac', 320, 192, 128],
-  tencent_flac: [320, 192, 128],
-}
-
 interface ResolvedStreamUrl {
   url: string
   /** Quality tier attempted by our fallback chain. */
@@ -114,15 +100,21 @@ const SOURCE_LABELS: Record<MusicSource, string> = {
   bilibili: 'B站',
 }
 
-function qualityToBitrate(quality: AudioQuality): BitrateQuality {
-  return typeof quality === 'number' ? quality : 999
-}
-
 function formatAudioQuality(bitrate: AudioQuality | number | null): string {
   if (bitrate === null) return '未知（上游未返回）'
-  if (bitrate === 'tencent_master') return 'QQ 臻品母带'
-  if (bitrate === 'tencent_flac') return 'QQ 无损'
-  if (typeof bitrate === 'string') return bitrate
+  const labels: Partial<Record<AudioQuality, string>> = {
+    highest: '尽量高',
+    netease_dolby: '杜比全景声',
+    netease_hires: 'Hi-Res',
+    netease_jyeffect: '高清臻音',
+    netease_master: '超清母带',
+    netease_spatial: '沉浸环绕声',
+    tencent_flac: '无损',
+    tencent_master: '臻品母带',
+    kugou_hires: '酷狗 Hi-Res',
+    kugou_master: '酷狗臻品母带',
+  }
+  if (typeof bitrate === 'string') return labels[bitrate] ?? bitrate
   if (bitrate === 999) return '无损'
   return `${bitrate} kbps`
 }
@@ -143,21 +135,23 @@ function formatDuration(seconds: number): string {
   return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`
 }
 
-function isQualityDowngraded(requested: AudioQuality, stream: ResolvedStreamUrl): boolean {
+function isQualityDowngraded(source: MusicSource, requested: AudioQuality, stream: ResolvedStreamUrl): boolean {
+  if (requested === 'highest') return false
+
+  const desired = getEffectiveQuality(source, requested, 2)
+  if (providerQualityRank(source, stream.attemptedBitrate) < providerQualityRank(source, desired)) return true
   if (stream.actualQuality !== undefined) {
-    if (requested === 'tencent_master') return stream.actualQuality !== 'tencent_master'
-    if (requested === 'tencent_flac') {
-      return stream.actualQuality !== 'tencent_master' && stream.actualQuality !== 'tencent_flac'
-    }
+    return providerQualityRank(source, stream.actualQuality) < providerQualityRank(source, stream.attemptedBitrate)
   }
-  const requestedBitrate = qualityToBitrate(requested)
-  if (stream.actualBitrate !== null) return stream.actualBitrate < requestedBitrate
-  return qualityToBitrate(stream.attemptedBitrate) < requestedBitrate
+  if (typeof stream.attemptedBitrate === 'number' && stream.actualBitrate !== null) {
+    return stream.actualBitrate < stream.attemptedBitrate
+  }
+  return false
 }
 
 /**
- * Try to get a stream URL at the requested bitrate. If it fails, try each
- * lower tier in order until one succeeds or all options are exhausted.
+ * Resolve one provider quality after applying the current membership cap.
+ * Providers select the best track format at or below that quality in one request.
  */
 async function resolveStreamUrl(
   source: MusicSource,
@@ -165,27 +159,20 @@ async function resolveStreamUrl(
   bitrate: AudioQuality,
   cookie?: string,
   forceRefresh = false,
+  vipType: MembershipTier = 0,
 ): Promise<ResolvedStreamUrl | null> {
-  const result = await musicProvider.getStreamInfo(source, urlId, bitrate, cookie, forceRefresh)
-  if (result) return { ...result, attemptedBitrate: bitrate }
-
-  // Fallback to lower bitrates
-  const fallbacks = QUALITY_FALLBACKS[bitrate] ?? BITRATE_FALLBACKS[qualityToBitrate(bitrate)]
-  for (const fallback of fallbacks) {
-    const fallbackResult = await musicProvider.getStreamInfo(source, urlId, fallback, cookie, forceRefresh)
-    if (fallbackResult) {
-      logger.warn('音质自动降级后获取到可播放资源', {
-        source,
-        urlId,
-        requestedBitrate: bitrate,
-        attemptedBitrate: fallback,
-        actualBitrate: fallbackResult.actualBitrate,
-      })
-      return { ...fallbackResult, attemptedBitrate: fallback }
-    }
+  const attemptedBitrate = getEffectiveQuality(source, bitrate, vipType)
+  if (attemptedBitrate !== bitrate && bitrate !== 'highest') {
+    logger.info('已根据平台会员等级调整请求音质', {
+      source,
+      urlId,
+      requestedBitrate: bitrate,
+      attemptedBitrate,
+      vipType,
+    })
   }
-
-  return null
+  const result = await musicProvider.getStreamInfo(source, urlId, attemptedBitrate, cookie, forceRefresh)
+  return result ? { ...result, attemptedBitrate } : null
 }
 
 /**
@@ -223,10 +210,17 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
   // Always resolve on the server so the URL is fresh and actual quality is known.
   if (!resolved.streamUrl) {
     try {
-      // Get cookie from the room's pool for this platform (enables VIP access)
-      const cookie = authService.getAnyCookie(resolved.source, roomId)
-      const url = await resolveStreamUrl(resolved.source, resolved.urlId, room.audioQuality, cookie ?? undefined)
-      if (url) usedAuthenticatedAccount = Boolean(cookie)
+      const platformAuth = authService.getBestAuth(resolved.source, roomId)
+      const cookie = platformAuth?.cookie
+      const url = await resolveStreamUrl(
+        resolved.source,
+        resolved.urlId,
+        room.audioQuality,
+        cookie,
+        false,
+        platformAuth?.vipType ?? 0,
+      )
+      if (url) usedAuthenticatedAccount = Boolean(platformAuth)
 
       if (!url) {
         const isVip = resolved.vip
@@ -272,12 +266,14 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
             try {
               const best = await trackFallbackService.findBestAlternativeTrack(resolved, toSource)
               if (best) {
-                const cookie2 = authService.getAnyCookie(best.track.source, roomId)
+                const fallbackAuth = authService.getBestAuth(best.track.source, roomId)
                 const url2 = await resolveStreamUrl(
                   best.track.source,
                   best.track.urlId,
                   room.audioQuality,
-                  cookie2 ?? undefined,
+                  fallbackAuth?.cookie,
+                  false,
+                  fallbackAuth?.vipType ?? 0,
                 )
                 if (url2) {
                   const replacement: Track = {
@@ -287,7 +283,7 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
                     streamUrl: url2.url,
                   }
                   streamResolution = url2
-                  usedAuthenticatedAccount = Boolean(cookie2)
+                  usedAuthenticatedAccount = Boolean(fallbackAuth)
 
                   // Replace in queue (if present) before playing
                   const roomBefore = roomRepo.get(roomId)
@@ -401,7 +397,7 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
   const artistLabel = resolved.artist.filter(Boolean).join(' / ') || '未知歌手'
   const requestedQuality = formatAudioQuality(room.audioQuality)
   const actualQuality = formatResolvedAudioQuality(streamResolution)
-  const qualityDowngraded = isQualityDowngraded(room.audioQuality, streamResolution)
+  const qualityDowngraded = isQualityDowngraded(resolved.source, room.audioQuality, streamResolution)
   const qualityDetail = qualityDowngraded ? `${actualQuality}（房间期望 ${requestedQuality}，已降级）` : actualQuality
 
   logger.info(
@@ -615,8 +611,15 @@ export function refreshStreamUrlForJoin(roomId: string): Promise<boolean> {
     // Record the attempt up front so failed upstream requests are also throttled.
     lastStreamUrlRefreshAt.set(roomId, now)
     try {
-      const cookie = authService.getAnyCookie(track.source, roomId)
-      const refreshed = await resolveStreamUrl(track.source, track.urlId, room.audioQuality, cookie ?? undefined, true)
+      const platformAuth = authService.getBestAuth(track.source, roomId)
+      const refreshed = await resolveStreamUrl(
+        track.source,
+        track.urlId,
+        room.audioQuality,
+        platformAuth?.cookie,
+        true,
+        platformAuth?.vipType ?? 0,
+      )
       if (!refreshed) {
         if (room.currentTrack?.id === track.id) room.currentTrack = { ...room.currentTrack, streamUrl: undefined }
         return false

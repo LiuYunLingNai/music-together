@@ -13,8 +13,40 @@ interface CookieEntry {
   cookie: string
   userId: string
   nickname: string
-  /** 0 = no VIP, 1 = VIP, 11 = 黑胶 (Netease specific) */
+  /** Normalized membership tier: 0 = none, 1 = VIP, 2 = SVIP. */
   vipType: number
+  vipLabel?: string
+  vipLevel?: number
+}
+
+export interface MembershipDetails {
+  vipLabel?: string
+  vipLevel?: number
+}
+
+function normalizeVipType(platform: MusicSource, vipType: number): 0 | 1 | 2 {
+  if (vipType <= 0) return 0
+  // Older Netease records stored profile.vipType (usually 10/11). That value
+  // means vinyl VIP, not SVIP, so only the new normalized value 2 is SVIP.
+  if (platform === 'netease') return vipType === 2 ? 2 : 1
+  return vipType >= 2 ? 2 : 1
+}
+
+function normalizeMembershipDetails(details?: MembershipDetails): MembershipDetails {
+  const vipLabel =
+    details?.vipLabel
+      ?.replace(/[\u0000-\u001f\u007f]/g, '')
+      .trim()
+      .slice(0, 32) || undefined
+  const level = Number(details?.vipLevel)
+  const vipLevel = Number.isInteger(level) && level > 0 && level <= 100 ? level : undefined
+  return { vipLabel, vipLevel }
+}
+
+function isHigherMembership(candidate: CookieEntry, current: CookieEntry | undefined): boolean {
+  if (!current) return true
+  if (candidate.vipType !== current.vipType) return candidate.vipType > current.vipType
+  return (candidate.vipLevel ?? 0) > (current.vipLevel ?? 0)
 }
 
 /** roomId -> (platform -> list of cookie entries) */
@@ -55,14 +87,17 @@ export function addCookie(
   nickname: string,
   vipType: number,
   persist = true,
+  membership?: MembershipDetails,
 ): void {
+  vipType = normalizeVipType(platform, vipType)
+  const { vipLabel, vipLevel } = normalizeMembershipDetails(membership)
   const entries = getPlatformEntries(roomId, platform)
   // Dedup by cookie value (same account) or by userId (same socket)
   const idx = entries.findIndex((e) => e.cookie === cookie || e.userId === userId)
   if (idx !== -1) entries.splice(idx, 1)
-  entries.push({ cookie, userId, nickname, vipType })
+  entries.push({ cookie, userId, nickname, vipType, vipLabel, vipLevel })
   if (persist) {
-    platformAuthRepo.save({ userId, platform, cookie, nickname, vipType })
+    platformAuthRepo.save({ userId, platform, cookie, nickname, vipType, vipLabel, vipLevel })
   }
   logger.info(`用户“${nickname}”已在房间 ${roomId} 登录 ${platform}`, {
     event: 'auth.account_added',
@@ -71,6 +106,8 @@ export function addCookie(
     nickname,
     platform,
     vipType,
+    vipLabel,
+    vipLevel,
   })
 }
 
@@ -97,7 +134,10 @@ export function removeCookie(roomId: string, platform: MusicSource, userId: stri
 export function restoreUserCookies(roomId: string, userId: string): number {
   const entries = platformAuthRepo.loadUser(userId)
   for (const entry of entries) {
-    addCookie(roomId, entry.platform, userId, entry.cookie, entry.nickname, entry.vipType, false)
+    addCookie(roomId, entry.platform, userId, entry.cookie, entry.nickname, entry.vipType, false, {
+      vipLabel: entry.vipLabel,
+      vipLevel: entry.vipLevel,
+    })
   }
   return entries.length
 }
@@ -114,6 +154,8 @@ export function persistUserCookieFromRoom(roomId: string, platform: MusicSource,
     cookie: entry.cookie,
     nickname: entry.nickname,
     vipType: entry.vipType,
+    vipLabel: entry.vipLabel,
+    vipLevel: entry.vipLevel,
   })
   return true
 }
@@ -158,6 +200,16 @@ export function hasCookie(roomId: string, platform: MusicSource, cookie: string)
  * Prefers VIP cookies over non-VIP.
  */
 export function getAnyCookie(platform: MusicSource, roomId: string): string | null {
+  return getBestAuth(platform, roomId)?.cookie ?? null
+}
+
+export interface BestPlatformAuth {
+  cookie: string
+  vipType: 0 | 1 | 2
+}
+
+/** Return the credential with the highest normalized membership tier. */
+export function getBestAuth(platform: MusicSource, roomId: string): BestPlatformAuth | null {
   const pool = roomCookiePool.get(roomId)
   if (!pool) return null
   const entries = pool.get(platform)
@@ -166,9 +218,9 @@ export function getAnyCookie(platform: MusicSource, roomId: string): string | nu
   // 单次遍历取最高 vipType 的 cookie（O(n) 替代排序 O(n log n)）
   let best = entries[0]
   for (let i = 1; i < entries.length; i++) {
-    if (entries[i].vipType > best.vipType) best = entries[i]
+    if (isHigherMembership(entries[i], best)) best = entries[i]
   }
-  return best.cookie
+  return { cookie: best.cookie, vipType: normalizeVipType(platform, best.vipType) }
 }
 
 /**
@@ -184,6 +236,15 @@ export function getUserCookie(userId: string, platform: MusicSource, roomId: str
   return entry?.cookie ?? null
 }
 
+/** Existing VIP records without a detailed label should be revalidated once after upgrades. */
+export function needsMembershipRefresh(userId: string, platform: MusicSource, roomId: string): boolean {
+  const entry = roomCookiePool
+    .get(roomId)
+    ?.get(platform)
+    ?.find((item) => item.userId === userId)
+  return Boolean(entry && entry.vipType > 0 && !entry.vipLabel)
+}
+
 // ---------------------------------------------------------------------------
 // Status for frontend
 // ---------------------------------------------------------------------------
@@ -196,12 +257,18 @@ export function getAllPlatformStatus(roomId: string): PlatformAuthStatus[] {
   const pool = roomCookiePool.get(roomId)
   return platforms.map((platform) => {
     const entries = pool?.get(platform) ?? []
-    const maxVipType = entries.reduce((max, e) => Math.max(max, e.vipType), 0)
+    const best = entries.reduce<CookieEntry | undefined>(
+      (current, entry) => (isHigherMembership(entry, current) ? entry : current),
+      undefined,
+    )
+    const maxVipType = best?.vipType ?? 0
     return {
       platform,
       loggedInCount: entries.length,
       hasVip: maxVipType > 0,
       maxVipType,
+      maxVipLabel: best?.vipLabel,
+      maxVipLevel: best?.vipLevel,
     }
   })
 }
@@ -220,6 +287,8 @@ export function getUserAuthStatus(userId: string, roomId: string): MyPlatformAut
       loggedIn: !!entry,
       nickname: entry?.nickname,
       vipType: entry?.vipType,
+      vipLabel: entry?.vipLabel,
+      vipLevel: entry?.vipLevel,
     }
   })
 }

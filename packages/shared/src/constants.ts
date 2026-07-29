@@ -16,8 +16,8 @@ export const LIMITS = {
   PLAYLIST_ID_MAX_LENGTH: 200,
 } as const
 
-/** 房间可选择的最高音质档位（无损 SQ） */
-export const HIGHEST_AUDIO_QUALITY: AudioQuality = 999
+/** 房间可选择的跨平台最高音质策略。 */
+export const HIGHEST_AUDIO_QUALITY: AudioQuality = 'highest'
 
 export const TIMING = {
   ROOM_GRACE_PERIOD_MS: 60_000,

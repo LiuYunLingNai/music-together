@@ -75,7 +75,7 @@ interface Track {
 type PlayMode = 'sequential' | 'loop-all' | 'loop-one' | 'shuffle'
 
 // 音频质量档位 (kbps)
-type AudioQuality = 128 | 192 | 320 | 999
+type AudioQuality = 128 | 192 | 320 | 999 | 'highest' | ProviderSpecificQuality
 
 // 客户端可见的房间状态
 interface RoomState {
@@ -217,7 +217,7 @@ Conductor（当前 `hostId` 对应用户）**自适应频率**上报当前播放
 
 ## 音频质量
 
-房间支持 4 档音质（`AudioQuality`），由 `room.audioQuality` 字段控制，默认 `320`（HQ）：
+房间音质由 `room.audioQuality` 字段控制，默认 `320`（HQ）。除固定和平台特色档位外，`highest` 表示“尽量高”：
 
 | 档位    | bitrate  | 说明                        |
 | ------- | -------- | --------------------------- |
@@ -225,13 +225,15 @@ Conductor（当前 `hostId` 对应用户）**自适应频率**上报当前播放
 | 较高    | 192 kbps | 平衡音质与流量              |
 | HQ      | 320 kbps | 高品质（默认）              |
 | 无损 SQ | 999 kbps | 无损音质，通常需要 VIP 账号 |
+| 尽量高  | highest  | 根据歌曲平台及房间内最高会员等级选择 |
 
 - **仅房主**可在房间设置中切换音质
-- 任一用户成功登录经平台确认的 **VIP 账号**后，房间会自动切换到最高音质（无损 SQ），并在聊天区发送系统消息
+- 任一用户成功登录经平台确认的 **VIP 账号**后，房间会自动切换到“尽量高”，并在聊天区发送系统消息
 - 音质切换仅对**下一首歌**生效，当前播放不中断
-- 服务端 `playerService.playTrackInRoom()` 从 `room.audioQuality` 读取 bitrate，通过 `resolveStreamUrl()` 请求流 URL
-- **降级策略**：如果请求的 bitrate 获取不到（VIP 限制或平台不支持），自动逐级降低 bitrate 重试（999 → 320 → 192 → 128）
-- 三个平台（netease / tencent / kugou）统一使用同一 bitrate 参数，Meting 内部处理各平台差异
+- 服务端将各平台会员统一为 `0/1/2`（普通/VIP/SVIP），并从房间凭据池选择该歌曲平台等级最高的账号
+- `audioQualityPolicy.getEffectiveQuality()` 一次确定不超过账号权益和房间设置的目标档位，不通过连续请求猜测会员等级
+- 网易云：普通账号最高 320、VIP 最高高清臻音、SVIP 最高超清母带；QQ 与酷狗使用各自对应的 VIP/SVIP 档位
+- 上游若返回歌曲实际可用的较低规格，服务端记录 `actualQuality` 和实际平均码率，不再逐档重新请求
 - `musicProvider.streamUrlCache` 的 key 包含 bitrate，不同音质自动隔离缓存
 
 ## 队列清空

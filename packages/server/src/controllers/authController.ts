@@ -126,6 +126,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
               userInfo.nickname,
               userInfo.vipType,
               true,
+              { vipLabel: userInfo.vipLabel, vipLevel: userInfo.vipLevel },
             )
             upgradeRoomAudioQualityForVip(io, mapping.roomId, platform, userInfo.nickname, userInfo.vipType)
             broadcastAuthStatus(io, socket, mapping)
@@ -197,7 +198,12 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
       const roomId = mapping?.roomId ?? null
 
       // Fast path: cookie 已在房间池中，跳过验证
-      if (mapping && roomId && authService.getUserCookie(mapping.userId, platform, roomId) === cookie) {
+      if (
+        mapping &&
+        roomId &&
+        authService.getUserCookie(mapping.userId, platform, roomId) === cookie &&
+        !authService.needsMembershipRefresh(mapping.userId, platform, roomId)
+      ) {
         if (data.persist !== false) {
           authService.persistUserCookieFromRoom(roomId, platform, mapping.userId)
         }
@@ -231,6 +237,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
             userInfo.nickname,
             userInfo.vipType,
             data.persist !== false,
+            { vipLabel: userInfo.vipLabel, vipLevel: userInfo.vipLevel },
           )
           upgradeRoomAudioQualityForVip(io, mapping.roomId, platform, userInfo.nickname, userInfo.vipType)
         }
@@ -373,7 +380,7 @@ function broadcastAuthStatus(io: TypedServer, socket: TypedSocket, mapping: { ro
   io.to(mapping.roomId).emit(EVENTS.AUTH_STATUS_UPDATE, authService.getAllPlatformStatus(mapping.roomId))
 }
 
-/** VIP 账号登录成功后，将房间音质自动提升到最高档。 */
+/** VIP 账号登录成功后，将房间音质切换到跨平台最高策略。 */
 function upgradeRoomAudioQualityForVip(
   io: TypedServer,
   roomId: string,
@@ -395,7 +402,7 @@ function upgradeRoomAudioQualityForVip(
     audioQuality: room.audioQuality,
   })
 
-  const message = chatService.createSystemMessage(roomId, '系统检测到 VIP 账号，已自动升级到无损 SQ 音质')
+  const message = chatService.createSystemMessage(roomId, '系统检测到 VIP 账号，已自动切换为“尽量高”音质')
   io.to(roomId).emit(EVENTS.CHAT_MESSAGE, message)
 
   logger.info(`检测到用户“${nickname}”登录 VIP 账号，房间 ${roomId} 已自动升级为最高音质`, {

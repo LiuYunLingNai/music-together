@@ -2,7 +2,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { useAuth } from '@/hooks/useAuth'
-import { PLATFORM_LABELS, VIP_LABELS, getPlatformStatus, getMyPlatformStatus } from '@/lib/platform'
+import { PLATFORM_LABELS, getVipDisplayLabel, getPlatformStatus, getMyPlatformStatus } from '@/lib/platform'
 import type { MusicSource, MyPlatformAuth, PlatformAuthStatus } from '@music-together/shared'
 import { Crown, KeyRound, LogOut, ScanLine } from 'lucide-react'
 import { useState } from 'react'
@@ -41,7 +41,7 @@ function PlatformRow({
           {hasVip && (
             <Badge variant="secondary" className="gap-1 text-xs">
               <Crown className="h-3 w-3" />
-              {VIP_LABELS[maxVipType] || 'VIP'}
+              {getVipDisplayLabel(maxVipType, status?.maxVipLabel)}
             </Badge>
           )}
         </div>

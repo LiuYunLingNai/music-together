@@ -412,8 +412,15 @@ async function getUserInfoForEdition(cookie: string, edition: KugouEdition): Pro
     }
 
     const vipData = body.data as Record<string, unknown>
-    const isVip = vipData.is_vip === 1 || Number(vipData.vip_type) > 0
-    const vipType = isVip ? Number(vipData.vip_type) || 1 : 0
+    const isVip = Number(vipData.is_vip) === 1 || Number(vipData.vip_type) > 0
+    const isSvip =
+      Number(vipData.is_svip) === 1 ||
+      Number(vipData.svip_type) > 0 ||
+      Number(vipData.super_vip_type) > 0 ||
+      Number(vipData.vip_type) >= 2
+    const vipType = isSvip ? 2 : isVip ? 1 : 0
+    const rawVipLevel = Number(vipData.vip_level ?? vipData.level ?? 0)
+    const vipLevel = Number.isInteger(rawVipLevel) && rawVipLevel > 0 ? rawVipLevel : undefined
 
     // Fetch nickname (non-blocking — fallback to userid if failed)
     const nickname = await fetchUserDetail({ token, userid }, edition)
@@ -423,6 +430,8 @@ async function getUserInfoForEdition(cookie: string, edition: KugouEdition): Pro
       data: {
         nickname: nickname || `酷狗用户${userid}`,
         vipType,
+        vipLabel: vipType === 2 ? 'SVIP' : vipType === 1 ? 'VIP' : undefined,
+        vipLevel,
         userId: Number(userid),
       },
     }
