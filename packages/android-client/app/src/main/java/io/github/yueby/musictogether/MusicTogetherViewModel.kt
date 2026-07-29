@@ -73,6 +73,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private data class PendingQueueAction(val title: String, val pinned: Boolean)
     private data class PendingRoomCreation(val name: String, val password: String)
     private data class PlaylistContext(val source: String, val id: String, val roomId: String)
+    private data class PlaybackSyncSettings(val tempoEnabled: Boolean, val hardSeekEnabled: Boolean)
 
     private companion object {
         const val QR_EXPIRED = 800
@@ -89,6 +90,9 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         const val UPDATE_SOURCE_KEY = "update_download_source"
         const val LYRIC_OFFSETS_KEY = "lyric_offsets"
         const val PLAYBACK_TEMPO_SYNC_KEY = "playback_tempo_sync_enabled"
+        const val PLAYBACK_HARD_SEEK_SYNC_KEY = "playback_hard_seek_sync_enabled"
+        const val PLAYBACK_SETTINGS_SCHEMA_KEY = "playback_settings_schema_version"
+        const val PLAYBACK_SETTINGS_SCHEMA_VERSION = 2
         const val SYNC_PACKET_INTERVAL_KEY = "sync_packet_interval_seconds"
         const val DEFAULT_SYNC_PACKET_INTERVAL_SECONDS = 3
         const val MIN_SYNC_PACKET_INTERVAL_SECONDS = 1
@@ -97,6 +101,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     private val preferences = application.getSharedPreferences("music_together", Context.MODE_PRIVATE)
+    private val playbackSyncSettings = loadPlaybackSyncSettings()
     private val initialServerUrls = ServerCatalog.decode(
         preferences.getString(SERVERS_KEY, null),
         preferences.getString("server_url", DEFAULT_SERVER_URL).orEmpty().ifBlank { DEFAULT_SERVER_URL },
@@ -119,7 +124,8 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             servers = initialServerUrls.map { ServerConnection(it) },
             nickname = preferences.getString("nickname", "").orEmpty(),
             lyricOffsets = loadLyricOffsets(),
-            playbackTempoSyncEnabled = preferences.getBoolean(PLAYBACK_TEMPO_SYNC_KEY, true),
+            playbackTempoSyncEnabled = playbackSyncSettings.tempoEnabled,
+            playbackHardSeekSyncEnabled = playbackSyncSettings.hardSeekEnabled,
             syncPacketIntervalSeconds = preferences
                 .getInt(SYNC_PACKET_INTERVAL_KEY, DEFAULT_SYNC_PACKET_INTERVAL_SECONDS)
                 .coerceIn(MIN_SYNC_PACKET_INTERVAL_SECONDS, MAX_SYNC_PACKET_INTERVAL_SECONDS),
@@ -134,6 +140,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         viewModelScope,
         clock,
         _state.value.playbackTempoSyncEnabled,
+        _state.value.playbackHardSeekSyncEnabled,
         ::onTrackEnded,
     )
     val playerState: StateFlow<PlayerUiState> = nativePlayer.state
@@ -168,7 +175,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private val autoRestoringPlatforms = mutableSetOf<String>()
     private val loadedPlaylistPlatforms = mutableSetOf<String>()
     private var downloadedUpdateApk: java.io.File? = null
-    private val supportedPlatforms = listOf("netease", "tencent", "kugou", "bilibili")
+    private val supportedPlatforms = listOf("netease", "tencent", "kugou", "kugou_concept", "bilibili")
 
     init {
         PlaybackCommandBridge.listener = object : PlaybackCommandBridge.Listener {
@@ -381,6 +388,12 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         preferences.edit().putBoolean(PLAYBACK_TEMPO_SYNC_KEY, enabled).apply()
         _state.value = _state.value.copy(playbackTempoSyncEnabled = enabled)
         nativePlayer.setTempoSyncEnabled(enabled)
+    }
+
+    fun updatePlaybackHardSeekSync(enabled: Boolean) {
+        preferences.edit().putBoolean(PLAYBACK_HARD_SEEK_SYNC_KEY, enabled).apply()
+        _state.value = _state.value.copy(playbackHardSeekSyncEnabled = enabled)
+        nativePlayer.setHardSeekSyncEnabled(enabled)
     }
 
     fun updateSyncPacketInterval(seconds: Int) {
@@ -766,6 +779,20 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             notice = UiNotice(text = "已退出${platformLabel(platform)}账号"),
         )
         AppLogger.info("Auth", "logout platform=$platform")
+    }
+
+    fun claimKugouConceptVip() {
+        val hub = _state.value.platformHub
+        if (hub.claimingKugouConceptVip) return
+        _state.value = _state.value.copy(
+            platformHub = hub.copy(claimingKugouConceptVip = true),
+        )
+        if (!socket.emit(Events.AUTH_CLAIM_KUGOU_CONCEPT_VIP)) {
+            _state.value = _state.value.copy(
+                platformHub = _state.value.platformHub.copy(claimingKugouConceptVip = false),
+            )
+            setNotice("权益领取请求未发送，请检查连接", isError = true)
+        }
     }
 
     fun fetchMyPlaylists(platform: String) {
@@ -1495,6 +1522,9 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 val value = data as? JSONObject ?: return
                 val status = value.optInt("status")
                 val current = _state.value.platformHub.qr
+                val responseKey = value.stringOrNull("key")
+                if (!current.open || (responseKey != null && responseKey != current.key)) return
+                if (current.status == QR_EXPIRED || current.status == QR_SUCCESS) return
                 _state.value = _state.value.copy(
                     platformHub = _state.value.platformHub.copy(
                         qr = current.copy(
@@ -1513,6 +1543,17 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                         closeQrLogin()
                     }
                 }
+            }
+            Events.AUTH_CLAIM_KUGOU_CONCEPT_VIP_RESULT -> {
+                val value = data as? JSONObject ?: return
+                val success = value.optBoolean("success")
+                _state.value = _state.value.copy(
+                    platformHub = _state.value.platformHub.copy(claimingKugouConceptVip = false),
+                    notice = UiNotice(
+                        text = value.optString("message", if (success) "权益领取成功" else "权益领取失败"),
+                        isError = !success,
+                    ),
+                )
             }
             Events.AUTH_SET_COOKIE_RESULT -> {
                 val value = data as? JSONObject ?: return
@@ -1625,7 +1666,6 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         qrPollJob?.cancel()
         qrPollJob = viewModelScope.launch {
             while (isActive) {
-                delay(2_000)
                 val qr = _state.value.platformHub.qr
                 if (!qr.open || qr.platform != platform || qr.key != key) break
                 if (qr.status == QR_EXPIRED || qr.status == QR_SUCCESS) break
@@ -1633,6 +1673,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     Events.AUTH_CHECK_QR,
                     JSONObject().put("key", key).put("platform", platform),
                 )
+                delay(2_000)
             }
         }
     }
@@ -1712,6 +1753,22 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private fun platformCookieKey(platform: String): String =
         "platform_auth:${activeServer?.displayUrl.orEmpty()}:$platform"
 
+    private fun loadPlaybackSyncSettings(): PlaybackSyncSettings {
+        val schemaVersion = preferences.getInt(PLAYBACK_SETTINGS_SCHEMA_KEY, 0)
+        if (schemaVersion < PLAYBACK_SETTINGS_SCHEMA_VERSION) {
+            preferences.edit()
+                .putBoolean(PLAYBACK_TEMPO_SYNC_KEY, false)
+                .putBoolean(PLAYBACK_HARD_SEEK_SYNC_KEY, false)
+                .putInt(PLAYBACK_SETTINGS_SCHEMA_KEY, PLAYBACK_SETTINGS_SCHEMA_VERSION)
+                .apply()
+            return PlaybackSyncSettings(tempoEnabled = false, hardSeekEnabled = false)
+        }
+        return PlaybackSyncSettings(
+            tempoEnabled = preferences.getBoolean(PLAYBACK_TEMPO_SYNC_KEY, false),
+            hardSeekEnabled = preferences.getBoolean(PLAYBACK_HARD_SEEK_SYNC_KEY, false),
+        )
+    }
+
     private fun loadLyricOffsets(): Map<String, Int> {
         val raw = preferences.getString(LYRIC_OFFSETS_KEY, null) ?: return emptyMap()
         val json = runCatching { JSONObject(raw) }.getOrNull() ?: return emptyMap()
@@ -1759,6 +1816,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         "netease" -> "网易云音乐"
         "tencent" -> "QQ 音乐"
         "kugou" -> "酷狗音乐"
+        "kugou_concept" -> "酷狗概念版"
         "bilibili" -> "哔哩哔哩"
         else -> platform
     }
@@ -1886,7 +1944,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     private fun playbackUrl(track: Track): String? =
-        activeServer?.let { api.playbackUrl(it, track) } ?: track.streamUrl
+        activeServer?.let { api.playbackUrl(it, track, _state.value.room?.id) } ?: track.streamUrl
 
     private fun updateRoom(transform: (io.github.yueby.musictogether.model.RoomState) -> io.github.yueby.musictogether.model.RoomState) {
         val room = _state.value.room ?: return

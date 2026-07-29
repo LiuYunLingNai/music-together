@@ -36,6 +36,7 @@ internal class PlaybackDriftController {
         expectedSeconds: Double,
         medianRttMs: Long,
         tempoSyncEnabled: Boolean,
+        hardSeekSyncEnabled: Boolean,
     ): DriftCorrection {
         val rawDrift = currentSeconds - expectedSeconds
         smoothedDriftSeconds = if (coldStart) {
@@ -51,6 +52,10 @@ internal class PlaybackDriftController {
             (medianRttMs.coerceAtLeast(0) + DRIFT_SEEK_RTT_MARGIN_MS) / 1000.0,
         )
         if (absoluteDrift > hardSeekThreshold) {
+            if (!tempoSyncEnabled && !hardSeekSyncEnabled) {
+                hardSeekConfirmations = 0
+                return DriftCorrection.Tempo(1f)
+            }
             hardSeekConfirmations++
             if (hardSeekConfirmations < HARD_SEEK_CONFIRMATIONS) return DriftCorrection.None
             reset()

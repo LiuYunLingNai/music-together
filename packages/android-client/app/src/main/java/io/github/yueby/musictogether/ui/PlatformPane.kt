@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -105,13 +106,19 @@ fun PlatformPane(state: AppState, viewModel: MusicTogetherViewModel) {
 private fun PlatformAccountList(state: AppState, viewModel: MusicTogetherViewModel) {
     var platform by remember { mutableStateOf("netease") }
     var cookieDialogOpen by remember { mutableStateOf(false) }
+    var cookiePlatform by remember { mutableStateOf("netease") }
     var cookieText by remember { mutableStateOf("") }
-    val collectionLabel = platformCollectionLabel(platform)
     val hub = state.platformHub
     val myAuth = hub.myAuth.firstOrNull { it.platform == platform }
     val roomAuth = hub.authStatus.firstOrNull { it.platform == platform }
-    val playlists = hub.playlists[platform].orEmpty()
-    val loading = platform in hub.playlistsLoading
+    val conceptAuth = hub.myAuth.firstOrNull { it.platform == "kugou_concept" }
+    val conceptRoomAuth = hub.authStatus.firstOrNull { it.platform == "kugou_concept" }
+
+    fun openCookieLogin(targetPlatform: String) {
+        cookiePlatform = targetPlatform
+        cookieText = ""
+        cookieDialogOpen = true
+    }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
         Text(
@@ -153,62 +160,54 @@ private fun PlatformAccountList(state: AppState, viewModel: MusicTogetherViewMod
                     roomAuth = roomAuth,
                     statusLoaded = hub.statusLoaded,
                     onQrLogin = { viewModel.requestQrLogin(platform) },
-                    onCookieLogin = {
-                        cookieText = ""
-                        cookieDialogOpen = true
-                    },
+                    onCookieLogin = { openCookieLogin(platform) },
                     onLogout = { viewModel.logoutPlatform(platform) },
+                    compactLabel = if (platform == "kugou") "标准版" else null,
+                    onClaimConceptVip = null,
+                    isClaimingConceptVip = hub.claimingKugouConceptVip,
                 )
             }
 
-            if (myAuth?.loggedIn == true) {
+            if (platform == "kugou") {
                 item {
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text("我的$collectionLabel", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.weight(1f))
-                        TextButton(onClick = { viewModel.fetchMyPlaylists(platform) }, enabled = !loading) {
-                            if (loading) {
-                                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                            } else {
-                                Icon(Icons.Default.Refresh, null, Modifier.size(17.dp))
-                            }
-                            Spacer(Modifier.width(4.dp))
-                            Text("刷新")
-                        }
-                    }
-                }
-                if (loading && playlists.isEmpty()) {
-                    item {
-                        Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator()
-                        }
-                    }
-                } else if (playlists.isEmpty()) {
-                    item {
-                        Text(
-                            "暂无$collectionLabel",
-                            Modifier.fillMaxWidth().padding(32.dp),
-                            textAlign = TextAlign.Center,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                } else {
-                    items(playlists, key = { "${it.source}:${it.id}" }) { playlist ->
-                        PlaylistRow(playlist) { viewModel.openPlaylist(playlist) }
-                    }
-                }
-            } else {
-                item {
-                    Text(
-                        if (hub.statusLoaded) "登录后即可查看这个平台的个人$collectionLabel" else "正在获取登录状态…",
-                        Modifier.fillMaxWidth().padding(32.dp),
-                        textAlign = TextAlign.Center,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    PlatformLoginCard(
+                        platform = "kugou_concept",
+                        myAuth = conceptAuth,
+                        roomAuth = conceptRoomAuth,
+                        statusLoaded = hub.statusLoaded,
+                        onQrLogin = { viewModel.requestQrLogin("kugou_concept") },
+                        onCookieLogin = { openCookieLogin("kugou_concept") },
+                        onLogout = { viewModel.logoutPlatform("kugou_concept") },
+                        compactLabel = "概念版",
+                        onClaimConceptVip = viewModel::claimKugouConceptVip,
+                        isClaimingConceptVip = hub.claimingKugouConceptVip,
                     )
                 }
+            }
+
+            platformPlaylistItems(
+                platform = platform,
+                auth = myAuth,
+                statusLoaded = hub.statusLoaded,
+                playlists = hub.playlists[platform].orEmpty(),
+                loading = platform in hub.playlistsLoading,
+                title = "我的${platformCollectionLabel(platform)}",
+                showLoggedOutHint = true,
+                viewModel = viewModel,
+            )
+
+            if (platform == "kugou" && conceptAuth?.loggedIn == true) {
+                item { HorizontalDivider(Modifier.padding(vertical = 4.dp)) }
+                platformPlaylistItems(
+                    platform = "kugou_concept",
+                    auth = conceptAuth,
+                    statusLoaded = hub.statusLoaded,
+                    playlists = hub.playlists["kugou_concept"].orEmpty(),
+                    loading = "kugou_concept" in hub.playlistsLoading,
+                    title = "概念版歌单",
+                    showLoggedOutHint = false,
+                    viewModel = viewModel,
+                )
             }
         }
     }
@@ -216,7 +215,7 @@ private fun PlatformAccountList(state: AppState, viewModel: MusicTogetherViewMod
     if (cookieDialogOpen) {
         AlertDialog(
             onDismissRequest = { cookieDialogOpen = false },
-            title = { Text("${platformLabel(platform)} Cookie 登录") },
+            title = { Text("${platformLabel(cookiePlatform)} Cookie 登录") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Cookie 只会按当前服务端 URL 单独保存在本机，不会写入日志。")
@@ -232,7 +231,7 @@ private fun PlatformAccountList(state: AppState, viewModel: MusicTogetherViewMod
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.loginWithPlatformCookie(platform, cookieText)
+                        viewModel.loginWithPlatformCookie(cookiePlatform, cookieText)
                         cookieText = ""
                         cookieDialogOpen = false
                     },
@@ -241,6 +240,69 @@ private fun PlatformAccountList(state: AppState, viewModel: MusicTogetherViewMod
             },
             dismissButton = { TextButton(onClick = { cookieDialogOpen = false }) { Text("取消") } },
         )
+    }
+}
+
+private fun LazyListScope.platformPlaylistItems(
+    platform: String,
+    auth: MyPlatformAuth?,
+    statusLoaded: Boolean,
+    playlists: List<Playlist>,
+    loading: Boolean,
+    title: String,
+    showLoggedOutHint: Boolean,
+    viewModel: MusicTogetherViewModel,
+) {
+    if (auth?.loggedIn == true) {
+        item {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = { viewModel.fetchMyPlaylists(platform) }, enabled = !loading) {
+                    if (loading) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Default.Refresh, null, Modifier.size(17.dp))
+                    }
+                    Spacer(Modifier.width(4.dp))
+                    Text("刷新")
+                }
+            }
+        }
+        when {
+            loading && playlists.isEmpty() -> item {
+                Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            }
+            playlists.isEmpty() -> item {
+                Text(
+                    "暂无${platformCollectionLabel(platform)}",
+                    Modifier.fillMaxWidth().padding(32.dp),
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            else -> items(playlists, key = { "${it.source}:${it.id}" }) { playlist ->
+                PlaylistRow(playlist) { viewModel.openPlaylist(playlist) }
+            }
+        }
+    } else if (showLoggedOutHint) {
+        item {
+            Text(
+                if (statusLoaded) {
+                    "登录后即可查看这个平台的个人${platformCollectionLabel(platform)}"
+                } else {
+                    "正在获取登录状态…"
+                },
+                Modifier.fillMaxWidth().padding(32.dp),
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -253,12 +315,24 @@ private fun PlatformLoginCard(
     onQrLogin: () -> Unit,
     onCookieLogin: () -> Unit,
     onLogout: () -> Unit,
+    compactLabel: String?,
+    onClaimConceptVip: (() -> Unit)?,
+    isClaimingConceptVip: Boolean,
 ) {
     val loggedIn = myAuth?.loggedIn == true
+    val displayedVipType = if (loggedIn) myAuth.vipType else roomAuth?.maxVipType ?: 0
+    val displayedVipLabel = if (loggedIn) myAuth?.vipLabel else roomAuth?.maxVipLabel
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
+                    compactLabel?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     Text(
                         when {
                             loggedIn -> myAuth?.nickname ?: "已登录"
@@ -278,15 +352,30 @@ private fun PlatformLoginCard(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                if (roomAuth?.hasVip == true) {
+                if (displayedVipType > 0) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Star, null, tint = MaterialTheme.colorScheme.primary)
                         Spacer(Modifier.width(4.dp))
-                        Text(vipLabel(roomAuth.maxVipType), color = MaterialTheme.colorScheme.primary)
+                        Text(vipLabel(displayedVipType, displayedVipLabel), color = MaterialTheme.colorScheme.primary)
                     }
                 }
             }
             if (loggedIn) {
+                if (onClaimConceptVip != null) {
+                    FilledTonalButton(
+                        onClick = onClaimConceptVip,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isClaimingConceptVip,
+                    ) {
+                        if (isClaimingConceptVip) {
+                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Default.Star, null)
+                        }
+                        Spacer(Modifier.width(6.dp))
+                        Text(if (isClaimingConceptVip) "领取中…" else "领取每日畅听权益")
+                    }
+                }
                 OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.AutoMirrored.Filled.Logout, null)
                     Spacer(Modifier.width(6.dp))
@@ -556,6 +645,7 @@ private fun platformLabel(platform: String): String = when (platform) {
     "netease" -> "网易云音乐"
     "tencent" -> "QQ 音乐"
     "kugou" -> "酷狗音乐"
+    "kugou_concept" -> "酷狗概念版"
     "bilibili" -> "哔哩哔哩"
     else -> platform
 }
@@ -563,9 +653,10 @@ private fun platformLabel(platform: String): String = when (platform) {
 private fun platformCollectionLabel(platform: String): String =
     if (platform == "bilibili") "收藏夹" else "歌单"
 
-private fun vipLabel(type: Int): String = when (type) {
-    10, 11 -> "黑胶 VIP"
-    2 -> "豪华 VIP"
-    3 -> "超级 VIP"
-    else -> "VIP"
-}
+private fun vipLabel(type: Int, providerLabel: String?): String =
+    providerLabel?.trim()?.takeIf { it.isNotEmpty() } ?: when (type) {
+        2 -> "SVIP"
+        3 -> "超级 VIP"
+        10, 11 -> "黑胶 VIP"
+        else -> "VIP"
+    }

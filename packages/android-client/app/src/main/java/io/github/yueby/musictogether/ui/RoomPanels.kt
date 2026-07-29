@@ -288,7 +288,13 @@ internal fun SearchPane(state: AppState, viewModel: MusicTogetherViewModel) {
     Column(Modifier.fillMaxSize().padding(12.dp)) {
         Text("搜索并点歌", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(8.dp))
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf("netease" to "网易云", "tencent" to "QQ 音乐", "kugou" to "酷狗", "bilibili" to "B站").forEach { (value, label) ->
+            listOf(
+                "netease" to "网易云",
+                "tencent" to "QQ 音乐",
+                "kugou" to "酷狗",
+                "kugou_concept" to "概念版",
+                "bilibili" to "B站",
+            ).forEach { (value, label) ->
                 AssistChip(onClick = { source = value }, label = { Text(label) }, leadingIcon = if (source == value) {
                     { Icon(Icons.Default.MusicNote, null, Modifier.size(16.dp)) }
                 } else null)

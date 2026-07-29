@@ -138,14 +138,23 @@ class MusicTogetherApi(private val client: OkHttpClient) {
         return if (path.startsWith("/")) server.httpBase.resolve(path)?.toString() else path
     }
 
-    fun playbackUrl(server: ServerAddress, track: Track): String? {
+    fun playbackUrl(server: ServerAddress, track: Track, roomId: String? = null): String? {
         val streamUrl = track.streamUrl ?: return null
-        if (track.source != "bilibili" || track.urlId.isBlank()) return streamUrl
-        return server.api("music", "bilibili-audio-proxy").newBuilder()
-            .addQueryParameter("url", streamUrl)
-            .addQueryParameter("bvid", track.urlId)
-            .build()
-            .toString()
+        return when {
+            track.source == "bilibili" && track.urlId.isNotBlank() ->
+                server.api("music", "bilibili-audio-proxy").newBuilder()
+                    .addQueryParameter("url", streamUrl)
+                    .addQueryParameter("bvid", track.urlId)
+                    .apply { roomId?.takeIf { it.isNotBlank() }?.let { addQueryParameter("roomId", it) } }
+                    .build()
+                    .toString()
+            track.source == "kugou" || track.source == "kugou_concept" ->
+                server.api("music", "kugou-audio-proxy").newBuilder()
+                    .addQueryParameter("url", streamUrl)
+                    .build()
+                    .toString()
+            else -> streamUrl
+        }
     }
 
     suspend fun search(server: ServerAddress, keyword: String, source: String, roomId: String?, page: Int): SearchPage =

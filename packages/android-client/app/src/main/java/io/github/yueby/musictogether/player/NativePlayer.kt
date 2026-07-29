@@ -42,6 +42,7 @@ class NativePlayer(
     private val scope: CoroutineScope,
     private val clock: ClockSync,
     initialTempoSyncEnabled: Boolean,
+    initialHardSeekSyncEnabled: Boolean,
     private val onTrackEnded: () -> Unit,
 ) {
     private companion object {
@@ -71,6 +72,7 @@ class NativePlayer(
     private var pendingLoad: PendingLoad? = null
     private val driftController = PlaybackDriftController()
     private var tempoSyncEnabled = initialTempoSyncEnabled
+    private var hardSeekSyncEnabled = initialHardSeekSyncEnabled
     private var hardSeekJob: Job? = null
     private var hardSeekRestoreVolume: Float? = null
     private var correctionGeneration = 0L
@@ -196,6 +198,12 @@ class NativePlayer(
         AppLogger.info("Sync", "tempo correction enabled=$enabled")
     }
 
+    fun setHardSeekSyncEnabled(enabled: Boolean) {
+        hardSeekSyncEnabled = enabled
+        resetPlaybackCorrection()
+        AppLogger.info("Sync", "hard seek correction enabled=$enabled")
+    }
+
     fun correctDrift(expectedSeconds: Double, serverIsPlaying: Boolean, medianRttMs: Long): Double? {
         val controller = player ?: return null
         if (!serverIsPlaying) {
@@ -205,7 +213,13 @@ class NativePlayer(
         if (!controller.isPlaying || controller.playbackState != Player.STATE_READY) return null
         val current = controller.currentPosition / 1000.0
         val drift = current - expectedSeconds
-        val correction = driftController.update(current, expectedSeconds, medianRttMs, tempoSyncEnabled)
+        val correction = driftController.update(
+            current,
+            expectedSeconds,
+            medianRttMs,
+            tempoSyncEnabled,
+            hardSeekSyncEnabled,
+        )
         val displayedDrift = driftController.currentDriftSeconds
         AppLogger.debug(
             "Sync",

@@ -54,14 +54,32 @@ class JsonTest {
               "urlId": "BV1xx",
               "lyricId": "123",
               "picId": "123",
-              "metadataSource": "netease"
+              "metadataSource": "netease",
+              "streamFormat": "flac"
             }""".trimIndent(),
         ).toTrack()
 
         assertEquals("bilibili", track.source)
         assertEquals("https://cover.example/video.jpg", track.bilibiliCover)
         assertEquals("netease", track.metadataSource)
+        assertEquals("flac", track.streamFormat)
         assertEquals("netease", track.toJson().getString("metadataSource"))
+        assertEquals("flac", track.toJson().getString("streamFormat"))
+    }
+
+    @Test
+    fun platformAuthPreservesMembershipDetails() {
+        val roomStatus = JSONObject(
+            """{"platform":"kugou_concept","loggedInCount":1,"hasVip":true,"maxVipType":1,"maxVipLabel":"畅听 VIP","maxVipLevel":3}""",
+        ).toPlatformAuthStatus()
+        val myStatus = JSONObject(
+            """{"platform":"kugou_concept","loggedIn":true,"nickname":"User","vipType":1,"vipLabel":"畅听 VIP","vipLevel":3}""",
+        ).toMyPlatformAuth()
+
+        assertEquals("畅听 VIP", roomStatus.maxVipLabel)
+        assertEquals(3, roomStatus.maxVipLevel)
+        assertEquals("畅听 VIP", myStatus.vipLabel)
+        assertEquals(3, myStatus.vipLevel)
     }
 
     @Test

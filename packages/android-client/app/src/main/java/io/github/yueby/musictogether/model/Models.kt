@@ -60,6 +60,7 @@ data class Track(
     val bilibiliCover: String? = null,
     val metadataSource: String? = null,
     val streamUrl: String? = null,
+    val streamFormat: String? = null,
     val vip: Boolean = false,
     val requestedBy: String? = null,
 )
@@ -187,6 +188,8 @@ data class PlatformAuthStatus(
     val loggedInCount: Int,
     val hasVip: Boolean,
     val maxVipType: Int,
+    val maxVipLabel: String? = null,
+    val maxVipLevel: Int? = null,
 )
 
 @Immutable
@@ -195,6 +198,8 @@ data class MyPlatformAuth(
     val loggedIn: Boolean,
     val nickname: String? = null,
     val vipType: Int = 0,
+    val vipLabel: String? = null,
+    val vipLevel: Int? = null,
 )
 
 @Immutable
@@ -229,6 +234,8 @@ data class PlatformHubState(
         "netease" to emptyList(),
         "tencent" to emptyList(),
         "kugou" to emptyList(),
+        "kugou_concept" to emptyList(),
+        "bilibili" to emptyList(),
     ),
     val playlistsLoading: Set<String> = emptySet(),
     val selectedPlaylist: Playlist? = null,
@@ -238,6 +245,7 @@ data class PlatformHubState(
     val playlistLoading: Boolean = false,
     val playlistLoadingMore: Boolean = false,
     val playlistError: String? = null,
+    val claimingKugouConceptVip: Boolean = false,
 )
 
 @Immutable
@@ -286,7 +294,8 @@ data class AppState(
     val activeVote: VoteState? = null,
     val lyrics: LyricsState = LyricsState(),
     val platformHub: PlatformHubState = PlatformHubState(),
-    val playbackTempoSyncEnabled: Boolean = true,
+    val playbackTempoSyncEnabled: Boolean = false,
+    val playbackHardSeekSyncEnabled: Boolean = false,
     val syncPacketIntervalSeconds: Int = 3,
     val syncDriftSeconds: Double = 0.0,
     val pingMs: Long? = null,

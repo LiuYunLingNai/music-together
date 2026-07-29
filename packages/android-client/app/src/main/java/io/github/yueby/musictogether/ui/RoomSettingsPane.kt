@@ -60,7 +60,7 @@ fun RoomSettingsPane(state: AppState, viewModel: MusicTogetherViewModel) {
     val currentUser = room.users.firstOrNull { it.id == state.userId }
     val canManage = currentUser?.role == "owner" || currentUser?.isServerAdmin == true ||
         state.accountProfile?.role == "admin"
-    val options = remember(state.platformHub.authStatus) { availableAudioQualities(state.platformHub.authStatus) }
+    val options = remember { availableAudioQualities() }
     var expanded by remember { mutableStateOf(false) }
     var syncIntervalDraft by remember(state.syncPacketIntervalSeconds) {
         mutableStateOf(state.syncPacketIntervalSeconds.toString())
@@ -160,7 +160,7 @@ fun RoomSettingsPane(state: AppState, viewModel: MusicTogetherViewModel) {
                 Column(Modifier.weight(1f)) {
                     Text("自动变速校准", fontWeight = FontWeight.SemiBold)
                     Text(
-                        "不改变音高，以最多 ±1% 的速度差平滑消除本机播放偏移；关闭后保持 1.0× 原速，大幅偏移仍会自动定位。",
+                        "不改变音高，以最多 ±1% 的速度差平滑消除本机播放偏移；关闭后保持 1.0× 原速，并可单独选择是否直接定位大幅偏移。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -169,6 +169,27 @@ fun RoomSettingsPane(state: AppState, viewModel: MusicTogetherViewModel) {
                     checked = state.playbackTempoSyncEnabled,
                     onCheckedChange = viewModel::updatePlaybackTempoSync,
                 )
+            }
+        }
+        if (!state.playbackTempoSyncEnabled) {
+            item { HorizontalDivider() }
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Sync, null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("大偏差直接同步", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "偏移连续两次超过动态阈值后直接定位；阈值最低为 500ms，高延迟时会提高到中位 RTT + 250ms。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = state.playbackHardSeekSyncEnabled,
+                        onCheckedChange = viewModel::updatePlaybackHardSeekSync,
+                    )
+                }
             }
         }
         item { HorizontalDivider() }

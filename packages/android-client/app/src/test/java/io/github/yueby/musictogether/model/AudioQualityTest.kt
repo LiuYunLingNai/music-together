@@ -1,22 +1,22 @@
 package io.github.yueby.musictogether.model
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AudioQualityTest {
     @Test
-    fun onlyAddsPlatformQualitiesForVipAccounts() {
-        val options = availableAudioQualities(
-            listOf(
-                PlatformAuthStatus("netease", 1, true, 11),
-                PlatformAuthStatus("tencent", 1, false, 0),
-            ),
-        )
+    fun exposesOnlyCrossPlatformRoomQualityChoices() {
+        val options = availableAudioQualities()
 
-        assertTrue(options.any { it.value == "netease_master" })
-        assertFalse(options.any { it.value == "tencent_master" })
+        assertEquals(listOf("128", "192", "320", "999", "highest"), options.map { it.value })
         assertEquals(1, options.count { it.value == "999" })
+        assertTrue(options.any { it.value == "highest" && it.label == "尽量高" })
+    }
+
+    @Test
+    fun labelsLegacyAndNewServerQualityValues() {
+        assertEquals("B站 Hi-Res", audioQualityLabel("bilibili_hires"))
+        assertEquals("酷狗蝰蛇母带 2.0", audioQualityLabel("kugou_master"))
     }
 }

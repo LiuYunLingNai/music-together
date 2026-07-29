@@ -53,6 +53,8 @@ object Events {
     const val AUTH_STATUS_UPDATE = "auth:status_update"
     const val AUTH_MY_STATUS = "auth:my_status"
     const val AUTH_GET_STATUS = "auth:get_status"
+    const val AUTH_CLAIM_KUGOU_CONCEPT_VIP = "auth:claim_kugou_concept_vip"
+    const val AUTH_CLAIM_KUGOU_CONCEPT_VIP_RESULT = "auth:claim_kugou_concept_vip_result"
 
     const val PLAYLIST_GET_MY = "playlist:get_my"
     const val PLAYLIST_MY_LIST = "playlist:my_list"

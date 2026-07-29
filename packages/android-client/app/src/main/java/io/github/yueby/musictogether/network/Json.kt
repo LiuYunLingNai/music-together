@@ -47,6 +47,7 @@ internal fun JSONObject.toTrack(): Track {
         bilibiliCover = stringOrNull("bilibiliCover"),
         metadataSource = stringOrNull("metadataSource"),
         streamUrl = stringOrNull("streamUrl"),
+        streamFormat = stringOrNull("streamFormat"),
         vip = optBoolean("vip", false),
         requestedBy = stringOrNull("requestedBy"),
     )
@@ -67,6 +68,7 @@ internal fun Track.toJson(): JSONObject = JSONObject().apply {
     bilibiliCover?.let { put("bilibiliCover", it) }
     metadataSource?.let { put("metadataSource", it) }
     streamUrl?.let { put("streamUrl", it) }
+    streamFormat?.let { put("streamFormat", it) }
     put("vip", vip)
     requestedBy?.let { put("requestedBy", it) }
 }
@@ -151,6 +153,8 @@ internal fun JSONObject.toPlatformAuthStatus(): PlatformAuthStatus = PlatformAut
     loggedInCount = optInt("loggedInCount"),
     hasVip = optBoolean("hasVip"),
     maxVipType = optInt("maxVipType"),
+    maxVipLabel = stringOrNull("maxVipLabel"),
+    maxVipLevel = if (has("maxVipLevel") && !isNull("maxVipLevel")) optInt("maxVipLevel") else null,
 )
 
 internal fun JSONObject.toMyPlatformAuth(): MyPlatformAuth = MyPlatformAuth(
@@ -158,6 +162,8 @@ internal fun JSONObject.toMyPlatformAuth(): MyPlatformAuth = MyPlatformAuth(
     loggedIn = optBoolean("loggedIn"),
     nickname = stringOrNull("nickname"),
     vipType = optInt("vipType"),
+    vipLabel = stringOrNull("vipLabel"),
+    vipLevel = if (has("vipLevel") && !isNull("vipLevel")) optInt("vipLevel") else null,
 )
 
 internal fun JSONObject.toPlaylist(): Playlist = Playlist(

@@ -13,6 +13,7 @@ class PlaybackDriftControllerTest {
             expectedSeconds = 10.0,
             medianRttMs = 20,
             tempoSyncEnabled = true,
+            hardSeekSyncEnabled = true,
         )
 
         assertEquals(0.994f, (correction as DriftCorrection.Tempo).speed, 0.0001f)
@@ -21,32 +22,40 @@ class PlaybackDriftControllerTest {
 
     @Test
     fun `tempo correction is clamped to one percent`() {
-        val correction = PlaybackDriftController().update(10.2, 10.0, 20, true)
+        val correction = PlaybackDriftController().update(10.2, 10.0, 20, true, true)
 
         assertEquals(0.99f, (correction as DriftCorrection.Tempo).speed, 0.0001f)
     }
 
     @Test
     fun `disabled tempo sync keeps native speed`() {
-        val correction = PlaybackDriftController().update(9.9, 10.0, 20, false)
+        val correction = PlaybackDriftController().update(9.9, 10.0, 20, false, false)
 
         assertEquals(1f, (correction as DriftCorrection.Tempo).speed, 0f)
     }
 
     @Test
-    fun `disabled tempo sync still hard seeks sustained large drift`() {
+    fun `independent hard seek setting corrects sustained large drift`() {
         val controller = PlaybackDriftController()
 
-        assertTrue(controller.update(11.0, 10.0, 20, false) is DriftCorrection.None)
-        assertTrue(controller.update(11.0, 10.0, 20, false) is DriftCorrection.Seek)
+        assertTrue(controller.update(11.0, 10.0, 20, false, true) is DriftCorrection.None)
+        assertTrue(controller.update(11.0, 10.0, 20, false, true) is DriftCorrection.Seek)
+    }
+
+    @Test
+    fun `disabled correction settings keep native speed during large drift`() {
+        val controller = PlaybackDriftController()
+
+        assertEquals(1f, (controller.update(11.0, 10.0, 20, false, false) as DriftCorrection.Tempo).speed, 0f)
+        assertEquals(1f, (controller.update(11.0, 10.0, 20, false, false) as DriftCorrection.Tempo).speed, 0f)
     }
 
     @Test
     fun `large drift requires two consecutive samples before seeking`() {
         val controller = PlaybackDriftController()
 
-        assertTrue(controller.update(11.0, 10.0, 20, true) is DriftCorrection.None)
-        val correction = controller.update(11.0, 10.0, 20, true)
+        assertTrue(controller.update(11.0, 10.0, 20, true, false) is DriftCorrection.None)
+        val correction = controller.update(11.0, 10.0, 20, true, false)
 
         assertEquals(10.0, (correction as DriftCorrection.Seek).positionSeconds, 0.0)
     }
@@ -55,8 +64,8 @@ class PlaybackDriftControllerTest {
     fun `high latency raises hard seek threshold`() {
         val controller = PlaybackDriftController()
 
-        val first = controller.update(10.8, 10.0, 700, true)
-        val second = controller.update(10.8, 10.0, 700, true)
+        val first = controller.update(10.8, 10.0, 700, true, true)
+        val second = controller.update(10.8, 10.0, 700, true, true)
 
         assertTrue(first is DriftCorrection.Tempo)
         assertTrue(second is DriftCorrection.Tempo)
