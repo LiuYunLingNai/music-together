@@ -2,6 +2,8 @@ import { NTP, type MusicSource } from '@music-together/shared'
 import { SYNC_PACKET_INTERVAL_MAX_SECONDS, SYNC_PACKET_INTERVAL_MIN_SECONDS } from '@/lib/constants'
 
 const PREFIX = 'mt-'
+const SETTINGS_SCHEMA_VERSION_KEY = 'settingsSchemaVersion'
+const SETTINGS_SCHEMA_VERSION = 2
 
 function safeGet(key: string): string | null {
   try {
@@ -68,11 +70,39 @@ function safeEnum<T extends string>(key: string, allowed: readonly T[], fallback
   return fallback
 }
 
+/**
+ * Apply browser-setting migrations once per schema version.
+ *
+ * Version 1 changes automatic tempo correction from opt-out to opt-in. This
+ * deliberately resets the legacy value once; choices made after the upgrade
+ * are preserved because the recorded version prevents the migration from
+ * running again on reload or restart.
+ * Version 2 adds the opt-in hard-seek fallback used while tempo correction is
+ * disabled.
+ */
+function migrateSettings(): void {
+  const storedVersion = Math.max(0, safeInt(SETTINGS_SCHEMA_VERSION_KEY, 0))
+  if (storedVersion >= SETTINGS_SCHEMA_VERSION) return
+
+  if (storedVersion < 1) {
+    safeSet('playbackTempoSyncEnabled', 'false')
+  }
+
+  if (storedVersion < 2) {
+    safeSet('playbackHardSeekSyncEnabled', 'false')
+  }
+
+  safeSet(SETTINGS_SCHEMA_VERSION_KEY, String(SETTINGS_SCHEMA_VERSION))
+}
+
+migrateSettings()
+
 const LYRIC_ANCHORS = ['top', 'center', 'bottom'] as const
 
 /** 所有持久化设置项的默认值 — 供 store 层的 resettable 工厂使用 */
 export const SETTING_DEFAULTS = {
-  playbackTempoSyncEnabled: true,
+  playbackTempoSyncEnabled: false,
+  playbackHardSeekSyncEnabled: false,
   syncPacketIntervalSeconds: NTP.STEADY_STATE_INTERVAL_MS / 1000,
   ttmlEnabled: true,
   ttmlDbUrl: 'https://amlldb.bikonoo.com/ncm-lyrics/%s.ttml',
@@ -110,8 +140,10 @@ export const storage = {
   setVolume: (v: number) => safeSet('volume', String(v)),
 
   // Playback synchronization
-  getPlaybackTempoSyncEnabled: () => safeGet('playbackTempoSyncEnabled') !== 'false',
+  getPlaybackTempoSyncEnabled: () => safeGet('playbackTempoSyncEnabled') === 'true',
   setPlaybackTempoSyncEnabled: (v: boolean) => safeSet('playbackTempoSyncEnabled', String(v)),
+  getPlaybackHardSeekSyncEnabled: () => safeGet('playbackHardSeekSyncEnabled') === 'true',
+  setPlaybackHardSeekSyncEnabled: (v: boolean) => safeSet('playbackHardSeekSyncEnabled', String(v)),
 
   getSyncPacketIntervalSeconds: () => {
     const seconds = safeInt('syncPacketIntervalSeconds', SETTING_DEFAULTS.syncPacketIntervalSeconds)

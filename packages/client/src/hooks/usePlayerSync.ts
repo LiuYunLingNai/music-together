@@ -218,8 +218,15 @@ export function usePlayerSync(
       // Raising the threshold proportionally to the observed RTT avoids this.
       const rttBasedThreshold = (getMedianRTT() + DRIFT_SEEK_RTT_MARGIN_MS) / 1000
       const hardSeekThreshold = Math.max(DRIFT_SEEK_THRESHOLD_MS / 1000, rttBasedThreshold)
+      const { playbackTempoSyncEnabled, playbackHardSeekSyncEnabled } = useSettingsStore.getState()
+      const hardSeekEnabled = playbackTempoSyncEnabled || playbackHardSeekSyncEnabled
 
       if (absDrift > hardSeekThreshold) {
+        if (!hardSeekEnabled) {
+          hardSeekCountRef.current = 0
+          setPlaybackTempo(1)
+          return
+        }
         // Require HARD_SEEK_CONFIRM_COUNT consecutive triggers to avoid
         // acting on a single noisy measurement.
         hardSeekCountRef.current++
@@ -245,8 +252,12 @@ export function usePlayerSync(
         emaColdStartRef.current = true
       } else if (absDrift > DRIFT_DEAD_ZONE_MS / 1000) {
         hardSeekCountRef.current = 0
-        const adjustment = clamp(sd * DRIFT_TEMPO_KP, MAX_TEMPO_ADJUSTMENT)
-        setPlaybackTempo(1 - adjustment)
+        if (playbackTempoSyncEnabled) {
+          const adjustment = clamp(sd * DRIFT_TEMPO_KP, MAX_TEMPO_ADJUSTMENT)
+          setPlaybackTempo(1 - adjustment)
+        } else {
+          setPlaybackTempo(1)
+        }
       } else {
         hardSeekCountRef.current = 0
         setPlaybackTempo(1)

@@ -27,6 +27,7 @@ type ResettableFields<K extends string, V> = {
 
 /** 合并所有 resettable key 的字段为完整 SettingsStore 类型 */
 type SettingsStore = ResettableFields<'playbackTempoSyncEnabled', boolean> &
+  ResettableFields<'playbackHardSeekSyncEnabled', boolean> &
   ResettableFields<'syncPacketIntervalSeconds', number> &
   ResettableFields<'ttmlEnabled', boolean> &
   ResettableFields<'ttmlDbUrl', string> &
@@ -87,6 +88,11 @@ export const useSettingsStore = create<SettingsStore>((set) => {
 
   return {
     ...resettable('playbackTempoSyncEnabled', storage.getPlaybackTempoSyncEnabled, storage.setPlaybackTempoSyncEnabled),
+    ...resettable(
+      'playbackHardSeekSyncEnabled',
+      storage.getPlaybackHardSeekSyncEnabled,
+      storage.setPlaybackHardSeekSyncEnabled,
+    ),
     ...resettable(
       'syncPacketIntervalSeconds',
       storage.getSyncPacketIntervalSeconds,

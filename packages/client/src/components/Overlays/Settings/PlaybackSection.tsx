@@ -52,7 +52,7 @@ export function PlaybackSection() {
 
         <SettingRow
           label="自动变速校准"
-          description="开启后会在不改变音高的前提下，以最多 ±1% 的速度差平滑消除客户端间的微小时间偏移。关闭后始终以 1.0× 原速播放；网络抖动造成的偏差不会被平滑追回，偏差过大时仍会直接定位来重新校准。"
+          description="开启后会在不改变音高的前提下，以最多 ±1% 的速度差平滑消除客户端间的微小时间偏移。关闭后始终以 1.0× 原速播放，并可单独选择是否在偏差过大时直接定位同步。"
           onReset={
             s.playbackTempoSyncEnabled !== s.playbackTempoSyncEnabledDefault
               ? s.resetPlaybackTempoSyncEnabled
@@ -65,6 +65,24 @@ export function PlaybackSection() {
             onCheckedChange={s.setPlaybackTempoSyncEnabled}
           />
         </SettingRow>
+
+        {!s.playbackTempoSyncEnabled && (
+          <SettingRow
+            label="大偏差直接同步"
+            description="自动变速关闭时，平滑偏差连续两次超过动态阈值后直接定位同步。阈值最低为 500 ms，高延迟时会提高到中位 RTT + 250 ms。"
+            onReset={
+              s.playbackHardSeekSyncEnabled !== s.playbackHardSeekSyncEnabledDefault
+                ? s.resetPlaybackHardSeekSyncEnabled
+                : undefined
+            }
+          >
+            <Switch
+              aria-label="大偏差直接同步"
+              checked={s.playbackHardSeekSyncEnabled}
+              onCheckedChange={s.setPlaybackHardSeekSyncEnabled}
+            />
+          </SettingRow>
+        )}
 
         <SettingRow
           label="同步数据间隔"
