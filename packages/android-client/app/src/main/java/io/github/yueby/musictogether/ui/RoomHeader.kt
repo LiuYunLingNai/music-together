@@ -24,6 +24,8 @@ import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -49,6 +51,7 @@ import io.github.yueby.musictogether.BuildConfig
 import io.github.yueby.musictogether.MusicTogetherViewModel
 import io.github.yueby.musictogether.logging.AppLogger
 import io.github.yueby.musictogether.model.ChatMessage
+import io.github.yueby.musictogether.model.ConnectionStatus
 import io.github.yueby.musictogether.model.RoomState
 
 @Composable
@@ -58,6 +61,8 @@ internal fun RoomHeader(
     safeContentPadding: PaddingValues = PaddingValues(0.dp),
     menuExpanded: Boolean,
     onMenuExpandedChange: (Boolean) -> Unit,
+    connectionStatus: ConnectionStatus,
+    pingMs: Long?,
     viewModel: MusicTogetherViewModel,
     context: android.content.Context,
     onOpenOverlay: (RoomOverlay) -> Unit,
@@ -72,6 +77,14 @@ internal fun RoomHeader(
         if (immersive) Color.White.copy(alpha = 0.92f) else MaterialTheme.colorScheme.onSurface
     val secondaryColor =
         if (immersive) Color.White.copy(alpha = 0.74f) else MaterialTheme.colorScheme.onSurfaceVariant
+    val connected = connectionStatus == ConnectionStatus.Connected
+    val latencyColor = when {
+        !connected -> MaterialTheme.colorScheme.error
+        pingMs == null -> secondaryColor
+        pingMs < 100 -> if (immersive) Color(0xFF86EFAC) else Color(0xFF15803D)
+        pingMs < 300 -> if (immersive) Color(0xFFFDE68A) else Color(0xFFB45309)
+        else -> MaterialTheme.colorScheme.error
+    }
     val dividerColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.50f)
     val backgroundModifier =
         if (immersive) {
@@ -146,6 +159,25 @@ internal fun RoomHeader(
             }
         }
         Spacer(Modifier.size(6.dp))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Icon(
+                if (connected) Icons.Default.Wifi else Icons.Default.WifiOff,
+                contentDescription = if (connected) "网络延迟" else "连接已断开",
+                modifier = Modifier.size(16.dp),
+                tint = latencyColor,
+            )
+            Text(
+                text = if (connected) pingMs?.let { "${it}ms" } ?: "--ms" else "--",
+                color = latencyColor,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                fontSize = 11.sp,
+                maxLines = 1,
+            )
+        }
+        Spacer(Modifier.size(2.dp))
         IconButton(onClick = { onOpenOverlay(RoomOverlay.Search) }) {
             Icon(Icons.Default.Search, "搜索点歌", Modifier.size(20.dp), tint = contentColor)
         }

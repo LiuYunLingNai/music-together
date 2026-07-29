@@ -32,6 +32,7 @@ import io.github.yueby.musictogether.network.Events
 import io.github.yueby.musictogether.network.MusicTogetherApi
 import io.github.yueby.musictogether.network.MusicTogetherSocket
 import io.github.yueby.musictogether.network.PersistentCookieJar
+import io.github.yueby.musictogether.network.RoomJoinTargetParser
 import io.github.yueby.musictogether.network.ServerAddress
 import io.github.yueby.musictogether.network.ServerCatalog
 import io.github.yueby.musictogether.network.SocketEvents
@@ -87,6 +88,11 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         const val MAX_SERVERS = 10
         const val UPDATE_SOURCE_KEY = "update_download_source"
         const val LYRIC_OFFSETS_KEY = "lyric_offsets"
+        const val PLAYBACK_TEMPO_SYNC_KEY = "playback_tempo_sync_enabled"
+        const val SYNC_PACKET_INTERVAL_KEY = "sync_packet_interval_seconds"
+        const val DEFAULT_SYNC_PACKET_INTERVAL_SECONDS = 3
+        const val MIN_SYNC_PACKET_INTERVAL_SECONDS = 1
+        const val MAX_SYNC_PACKET_INTERVAL_SECONDS = 60
         const val GITHUB_RELEASES_API = "https://api.github.com/repos/LiuYunLingNai/music-together/releases"
     }
 
@@ -113,13 +119,23 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             servers = initialServerUrls.map { ServerConnection(it) },
             nickname = preferences.getString("nickname", "").orEmpty(),
             lyricOffsets = loadLyricOffsets(),
+            playbackTempoSyncEnabled = preferences.getBoolean(PLAYBACK_TEMPO_SYNC_KEY, true),
+            syncPacketIntervalSeconds = preferences
+                .getInt(SYNC_PACKET_INTERVAL_KEY, DEFAULT_SYNC_PACKET_INTERVAL_SECONDS)
+                .coerceIn(MIN_SYNC_PACKET_INTERVAL_SECONDS, MAX_SYNC_PACKET_INTERVAL_SECONDS),
             updateSource = preferences.getString(UPDATE_SOURCE_KEY, null)
                 ?.let { runCatching { UpdateDownloadSource.valueOf(it) }.getOrNull() }
                 ?: UpdateDownloadSource.GitHub,
         ),
     )
     val state: StateFlow<AppState> = _state.asStateFlow()
-    private val nativePlayer = NativePlayer(application, viewModelScope, clock, ::onTrackEnded)
+    private val nativePlayer = NativePlayer(
+        application,
+        viewModelScope,
+        clock,
+        _state.value.playbackTempoSyncEnabled,
+        ::onTrackEnded,
+    )
     val playerState: StateFlow<PlayerUiState> = nativePlayer.state
 
     private var activeServer: ServerAddress? = null
@@ -142,12 +158,13 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private var playlistJob: Job? = null
     private var playlistContext: PlaylistContext? = null
     private var restoredAuthRoomId: String? = null
-    private var appInForeground = true
+    private var appInForeground = false
     private var chatVisible = false
     private var lastRtt: Long? = null
     private var waitingForJoinRoomState = false
     private var recoveredTrackId: String? = null
     private val pendingQueueActions = linkedMapOf<String, PendingQueueAction>()
+    private val pendingQueueTrackIds = mutableSetOf<String>()
     private val autoRestoringPlatforms = mutableSetOf<String>()
     private val loadedPlaylistPlatforms = mutableSetOf<String>()
     private var downloadedUpdateApk: java.io.File? = null
@@ -352,8 +369,29 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         socket.emit(Events.ROOM_SETTINGS, JSONObject().put("audioQuality", value))
     }
 
+    fun updateRoomHidden(hidden: Boolean) {
+        socket.emit(Events.ROOM_SETTINGS, JSONObject().put("hidden", hidden))
+    }
+
     fun updateRoomPermanent(permanent: Boolean) {
         socket.emit(Events.ROOM_SETTINGS, JSONObject().put("permanent", permanent))
+    }
+
+    fun updatePlaybackTempoSync(enabled: Boolean) {
+        preferences.edit().putBoolean(PLAYBACK_TEMPO_SYNC_KEY, enabled).apply()
+        _state.value = _state.value.copy(playbackTempoSyncEnabled = enabled)
+        nativePlayer.setTempoSyncEnabled(enabled)
+    }
+
+    fun updateSyncPacketInterval(seconds: Int) {
+        val value = seconds.coerceIn(MIN_SYNC_PACKET_INTERVAL_SECONDS, MAX_SYNC_PACKET_INTERVAL_SECONDS)
+        if (value == _state.value.syncPacketIntervalSeconds) return
+        preferences.edit().putInt(SYNC_PACKET_INTERVAL_KEY, value).apply()
+        _state.value = _state.value.copy(syncPacketIntervalSeconds = value)
+        if (_state.value.connectionStatus == ConnectionStatus.Connected) {
+            stopPeriodicJobs()
+            startPeriodicJobs()
+        }
     }
 
     fun copyRoomLink() {
@@ -550,6 +588,17 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         joinRoomOnServer(_state.value.selectedServerUrl, roomId, password)
     }
 
+    fun joinRoomInput(input: String, password: String = "") {
+        val target = RoomJoinTargetParser.parse(input)
+            ?: return setError("请输入有效的房间号或邀请链接")
+        val server = target.serverAddress
+        if (server == null) {
+            joinRoom(target.roomId, password)
+        } else {
+            joinRoomOnServer(server.displayUrl, target.roomId, password)
+        }
+    }
+
     fun leaveRoom() {
         socket.emit(Events.ROOM_LEAVE)
         desiredRoomId = null
@@ -557,6 +606,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         nativePlayer.stop()
         recoveredTrackId = null
         pendingQueueActions.clear()
+        pendingQueueTrackIds.clear()
         chatVisible = false
         chatNotifications.clear()
         dismissBilibiliMetadata()
@@ -784,9 +834,11 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     fun addPlaylistTracksToQueue(playlist: Playlist) {
         val room = _state.value.room ?: return
         val queueIds = room.queue.mapTo(mutableSetOf()) { it.id }
-        val available = (MAX_QUEUE_SIZE - room.queue.size).coerceAtLeast(0)
+        val reservedIds = pendingQueueTrackIds - queueIds
+        val unavailableIds = queueIds + reservedIds
+        val available = (MAX_QUEUE_SIZE - room.queue.size - reservedIds.size).coerceAtLeast(0)
         val tracks = _state.value.platformHub.playlistTracks
-            .filterNot { it.id in queueIds }
+            .filterNot { it.id in unavailableIds }
             .distinctBy { it.id }
             .take(available)
         if (tracks.isEmpty()) {
@@ -795,12 +847,14 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         }
         var sent = true
         tracks.chunked(MAX_QUEUE_BATCH_SIZE).forEach { page ->
-            sent = socket.emit(
+            val pageSent = socket.emit(
                 Events.QUEUE_ADD_BATCH,
                 JSONObject()
                     .put("tracks", JSONArray(page.map { it.toJson() }))
                     .put("playlistName", playlist.name),
-            ) && sent
+            )
+            if (pageSent) pendingQueueTrackIds.addAll(page.map { it.id })
+            sent = pageSent && sent
         }
         AppLogger.info("Queue", "playlist batch=${tracks.size} source=${playlist.source} sent=$sent")
         setNotice(
@@ -832,7 +886,16 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun clearQueue() {
-        if (canControl()) socket.emit(Events.QUEUE_CLEAR)
+        if (!canControl()) return
+        val sent = socket.emit(Events.QUEUE_CLEAR)
+        if (sent) {
+            pendingQueueActions.clear()
+            pendingQueueTrackIds.clear()
+        }
+        setNotice(
+            if (sent) "播放列表已清空" else "清空播放列表失败，请检查连接",
+            isError = !sent,
+        )
     }
 
     fun moveTrack(track: Track, offset: Int) {
@@ -900,8 +963,24 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun setAppForeground(foreground: Boolean) {
+        val resumed = foreground && !appInForeground
         appInForeground = foreground
         if (foreground && chatVisible) chatNotifications.clear()
+        if (resumed && _state.value.connectionStatus == ConnectionStatus.Connected) {
+            viewModelScope.launch {
+                repeat(5) { index ->
+                    sendClockPing()
+                    if (index < 4) delay(50)
+                }
+            }
+            if (nativePlayer.state.value.playing) {
+                socket.emit(Events.PLAYER_SYNC_REQUEST)
+                viewModelScope.launch {
+                    delay(250)
+                    if (nativePlayer.state.value.playing) socket.emit(Events.PLAYER_SYNC_REQUEST)
+                }
+            }
+        }
     }
 
     fun setChatVisible(visible: Boolean) {
@@ -1012,7 +1091,13 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         return state.room?.users?.firstOrNull { it.id == state.userId }?.role
     }
 
-    fun canControl(): Boolean = currentRole() in setOf("owner", "admin") || _state.value.accountProfile?.role == "admin"
+    fun canControl(): Boolean {
+        val state = _state.value
+        val currentUser = state.room?.users?.firstOrNull { it.id == state.userId }
+        return currentUser?.role in setOf("owner", "admin") ||
+            currentUser?.isServerAdmin == true ||
+            state.accountProfile?.role == "admin"
+    }
 
     private fun persistServers(urls: List<String>) {
         preferences.edit().putString(SERVERS_KEY, ServerCatalog.encode(urls)).apply()
@@ -1124,10 +1209,18 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             }
             AppLogger.info("WebSocket", "connected server=${activeServer?.displayUrl}")
             reconnectJob?.cancel()
-            _state.value = _state.value.copy(connectionStatus = ConnectionStatus.Connected, error = null)
+            _state.value = _state.value.copy(
+                connectionStatus = ConnectionStatus.Connected,
+                pingMs = null,
+                syncDriftSeconds = 0.0,
+                error = null,
+            )
             activeServer?.displayUrl?.let { url ->
                 updateServerConnection(url) { it.copy(status = ConnectionStatus.Connected, error = null) }
             }
+            clock.reset()
+            lastRtt = null
+            startPeriodicJobs()
             socket.emit(Events.ROOM_LIST)
             val creation = pendingRoomCreation
             if (creation != null) {
@@ -1136,7 +1229,6 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             } else {
                 desiredRoomId?.let { emitJoin(it, desiredRoomPassword.orEmpty()) }
             }
-            startPeriodicJobs()
         }
     }
 
@@ -1147,10 +1239,16 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             AppLogger.warn("WebSocket", "disconnected reason=${reason.orEmpty()}")
             stopPeriodicJobs()
             clock.reset()
+            lastRtt = null
             recoveredTrackId = null
             pendingQueueActions.clear()
+            pendingQueueTrackIds.clear()
             resetPlatformRoomState()
-            _state.value = _state.value.copy(connectionStatus = ConnectionStatus.Disconnected)
+            _state.value = _state.value.copy(
+                connectionStatus = ConnectionStatus.Disconnected,
+                pingMs = null,
+                syncDriftSeconds = 0.0,
+            )
             activeServer?.displayUrl?.let { url ->
                 updateServerConnection(url) { it.copy(status = ConnectionStatus.Disconnected, error = reason) }
             }
@@ -1233,6 +1331,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     it.copy(
                         name = value.optString("name", it.name),
                         hasPassword = value.optBoolean("hasPassword", it.hasPassword),
+                        hidden = value.optBoolean("hidden", it.hidden),
                         permanent = value.optBoolean("permanent", it.permanent),
                         audioQuality = value.audioQuality("audioQuality", it.audioQuality),
                     )
@@ -1241,10 +1340,11 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             Events.ROOM_USER_JOINED -> updateUsers { users ->
                 val value = data as? JSONObject ?: return@updateUsers users
                 users.filterNot { it.id == value.optString("id") } + User(
-                    value.optString("id"),
-                    value.optString("nickname"),
-                    value.optString("role", "member"),
-                    value.stringOrNull("avatarUrl"),
+                    id = value.optString("id"),
+                    nickname = value.optString("nickname"),
+                    role = value.optString("role", "member"),
+                    avatarUrl = value.stringOrNull("avatarUrl"),
+                    isServerAdmin = value.optBoolean("isServerAdmin", false),
                 )
             }
             Events.ROOM_USER_LEFT -> updateUsers { users ->
@@ -1277,8 +1377,9 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     desiredRoomId = null
                     desiredRoomPassword = null
                 }
-                if (pendingQueueActions.isNotEmpty()) {
+                if (pendingQueueActions.isNotEmpty() || pendingQueueTrackIds.isNotEmpty()) {
                     pendingQueueActions.clear()
+                    pendingQueueTrackIds.clear()
                     setError("点歌失败：$message")
                 } else {
                     setError(message)
@@ -1288,6 +1389,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 val queueJson = (data as? JSONObject)?.optJSONArray("queue") ?: JSONArray()
                 val queue = List(queueJson.length()) { index -> queueJson.getJSONObject(index).toTrack() }
                 updateRoom { it.copy(queue = queue) }
+                pendingQueueTrackIds.removeAll(queue.mapTo(hashSetOf()) { it.id })
                 val completed = pendingQueueActions.filterKeys { id -> queue.any { it.id == id } }
                 if (completed.isNotEmpty()) {
                     completed.keys.forEach(pendingQueueActions::remove)
@@ -1304,6 +1406,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 val track = value.optJSONObject("track")?.toTrack() ?: return
                 val playState = value.optJSONObject("playState")?.toPlayState() ?: PlayState()
                 updateRoom { it.copy(currentTrack = track, playState = playState) }
+                _state.value = _state.value.copy(syncDriftSeconds = 0.0)
                 if (_state.value.lyrics.trackId != track.id) loadLyrics(track)
                 if (recoveredTrackId == track.id && nativePlayer.state.value.track?.id == track.id) {
                     AppLogger.info("Sync", "skip duplicate join PLAYER_PLAY track=${track.id}")
@@ -1323,11 +1426,13 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             Events.PLAYER_SEEK -> handleScheduledState(data) { nativePlayer.seek(it) }
             Events.PLAYER_SYNC_RESPONSE -> {
                 val value = data as? JSONObject ?: return
-                if (_state.value.room?.hostId == _state.value.userId) return
+                if (!clock.calibrated) return
                 val serverTimestamp = value.optLong("serverTimestamp")
                 val networkDelay = ((clock.serverTime() - serverTimestamp) / 1000.0).coerceIn(0.0, 5.0)
                 val expected = value.optDouble("currentTime") + if (value.optBoolean("isPlaying")) networkDelay else 0.0
-                nativePlayer.correctDrift(expected, value.optBoolean("isPlaying"), (lastRtt ?: 0) + 100)
+                nativePlayer.correctDrift(expected, value.optBoolean("isPlaying"), clock.medianRtt)?.let { drift ->
+                    _state.value = _state.value.copy(syncDriftSeconds = drift)
+                }
             }
             Events.CHAT_HISTORY -> {
                 val array = data as? JSONArray ?: JSONArray()
@@ -1465,7 +1570,9 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             }
             Events.NTP_PONG -> {
                 val value = data as? JSONObject ?: return
-                lastRtt = clock.processPong(value.optLong("clientPingId"), value.optLong("serverTime")) ?: lastRtt
+                val rtt = clock.processPong(value.optLong("clientPingId"), value.optLong("serverTime")) ?: return
+                lastRtt = rtt
+                _state.value = _state.value.copy(pingMs = clock.medianRtt)
                 if (clock.calibrated) AppLogger.debug("Sync", "NTP calibrated rttMs=${lastRtt ?: -1}")
             }
         }
@@ -1774,6 +1881,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private fun handleScheduledState(data: Any?, action: (PlayState) -> Unit) {
         val playState = (data as? JSONObject)?.optJSONObject("playState")?.toPlayState() ?: return
         updateRoom { it.copy(playState = playState) }
+        if (!playState.isPlaying) _state.value = _state.value.copy(syncDriftSeconds = 0.0)
         action(playState)
     }
 
@@ -1806,10 +1914,15 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     private fun emitSearchQueueAction(track: Track, pinned: Boolean) {
+        if (_state.value.room?.queue.orEmpty().any { it.id == track.id } || track.id in pendingQueueTrackIds) {
+            setNotice("《${track.title}》已在播放列表中")
+            return
+        }
         val event = if (pinned) Events.QUEUE_INSERT_AFTER_CURRENT else Events.QUEUE_ADD
         val sent = socket.emit(event, JSONObject().put("track", track.toJson()))
         AppLogger.info("Queue", "search action=${if (pinned) "pin" else "add"} track=${track.id} sent=$sent")
         if (sent) {
+            pendingQueueTrackIds += track.id
             pendingQueueActions[track.id] = PendingQueueAction(track.title, pinned)
         } else {
             _state.value = _state.value.copy(
@@ -2062,31 +2175,33 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private fun startPeriodicJobs() {
         stopPeriodicJobs()
         clockJob = viewModelScope.launch {
-            var count = 0
             while (isActive) {
-                val id = clock.recordPing()
-                socket.emit(Events.NTP_PING, JSONObject().apply {
-                    put("clientPingId", id)
-                    lastRtt?.let { put("lastRttMs", it) }
-                })
-                count++
-                delay(if (count < 20) 50 else 5_000)
+                sendClockPing()
+                delay(
+                    if (clock.calibrated) {
+                        _state.value.syncPacketIntervalSeconds * 1_000L
+                    } else {
+                        50L
+                    },
+                )
             }
         }
         syncJob = viewModelScope.launch {
             while (isActive) {
-                delay(2_000)
-                val room = _state.value.room ?: continue
-                if (room.hostId == _state.value.userId && nativePlayer.state.value.playing) {
-                    socket.emit(Events.PLAYER_SYNC, JSONObject().apply {
-                        put("currentTime", nativePlayer.currentPositionSeconds())
-                        put("hostServerTime", clock.serverTime())
-                    })
-                } else if (room.hostId != _state.value.userId) {
+                delay(_state.value.syncPacketIntervalSeconds * 1_000L)
+                if (_state.value.room != null && nativePlayer.state.value.playing) {
                     socket.emit(Events.PLAYER_SYNC_REQUEST)
                 }
             }
         }
+    }
+
+    private fun sendClockPing() {
+        val id = clock.recordPing()
+        socket.emit(Events.NTP_PING, JSONObject().apply {
+            put("clientPingId", id)
+            clock.medianRtt.takeIf { it > 0 }?.let { put("lastRttMs", it) }
+        })
     }
 
     private fun stopPeriodicJobs() {

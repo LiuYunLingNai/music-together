@@ -449,7 +449,7 @@ private fun PlatformTrackRow(track: Track, isAdded: Boolean, onAdd: () -> Unit, 
         colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
         leadingContent = {
             AsyncImage(
-                model = track.cover,
+                model = rememberCoverImageRequest(track.cover),
                 contentDescription = null,
                 modifier = Modifier.size(50.dp).clip(RoundedCornerShape(8.dp)),
                 contentScale = ContentScale.Crop,

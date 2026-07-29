@@ -315,6 +315,8 @@ class MusicTogetherApi(private val client: OkHttpClient) {
         creatorId = optString("creatorId"),
         userCount = optInt("userCount"),
         hasPassword = optBoolean("hasPassword"),
+        hidden = optBoolean("hidden", false),
+        permanent = optBoolean("permanent", false),
         currentTrackTitle = stringOrNull("currentTrackTitle"),
     )
 

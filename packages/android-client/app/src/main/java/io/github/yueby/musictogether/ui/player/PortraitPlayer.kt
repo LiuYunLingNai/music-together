@@ -78,6 +78,7 @@ import io.github.yueby.musictogether.model.LyricsState
 import io.github.yueby.musictogether.model.RoomState
 import io.github.yueby.musictogether.model.Track
 import io.github.yueby.musictogether.player.PlayerUiState
+import io.github.yueby.musictogether.ui.rememberCoverImageRequest
 import kotlin.math.roundToInt
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
@@ -219,7 +220,7 @@ private fun MobileCoverHero(
         )
         if (track != null && track.cover.isNotBlank()) {
             AsyncImage(
-                model = track.cover,
+                model = rememberCoverImageRequest(track.cover),
                 contentDescription = "打开歌词",
                 modifier = with(sharedTransitionScope) {
                     Modifier
@@ -294,7 +295,7 @@ private fun MobileLyricsHero(
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             AsyncImage(
-                model = track.cover,
+                model = rememberCoverImageRequest(track.cover),
                 contentDescription = "返回封面",
                 modifier = with(sharedTransitionScope) {
                     Modifier

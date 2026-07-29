@@ -10,16 +10,25 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -31,22 +40,38 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import io.github.yueby.musictogether.MusicTogetherViewModel
 import io.github.yueby.musictogether.model.AppState
 import io.github.yueby.musictogether.model.audioQualityLabel
 import io.github.yueby.musictogether.model.availableAudioQualities
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RoomSettingsPane(state: AppState, viewModel: MusicTogetherViewModel) {
     val room = state.room ?: return
-    val canManage = room.users.firstOrNull { it.id == state.userId }?.role == "owner" ||
+    val currentUser = room.users.firstOrNull { it.id == state.userId }
+    val canManage = currentUser?.role == "owner" || currentUser?.isServerAdmin == true ||
         state.accountProfile?.role == "admin"
     val options = remember(state.platformHub.authStatus) { availableAudioQualities(state.platformHub.authStatus) }
     var expanded by remember { mutableStateOf(false) }
+    var syncIntervalDraft by remember(state.syncPacketIntervalSeconds) {
+        mutableStateOf(state.syncPacketIntervalSeconds.toString())
+    }
+    val syncDriftMs = (state.syncDriftSeconds * 1000).roundToInt()
+    val syncDriftLabel = if (syncDriftMs > 0) "+${syncDriftMs}ms" else "${syncDriftMs}ms"
+    val commitSyncInterval = {
+        val value = syncIntervalDraft.toIntOrNull()?.coerceIn(1, 60) ?: state.syncPacketIntervalSeconds
+        syncIntervalDraft = value.toString()
+        viewModel.updateSyncPacketInterval(value)
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -61,6 +86,90 @@ fun RoomSettingsPane(state: AppState, viewModel: MusicTogetherViewModel) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontFamily = FontFamily.Monospace,
             )
+        }
+        item { HorizontalDivider() }
+        item {
+            Row(verticalAlignment = Alignment.Top) {
+                Icon(Icons.Default.Timer, null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("同步数据间隔", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "时钟数据包和播放进度校准包的发送间隔，可设置为 1–60 秒。间隔越长，网络请求越少，但校准响应会稍慢。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(
+                        modifier = Modifier.padding(top = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(
+                            onClick = { viewModel.updateSyncPacketInterval(state.syncPacketIntervalSeconds - 1) },
+                            enabled = state.syncPacketIntervalSeconds > 1,
+                        ) {
+                            Icon(Icons.Default.Remove, "减少同步数据间隔")
+                        }
+                        OutlinedTextField(
+                            value = syncIntervalDraft,
+                            onValueChange = { value ->
+                                if (value.isEmpty() || value.all(Char::isDigit)) syncIntervalDraft = value.take(2)
+                            },
+                            modifier = Modifier
+                                .width(104.dp)
+                                .onFocusChanged { if (!it.isFocused) commitSyncInterval() },
+                            singleLine = true,
+                            suffix = { Text("秒") },
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Number,
+                                imeAction = ImeAction.Done,
+                            ),
+                            keyboardActions = KeyboardActions(onDone = { commitSyncInterval() }),
+                        )
+                        IconButton(
+                            onClick = { viewModel.updateSyncPacketInterval(state.syncPacketIntervalSeconds + 1) },
+                            enabled = state.syncPacketIntervalSeconds < 60,
+                        ) {
+                            Icon(Icons.Default.Add, "增加同步数据间隔")
+                        }
+                    }
+                }
+            }
+        }
+        item { HorizontalDivider() }
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Sync, null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(10.dp))
+                Text("同步偏移", modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                Text(
+                    syncDriftLabel,
+                    color = if (abs(syncDriftMs) > 500) {
+                        MaterialTheme.colorScheme.tertiary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+        }
+        item { HorizontalDivider() }
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Speed, null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("自动变速校准", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "不改变音高，以最多 ±1% 的速度差平滑消除本机播放偏移；关闭后保持 1.0× 原速，大幅偏移仍会自动定位。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = state.playbackTempoSyncEnabled,
+                    onCheckedChange = viewModel::updatePlaybackTempoSync,
+                )
+            }
         }
         item { HorizontalDivider() }
         item {
@@ -111,12 +220,31 @@ fun RoomSettingsPane(state: AppState, viewModel: MusicTogetherViewModel) {
         }
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.VisibilityOff, null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("隐藏房间", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (room.hidden) "不在公开大厅显示，仍可通过房间号或邀请链接加入" else "当前显示在公开大厅",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = room.hidden,
+                    onCheckedChange = viewModel::updateRoomHidden,
+                    enabled = canManage,
+                )
+            }
+        }
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.PushPin, null, tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Text("永久房间", fontWeight = FontWeight.SemiBold)
                     Text(
-                        if (room.permanent) "空房不回收，服务重启后仍会保留" else "空置一分钟后自动回收",
+                        if (room.permanent) "无论公开或隐藏，空房均不回收" else "空置一分钟后自动回收",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

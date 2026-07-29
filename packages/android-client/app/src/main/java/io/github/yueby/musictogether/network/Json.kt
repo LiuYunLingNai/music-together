@@ -88,15 +88,17 @@ internal fun JSONObject.toRoomState(): RoomState {
         creatorId = optString("creatorId"),
         hostId = optString("hostId"),
         hasPassword = optBoolean("hasPassword", false),
+        hidden = optBoolean("hidden", false),
         permanent = optBoolean("permanent", false),
         audioQuality = audioQuality("audioQuality"),
         users = List(usersJson.length()) { i ->
             val item = usersJson.getJSONObject(i)
             User(
-                item.optString("id"),
-                item.optString("nickname"),
-                item.optString("role", "member"),
-                item.stringOrNull("avatarUrl"),
+                id = item.optString("id"),
+                nickname = item.optString("nickname"),
+                role = item.optString("role", "member"),
+                avatarUrl = item.stringOrNull("avatarUrl"),
+                isServerAdmin = item.optBoolean("isServerAdmin", false),
             )
         },
         queue = List(queueJson.length()) { queueJson.getJSONObject(it).toTrack() },

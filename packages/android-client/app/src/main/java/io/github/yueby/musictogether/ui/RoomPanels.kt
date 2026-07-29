@@ -571,7 +571,7 @@ private fun TrackRow(
         ),
         leadingContent = {
             AsyncImage(
-                model = track.cover,
+                model = rememberCoverImageRequest(track.cover),
                 contentDescription = null,
                 modifier = Modifier
                     .size(if (compact) 40.dp else 48.dp)
