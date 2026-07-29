@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "test": "tsx --test test/audioQualityPolicy.test.ts test/neteaseMembership.test.ts",
+    "test": "tsx --test test/audioQualityPolicy.test.ts test/neteaseMembership.test.ts test/membershipRefresh.test.ts test/permanentRoomAudioQualityMigration.test.ts",
     "start": "node dist/index.js"
   },
   "dependencies": {
