@@ -1,4 +1,4 @@
-import { LIMITS, type RoomListItem, type Track } from '@music-together/shared'
+import { HIGHEST_AUDIO_QUALITY, LIMITS, type RoomListItem, type Track } from '@music-together/shared'
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto'
 import { config } from '../config.js'
 import { logger } from '../utils/logger.js'
@@ -23,6 +23,40 @@ interface PersistedRoomState {
   currentTrack: RoomData['currentTrack']
   playState: RoomData['playState']
   playMode: RoomData['playMode']
+}
+
+interface PermanentRoomAudioQualityMigration {
+  state: PersistedRoomState
+  previousAudioQuality: RoomData['audioQuality']
+  audioQuality: RoomData['audioQuality']
+}
+
+/**
+ * Do not migrate every `999` room: that value was both the old automatic
+ * maximum and the explicit lossless-SQ choice. Per the migration policy,
+ * provider-specific qualities at or above lossless SQ are normalized for every
+ * permanent room.
+ */
+const LEGACY_AUTOMATIC_HIGHEST_AUDIO_QUALITIES = new Set<RoomData['audioQuality']>([
+  'netease_hires',
+  'netease_jyeffect',
+  'netease_dolby',
+  'netease_spatial',
+  'netease_master',
+  'tencent_flac',
+  'tencent_master',
+  'kugou_hires',
+  'kugou_master',
+])
+
+function migratePermanentRoomAudioQuality(state: PersistedRoomState): PermanentRoomAudioQualityMigration | null {
+  if (!LEGACY_AUTOMATIC_HIGHEST_AUDIO_QUALITIES.has(state.audioQuality)) return null
+
+  return {
+    state: { ...state, audioQuality: HIGHEST_AUDIO_QUALITY },
+    previousAudioQuality: state.audioQuality,
+    audioQuality: HIGHEST_AUDIO_QUALITY,
+  }
 }
 
 const encryptionKey = createHash('sha256').update(config.identity.secret).digest()
@@ -67,12 +101,56 @@ export class InMemoryRoomRepository implements RoomRepository {
     ON CONFLICT(id) DO UPDATE SET state_json = excluded.state_json, updated_at = excluded.updated_at
   `)
   private deletePermanentRoom = db.prepare('DELETE FROM permanent_rooms WHERE id = ?')
+  private updateMigratedPermanentRoom = db.prepare(`
+    UPDATE permanent_rooms
+    SET state_json = @stateJson, updated_at = @updatedAt
+    WHERE id = @id AND state_json = @previousStateJson
+  `)
 
   constructor() {
     const rows = db.prepare<[], PermanentRoomRow>('SELECT id, state_json FROM permanent_rooms').all()
     for (const row of rows) {
       try {
-        const state = JSON.parse(row.state_json) as PersistedRoomState
+        let state = JSON.parse(row.state_json) as PersistedRoomState
+        const migration = migratePermanentRoomAudioQuality(state)
+        if (migration) {
+          try {
+            const result = this.updateMigratedPermanentRoom.run({
+              id: row.id,
+              stateJson: JSON.stringify(migration.state),
+              previousStateJson: row.state_json,
+              updatedAt: Date.now(),
+            })
+            if (result.changes === 1) {
+              state = migration.state
+              logger.info(
+                `永久房间 ${row.id} 的旧版音质配置已从 ${migration.previousAudioQuality} 迁移为 ${migration.audioQuality}`,
+                {
+                  event: 'permanent_room.audio_quality_migrated',
+                  roomId: row.id,
+                  previousAudioQuality: migration.previousAudioQuality,
+                  audioQuality: migration.audioQuality,
+                },
+              )
+            } else {
+              logger.warn(`永久房间 ${row.id} 的音质配置迁移已跳过：房间状态已发生变化`, {
+                event: 'permanent_room.audio_quality_migration_skipped',
+                roomId: row.id,
+                previousAudioQuality: migration.previousAudioQuality,
+                audioQuality: migration.audioQuality,
+              })
+            }
+          } catch (error) {
+            // A migration failure must not prevent this or other rooms from loading.
+            logger.warn(`永久房间 ${row.id} 的旧版音质配置迁移失败`, {
+              event: 'permanent_room.audio_quality_migration_failed',
+              roomId: row.id,
+              previousAudioQuality: migration.previousAudioQuality,
+              audioQuality: migration.audioQuality,
+              error: error instanceof Error ? error.message : String(error),
+            })
+          }
+        }
         this.rooms.set(row.id, {
           id: row.id,
           name: state.name,
@@ -95,7 +173,12 @@ export class InMemoryRoomRepository implements RoomRepository {
           },
           playMode: state.playMode ?? 'loop-all',
         })
-      } catch {
+      } catch (error) {
+        logger.warn(`永久房间 ${row.id} 加载失败`, {
+          event: 'permanent_room.load_failed',
+          roomId: row.id,
+          error: error instanceof Error ? error.message : String(error),
+        })
         this.deletePermanentRoom.run(row.id)
       }
     }

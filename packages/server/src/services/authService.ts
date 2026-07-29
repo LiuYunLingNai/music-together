@@ -1,6 +1,7 @@
 import type { MusicSource, PlatformAuthStatus, MyPlatformAuth } from '@music-together/shared'
 import { platformAuthRepo } from '../repositories/platformAuthRepository.js'
 import { logger } from '../utils/logger.js'
+import { AUTH_PROVIDERS, type GetUserInfoResult } from './authProvider.js'
 
 /**
  * Room-scoped cookie pool for music platform authentication.
@@ -51,6 +52,7 @@ function isHigherMembership(candidate: CookieEntry, current: CookieEntry | undef
 
 /** roomId -> (platform -> list of cookie entries) */
 const roomCookiePool = new Map<string, Map<MusicSource, CookieEntry[]>>()
+const membershipRefreshPool = new Map<string, Promise<boolean>>()
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -140,6 +142,98 @@ export function restoreUserCookies(roomId: string, userId: string): number {
     })
   }
   return entries.length
+}
+
+export type MembershipInfoLoader = (platform: MusicSource, cookie: string) => Promise<GetUserInfoResult>
+
+async function refreshMembershipEntry(
+  roomId: string,
+  platform: MusicSource,
+  userId: string,
+  cookie: string,
+  loadInfo: MembershipInfoLoader,
+): Promise<boolean> {
+  const refreshKey = `${roomId}:${platform}:${userId}`
+  const inFlight = membershipRefreshPool.get(refreshKey)
+  if (inFlight) return inFlight
+
+  const refresh = (async () => {
+    try {
+      let result = await loadInfo(platform, cookie)
+      if (!result.ok && result.reason === 'error') {
+        result = await loadInfo(platform, cookie)
+      }
+      if (!result.ok) {
+        logger.warn('恢复平台账号时未能刷新会员详情，保留原有账号信息', {
+          event: 'auth.membership_refresh_failed',
+          roomId,
+          userId,
+          platform,
+          reason: result.reason,
+        })
+        return false
+      }
+
+      const current = roomCookiePool
+        .get(roomId)
+        ?.get(platform)
+        ?.find((entry) => entry.userId === userId)
+      // The user may have logged out or replaced the credential while the
+      // provider request was in flight. Never restore a stale credential.
+      if (!current || current.cookie !== cookie || current.vipLabel) return false
+
+      const userInfo = result.data
+      addCookie(roomId, platform, userId, cookie, userInfo.nickname, userInfo.vipType, true, {
+        vipLabel: userInfo.vipLabel,
+        vipLevel: userInfo.vipLevel,
+      })
+      logger.info('已自动刷新恢复账号的会员详情', {
+        event: 'auth.membership_refreshed',
+        roomId,
+        userId,
+        platform,
+        vipType: userInfo.vipType,
+        vipLabel: userInfo.vipLabel,
+        vipLevel: userInfo.vipLevel,
+      })
+      return true
+    } catch (error) {
+      logger.warn('恢复平台账号时刷新会员详情发生异常，保留原有账号信息', {
+        event: 'auth.membership_refresh_failed',
+        roomId,
+        userId,
+        platform,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return false
+    } finally {
+      membershipRefreshPool.delete(refreshKey)
+    }
+  })()
+
+  membershipRefreshPool.set(refreshKey, refresh)
+  return refresh
+}
+
+/** Refresh legacy restored accounts whose detailed membership fields are empty. */
+export async function refreshMissingMembershipDetails(
+  roomId: string,
+  userId: string,
+  loadInfo: MembershipInfoLoader = (platform, cookie) => AUTH_PROVIDERS[platform].getUserInfo(cookie),
+): Promise<MusicSource[]> {
+  const candidates = [...(roomCookiePool.get(roomId)?.entries() ?? [])].flatMap(([platform, entries]) =>
+    entries
+      .filter((entry) => entry.userId === userId && entry.vipType > 0 && !entry.vipLabel)
+      .map((entry) => ({ platform, cookie: entry.cookie })),
+  )
+
+  const results = await Promise.all(
+    candidates.map(async ({ platform, cookie }) => ({
+      platform,
+      refreshed: await refreshMembershipEntry(roomId, platform, userId, cookie, loadInfo),
+    })),
+  )
+  return results.filter((result) => result.refreshed).map((result) => result.platform)
 }
 
 export function persistUserCookieFromRoom(roomId: string, platform: MusicSource, userId: string): boolean {
