@@ -10,6 +10,8 @@ export interface PersistedPlatformAuth {
   cookie: string
   nickname: string
   vipType: number
+  vipLabel?: string
+  vipLevel?: number
 }
 
 interface PlatformAuthRow {
@@ -18,6 +20,8 @@ interface PlatformAuthRow {
   cookie_encrypted: string
   nickname_snapshot: string | null
   vip_type: number | null
+  vip_label: string | null
+  vip_level: number | null
 }
 
 const upsertAuth = db.prepare(`
@@ -28,18 +32,22 @@ const upsertAuth = db.prepare(`
     cookie_encrypted,
     nickname_snapshot,
     vip_type,
+    vip_label,
+    vip_level,
     created_at,
     updated_at
   )
-  VALUES (@id, @userId, @platform, @cookie, @nickname, @vipType, @now, @now)
+  VALUES (@id, @userId, @platform, @cookie, @nickname, @vipType, @vipLabel, @vipLevel, @now, @now)
   ON CONFLICT(id) DO UPDATE SET
     cookie_encrypted = excluded.cookie_encrypted,
     nickname_snapshot = excluded.nickname_snapshot,
     vip_type = excluded.vip_type,
+    vip_label = excluded.vip_label,
+    vip_level = excluded.vip_level,
     updated_at = excluded.updated_at
 `)
 const loadUserAuth = db.prepare<[string], PlatformAuthRow>(
-  'SELECT user_id, platform, cookie_encrypted, nickname_snapshot, vip_type FROM platform_auth WHERE user_id = ? ORDER BY updated_at DESC',
+  'SELECT user_id, platform, cookie_encrypted, nickname_snapshot, vip_type, vip_label, vip_level FROM platform_auth WHERE user_id = ? ORDER BY updated_at DESC',
 )
 const deleteUserPlatformAuth = db.prepare('DELETE FROM platform_auth WHERE user_id = ? AND platform = ?')
 
@@ -80,6 +88,8 @@ export const platformAuthRepo = {
       cookie: encryptCookie(entry.cookie),
       nickname: entry.nickname,
       vipType: entry.vipType,
+      vipLabel: entry.vipLabel ?? null,
+      vipLevel: entry.vipLevel ?? null,
       now: Date.now(),
     })
   },
@@ -103,6 +113,8 @@ export const platformAuthRepo = {
                 cookie,
                 nickname: row.nickname_snapshot ?? row.user_id,
                 vipType: row.vip_type ?? 0,
+                vipLabel: row.vip_label ?? undefined,
+                vipLevel: row.vip_level ?? undefined,
               },
             ]
           : []

@@ -40,12 +40,15 @@ export const PLATFORM_TEXT: Record<MusicSource, string> = {
   bilibili: 'text-pink-500',
 }
 
-/** VIP level display labels (Netease vipType values) */
+/** Normalized membership labels shared by all platforms. */
 export const VIP_LABELS: Record<number, string> = {
   0: '',
   1: 'VIP',
-  10: '黑胶VIP',
-  11: '黑胶VIP',
+  2: 'SVIP',
+}
+
+export function getVipDisplayLabel(vipType = 0, providerLabel?: string): string {
+  return providerLabel?.trim() || VIP_LABELS[vipType] || (vipType > 0 ? 'VIP' : '')
 }
 
 /** Find a platform's auth status from the room-wide status list */

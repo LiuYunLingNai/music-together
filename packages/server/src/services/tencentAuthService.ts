@@ -534,6 +534,7 @@ export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
       data: {
         nickname,
         vipType,
+        vipLabel: vipType === 2 ? 'SVIP' : vipType === 1 ? 'VIP' : undefined,
         userId: Number(uin),
       },
     }

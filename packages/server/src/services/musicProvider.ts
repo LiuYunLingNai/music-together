@@ -302,16 +302,19 @@ function neteaseQualityToLevel(quality: AudioQuality): NeteaseSoundQualityLevel 
   }
 }
 
-const NETEASE_LEVEL_RANK: Record<NeteaseSoundQualityLevel, number> = {
-  standard: 0,
-  higher: 1,
-  exhigh: 2,
-  lossless: 3,
-  hires: 4,
-  jyeffect: 5,
-  dolby: 6,
-  sky: 7,
-  jymaster: 8,
+function neteaseLevelToQuality(level: unknown): AudioQuality | undefined {
+  const qualities: Record<NeteaseSoundQualityLevel, AudioQuality> = {
+    standard: 128,
+    higher: 192,
+    exhigh: 320,
+    lossless: 999,
+    dolby: 'netease_dolby',
+    hires: 'netease_hires',
+    jyeffect: 'netease_jyeffect',
+    jymaster: 'netease_master',
+    sky: 'netease_spatial',
+  }
+  return qualities[String(level ?? '').toLowerCase() as NeteaseSoundQualityLevel]
 }
 
 function qualityToBitrate(quality: AudioQuality): 128 | 192 | 320 | 999 {
@@ -329,7 +332,7 @@ function positiveNumber(value: unknown): number {
   return Number.isFinite(number) && number > 0 ? number : 0
 }
 
-function getTencentStreamSpec(track: TencentTrackInfo, quality: AudioQuality): TencentStreamSpec | null {
+function getExactTencentStreamSpec(track: TencentTrackInfo, quality: AudioQuality): TencentStreamSpec | null {
   const file = track.file
   if (!file) return null
 
@@ -369,12 +372,16 @@ function getTencentStreamSpec(track: TencentTrackInfo, quality: AudioQuality): T
   }
 }
 
-function isNeteaseReturnedLevelAcceptable(quality: AudioQuality, returnedLevel: unknown): boolean {
-  const requested = neteaseQualityToLevel(quality)
-  const returned = String(returnedLevel ?? '').toLowerCase() as NeteaseSoundQualityLevel
-  if (!requested || NETEASE_LEVEL_RANK[returned] === undefined) return true
-  if (typeof quality === 'string') return returned === requested
-  return NETEASE_LEVEL_RANK[returned] >= NETEASE_LEVEL_RANK[requested]
+/** Select the best file the song provides without exceeding the membership-capped request. */
+function getTencentStreamSpec(track: TencentTrackInfo, quality: AudioQuality): TencentStreamSpec | null {
+  const ladder: AudioQuality[] = [128, 192, 320, 'tencent_flac', 'tencent_master']
+  const requestedIndex = ladder.indexOf(quality)
+  if (requestedIndex === -1) return null
+  for (let index = requestedIndex; index >= 0; index -= 1) {
+    const spec = getExactTencentStreamSpec(track, ladder[index])
+    if (spec) return spec
+  }
+  return null
 }
 
 // Path to song list in raw (non-formatted) API response per platform
@@ -1308,20 +1315,42 @@ class MusicProvider {
 
   private static selectKugouQuality(
     hash: string,
-    bitrate: number,
+    requested: AudioQuality,
     songInfo: Record<string, any> | null,
-  ): { hash: string; quality: '128' | '320' | 'flac'; actualBitrate: number } {
+  ): {
+    hash: string
+    quality: '128' | '320' | 'flac' | 'viper_clear' | 'viper_tape'
+    actualBitrate: number
+    actualQuality: AudioQuality
+  } {
+    if (requested === 'kugou_master') {
+      return { hash, quality: 'viper_tape', actualBitrate: 999, actualQuality: 'kugou_master' }
+    }
+    if (requested === 'kugou_hires') {
+      return { hash, quality: 'viper_clear', actualBitrate: 999, actualQuality: 'kugou_hires' }
+    }
+
+    const bitrate = qualityToBitrate(requested)
     const extra = songInfo?.extra ?? {}
     const hash128 = String(extra['128hash'] || songInfo?.hash || hash).trim()
     const hash320 = String(extra['320hash'] || '').trim()
     const hashFlac = String(extra.sqhash || '').trim()
 
-    if (bitrate >= 999 && hashFlac) return { hash: hashFlac, quality: 'flac', actualBitrate: 999 }
-    if (bitrate >= 320 && hash320) return { hash: hash320, quality: '320', actualBitrate: 320 }
-    return { hash: hash128 || hash, quality: '128', actualBitrate: 128 }
+    if (bitrate >= 999 && hashFlac) {
+      return { hash: hashFlac, quality: 'flac', actualBitrate: 999, actualQuality: 999 }
+    }
+    if (bitrate >= 320 && hash320) {
+      return { hash: hash320, quality: '320', actualBitrate: 320, actualQuality: 320 }
+    }
+    return { hash: hash128 || hash, quality: '128', actualBitrate: 128, actualQuality: 128 }
   }
 
-  private async getKugouStreamUrl(hash: string, bitrate: number, cookie?: string): Promise<CachedStreamUrl | null> {
+  private async getKugouStreamUrl(
+    hash: string,
+    quality: AudioQuality,
+    cookie?: string,
+  ): Promise<CachedStreamUrl | null> {
+    const bitrate = qualityToBitrate(quality)
     const cookieObj = cookie ? parseCookieString(cookie) : {}
     const token = cookieObj['token'] || ''
     const userid = cookieObj['userid'] || ''
@@ -1334,7 +1363,7 @@ class MusicProvider {
       // KuGouMusicApi resolves album_audio_id and the quality-specific hash
       // before calling trackercdn. /play/songinfo rejects a raw hash with 30020.
       const songInfo = await this.getKugouSongInfo(hash)
-      const selected = MusicProvider.selectKugouQuality(hash, bitrate, songInfo)
+      const selected = MusicProvider.selectKugouQuality(hash, quality, songInfo)
       const mid = cookieObj['mid'] || cookieObj['kg_mid'] || kugouAuth.getDeviceMid()
       // A dfid must either be issued by Kugou's device-registration endpoint or
       // be the official anonymous sentinel. A locally generated random dfid is
@@ -1430,7 +1459,7 @@ class MusicProvider {
         actualBitrate,
         quality: selected.quality,
       })
-      return { url, actualBitrate }
+      return { url, actualBitrate, actualQuality: selected.actualQuality }
     } catch (err) {
       logger.error('Kugou tracker URL error:', err)
       return this.getKugouStreamUrlLegacy(hash, bitrate)
@@ -1528,10 +1557,14 @@ class MusicProvider {
         ncmApi.song_url_v1({ id: urlId, level, timestamp: Date.now(), ...(cookie ? { cookie } : {}) }),
       )
       const data = res?.body?.data?.[0] as MetingJson | undefined
-      if (!data || !isNeteaseReturnedLevelAcceptable(quality, data.level)) return null
+      if (!data) return null
       const url = String(data.url ?? '').replace(/^http:\/\//, 'https://')
       if (!url) return null
-      return { url, actualBitrate: normalizeBitrate(data.br) ?? qualityToBitrate(quality) }
+      return {
+        url,
+        actualBitrate: normalizeBitrate(data.br) ?? qualityToBitrate(quality),
+        actualQuality: neteaseLevelToQuality(data.level) ?? quality,
+      }
     } catch (err) {
       if (!retried && isXeapiPublicKeyMissing(err) && (await ensureNeteaseEnhancedConfig(true))) {
         return this.getNeteaseStreamUrlV1(urlId, quality, cookie, true)
@@ -1732,7 +1765,7 @@ class MusicProvider {
 
       // Kugou: use native API that properly handles VIP authentication
       if (source === 'kugou') {
-        const result = await this.getKugouStreamUrl(urlId, bitrate, cookie)
+        const result = await this.getKugouStreamUrl(urlId, quality, cookie)
         if (result) {
           if (!cookie) {
             this.streamUrlCache.set(`${source}:${urlId}:${qualityCacheKey}`, result)

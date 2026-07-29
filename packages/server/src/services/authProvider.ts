@@ -14,6 +14,10 @@ import * as bilibiliAuth from './bilibiliAuthService.js'
 export interface UserInfoData {
   nickname: string
   vipType: number
+  /** Sanitized display label, never an upstream HTML fragment. */
+  vipLabel?: string
+  /** Optional provider-specific progression level. */
+  vipLevel?: number
   userId: number
 }
 

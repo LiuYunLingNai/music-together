@@ -23,8 +23,8 @@ const PLATFORM_OPTIONS: Record<MusicSource, AudioQualityOption[]> = {
     { value: 'netease_dolby', label: '杜比全景声', platform: 'netease', description: '浏览器兼容性有限' },
   ],
   tencent: [
-    { value: 'tencent_flac', label: 'QQ 无损', platform: 'tencent' },
-    { value: 'tencent_master', label: 'QQ 臻品母带', platform: 'tencent' },
+    { value: 'tencent_flac', label: '无损', platform: 'tencent' },
+    { value: 'tencent_master', label: '臻品母带', platform: 'tencent' },
   ],
   kugou: [
     { value: 'kugou_hires', label: '酷狗 Hi-Res', platform: 'kugou' },
@@ -41,6 +41,7 @@ export function getAudioQualityOptions(statuses: PlatformAuthStatus[]): AudioQua
   if (!options.some((option) => option.value === 999)) {
     options.push({ value: 999, label: '无损 SQ', description: '需要 VIP 账号' })
   }
+  options.push({ value: 'highest', label: '尽量高' })
   return options
 }
 

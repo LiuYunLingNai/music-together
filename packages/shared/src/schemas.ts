@@ -23,6 +23,7 @@ export const audioQualitySchema = z.union([
   z.literal(192),
   z.literal(320),
   z.literal(999),
+  z.literal('highest'),
   z.literal('netease_dolby'),
   z.literal('netease_hires'),
   z.literal('netease_jyeffect'),

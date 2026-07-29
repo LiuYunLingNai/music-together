@@ -1,18 +1,8 @@
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { getVipDisplayLabel } from '@/lib/platform'
 import type { MusicSource, MyPlatformAuth, PlatformAuthStatus } from '@music-together/shared'
 import { Crown, KeyRound, Loader2, LogOut, ScanLine } from 'lucide-react'
-
-const VIP_LABELS: Record<number, string> = {
-  0: '',
-  // Netease: 1=VIP, 10/11=黑胶VIP
-  1: 'VIP',
-  10: '黑胶VIP',
-  11: '黑胶VIP',
-  // Kugou: vip_type values
-  2: '豪华VIP',
-  3: '超级VIP',
-}
 
 interface LoginSectionProps {
   platform: MusicSource
@@ -38,6 +28,11 @@ export function LoginSection({
   const hasVip = status?.hasVip ?? false
   const maxVipType = status?.maxVipType ?? 0
   const isMyLoggedIn = myStatus?.loggedIn ?? false
+  const displayedVipType = isMyLoggedIn ? (myStatus?.vipType ?? 0) : maxVipType
+  const displayedVipLabel = getVipDisplayLabel(
+    displayedVipType,
+    isMyLoggedIn ? myStatus?.vipLabel : status?.maxVipLabel,
+  )
 
   return (
     <div className="flex items-center justify-between gap-2 overflow-hidden rounded-lg border p-3">
@@ -53,10 +48,10 @@ export function LoginSection({
           ) : (
             <span className="text-muted-foreground shrink-0 text-sm">未登录</span>
           )}
-          {hasVip && (
+          {displayedVipType > 0 && (
             <Badge variant="secondary" className="shrink-0 gap-1 text-xs">
               <Crown className="h-3 w-3" />
-              {VIP_LABELS[maxVipType] || 'VIP'}
+              {displayedVipLabel}
             </Badge>
           )}
         </div>

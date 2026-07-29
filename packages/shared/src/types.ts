@@ -51,6 +51,7 @@ export type AudioQuality =
   | 192
   | 320
   | 999
+  | 'highest'
   | 'netease_dolby'
   | 'netease_hires'
   | 'netease_jyeffect'
@@ -174,8 +175,12 @@ export interface PlatformAuthStatus {
   loggedInCount: number
   /** 是否有 VIP 用户 */
   hasVip: boolean
-  /** 最高 VIP 等级 (0=无, 1=VIP, 11=黑胶) */
+  /** 最高会员等级 (0=无, 1=VIP, 2=SVIP) */
   maxVipType: number
+  /** 平台提供的最高会员展示名称，例如 VIP·伍。 */
+  maxVipLabel?: string
+  /** 平台提供的细分等级。 */
+  maxVipLevel?: number
 }
 
 /** 当前用户自己在某平台的认证信息 */
@@ -184,6 +189,8 @@ export interface MyPlatformAuth {
   loggedIn: boolean
   nickname?: string
   vipType?: number
+  vipLabel?: string
+  vipLevel?: number
 }
 
 /** 歌单元数据（用于歌单列表展示） */
