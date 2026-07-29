@@ -160,7 +160,7 @@ fun RoomSettingsPane(state: AppState, viewModel: MusicTogetherViewModel) {
                 Column(Modifier.weight(1f)) {
                     Text("自动变速校准", fontWeight = FontWeight.SemiBold)
                     Text(
-                        "不改变音高，以最多 ±1% 的速度差平滑消除本机播放偏移；关闭后保持 1.0× 原速，并可单独选择是否直接定位大幅偏移。",
+                        "不改变音高，以最多 ±1% 的速度差平滑消除本机播放偏移；关闭后保持 1.0× 原速，并可单独选择是否直接定位大幅偏移。但是开启后有可能导致音质变差",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -180,7 +180,7 @@ fun RoomSettingsPane(state: AppState, viewModel: MusicTogetherViewModel) {
                     Column(Modifier.weight(1f)) {
                         Text("大偏差直接同步", fontWeight = FontWeight.SemiBold)
                         Text(
-                            "偏移连续两次超过动态阈值后直接定位；阈值最低为 500ms，高延迟时会提高到中位 RTT + 250ms。",
+                            "偏移连续两次超过动态阈值后直接定位；阈值最低为 500ms，高延迟时会提高到中位 RTT + 250ms。如果你的网络环境(延迟)不好 开启后可能导致一直同步导致体验不佳",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
