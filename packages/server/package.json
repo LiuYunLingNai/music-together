@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "test": "tsx --test test/audioQualityPolicy.test.ts test/neteaseMembership.test.ts test/tencentMembership.test.ts test/kugouMembership.test.ts test/membershipRefresh.test.ts test/platformMembershipMigration.test.ts test/permanentRoomAudioQualityMigration.test.ts",
+    "test": "tsx --test test/audioQualityPolicy.test.ts test/bilibiliAudioQuality.test.ts test/bilibiliMembership.test.ts test/neteaseMembership.test.ts test/tencentMembership.test.ts test/kugouMembership.test.ts test/membershipRefresh.test.ts test/platformMembershipMigration.test.ts test/permanentRoomAudioQualityMigration.test.ts",
     "start": "node dist/index.js"
   },
   "dependencies": {

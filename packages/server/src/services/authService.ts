@@ -160,10 +160,7 @@ async function refreshMembershipEntry(
   const inFlight = membershipRefreshPool.get(refreshKey)
   if (inFlight) return inFlight
   const previousRefresh = membershipRefreshHistory.get(refreshKey)
-  if (
-    previousRefresh?.cookie === cookie &&
-    Date.now() - previousRefresh.refreshedAt < MEMBERSHIP_REFRESH_COOLDOWN_MS
-  ) {
+  if (previousRefresh?.cookie === cookie && Date.now() - previousRefresh.refreshedAt < MEMBERSHIP_REFRESH_COOLDOWN_MS) {
     return false
   }
 
@@ -233,9 +230,7 @@ export async function refreshMissingMembershipDetails(
   loadInfo: MembershipInfoLoader = (platform, cookie) => AUTH_PROVIDERS[platform].getUserInfo(cookie),
 ): Promise<MusicSource[]> {
   const candidates = [...(roomCookiePool.get(roomId)?.entries() ?? [])].flatMap(([platform, entries]) =>
-    entries
-      .filter((entry) => entry.userId === userId && platform !== 'bilibili')
-      .map((entry) => ({ platform, cookie: entry.cookie })),
+    entries.filter((entry) => entry.userId === userId).map((entry) => ({ platform, cookie: entry.cookie })),
   )
 
   const results = await Promise.all(

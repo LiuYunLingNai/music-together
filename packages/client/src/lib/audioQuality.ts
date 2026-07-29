@@ -34,10 +34,16 @@ const PLATFORM_OPTIONS: Record<MusicSource, AudioQualityOption[]> = {
     { value: 'kugou_hires', label: '酷狗概念版 Hi-Res', platform: 'kugou_concept' },
     { value: 'kugou_master', label: '酷狗概念版 臻品母带', platform: 'kugou_concept' },
   ],
-  bilibili: [],
+  bilibili: [
+    { value: 'bilibili_64', label: 'B站 64K', platform: 'bilibili' },
+    { value: 'bilibili_132', label: 'B站 132K', platform: 'bilibili' },
+    { value: 'bilibili_192', label: 'B站 192K', platform: 'bilibili' },
+    { value: 'bilibili_hires', label: 'B站 Hi-Res', platform: 'bilibili' },
+  ],
 }
 
-export function getAudioQualityOptions(_statuses: PlatformAuthStatus[]): AudioQualityOption[] {
+export function getAudioQualityOptions(statuses: PlatformAuthStatus[]): AudioQualityOption[] {
+  void statuses
   // Room quality is shared by all providers. Provider-specific formats are
   // selected by the server from `highest`; exposing them here made a Tencent
   // or Kugou room appear to offer unrelated Netease formats.

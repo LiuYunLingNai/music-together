@@ -44,6 +44,18 @@ export interface BilibiliFavoriteVideo {
   cover: string
 }
 
+export function parseBilibiliMembership(
+  vipStatus: number | undefined,
+  providerVipType: number | undefined,
+): { vipType: 0 | 1 | 2; vipLabel?: string } {
+  if (!vipStatus) return { vipType: 0, vipLabel: undefined }
+  const annual = providerVipType === 2
+  return {
+    vipType: annual ? 2 : 1,
+    vipLabel: annual ? '年度大会员' : '大会员',
+  }
+}
+
 function requestHeaders(cookie?: string): HeadersInit {
   return {
     Accept: 'application/json, text/plain, */*',
@@ -186,13 +198,12 @@ export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
     const user = body.data
     if (!response.ok || body.code !== 0 || !user?.isLogin || !user.mid) return { ok: false, reason: 'expired' }
 
-    const vipType = user.vipStatus ? 1 : 0
+    const membership = parseBilibiliMembership(user.vipStatus, user.vipType)
     return {
       ok: true,
       data: {
         nickname: user.uname || 'B站用户',
-        vipType,
-        vipLabel: vipType ? (user.vipType === 2 ? 'VIP · 年度大会员' : 'VIP · 大会员') : undefined,
+        ...membership,
         userId: user.mid,
       },
     }

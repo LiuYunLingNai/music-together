@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react'
 import { Howl } from 'howler'
 import type { Track } from '@music-together/shared'
 import { usePlayerStore } from '@/stores/playerStore'
+import { useRoomStore } from '@/stores/roomStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { CURRENT_TIME_THROTTLE_MS } from '@/lib/constants'
 import { toast } from 'sonner'
@@ -223,13 +224,14 @@ export function useHowl(onTrackEnd: () => void) {
       if (!track.streamUrl) return
 
       const currentVolume = usePlayerStore.getState().volume
+      const roomId = useRoomStore.getState().room?.id ?? ''
       const playbackUrl =
         track.source === 'bilibili'
-          ? `${SERVER_URL}/api/music/bilibili-audio-proxy?url=${encodeURIComponent(track.streamUrl)}&bvid=${encodeURIComponent(track.urlId)}`
+          ? `${SERVER_URL}/api/music/bilibili-audio-proxy?url=${encodeURIComponent(track.streamUrl)}&bvid=${encodeURIComponent(track.urlId)}&roomId=${encodeURIComponent(roomId)}`
           : track.source === 'kugou' || track.source === 'kugou_concept'
             ? `${SERVER_URL}/api/music/kugou-audio-proxy?url=${encodeURIComponent(track.streamUrl)}`
             : track.streamUrl
-      const streamFormat = track.source === 'bilibili' ? ['m4a'] : ['flac', 'm4a', 'ogg', 'mp3']
+      const streamFormat = track.source === 'bilibili' ? [track.streamFormat ?? 'm4a'] : ['flac', 'm4a', 'ogg', 'mp3']
 
       // Howler creates its HTMLMediaElement synchronously inside the
       // constructor. Configure CORS before it assigns the direct CDN URL so

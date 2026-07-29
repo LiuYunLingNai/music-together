@@ -33,6 +33,10 @@ export const audioQualitySchema = z.union([
   z.literal('tencent_master'),
   z.literal('kugou_hires'),
   z.literal('kugou_master'),
+  z.literal('bilibili_64'),
+  z.literal('bilibili_132'),
+  z.literal('bilibili_192'),
+  z.literal('bilibili_hires'),
 ])
 
 export const roomSettingsSchema = z.object({
@@ -98,6 +102,7 @@ const trackSchema = z.object({
   picId: z.string().max(200).optional(),
   metadataSource: z.enum(['netease', 'tencent']).optional(),
   streamUrl: z.string().max(2000).optional(),
+  streamFormat: z.enum(['m4a', 'flac']).optional(),
   vip: z.boolean().optional(),
 })
 

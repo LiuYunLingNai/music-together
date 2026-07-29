@@ -23,6 +23,7 @@ after(() => {
   authService.cleanupRoom('refresh-room')
   authService.cleanupRoom('concept-refresh-room')
   authService.cleanupRoom('standard-refresh-room')
+  authService.cleanupRoom('bilibili-refresh-room')
   db.close()
   rmSync(testDataDir, { recursive: true, force: true })
 })
@@ -120,16 +121,10 @@ test('refreshes a restored Concept Edition account even when its stored tier is 
 })
 
 test('revalidates a detailed standard Kugou account and persists an expired membership', async () => {
-  authService.addCookie(
-    'standard-refresh-room',
-    'kugou',
-    'refresh-user',
-    'standard-cookie',
-    '酷狗用户',
-    2,
-    true,
-    { vipLabel: 'SVIP·Lv5', vipLevel: 5 },
-  )
+  authService.addCookie('standard-refresh-room', 'kugou', 'refresh-user', 'standard-cookie', '酷狗用户', 2, true, {
+    vipLabel: 'SVIP·Lv5',
+    vipLevel: 5,
+  })
   let attempts = 0
 
   const refreshed = await authService.refreshMissingMembershipDetails(
@@ -163,4 +158,30 @@ test('revalidates a detailed standard Kugou account and persists an expired memb
   )
   assert.deepEqual(repeated, [])
   assert.equal(attempts, 1)
+})
+
+test('refreshes a restored Bilibili account to distinguish annual membership', async () => {
+  authService.addCookie('bilibili-refresh-room', 'bilibili', 'refresh-user', 'bilibili-cookie', 'B站用户', 1, true, {
+    vipLabel: 'VIP · 年度大会员',
+  })
+
+  const refreshed = await authService.refreshMissingMembershipDetails(
+    'bilibili-refresh-room',
+    'refresh-user',
+    async (platform, cookie) => {
+      assert.equal(platform, 'bilibili')
+      assert.equal(cookie, 'bilibili-cookie')
+      return {
+        ok: true,
+        data: { nickname: 'B站用户', vipType: 2, vipLabel: '年度大会员', userId: 123 },
+      }
+    },
+  )
+
+  assert.deepEqual(refreshed, ['bilibili'])
+  const status = authService
+    .getUserAuthStatus('refresh-user', 'bilibili-refresh-room')
+    .find((entry) => entry.platform === 'bilibili')
+  assert.equal(status?.vipType, 2)
+  assert.equal(status?.vipLabel, '年度大会员')
 })

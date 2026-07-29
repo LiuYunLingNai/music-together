@@ -61,6 +61,12 @@ export type AudioQuality =
   | 'tencent_master'
   | 'kugou_hires'
   | 'kugou_master'
+  | 'bilibili_64'
+  | 'bilibili_132'
+  | 'bilibili_192'
+  | 'bilibili_hires'
+
+export type BilibiliStreamFormat = 'm4a' | 'flac'
 
 export interface Track {
   id: string
@@ -82,6 +88,8 @@ export interface Track {
    */
   metadataSource?: BilibiliMetadataSource
   streamUrl?: string
+  /** Codec family selected for Bilibili DASH playback. */
+  streamFormat?: BilibiliStreamFormat
   /** 是否为 VIP / 付费歌曲（可能无法播放或仅试听） */
   vip?: boolean
   /** 点歌人昵称（服务端在加入队列时注入） */

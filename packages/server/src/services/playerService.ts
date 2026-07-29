@@ -88,6 +88,7 @@ interface ResolvedStreamUrl {
   actualBitrate: number | null
   actualQuality?: AudioQuality
   providerFormat?: string
+  streamFormat?: Track['streamFormat']
   fileSize?: number
   fromCache: boolean
 }
@@ -113,6 +114,10 @@ function formatAudioQuality(bitrate: AudioQuality | number | null): string {
     tencent_master: '臻品母带',
     kugou_hires: '酷狗 Hi-Res',
     kugou_master: '酷狗臻品母带',
+    bilibili_64: 'B站 64K',
+    bilibili_132: 'B站 132K',
+    bilibili_192: 'B站 192K',
+    bilibili_hires: 'B站 Hi-Res',
   }
   if (typeof bitrate === 'string') return labels[bitrate] ?? bitrate
   if (bitrate === 999) return '无损'
@@ -203,7 +208,7 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
 
   // Never trust/reuse a client-provided URL here. Resolving on the server is
   // what lets us record the provider's actual bitrate and refresh expired URLs.
-  const resolved: Track = { ...track, streamUrl: undefined }
+  const resolved: Track = { ...track, streamUrl: undefined, streamFormat: undefined }
   let streamResolution: ResolvedStreamUrl | null = null
   let usedAuthenticatedAccount = false
 
@@ -281,6 +286,7 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
                     id: resolved.id, // keep stable id so queue/current references remain consistent
                     requestedBy: resolved.requestedBy,
                     streamUrl: url2.url,
+                    streamFormat: url2.streamFormat,
                   }
                   streamResolution = url2
                   usedAuthenticatedAccount = Boolean(fallbackAuth)
@@ -313,6 +319,7 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
                   resolved.title = replacement.title
                   resolved.cover = replacement.cover
                   resolved.streamUrl = replacement.streamUrl
+                  resolved.streamFormat = replacement.streamFormat
                 }
               }
             } catch (fallbackErr) {
@@ -347,6 +354,7 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
       }
       if (url) streamResolution = url
       resolved.streamUrl = url?.url ?? resolved.streamUrl
+      resolved.streamFormat = url?.streamFormat ?? resolved.streamFormat
     } catch (err) {
       logger.error('解析歌曲播放地址时发生异常', err, {
         roomId,
@@ -621,12 +629,14 @@ export function refreshStreamUrlForJoin(roomId: string): Promise<boolean> {
         platformAuth?.vipType ?? 0,
       )
       if (!refreshed) {
-        if (room.currentTrack?.id === track.id) room.currentTrack = { ...room.currentTrack, streamUrl: undefined }
+        if (room.currentTrack?.id === track.id) {
+          room.currentTrack = { ...room.currentTrack, streamUrl: undefined, streamFormat: undefined }
+        }
         return false
       }
 
       if (room.currentTrack?.id !== track.id) return false
-      room.currentTrack = { ...room.currentTrack, streamUrl: refreshed.url }
+      room.currentTrack = { ...room.currentTrack, streamUrl: refreshed.url, streamFormat: refreshed.streamFormat }
       logger.info('Refreshed stale stream URL when user joined permanent room', {
         event: 'player.stream_url_refreshed_on_join',
         roomId,
@@ -634,7 +644,9 @@ export function refreshStreamUrlForJoin(roomId: string): Promise<boolean> {
       })
       return true
     } catch (err) {
-      if (room.currentTrack?.id === track.id) room.currentTrack = { ...room.currentTrack, streamUrl: undefined }
+      if (room.currentTrack?.id === track.id) {
+        room.currentTrack = { ...room.currentTrack, streamUrl: undefined, streamFormat: undefined }
+      }
       logger.warn('Failed to refresh stale stream URL when user joined permanent room', {
         roomId,
         trackId: track.id,

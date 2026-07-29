@@ -2,7 +2,7 @@ import type { AudioQuality, MusicSource } from '@music-together/shared'
 
 export type MembershipTier = 0 | 1 | 2
 
-const PROVIDER_QUALITY_LADDERS: Record<Exclude<MusicSource, 'bilibili'>, AudioQuality[]> = {
+const PROVIDER_QUALITY_LADDERS: Record<MusicSource, AudioQuality[]> = {
   netease: [
     128,
     192,
@@ -17,21 +17,27 @@ const PROVIDER_QUALITY_LADDERS: Record<Exclude<MusicSource, 'bilibili'>, AudioQu
   tencent: [128, 192, 320, 'tencent_flac', 'tencent_master'],
   kugou: [128, 192, 320, 999, 'kugou_hires', 'kugou_master'],
   kugou_concept: [128, 192, 320, 999, 'kugou_hires', 'kugou_master'],
+  bilibili: ['bilibili_64', 'bilibili_132', 'bilibili_192', 'bilibili_hires'],
 }
 
-const MEMBERSHIP_QUALITY_CAP: Record<Exclude<MusicSource, 'bilibili'>, Record<MembershipTier, AudioQuality>> = {
+const MEMBERSHIP_QUALITY_CAP: Record<MusicSource, Record<MembershipTier, AudioQuality>> = {
   netease: { 0: 320, 1: 'netease_jyeffect', 2: 'netease_master' },
   tencent: { 0: 320, 1: 'tencent_flac', 2: 'tencent_master' },
   kugou: { 0: 320, 1: 'kugou_hires', 2: 'kugou_master' },
   // The daily Concept Edition listening benefit is a non-paid business VIP.
   // Live provider verification shows it permits FLAC but not viper_clear/tape.
   kugou_concept: { 0: 320, 1: 999, 2: 'kugou_master' },
+  // Bilibili exposes Hi-Res only when both the account and video permit it.
+  bilibili: { 0: 'bilibili_192', 1: 'bilibili_hires', 2: 'bilibili_hires' },
 }
 
 export function getKugouQualityFallbacks(requested: AudioQuality): AudioQuality[] {
   const ladder: AudioQuality[] = [128, 320, 999, 'kugou_hires', 'kugou_master']
   const exactIndex = ladder.indexOf(requested)
-  const highestIndex = exactIndex >= 0 ? exactIndex : Math.min(ladder.indexOf(qualityForClass('kugou', requestedQualityClass(requested))), ladder.length - 1)
+  const highestIndex =
+    exactIndex >= 0
+      ? exactIndex
+      : Math.min(ladder.indexOf(qualityForClass('kugou', requestedQualityClass(requested))), ladder.length - 1)
   return ladder.slice(0, highestIndex + 1).reverse()
 }
 
@@ -43,12 +49,16 @@ function requestedQualityClass(quality: AudioQuality): QualityClass {
   if (quality === 320) return 'high'
   if (quality === 999 || quality === 'tencent_flac') return 'lossless'
   if (quality === 'netease_hires' || quality === 'kugou_hires') return 'hires'
+  if (quality === 'bilibili_64') return 'standard'
+  if (quality === 'bilibili_132') return 'higher'
+  if (quality === 'bilibili_192') return 'high'
+  if (quality === 'bilibili_hires') return 'hires'
   if (quality === 'netease_jyeffect') return 'vip'
   return 'svip'
 }
 
-function qualityForClass(source: Exclude<MusicSource, 'bilibili'>, qualityClass: QualityClass): AudioQuality {
-  const bySource: Record<Exclude<MusicSource, 'bilibili'>, Record<QualityClass, AudioQuality>> = {
+function qualityForClass(source: MusicSource, qualityClass: QualityClass): AudioQuality {
+  const bySource: Record<MusicSource, Record<QualityClass, AudioQuality>> = {
     netease: {
       standard: 128,
       higher: 192,
@@ -85,6 +95,15 @@ function qualityForClass(source: Exclude<MusicSource, 'bilibili'>, qualityClass:
       vip: 'kugou_hires',
       svip: 'kugou_master',
     },
+    bilibili: {
+      standard: 'bilibili_132',
+      higher: 'bilibili_192',
+      high: 'bilibili_192',
+      lossless: 'bilibili_hires',
+      hires: 'bilibili_hires',
+      vip: 'bilibili_hires',
+      svip: 'bilibili_hires',
+    },
   }
   return bySource[source][qualityClass]
 }
@@ -95,8 +114,6 @@ export function getEffectiveQuality(
   requested: AudioQuality,
   vipType: MembershipTier,
 ): AudioQuality {
-  if (source === 'bilibili') return requested
-
   const ladder = PROVIDER_QUALITY_LADDERS[source]
   // Persisted accounts from older versions used provider-specific numbers
   // (for example Netease 10/11). Keep the policy total even if one reaches
@@ -111,7 +128,6 @@ export function getEffectiveQuality(
 }
 
 export function providerQualityRank(source: MusicSource, quality: AudioQuality): number {
-  if (source === 'bilibili') return 0
   const exactRank = PROVIDER_QUALITY_LADDERS[source].indexOf(quality)
   if (exactRank !== -1) return exactRank
   const normalized = qualityForClass(source, requestedQualityClass(quality))

@@ -218,7 +218,13 @@ router.get('/cover-proxy', async (req: Request, res: Response) => {
 router.get('/bilibili-audio-proxy', async (req: Request, res: Response) => {
   const audioUrl = typeof req.query.url === 'string' ? req.query.url : ''
   const bvid = typeof req.query.bvid === 'string' ? req.query.bvid : ''
-  if (!isAllowedBilibiliAudioUrl(audioUrl) || !BILIBILI_BVID_PATTERN.test(bvid)) {
+  const roomId = typeof req.query.roomId === 'string' ? req.query.roomId : ''
+  const room = roomRepo.get(roomId)
+  const isCurrentTrack =
+    room?.currentTrack?.source === 'bilibili' &&
+    room.currentTrack.urlId === bvid &&
+    room.currentTrack.streamUrl === audioUrl
+  if (!isAllowedBilibiliAudioUrl(audioUrl) || !BILIBILI_BVID_PATTERN.test(bvid) || !isCurrentTrack) {
     res.status(400).json({ error: 'Invalid Bilibili audio request' })
     return
   }
@@ -228,11 +234,13 @@ router.get('/bilibili-audio-proxy', async (req: Request, res: Response) => {
 
   try {
     const range = req.headers.range
+    const cookie = authService.getAnyCookie('bilibili', roomId)
     const headers = {
       Accept: '*/*',
       'Accept-Encoding': 'identity',
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36',
       Referer: `https://www.bilibili.com/video/${bvid}/`,
+      ...(cookie ? { Cookie: cookie } : {}),
       ...(typeof range === 'string' ? { Range: range } : {}),
     }
     let upstream: globalThis.Response | null = null

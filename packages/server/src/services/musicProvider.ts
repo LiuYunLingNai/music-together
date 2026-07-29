@@ -1,7 +1,7 @@
 import Meting from '@meting/core'
 import { get as kugouLrcGet, Format } from '@s4p/kugou-lrc'
 import type { KrcInfo } from '@s4p/kugou-lrc'
-import type { AudioQuality, MusicSource, Track } from '@music-together/shared'
+import type { AudioQuality, BilibiliStreamFormat, MusicSource, Track } from '@music-together/shared'
 import { LRUCache } from 'lru-cache'
 import { nanoid } from 'nanoid'
 import pLimit from 'p-limit'
@@ -10,6 +10,7 @@ import * as kugouAuth from './kugouAuthService.js'
 import * as tencentAuth from './tencentAuthService.js'
 import * as bilibiliAuth from './bilibiliAuthService.js'
 import { getKugouQualityFallbacks } from './audioQualityPolicy.js'
+import { collectBilibiliAudioCandidates, selectBilibiliAudioCandidate } from './bilibiliAudioQuality.js'
 import { config } from '../config.js'
 import { parseCookieString } from '../utils/cookieUtils.js'
 import { logger } from '../utils/logger.js'
@@ -103,6 +104,8 @@ export interface StreamUrlResult {
   actualQuality?: AudioQuality
   /** Provider file prefix/format, for example AI00 or F000 on QQ Music. */
   providerFormat?: string
+  /** Browser codec hint for Bilibili's fragmented MP4 audio stream. */
+  streamFormat?: BilibiliStreamFormat
   /** Expected upstream file size in bytes. */
   fileSize?: number
   fromCache: boolean
@@ -217,6 +220,7 @@ interface BilibiliSearchVideo {
 }
 
 interface BilibiliViewData {
+  aid: number
   cid: number
   cover: string
 }
@@ -454,6 +458,8 @@ class MusicProvider {
   })
   private bilibiliViewCache = new LRUCache<string, BilibiliViewData>({ max: 500, ttl: 1 * HOUR })
   private bilibiliWbiMixinKey: { value: string; expiresAt: number } | null = null
+  private bilibiliBuvid3: { value: string; expiresAt: number } | null = null
+  private bilibiliBuvid3Request: Promise<string | null> | null = null
 
   private getInstance(source: MusicSource): MetingInstance {
     let m = this.instances.get(source)
@@ -552,6 +558,7 @@ class MusicProvider {
   private async fetchBilibiliJson(
     url: string,
     referer = 'https://www.bilibili.com/',
+    cookie?: string,
   ): Promise<Record<string, any> | null> {
     const response = await withTimeout(
       fetch(url, {
@@ -560,6 +567,7 @@ class MusicProvider {
           'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36',
           Referer: referer,
+          ...(cookie ? { Cookie: cookie } : {}),
         },
       }).then(async (res) => {
         const contentType = res.headers.get('content-type') ?? ''
@@ -582,11 +590,11 @@ class MusicProvider {
     return response ?? null
   }
 
-  private async getBilibiliWbiMixinKey(): Promise<string | null> {
+  private async getBilibiliWbiMixinKey(cookie?: string): Promise<string | null> {
     if (this.bilibiliWbiMixinKey && this.bilibiliWbiMixinKey.expiresAt > Date.now()) {
       return this.bilibiliWbiMixinKey.value
     }
-    const nav = await this.fetchBilibiliJson('https://api.bilibili.com/x/web-interface/nav')
+    const nav = await this.fetchBilibiliJson('https://api.bilibili.com/x/web-interface/nav', undefined, cookie)
     const imgUrl = String(nav?.data?.wbi_img?.img_url ?? '')
     const subUrl = String(nav?.data?.wbi_img?.sub_url ?? '')
     const imgKey = imgUrl.split('/').pop()?.split('.')[0] ?? ''
@@ -602,25 +610,52 @@ class MusicProvider {
     return mixinKey
   }
 
-  private async searchBilibiliWbi(keyword: string, limit: number, page: number): Promise<Record<string, any> | null> {
-    const mixinKey = await this.getBilibiliWbiMixinKey()
+  private async withBilibiliDeviceCookie(cookie?: string): Promise<string | undefined> {
+    if (/(?:^|;\s*)buvid3=/i.test(cookie ?? '')) return cookie
+    if (!this.bilibiliBuvid3 || this.bilibiliBuvid3.expiresAt <= Date.now()) {
+      this.bilibiliBuvid3Request ??= this.fetchBilibiliJson('https://api.bilibili.com/x/frontend/finger/spi')
+        .then((response) => {
+          const value = String(response?.data?.b_3 ?? '').trim()
+          if (!value) return null
+          this.bilibiliBuvid3 = { value, expiresAt: Date.now() + 24 * HOUR }
+          return value
+        })
+        .finally(() => {
+          this.bilibiliBuvid3Request = null
+        })
+      const value = await this.bilibiliBuvid3Request
+      if (!value) return cookie
+    }
+
+    const buvid3 = this.bilibiliBuvid3?.value
+    if (!buvid3) return cookie
+    const pair = `buvid3=${buvid3}`
+    return cookie ? `${cookie.replace(/;\s*$/, '')}; ${pair}` : pair
+  }
+
+  private async signBilibiliWbiParams(params: Record<string, string>, cookie?: string): Promise<string | null> {
+    const mixinKey = await this.getBilibiliWbiMixinKey(cookie)
     if (!mixinKey) return null
 
-    const params: Record<string, string> = {
-      keyword,
-      page: String(page),
-      page_size: String(limit),
-      search_type: 'video',
-      wts: String(Math.floor(Date.now() / 1000)),
-    }
-    const query = Object.entries(params)
+    const signedParams = { ...params, wts: String(Math.floor(Date.now() / 1000)) }
+    const query = Object.entries(signedParams)
       .sort(([left], [right]) => left.localeCompare(right))
       .map(
         ([key, value]) => `${MusicProvider.encodeBilibiliWbiParam(key)}=${MusicProvider.encodeBilibiliWbiParam(value)}`,
       )
       .join('&')
-    const wRid = MusicProvider.md5(`${query}${mixinKey}`)
-    return this.fetchBilibiliJson(`https://api.bilibili.com/x/web-interface/wbi/search/type?${query}&w_rid=${wRid}`)
+    return `${query}&w_rid=${MusicProvider.md5(`${query}${mixinKey}`)}`
+  }
+
+  private async searchBilibiliWbi(keyword: string, limit: number, page: number): Promise<Record<string, any> | null> {
+    const query = await this.signBilibiliWbiParams({
+      keyword,
+      page: String(page),
+      page_size: String(limit),
+      search_type: 'video',
+    })
+    if (!query) return null
+    return this.fetchBilibiliJson(`https://api.bilibili.com/x/web-interface/wbi/search/type?${query}`)
   }
 
   private static parseBilibiliDuration(value: unknown): number {
@@ -679,48 +714,95 @@ class MusicProvider {
     if (cached) return cached
     const params = new URLSearchParams({ bvid })
     const response = await this.fetchBilibiliJson(`https://api.bilibili.com/x/web-interface/view?${params}`)
+    const aid = Number(response?.data?.aid)
     const cid = Number(response?.data?.cid)
-    if (!Number.isFinite(cid) || cid <= 0) return null
-    const value = { cid, cover: normalizeBilibiliCoverUrl(response?.data?.pic) }
+    if (!Number.isFinite(aid) || aid <= 0 || !Number.isFinite(cid) || cid <= 0) return null
+    const value = { aid, cid, cover: normalizeBilibiliCoverUrl(response?.data?.pic) }
     this.bilibiliViewCache.set(bvid, value)
     return value
   }
 
-  private async getBilibiliStreamUrl(bvid: string): Promise<CachedStreamUrl | null> {
+  private async getBilibiliStreamUrl(
+    bvid: string,
+    quality: AudioQuality,
+    cookie?: string,
+  ): Promise<CachedStreamUrl | null> {
     const view = await this.getBilibiliView(bvid)
     if (!view) return null
-    const params = new URLSearchParams({ bvid, cid: String(view.cid), fnval: '16', fnver: '0', fourk: '1' })
-    const response = await this.fetchBilibiliJson(
-      `https://api.bilibili.com/x/player/playurl?${params}`,
-      `https://www.bilibili.com/video/${bvid}/`,
+    const requestCookie = await this.withBilibiliDeviceCookie(cookie)
+    const query = await this.signBilibiliWbiParams(
+      {
+        avid: String(view.aid),
+        cid: String(view.cid),
+        fnval: '4048',
+        fnver: '0',
+        fourk: '1',
+        from_client: 'BROWSER',
+        otype: 'json',
+        qn: '127',
+        support_multi_audio: 'true',
+        ...(!cookie ? { try_look: '1' } : {}),
+      },
+      requestCookie,
     )
-    const audios = (response?.data?.dash?.audio ?? []) as Record<string, unknown>[]
-    // The first DASH audio entry is often 44 kbps HE-AAC (mp4a.40.5), which
-    // is not reliably decoded by all browsers. Prefer AAC-LC and its highest
-    // available bitrate. Some mobile-CDN primary URLs use port 8082, so use
-    // Bilibili's HTTPS backup address when the primary is unsuitable.
-    const candidates = [...audios].sort((left, right) => Number(right.bandwidth ?? 0) - Number(left.bandwidth ?? 0))
-    const preferredAudio = candidates.find((audio) => String(audio.codecs ?? '').includes('mp4a.40.2'))
-    const audio = preferredAudio ?? candidates[0]
-    const rawUrls = [
-      audio?.baseUrl,
-      audio?.base_url,
-      ...(Array.isArray(audio?.backupUrl) ? audio.backupUrl : []),
-      ...(Array.isArray(audio?.backup_url) ? audio.backup_url : []),
-      response?.data?.durl?.[0]?.url,
-    ]
-    const url = rawUrls
-      .map((value) => String(value ?? '').replace(/^http:\/\//, 'https://'))
-      .find((value) => {
-        try {
-          const parsed = new URL(value)
-          return parsed.protocol === 'https:' && (!parsed.port || parsed.port === '443')
-        } catch {
-          return false
-        }
-      })
+    if (!query) return null
+    const response = await this.fetchBilibiliJson(
+      `https://api.bilibili.com/x/player/wbi/playurl?${query}`,
+      `https://www.bilibili.com/video/${bvid}/`,
+      requestCookie,
+    )
+    if (response?.code !== 0) {
+      logger.warn('Bilibili playurl request failed', { bvid, code: response?.code, authenticated: Boolean(cookie) })
+      return null
+    }
 
-    return url ? { url, actualBitrate: normalizeBitrate(audio?.bandwidth) } : null
+    const findUsableUrl = (audio: Record<string, unknown>): string | null => {
+      const rawUrls = [
+        audio.baseUrl,
+        audio.base_url,
+        ...(Array.isArray(audio.backupUrl) ? audio.backupUrl : []),
+        ...(Array.isArray(audio.backup_url) ? audio.backup_url : []),
+      ]
+      return (
+        rawUrls
+          .map((value) => String(value ?? '').replace(/^http:\/\//, 'https://'))
+          .find((value) => {
+            try {
+              const parsed = new URL(value)
+              return parsed.protocol === 'https:' && (!parsed.port || parsed.port === '443')
+            } catch {
+              return false
+            }
+          }) ?? null
+      )
+    }
+
+    const candidates = collectBilibiliAudioCandidates(response?.data?.dash).filter((candidate) =>
+      Boolean(findUsableUrl(candidate.raw)),
+    )
+    const audio = selectBilibiliAudioCandidate(candidates, quality)
+    const url = audio ? findUsableUrl(audio.raw) : null
+    if (!audio || !url) return null
+
+    const actualBitrate = normalizeBitrate(audio.bandwidth)
+    logger.info('Bilibili audio stream resolved', {
+      event: 'music.bilibili_stream_resolved',
+      bvid,
+      requestedQuality: quality,
+      actualQuality: audio.quality,
+      providerFormat: audio.providerFormat,
+      dashAudioId: audio.id,
+      actualBitrate,
+      availableQualities: [...new Set(candidates.map((candidate) => candidate.quality))],
+      authenticated: Boolean(cookie),
+    })
+    return {
+      url,
+      actualBitrate,
+      actualQuality: audio.quality,
+      providerFormat: audio.providerFormat,
+      streamFormat: audio.format,
+    }
   }
 
   /**
@@ -1839,7 +1921,7 @@ class MusicProvider {
 
     try {
       if (source === 'bilibili') {
-        const result = await this.getBilibiliStreamUrl(urlId)
+        const result = await this.getBilibiliStreamUrl(urlId, quality, cookie)
         if (result) {
           return { ...result, fromCache: false }
         }
