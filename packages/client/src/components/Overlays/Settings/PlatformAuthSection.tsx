@@ -56,7 +56,7 @@ function PlatformRow({
       <div className="flex shrink-0 items-center gap-1.5">
         {!isMyLoggedIn ? (
           <>
-            {(platform === 'netease' || platform === 'kugou' || platform === 'tencent') && (
+            {(platform === 'netease' || platform === 'kugou' || platform === 'tencent' || platform === 'bilibili') && (
               <Button variant="outline" size="sm" onClick={() => onQrLogin(platform)} className="gap-1">
                 <ScanLine className="h-3.5 w-3.5" />
                 扫码
@@ -88,7 +88,7 @@ export function PlatformAuthSection() {
   const [cookieDialogOpen, setCookieDialogOpen] = useState(false)
   const [cookieDialogPlatform, setCookieDialogPlatform] = useState<MusicSource>('netease')
 
-  const platforms: MusicSource[] = ['netease', 'tencent', 'kugou']
+  const platforms: MusicSource[] = ['netease', 'tencent', 'kugou', 'bilibili']
 
   // NOTE: This legacy component is replaced by PlatformHub. Kept for backward compat.
   const handleQrLogin = (platform: MusicSource) => {

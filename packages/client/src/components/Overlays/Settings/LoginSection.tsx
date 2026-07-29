@@ -68,7 +68,7 @@ export function LoginSection({
       <div className="flex shrink-0 items-center gap-1.5">
         {!isMyLoggedIn && !isVerifying ? (
           <>
-            {(platform === 'netease' || platform === 'kugou' || platform === 'tencent') && (
+            {(platform === 'netease' || platform === 'kugou' || platform === 'tencent' || platform === 'bilibili') && (
               <Button variant="outline" size="icon" className="h-8 w-8" onClick={onQrLogin} title="扫码登录">
                 <ScanLine className="h-3.5 w-3.5" />
               </Button>

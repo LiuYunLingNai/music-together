@@ -2,6 +2,7 @@ import type { Playlist, MusicSource } from '@music-together/shared'
 import * as neteaseAuth from './neteaseAuthService.js'
 import * as kugouAuth from './kugouAuthService.js'
 import * as tencentAuth from './tencentAuthService.js'
+import * as bilibiliAuth from './bilibiliAuthService.js'
 
 // ---------------------------------------------------------------------------
 // 统一认证服务接口
@@ -74,5 +75,5 @@ export const AUTH_PROVIDERS: Record<MusicSource, AuthProvider> = {
   netease: neteaseAuth,
   kugou: kugouAuth,
   tencent: tencentAuth,
-  bilibili: unsupportedAuthProvider,
+  bilibili: bilibiliAuth,
 }
