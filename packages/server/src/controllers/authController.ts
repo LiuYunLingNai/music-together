@@ -22,6 +22,9 @@ const VALID_PLATFORMS = new Set<MusicSource>(['netease', 'tencent', 'kugou', 'bi
 export function registerAuthController(io: TypedServer, socket: TypedSocket) {
   // 防止同一 QR 会话重复处理 803 成功状态
   let qrSuccessHandled = false
+  let activeQr: { key: string; platform: MusicSource } | null = null
+  let qrRequestVersion = 0
+  let qrCheckInFlight = false
 
   // -------------------------------------------------------------------------
   // QR 扫码登录（所有平台统一处理）
@@ -29,6 +32,8 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
 
   socket.on(EVENTS.AUTH_REQUEST_QR, async (data) => {
     qrSuccessHandled = false
+    activeQr = null
+    const requestVersion = ++qrRequestVersion
     try {
       const platform = data?.platform as MusicSource
       if (!platform || !QR_PLATFORMS.has(platform)) {
@@ -39,14 +44,19 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
       const provider = AUTH_PROVIDERS[platform]
       const result = await provider.generateQrCode()
 
+      // A newer QR request superseded this asynchronous response.
+      if (requestVersion !== qrRequestVersion) return
+
       if (!result) {
         socket.emit(EVENTS.AUTH_QR_STATUS, { status: QR_STATUS.EXPIRED, message: '生成二维码失败，请重试' })
         return
       }
 
+      activeQr = { key: result.key, platform }
       socket.emit(EVENTS.AUTH_QR_GENERATED, { key: result.key, qrimg: result.qrimg })
     } catch (err) {
       logger.error('AUTH_REQUEST_QR error', err, { socketId: socket.id })
+      if (requestVersion !== qrRequestVersion) return
       socket.emit(EVENTS.AUTH_QR_STATUS, { status: QR_STATUS.EXPIRED, message: '请求失败，请重试' })
     }
   })
@@ -64,16 +74,44 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
         return
       }
 
+      if (!activeQr || activeQr.key !== data.key || activeQr.platform !== platform) {
+        logger.debug('AUTH_CHECK_QR: ignoring stale QR session', { platform })
+        return
+      }
+      if (qrCheckInFlight) return
+      qrCheckInFlight = true
+
       const provider = AUTH_PROVIDERS[platform]
       const result = await provider.checkQrStatus(data.key)
+      if (!activeQr || activeQr.key !== data.key) {
+        qrCheckInFlight = false
+        return
+      }
 
-      socket.emit(EVENTS.AUTH_QR_STATUS, { status: result.status, message: result.message })
+      if (result.status !== QR_STATUS.SUCCESS) {
+        qrCheckInFlight = false
+        socket.emit(EVENTS.AUTH_QR_STATUS, { status: result.status, message: result.message, key: data.key })
+        return
+      }
+      if (!result.cookie) {
+        qrCheckInFlight = false
+        socket.emit(EVENTS.AUTH_QR_STATUS, {
+          status: QR_STATUS.EXPIRED,
+          message: '登录成功但未获取到凭据，请重新获取二维码',
+          key: data.key,
+        })
+        return
+      }
 
       // 登录成功：验证 cookie 并加入池（防止重复 803）
       if (result.status === QR_STATUS.SUCCESS && result.cookie && !qrSuccessHandled) {
         qrSuccessHandled = true
 
-        const infoResult = await provider.getUserInfo(result.cookie)
+        let infoResult = await provider.getUserInfo(result.cookie)
+        if (!infoResult.ok && infoResult.reason === 'error') {
+          await new Promise((resolve) => setTimeout(resolve, 1_000))
+          infoResult = await provider.getUserInfo(result.cookie)
+        }
 
         if (infoResult.ok) {
           const userInfo = infoResult.data
@@ -97,6 +135,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
             platform,
             cookie: result.cookie,
           })
+          socket.emit(EVENTS.AUTH_QR_STATUS, { status: QR_STATUS.SUCCESS, message: '登录成功', key: data.key })
           logger.info(`${platform} 扫码登录成功：${userInfo.nickname}`, {
             event: 'auth.qr_login_succeeded',
             platform,
@@ -110,11 +149,23 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
             platform,
             reason: infoResult.reason,
           })
+          socket.emit(EVENTS.AUTH_QR_STATUS, {
+            status: QR_STATUS.EXPIRED,
+            message: '登录凭据验证失败，请重新获取二维码',
+            key: data.key,
+          })
         }
       }
+      qrCheckInFlight = false
     } catch (err) {
       logger.error('AUTH_CHECK_QR error', err, { socketId: socket.id })
-      socket.emit(EVENTS.AUTH_QR_STATUS, { status: QR_STATUS.EXPIRED, message: '检查登录状态失败，请重试' })
+      qrCheckInFlight = false
+      if (data?.key && activeQr?.key !== data.key) return
+      socket.emit(EVENTS.AUTH_QR_STATUS, {
+        status: QR_STATUS.EXPIRED,
+        message: '检查登录状态失败，请重试',
+        key: data?.key,
+      })
     }
   })
 

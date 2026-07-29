@@ -58,7 +58,7 @@ export interface ServerToClientEvents {
 
   // Auth
   [EVENTS.AUTH_QR_GENERATED]: (data: { key: string; qrimg: string }) => void
-  [EVENTS.AUTH_QR_STATUS]: (data: { status: number; message: string }) => void
+  [EVENTS.AUTH_QR_STATUS]: (data: { status: number; message: string; key?: string }) => void
   [EVENTS.AUTH_SET_COOKIE_RESULT]: (data: {
     success: boolean
     message: string

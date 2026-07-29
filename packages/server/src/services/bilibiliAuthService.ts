@@ -70,20 +70,38 @@ function mergeCookiePairs(pairs: string[]): string {
   return [...cookies.values()].join('; ')
 }
 
+const BILIBILI_AUTH_COOKIE_NAMES = ['SESSDATA', 'bili_jct', 'DedeUserID', 'DedeUserID__ckMd5', 'sid']
+
 function cookiePairsFromLoginUrl(loginUrl: string): string[] {
-  try {
-    const params = new URL(loginUrl).searchParams
-    return ['SESSDATA', 'bili_jct', 'DedeUserID', 'DedeUserID__ckMd5', 'sid'].flatMap((name) => {
-      const value = params.get(name)
-      return value ? [`${name}=${encodeURIComponent(value)}`] : []
-    })
-  } catch {
-    return []
+  const pairs: string[] = []
+  const visited = new Set<string>()
+
+  const visit = (value: string, depth: number) => {
+    if (depth > 3 || visited.has(value)) return
+    visited.add(value)
+    try {
+      const params = new URL(value).searchParams
+      for (const name of BILIBILI_AUTH_COOKIE_NAMES) {
+        const cookieValue = params.get(name)
+        if (cookieValue) pairs.push(`${name}=${encodeURIComponent(cookieValue)}`)
+      }
+      // Some Bilibili responses place the completed login URL inside a
+      // `gourl`/redirect parameter rather than directly in the outer URL.
+      for (const [, parameterValue] of params) {
+        const decoded = decodeURIComponent(parameterValue)
+        if (/SESSDATA=|(?:https?:)?\/\//.test(decoded)) visit(decoded, depth + 1)
+      }
+    } catch {
+      // A non-URL query value is not a nested login URL.
+    }
   }
+
+  visit(loginUrl, 0)
+  return pairs
 }
 
-async function collectLoginCookies(loginUrl: string): Promise<string> {
-  const cookiePairs: string[] = []
+async function collectLoginCookies(loginUrl: string): Promise<string[]> {
+  const cookiePairs = cookiePairsFromLoginUrl(loginUrl)
   let currentUrl = loginUrl
 
   // Bilibili sets the final SESSDATA/DedeUserID cookies during the redirect
@@ -96,11 +114,12 @@ async function collectLoginCookies(loginUrl: string): Promise<string> {
     const location = response.headers.get('location')
     if (!location) break
     const nextUrl = new URL(location, currentUrl)
+    cookiePairs.push(...cookiePairsFromLoginUrl(nextUrl.toString()))
     if (nextUrl.protocol !== 'https:' || !/(^|\.)bilibili\.com$/.test(nextUrl.hostname)) break
     currentUrl = nextUrl.toString()
   }
 
-  return mergeCookiePairs(cookiePairs)
+  return cookiePairs
 }
 
 export async function generateQrCode(): Promise<{ key: string; qrimg: string } | null> {
@@ -132,12 +151,16 @@ export async function checkQrStatus(key: string): Promise<{ status: number; mess
 
     if (!response.ok || typeof status !== 'number') return { status: 800, message: '检查扫码状态失败' }
     if (status === 0) {
-      const redirectCookie = body.data?.url ? await collectLoginCookies(body.data.url) : ''
-      const cookie = mergeCookiePairs([
-        ...cookiePairsFromResponse(response),
-        ...(body.data?.url ? cookiePairsFromLoginUrl(body.data.url) : []),
-        ...redirectCookie.split(/;\s*/).filter(Boolean),
-      ])
+      const redirectCookiePairs = body.data?.url ? await collectLoginCookies(body.data.url) : []
+      const cookie = mergeCookiePairs([...cookiePairsFromResponse(response), ...redirectCookiePairs])
+      if (cookie) {
+        logger.debug('Bilibili QR credentials extracted', {
+          cookieNames: cookie
+            .split(/;\s*/)
+            .map((pair) => pair.split('=', 1)[0])
+            .filter(Boolean),
+        })
+      }
       return cookie
         ? { status: 803, message: '登录成功', cookie }
         : { status: 800, message: '登录成功但未获取到凭据，请重试' }

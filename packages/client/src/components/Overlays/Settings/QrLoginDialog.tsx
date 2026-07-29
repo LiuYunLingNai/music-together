@@ -28,6 +28,7 @@ export function QrLoginDialog({
   onCheckStatus,
 }: QrLoginDialogProps) {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pollPendingAtRef = useRef<number>(0)
   const label = PLATFORM_LABELS[platform] ?? platform
   const scanApp = platform === 'tencent' ? '手机QQ' : `${label} App`
 
@@ -41,9 +42,15 @@ export function QrLoginDialog({
       return
     }
 
-    pollRef.current = setInterval(() => {
+    pollPendingAtRef.current = 0
+    const poll = () => {
+      const now = Date.now()
+      if (pollPendingAtRef.current > 0 && now - pollPendingAtRef.current < 8_000) return
+      pollPendingAtRef.current = now
       onCheckStatus(qrData.key)
-    }, QR_TIMING.POLL_INTERVAL_MS)
+    }
+    poll()
+    pollRef.current = setInterval(poll, QR_TIMING.POLL_INTERVAL_MS)
 
     return () => {
       if (pollRef.current) {
@@ -55,6 +62,7 @@ export function QrLoginDialog({
 
   // On success or expiry: stop polling immediately + auto-close on success
   useEffect(() => {
+    pollPendingAtRef.current = 0
     const status = qrStatus?.status
     if (status === QR_STATUS.EXPIRED || status === QR_STATUS.SUCCESS) {
       if (pollRef.current) {
@@ -93,7 +101,7 @@ export function QrLoginDialog({
                 {statusCode === QR_STATUS.EXPIRED && (
                   <div className="absolute inset-0 flex flex-col items-center justify-center rounded-lg bg-black/60">
                     <AlertCircle className="mb-2 h-8 w-8 text-white" />
-                    <p className="text-sm text-white">二维码已过期</p>
+                    <p className="px-4 text-center text-sm text-white">{qrStatus?.message || '二维码已过期'}</p>
                   </div>
                 )}
                 {statusCode === QR_STATUS.SUCCESS && (
@@ -130,7 +138,7 @@ export function QrLoginDialog({
             {statusCode === QR_STATUS.EXPIRED && (
               <>
                 <AlertCircle className="text-destructive h-4 w-4" />
-                <span className="text-destructive">二维码已过期</span>
+                <span className="text-destructive">{qrStatus?.message || '二维码已过期'}</span>
               </>
             )}
           </div>

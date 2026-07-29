@@ -28,6 +28,7 @@ export function useAuth() {
 
   // Ref 跟踪最新的 qrPlatform，避免重建回调导致重启轮询
   const qrPlatformRef = useRef<MusicSource>(qrPlatform)
+  const qrKeyRef = useRef<string | null>(null)
 
   useEffect(() => {
     const onStatusUpdate = (data: PlatformAuthStatus[]) => {
@@ -40,12 +41,14 @@ export function useAuth() {
     }
 
     const onQrGenerated = (data: { key: string; qrimg: string }) => {
+      qrKeyRef.current = data.key
       setQrData(data)
       setQrStatus({ status: 801, message: '等待扫码' })
       setIsQrLoading(false)
     }
 
-    const onQrStatus = (data: { status: number; message: string }) => {
+    const onQrStatus = (data: { status: number; message: string; key?: string }) => {
+      if (data.key && data.key !== qrKeyRef.current) return
       setQrStatus(data)
       if (data.status === 803 || data.status === 800) {
         setIsQrLoading(false)
@@ -71,6 +74,7 @@ export function useAuth() {
   const requestQrCode = useCallback(
     (platform: MusicSource) => {
       setQrData(null)
+      qrKeyRef.current = null
       setQrStatus(null)
       setIsQrLoading(true)
       setQrPlatform(platform)
@@ -103,6 +107,7 @@ export function useAuth() {
   )
 
   const resetQr = useCallback(() => {
+    qrKeyRef.current = null
     setQrData(null)
     setQrStatus(null)
     setIsQrLoading(false)
