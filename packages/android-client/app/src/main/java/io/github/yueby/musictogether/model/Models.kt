@@ -45,6 +45,12 @@ data class AdminRoom(
 )
 
 @Immutable
+data class AudioProxyPolicy(
+    val bilibiliForceProxy: Boolean = true,
+    val kugouForceProxy: Boolean = true,
+)
+
+@Immutable
 data class Track(
     val id: String,
     val title: String,
@@ -277,6 +283,7 @@ data class AppState(
     val accountBusy: Boolean = false,
     val adminUsers: List<AdminUser> = emptyList(),
     val adminRooms: List<AdminRoom> = emptyList(),
+    val audioProxyPolicy: AudioProxyPolicy = AudioProxyPolicy(),
     val adminLoading: Boolean = false,
     val adminWorkingId: String? = null,
     val messages: List<ChatMessage> = emptyList(),

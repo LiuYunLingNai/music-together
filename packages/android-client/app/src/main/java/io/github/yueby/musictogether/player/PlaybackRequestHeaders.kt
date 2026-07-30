@@ -8,7 +8,7 @@ internal object PlaybackRequestHeaders {
         host.matchesDomain("bilivideo.com") || host.matchesDomain("bilivideo.cn") -> browserHeaders("https://www.bilibili.com/")
         host.matchesDomain("qqmusic.qq.com") || host.matchesDomain("music.qq.com") -> browserHeaders("https://y.qq.com/")
         host.matchesDomain("music.126.net") || host.matchesDomain("music.163.com") -> browserHeaders("https://music.163.com/")
-        host.matchesDomain("kugou.com") -> browserHeaders("https://www.kugou.com/")
+        host.matchesDomain("kugou.com") || host.matchesDomain("kugou.net") -> browserHeaders("https://www.kugou.com/")
         else -> emptyMap()
     }
 

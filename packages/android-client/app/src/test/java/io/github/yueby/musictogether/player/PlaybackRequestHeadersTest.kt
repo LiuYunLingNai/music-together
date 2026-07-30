@@ -32,6 +32,10 @@ class PlaybackRequestHeadersTest {
             "https://www.kugou.com/",
             PlaybackRequestHeaders.forHost("webfs.kugou.com")["Referer"],
         )
+        assertEquals(
+            "https://www.kugou.com/",
+            PlaybackRequestHeaders.forHost("audio.kugou.net")["Referer"],
+        )
     }
 
     @Test

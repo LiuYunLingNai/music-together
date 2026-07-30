@@ -70,6 +70,7 @@ class NativePlayer(
     private var scheduledAction: Job? = null
     private var progressJob: Job? = null
     private var pendingLoad: PendingLoad? = null
+    private var fallbackPlaybackUrl: String? = null
     private val driftController = PlaybackDriftController()
     private var tempoSyncEnabled = initialTempoSyncEnabled
     private var hardSeekSyncEnabled = initialHardSeekSyncEnabled
@@ -112,6 +113,7 @@ class NativePlayer(
         }
 
         override fun onPlayerError(error: PlaybackException) {
+            if (retryWithFallback(error)) return
             AppLogger.error(
                 "Player",
                 "playback failed code=${error.errorCodeName} status=${httpResponseCode(error) ?: "n/a"} " +
@@ -122,13 +124,20 @@ class NativePlayer(
         }
     }
 
-    fun load(track: Track, playState: PlayState, playbackUrl: String? = track.streamUrl) {
+    fun load(
+        track: Track,
+        playState: PlayState,
+        playbackUrl: String? = track.streamUrl,
+        fallbackUrl: String? = null,
+    ) {
         val streamUrl = playbackUrl ?: run {
+            fallbackPlaybackUrl = null
             AppLogger.warn("Player", "track has no stream URL id=${track.id}")
             return
         }
         scheduledAction?.cancel()
         pendingLoad = null
+        fallbackPlaybackUrl = fallbackUrl?.takeIf { it != streamUrl }
         resetPlaybackCorrection()
         _state.value = PlayerUiState(track = track, connectedToMediaSession = player != null)
         val elapsed = if (playState.isPlaying && playState.serverTimestamp > 0) {
@@ -236,6 +245,7 @@ class NativePlayer(
     fun stop() {
         scheduledAction?.cancel()
         pendingLoad = null
+        fallbackPlaybackUrl = null
         resetPlaybackCorrection()
         withPlayer {
             it.stop()
@@ -248,6 +258,7 @@ class NativePlayer(
         progressJob?.cancel()
         scheduledAction?.cancel()
         pendingLoad = null
+        fallbackPlaybackUrl = null
         resetPlaybackCorrection()
         player?.removeListener(playerListener)
         MediaController.releaseFuture(controllerFuture)
@@ -264,6 +275,43 @@ class NativePlayer(
             withPlayer(action)
             publish()
         }
+    }
+
+    fun switchPlaybackUrl(trackId: String, playbackUrl: String) {
+        withPlayer { controller ->
+            val currentItem = controller.currentMediaItem ?: return@withPlayer
+            if (currentItem.mediaId != trackId || currentItem.localConfiguration?.uri?.toString() == playbackUrl) {
+                return@withPlayer
+            }
+            val positionMs = controller.currentPosition.coerceAtLeast(0)
+            val shouldResume = controller.playWhenReady
+            fallbackPlaybackUrl = null
+            resetPlaybackCorrection(controller)
+            AppLogger.info("Player", "switch playback transport track=$trackId positionMs=$positionMs")
+            controller.playWhenReady = false
+            controller.setMediaItem(currentItem.buildUpon().setUri(playbackUrl).build(), positionMs)
+            controller.prepare()
+            if (pendingLoad == null) controller.playWhenReady = shouldResume
+        }
+    }
+
+    private fun retryWithFallback(error: PlaybackException): Boolean {
+        val fallbackUrl = fallbackPlaybackUrl ?: return false
+        val controller = player ?: return false
+        val currentItem = controller.currentMediaItem ?: return false
+        val positionMs = controller.currentPosition.coerceAtLeast(0)
+        val shouldResume = controller.playWhenReady
+        fallbackPlaybackUrl = null
+        resetPlaybackCorrection(controller)
+        AppLogger.warn(
+            "Player",
+            "direct playback failed; retry proxy code=${error.errorCodeName} status=${httpResponseCode(error) ?: "n/a"}",
+        )
+        controller.playWhenReady = false
+        controller.setMediaItem(currentItem.buildUpon().setUri(fallbackUrl).build(), positionMs)
+        controller.prepare()
+        if (pendingLoad == null) controller.playWhenReady = shouldResume
+        return true
     }
 
     private fun finishPendingLoad() {

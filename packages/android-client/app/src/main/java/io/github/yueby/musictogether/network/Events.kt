@@ -1,6 +1,8 @@
 package io.github.yueby.musictogether.network
 
 object Events {
+    const val SERVER_AUDIO_PROXY_POLICY = "server:audio_proxy_policy"
+
     const val ROOM_CREATE = "room:create"
     const val ROOM_CREATED = "room:created"
     const val ROOM_JOIN = "room:join"

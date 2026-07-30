@@ -1,5 +1,6 @@
 package io.github.yueby.musictogether.network
 
+import io.github.yueby.musictogether.model.AudioProxyPolicy
 import io.github.yueby.musictogether.model.Track
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
@@ -43,6 +44,35 @@ class PlaybackUrlTest {
         val streamUrl = "https://music.example.com/audio.mp3"
 
         assertEquals(streamUrl, api.playbackUrl(server, track(source = "tencent", streamUrl = streamUrl)))
+    }
+
+    @Test
+    fun `allows bilibili direct playback with a proxy fallback`() {
+        val streamUrl = "https://cdn.bilivideo.com/audio.m4s"
+        val target = api.playbackTarget(
+            server,
+            track(source = "bilibili", urlId = "BV1234567890", streamUrl = streamUrl),
+            "ROOM01",
+            AudioProxyPolicy(bilibiliForceProxy = false),
+        )!!
+
+        assertEquals(streamUrl, target.primaryUrl)
+        assertTrue(target.fallbackUrl!!.contains("/api/music/bilibili-audio-proxy?"))
+    }
+
+    @Test
+    fun `allows both kugou editions direct playback with a proxy fallback`() {
+        val streamUrl = "http://fs.kugou.com/audio.flac"
+        listOf("kugou", "kugou_concept").forEach { source ->
+            val target = api.playbackTarget(
+                server,
+                track(source = source, streamUrl = streamUrl),
+                policy = AudioProxyPolicy(kugouForceProxy = false),
+            )!!
+
+            assertEquals(streamUrl, target.primaryUrl)
+            assertTrue(target.fallbackUrl!!.contains("/api/music/kugou-audio-proxy?"))
+        }
     }
 
     private fun track(source: String, urlId: String = "song-id", streamUrl: String): Track = Track(

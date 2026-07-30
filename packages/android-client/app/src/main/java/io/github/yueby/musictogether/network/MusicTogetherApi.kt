@@ -4,6 +4,7 @@ import io.github.yueby.musictogether.logging.AppLogger
 import io.github.yueby.musictogether.model.AccountProfile
 import io.github.yueby.musictogether.model.AdminRoom
 import io.github.yueby.musictogether.model.AdminUser
+import io.github.yueby.musictogether.model.AudioProxyPolicy
 import io.github.yueby.musictogether.model.Track
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -27,6 +28,11 @@ data class PlaylistPage(
     val tracks: List<Track>,
     val total: Int,
     val hasMore: Boolean,
+)
+
+data class PlaybackTarget(
+    val primaryUrl: String,
+    val fallbackUrl: String? = null,
 )
 
 class ApiException(val statusCode: Int, message: String) : IOException(message)
@@ -106,6 +112,26 @@ class MusicTogetherApi(private val client: OkHttpClient) {
         List(array.length()) { index -> array.getJSONObject(index).toAdminRoom() }
     }
 
+    suspend fun adminAudioProxyPolicy(server: ServerAddress): AudioProxyPolicy = withContext(Dispatchers.IO) {
+        requireNotNull(
+            jsonRequest(server, listOf("admin", "audio-proxy-policy"), "GET", null, "admin audio proxy policy"),
+        ).toAudioProxyPolicy()
+    }
+
+    suspend fun updateAdminAudioProxyPolicy(
+        server: ServerAddress,
+        bilibiliForceProxy: Boolean? = null,
+        kugouForceProxy: Boolean? = null,
+    ): AudioProxyPolicy = withContext(Dispatchers.IO) {
+        val body = JSONObject().apply {
+            bilibiliForceProxy?.let { put("bilibiliForceProxy", it) }
+            kugouForceProxy?.let { put("kugouForceProxy", it) }
+        }
+        requireNotNull(
+            jsonRequest(server, listOf("admin", "audio-proxy-policy"), "PATCH", body, "update audio proxy policy"),
+        ).toAudioProxyPolicy()
+    }
+
     suspend fun deleteAdminUser(server: ServerAddress, userId: String) = withContext(Dispatchers.IO) {
         jsonRequest(server, listOf("admin", "users", userId), "DELETE", null, "delete user", allowNoContent = true)
     }
@@ -139,8 +165,17 @@ class MusicTogetherApi(private val client: OkHttpClient) {
     }
 
     fun playbackUrl(server: ServerAddress, track: Track, roomId: String? = null): String? {
+        return playbackTarget(server, track, roomId, AudioProxyPolicy())?.primaryUrl
+    }
+
+    fun playbackTarget(
+        server: ServerAddress,
+        track: Track,
+        roomId: String? = null,
+        policy: AudioProxyPolicy,
+    ): PlaybackTarget? {
         val streamUrl = track.streamUrl ?: return null
-        return when {
+        val proxyUrl = when {
             track.source == "bilibili" && track.urlId.isNotBlank() ->
                 server.api("music", "bilibili-audio-proxy").newBuilder()
                     .addQueryParameter("url", streamUrl)
@@ -153,7 +188,17 @@ class MusicTogetherApi(private val client: OkHttpClient) {
                     .addQueryParameter("url", streamUrl)
                     .build()
                     .toString()
-            else -> streamUrl
+            else -> null
+        }
+        val forceProxy = when (track.source) {
+            "bilibili" -> policy.bilibiliForceProxy
+            "kugou", "kugou_concept" -> policy.kugouForceProxy
+            else -> false
+        }
+        return if (forceProxy && proxyUrl != null) {
+            PlaybackTarget(primaryUrl = proxyUrl)
+        } else {
+            PlaybackTarget(primaryUrl = streamUrl, fallbackUrl = proxyUrl)
         }
     }
 
@@ -327,6 +372,11 @@ class MusicTogetherApi(private val client: OkHttpClient) {
         hidden = optBoolean("hidden", false),
         permanent = optBoolean("permanent", false),
         currentTrackTitle = stringOrNull("currentTrackTitle"),
+    )
+
+    private fun JSONObject.toAudioProxyPolicy() = AudioProxyPolicy(
+        bilibiliForceProxy = optBoolean("bilibiliForceProxy", true),
+        kugouForceProxy = optBoolean("kugouForceProxy", true),
     )
 
     private companion object {

@@ -40,6 +40,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -65,7 +66,7 @@ import io.github.yueby.musictogether.model.AdminUser
 import io.github.yueby.musictogether.model.AppState
 
 private enum class SettingsSection { Account, App, Admin }
-private enum class AdminSection { Users, Rooms }
+private enum class AdminSection { Users, Rooms, Proxy }
 
 @Composable
 fun AccountSettingsPane(state: AppState, viewModel: MusicTogetherViewModel) {
@@ -337,6 +338,7 @@ private fun AdminSection(state: AppState, viewModel: MusicTogetherViewModel) {
         ) {
             FilterChip(selected = section == AdminSection.Users, onClick = { section = AdminSection.Users }, label = { Text("账号") })
             FilterChip(selected = section == AdminSection.Rooms, onClick = { section = AdminSection.Rooms }, label = { Text("房间") })
+            FilterChip(selected = section == AdminSection.Proxy, onClick = { section = AdminSection.Proxy }, label = { Text("代理") })
         }
         when (section) {
             AdminSection.Users -> LazyColumn(
@@ -387,6 +389,7 @@ private fun AdminSection(state: AppState, viewModel: MusicTogetherViewModel) {
                     )
                 }
             }
+            AdminSection.Proxy -> AudioProxyPolicySection(state, viewModel)
         }
     }
 
@@ -406,6 +409,52 @@ private fun AdminSection(state: AppState, viewModel: MusicTogetherViewModel) {
             },
             dismissButton = { TextButton(onClick = { confirmation = null }) { Text("取消") } },
         )
+    }
+}
+
+@Composable
+private fun AudioProxyPolicySection(state: AppState, viewModel: MusicTogetherViewModel) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(20.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        item {
+            SettingsTitle("音频传输")
+        }
+        item {
+            AudioProxyPolicyRow(
+                label = "B站强制服务器代理",
+                checked = state.audioProxyPolicy.bilibiliForceProxy,
+                enabled = state.adminWorkingId == null,
+                onCheckedChange = viewModel::updateBilibiliForceProxy,
+            )
+        }
+        item {
+            AudioProxyPolicyRow(
+                label = "酷狗强制服务器代理",
+                checked = state.audioProxyPolicy.kugouForceProxy,
+                enabled = state.adminWorkingId == null,
+                onCheckedChange = viewModel::updateKugouForceProxy,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AudioProxyPolicyRow(
+    label: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(label, modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium)
+        Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
     }
 }
 

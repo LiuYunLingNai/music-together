@@ -13,6 +13,7 @@ import io.github.yueby.musictogether.lyrics.LyricsParser
 import io.github.yueby.musictogether.lyrics.lyricOffsetKey
 import io.github.yueby.musictogether.model.AppState
 import io.github.yueby.musictogether.model.AccountProfile
+import io.github.yueby.musictogether.model.AudioProxyPolicy
 import io.github.yueby.musictogether.model.BilibiliMetadataMatchState
 import io.github.yueby.musictogether.model.ChatMessage
 import io.github.yueby.musictogether.model.ConnectionStatus
@@ -33,6 +34,7 @@ import io.github.yueby.musictogether.network.Events
 import io.github.yueby.musictogether.network.MusicTogetherApi
 import io.github.yueby.musictogether.network.MusicTogetherSocket
 import io.github.yueby.musictogether.network.PersistentCookieJar
+import io.github.yueby.musictogether.network.PlaybackTarget
 import io.github.yueby.musictogether.network.RoomJoinTargetParser
 import io.github.yueby.musictogether.network.ServerAddress
 import io.github.yueby.musictogether.network.ServerCatalog
@@ -349,9 +351,16 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         if (_state.value.adminLoading) return
         _state.value = _state.value.copy(adminLoading = true)
         viewModelScope.launch {
-            runCatching { api.adminUsers(server) to api.adminRooms(server) }
-                .onSuccess { (users, rooms) ->
-                    _state.value = _state.value.copy(adminUsers = users, adminRooms = rooms, adminLoading = false)
+            runCatching {
+                Triple(api.adminUsers(server), api.adminRooms(server), api.adminAudioProxyPolicy(server))
+            }
+                .onSuccess { (users, rooms, policy) ->
+                    _state.value = _state.value.copy(
+                        adminUsers = users,
+                        adminRooms = rooms,
+                        audioProxyPolicy = policy,
+                        adminLoading = false,
+                    )
                 }
                 .onFailure {
                     _state.value = _state.value.copy(adminLoading = false)
@@ -372,6 +381,10 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     fun dissolveAdminRoom(roomId: String) = runAdminAction(roomId, "房间已解散") { server ->
         api.dissolveAdminRoom(server, roomId)
     }
+
+    fun updateBilibiliForceProxy(enabled: Boolean) = updateAudioProxyPolicy("bilibili", enabled)
+
+    fun updateKugouForceProxy(enabled: Boolean) = updateAudioProxyPolicy("kugou", enabled)
 
     fun updateRoomAudioQuality(quality: String) {
         val value: Any = quality.toIntOrNull() ?: quality
@@ -515,6 +528,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             accountLoading = true,
             adminUsers = if (serverChanged) emptyList() else _state.value.adminUsers,
             adminRooms = if (serverChanged) emptyList() else _state.value.adminRooms,
+            audioProxyPolicy = if (serverChanged) AudioProxyPolicy() else _state.value.audioProxyPolicy,
             error = null,
         )
         syncDiscoveryConnections()
@@ -1279,6 +1293,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 connectionStatus = ConnectionStatus.Disconnected,
                 pingMs = null,
                 syncDriftSeconds = 0.0,
+                audioProxyPolicy = AudioProxyPolicy(),
             )
             activeServer?.displayUrl?.let { url ->
                 updateServerConnection(url) { it.copy(status = ConnectionStatus.Disconnected, error = reason) }
@@ -1307,6 +1322,15 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         }
         when (event) {
             "connect_error" -> setError((data as? JSONObject)?.optString("message") ?: "连接认证失败")
+            Events.SERVER_AUDIO_PROXY_POLICY -> {
+                val value = data as? JSONObject ?: return
+                applyAudioProxyPolicy(
+                    AudioProxyPolicy(
+                        bilibiliForceProxy = value.optBoolean("bilibiliForceProxy", true),
+                        kugouForceProxy = value.optBoolean("kugouForceProxy", true),
+                    ),
+                )
+            }
             Events.ROOM_CREATED -> {
                 val value = data as? JSONObject ?: return
                 desiredRoomId = value.optString("roomId")
@@ -1334,7 +1358,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     if (needsRecovery) {
                         recoveredTrackId = if (isJoinSnapshot) room.currentTrack.id else null
                         AppLogger.info("Sync", "recover immediately from room state track=${room.currentTrack.id}")
-                        nativePlayer.load(room.currentTrack, room.playState, playbackUrl(room.currentTrack))
+                        loadTrack(room.currentTrack, room.playState)
                     }
                     if (_state.value.lyrics.trackId != room.currentTrack.id) loadLyrics(room.currentTrack)
                 }
@@ -1444,7 +1468,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     AppLogger.info("Sync", "skip duplicate join PLAYER_PLAY track=${track.id}")
                     recoveredTrackId = null
                 } else {
-                    nativePlayer.load(track, playState, playbackUrl(track))
+                    loadTrack(track, playState)
                 }
             }
             Events.PLAYER_TRACK_METADATA_UPDATED -> {
@@ -1948,8 +1972,33 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         action(playState)
     }
 
-    private fun playbackUrl(track: Track): String? =
-        activeServer?.let { api.playbackUrl(it, track, _state.value.room?.id) } ?: track.streamUrl
+    private fun playbackTarget(
+        track: Track,
+        policy: AudioProxyPolicy = _state.value.audioProxyPolicy,
+    ): PlaybackTarget? = activeServer?.let {
+        api.playbackTarget(it, track, _state.value.room?.id, policy)
+    } ?: track.streamUrl?.let(::PlaybackTarget)
+
+    private fun loadTrack(track: Track, playState: PlayState) {
+        val target = playbackTarget(track)
+        nativePlayer.load(track, playState, target?.primaryUrl, target?.fallbackUrl)
+    }
+
+    private fun applyAudioProxyPolicy(policy: AudioProxyPolicy) {
+        val previous = _state.value.audioProxyPolicy
+        _state.value = _state.value.copy(audioProxyPolicy = policy)
+        val track = _state.value.room?.currentTrack ?: return
+        val becameForced = when (track.source) {
+            "bilibili" -> !previous.bilibiliForceProxy && policy.bilibiliForceProxy
+            "kugou", "kugou_concept" -> !previous.kugouForceProxy && policy.kugouForceProxy
+            else -> false
+        }
+        if (becameForced) {
+            playbackTarget(track, policy)?.let { target ->
+                nativePlayer.switchPlaybackUrl(track.id, target.primaryUrl)
+            }
+        }
+    }
 
     private fun updateRoom(transform: (io.github.yueby.musictogether.model.RoomState) -> io.github.yueby.musictogether.model.RoomState) {
         val room = _state.value.room ?: return
@@ -2160,6 +2209,32 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 .onFailure {
                     _state.value = _state.value.copy(adminWorkingId = null)
                     setError(it.message ?: "管理员操作失败")
+                }
+        }
+    }
+
+    private fun updateAudioProxyPolicy(source: String, enabled: Boolean) {
+        val server = activeServer ?: return setError("请先连接服务端")
+        if (_state.value.accountProfile?.role != "admin") return setError("需要服务器管理员权限")
+        if (_state.value.adminWorkingId != null) return
+        val targetId = "audio-proxy-policy:$source"
+        _state.value = _state.value.copy(adminWorkingId = targetId)
+        viewModelScope.launch {
+            runCatching {
+                when (source) {
+                    "bilibili" -> api.updateAdminAudioProxyPolicy(server, bilibiliForceProxy = enabled)
+                    "kugou" -> api.updateAdminAudioProxyPolicy(server, kugouForceProxy = enabled)
+                    else -> error("不支持的音源")
+                }
+            }
+                .onSuccess { policy ->
+                    _state.value = _state.value.copy(adminWorkingId = null)
+                    applyAudioProxyPolicy(policy)
+                    showNotice("音频代理策略已更新")
+                }
+                .onFailure {
+                    _state.value = _state.value.copy(adminWorkingId = null)
+                    setError(it.message ?: "音频代理策略更新失败")
                 }
         }
     }
