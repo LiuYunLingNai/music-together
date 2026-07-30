@@ -1,4 +1,7 @@
 export const EVENTS = {
+  // Server policy
+  SERVER_AUDIO_PROXY_POLICY: 'server:audio_proxy_policy',
+
   // Room lifecycle
   ROOM_CREATE: 'room:create',
   ROOM_CREATED: 'room:created',

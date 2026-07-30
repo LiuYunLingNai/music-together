@@ -49,6 +49,7 @@ graph TB
 | **Auth**     | `auth:request_qr`, `auth:check_qr`, `auth:set_cookie`, `auth:logout`, `auth:get_status`                                             | `auth:qr_generated`, `auth:qr_status`, `auth:set_cookie_result`, `auth:status_update`, `auth:my_status`                                    |
 | **Playlist** | `playlist:get_my`                                                                                                                   | `playlist:my_list`                                                                                                                         |
 | **NTP**      | `ntp:ping`                                                                                                                          | `ntp:pong`                                                                                                                                 |
+| **Server**   | —                                                                                                                                   | `server:audio_proxy_policy`                                                                                                                |
 
 ## 关键数据模型
 
@@ -76,6 +77,11 @@ type PlayMode = 'sequential' | 'loop-all' | 'loop-one' | 'shuffle'
 
 // 音频质量档位 (kbps)
 type AudioQuality = 128 | 192 | 320 | 999 | 'highest' | ProviderSpecificQuality
+
+interface AudioProxyPolicy {
+  bilibiliForceProxy: boolean
+  kugouForceProxy: boolean
+}
 
 // 客户端可见的房间状态
 interface RoomState {
@@ -236,17 +242,27 @@ Conductor（当前 `hostId` 对应用户）**自适应频率**上报当前播放
 - B站：普通账号最高 192K，普通/年度大会员最高 Hi-Res；服务端用带 Cookie 的单次 WBI `playurl` 请求合并普通和 FLAC DASH 音轨，并在同一响应内选择不超过目标的最高可用档位。B站杜比为 E-AC-3，桌面浏览器支持不完整，当前明确不参与选流
 - B站沿用现有五档，不增加平台专属 UI 选项：
 
-| 房间音质 | 无会员 | 普通大会员 | 年度大会员 |
-| -------- | ------ | ---------- | ---------- |
-| 标准 128kbps | B站 132K | B站 132K | B站 132K |
-| 较高 192kbps | B站 192K | B站 192K | B站 192K |
-| 高品质 320kbps | B站 192K | B站 192K | B站 192K |
-| 无损 SQ | B站 192K | Hi-Res | Hi-Res |
-| 尽量高 | B站 192K | Hi-Res | Hi-Res |
+| 房间音质       | 无会员   | 普通大会员 | 年度大会员 |
+| -------------- | -------- | ---------- | ---------- |
+| 标准 128kbps   | B站 132K | B站 132K   | B站 132K   |
+| 较高 192kbps   | B站 192K | B站 192K   | B站 192K   |
+| 高品质 320kbps | B站 192K | B站 192K   | B站 192K   |
+| 无损 SQ        | B站 192K | Hi-Res     | Hi-Res     |
+| 尽量高         | B站 192K | Hi-Res     | Hi-Res     |
 
-  B站没有与房间 128K、320K 完全对应的普通 DASH 音轨，因此分别映射为最接近的 132K、192K。Hi-Res 还要求视频本身提供 FLAC 音轨，否则直接从同一次响应选 192K，不再次请求其他音质。
+B站没有与房间 128K、320K 完全对应的普通 DASH 音轨，因此分别映射为最接近的 132K、192K。Hi-Res 还要求视频本身提供 FLAC 音轨，否则直接从同一次响应选 192K，不再次请求其他音质。
+
 - 上游若返回歌曲实际可用的较低规格，服务端记录 `actualQuality` 和实际平均码率，不再逐档重新请求
 - `musicProvider.streamUrlCache` 的 key 包含 bitrate，不同音质自动隔离缓存
+
+## 音频代理策略
+
+- 全局 `AudioProxyPolicy` 持久化在 SQLite `server_settings` 表，旧数据库或无效配置默认 B站、酷狗均强制代理。
+- 只有服务器管理员可以通过 `GET/PATCH /api/admin/audio-proxy-policy` 读取或修改策略；PATCH 接受任一布尔字段并返回完整策略。
+- 新 WebSocket 连接会收到 `server:audio_proxy_policy`，管理员修改后服务端向 `lobby` 中的全部连接广播完整策略。
+- `forceProxy=false` 表示允许具备能力的原生客户端直连，不要求所有客户端直连。Android 先请求 CDN，失败时仅回退一次现有服务器代理；Web 管理页会明确提示浏览器受跨域和加密资源限制，始终通过服务器代理播放。
+- 重新启用强制代理时，Android 将正在直连的对应曲目保留位置切回代理；关闭强制代理不打断当前播放，从下一次加载开始生效。
+- 酷狗策略同时覆盖 `kugou` 与 `kugou_concept`。概念版加密资源直连通常会失败，Android 随后通过代理使用服务端流式解密。
 
 ## 队列清空
 
@@ -275,14 +291,16 @@ Conductor（当前 `hostId` 对应用户）**自适应频率**上报当前播放
 
 ## REST API
 
-| 路径                       | 方法 | 用途                                                                                                    |
-| -------------------------- | ---- | ------------------------------------------------------------------------------------------------------- |
-| `/api/music/search`        | GET  | 搜索曲目（`source` + `keyword` + `page`）                                                               |
-| `/api/music/url`           | GET  | 解析流媒体 URL（`source` + `id`）                                                                       |
-| `/api/music/lyric`         | GET  | 获取歌词                                                                                                |
-| `/api/music/cover`         | GET  | 获取封面图                                                                                              |
-| `/api/music/playlist`      | GET  | 获取歌单曲目列表（`source` + `id` + `limit` + `offset`），分页返回 `{ tracks, total, offset, hasMore }` |
-| `/api/rooms/:roomId/check` | GET  | 房间预检（存在性 + 是否需要密码），用于分享链接直接访问时的前置校验                                     |
-| `/api/health`              | GET  | 健康检查                                                                                                |
+| 路径                            | 方法  | 用途                                                                                                    |
+| ------------------------------- | ----- | ------------------------------------------------------------------------------------------------------- |
+| `/api/music/search`             | GET   | 搜索曲目（`source` + `keyword` + `page`）                                                               |
+| `/api/music/url`                | GET   | 解析流媒体 URL（`source` + `id`）                                                                       |
+| `/api/music/lyric`              | GET   | 获取歌词                                                                                                |
+| `/api/music/cover`              | GET   | 获取封面图                                                                                              |
+| `/api/music/playlist`           | GET   | 获取歌单曲目列表（`source` + `id` + `limit` + `offset`），分页返回 `{ tracks, total, offset, hasMore }` |
+| `/api/rooms/:roomId/check`      | GET   | 房间预检（存在性 + 是否需要密码），用于分享链接直接访问时的前置校验                                     |
+| `/api/admin/audio-proxy-policy` | GET   | 服务器管理员读取 B站与酷狗全局强制代理策略                                                              |
+| `/api/admin/audio-proxy-policy` | PATCH | 服务器管理员部分更新代理策略并广播完整结果                                                              |
+| `/api/health`                   | GET   | 健康检查                                                                                                |
 
 ---

@@ -179,10 +179,11 @@ src/
 │   ├── tencentAuthService.ts  #   QQ 音乐认证（5 步 OAuth QR 扫码登录：ptqrshow/ptqrlogin/check_sig/authorize/QQLogin 换取 musickey；zzc 签名防风控；getUserInfo 获取昵称 + VIP 状态；getUserPlaylists 获取自建 + 收藏歌单；getPlaylistTracks 分页获取歌单歌曲）
 │   └── voteService.ts          #   投票状态管理
 │
-├── repositories/               # 数据仓库：内存存储
+├── repositories/               # 数据仓库：内存状态与 SQLite 持久化
 │   ├── types.ts                #   接口定义（RoomRepository, ChatRepository）
 │   ├── roomRepository.ts       #   房间数据 + Socket 映射 + per-socket RTT + roomToSockets 反向索引（Map<string, RoomData>）
-│   └── chatRepository.ts       #   聊天记录（内存最多 200 条；永久房间同步持久化到 SQLite）
+│   ├── chatRepository.ts       #   聊天记录（内存最多 200 条；永久房间同步持久化到 SQLite）
+│   └── audioProxyPolicyRepository.ts # 全局 B站/酷狗音频代理策略（SQLite server_settings）
 │
 ├── middleware/                  # Socket.IO 中间件
 │   ├── types.ts                #   TypedServer, TypedSocket, HandlerContext

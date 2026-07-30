@@ -4,8 +4,10 @@ import * as z from 'zod/v4'
 import type { TypedServer } from '../middleware/types.js'
 import { roomRepo } from '../repositories/roomRepository.js'
 import { userRepo } from '../repositories/userRepository.js'
+import { audioProxyPolicyRepo } from '../repositories/audioProxyPolicyRepository.js'
 import { destroyRoom } from '../services/roomLifecycleService.js'
 import { logger } from '../utils/logger.js'
+import { EVENTS } from '@music-together/shared'
 
 function auditContext(req: Request): Record<string, unknown> {
   return {
@@ -32,9 +34,43 @@ const resetPasswordSchema = z.object({
   password: z.string().min(8, '密码至少需要 8 个字符').max(128),
 })
 
+const audioProxyPolicyPatchSchema = z
+  .object({
+    bilibiliForceProxy: z.boolean().optional(),
+    kugouForceProxy: z.boolean().optional(),
+  })
+  .refine((value) => value.bilibiliForceProxy !== undefined || value.kugouForceProxy !== undefined, {
+    message: '至少需要提供一个代理策略字段',
+  })
+
 export function createAdminRoutes(io: TypedServer): Router {
   const router = Router()
   router.use(requireServerAdmin)
+
+  router.get('/audio-proxy-policy', (req, res) => {
+    const policy = audioProxyPolicyRepo.get()
+    logger.info('服务器管理员查看了音频代理策略', {
+      event: 'admin.audio_proxy_policy_viewed',
+      ...auditContext(req),
+    })
+    res.json(policy)
+  })
+
+  router.patch('/audio-proxy-policy', (req, res) => {
+    const parsed = audioProxyPolicyPatchSchema.safeParse(req.body)
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid audio proxy policy' })
+      return
+    }
+    const policy = audioProxyPolicyRepo.update(parsed.data)
+    io.to('lobby').emit(EVENTS.SERVER_AUDIO_PROXY_POLICY, policy)
+    logger.info('服务器管理员更新了音频代理策略', {
+      event: 'admin.audio_proxy_policy_updated',
+      ...auditContext(req),
+      ...policy,
+    })
+    res.json(policy)
+  })
 
   router.get('/users', (req, res) => {
     const users = userRepo.list()

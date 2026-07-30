@@ -1,12 +1,16 @@
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useSocketEvent } from '@/hooks/useSocketEvent'
 import { requestJson } from '@/lib/identityAuth'
-import { DoorClosed, Loader2, RefreshCw, Trash2, Users } from 'lucide-react'
+import { useAccountStore } from '@/stores/accountStore'
+import { EVENTS, type AudioProxyPolicy } from '@music-together/shared'
+import { DoorClosed, Loader2, Network, RefreshCw, Trash2, Users } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { useAccountStore } from '@/stores/accountStore'
+import { SettingRow } from './SettingRow'
 
 interface AdminUser {
   id: string
@@ -34,19 +38,26 @@ export function AdminSection() {
   const currentUserId = useAccountStore((state) => state.profile?.id)
   const [users, setUsers] = useState<AdminUser[]>([])
   const [rooms, setRooms] = useState<AdminRoom[]>([])
+  const [audioProxyPolicy, setAudioProxyPolicy] = useState<AudioProxyPolicy>({
+    bilibiliForceProxy: true,
+    kugouForceProxy: true,
+  })
   const [passwords, setPasswords] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [workingId, setWorkingId] = useState<string | null>(null)
+  const [workingProxyPolicy, setWorkingProxyPolicy] = useState<keyof AudioProxyPolicy | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [userData, roomData] = await Promise.all([
+      const [userData, roomData, proxyPolicy] = await Promise.all([
         requestJson<{ users: AdminUser[] }>('/api/admin/users'),
         requestJson<{ rooms: AdminRoom[] }>('/api/admin/rooms'),
+        requestJson<AudioProxyPolicy>('/api/admin/audio-proxy-policy'),
       ])
       setUsers(userData.users)
       setRooms(roomData.rooms)
+      setAudioProxyPolicy(proxyPolicy)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '管理员数据加载失败')
     } finally {
@@ -57,6 +68,24 @@ export function AdminSection() {
   useEffect(() => {
     void load()
   }, [load])
+
+  useSocketEvent(EVENTS.SERVER_AUDIO_PROXY_POLICY, setAudioProxyPolicy)
+
+  const updateAudioProxyPolicy = async (field: keyof AudioProxyPolicy, checked: boolean) => {
+    setWorkingProxyPolicy(field)
+    try {
+      const policy = await requestJson<AudioProxyPolicy>('/api/admin/audio-proxy-policy', {
+        method: 'PATCH',
+        body: JSON.stringify({ [field]: checked }),
+      })
+      setAudioProxyPolicy(policy)
+      toast.success('音频代理策略已更新')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '音频代理策略更新失败')
+    } finally {
+      setWorkingProxyPolicy(null)
+    }
+  }
 
   const deleteUser = async (user: AdminUser) => {
     if (!window.confirm(`确定删除账号 ${user.id}？`)) return
@@ -128,6 +157,10 @@ export function AdminSection() {
           <TabsTrigger value="rooms">
             <DoorClosed />
             房间
+          </TabsTrigger>
+          <TabsTrigger value="proxy">
+            <Network />
+            代理
           </TabsTrigger>
         </TabsList>
 
@@ -220,6 +253,44 @@ export function AdminSection() {
                 </Button>
               </div>
             ))
+          )}
+        </TabsContent>
+
+        <TabsContent value="proxy" className="rounded-md border">
+          {loading ? (
+            <div className="flex h-24 items-center justify-center">
+              <Loader2 className="h-5 w-5 animate-spin" />
+            </div>
+          ) : (
+            <>
+              <div className="border-b bg-muted/40 p-3 text-xs leading-relaxed text-muted-foreground">
+                这些开关仅影响原生客户端。Web 端受跨域和加密音频资源限制，始终通过服务器代理播放。
+              </div>
+              <div className="divide-y px-3">
+                <SettingRow
+                  label="B 站强制服务器代理"
+                  description="关闭后，客户端优先直连音频 CDN，失败时回退服务器代理"
+                >
+                  <Switch
+                    checked={audioProxyPolicy.bilibiliForceProxy}
+                    disabled={workingProxyPolicy !== null}
+                    onCheckedChange={(checked) => void updateAudioProxyPolicy('bilibiliForceProxy', checked)}
+                    aria-label="B 站强制服务器代理"
+                  />
+                </SettingRow>
+                <SettingRow
+                  label="酷狗强制服务器代理"
+                  description="同时控制酷狗标准版和概念版；关闭后客户端优先直连，失败时回退代理"
+                >
+                  <Switch
+                    checked={audioProxyPolicy.kugouForceProxy}
+                    disabled={workingProxyPolicy !== null}
+                    onCheckedChange={(checked) => void updateAudioProxyPolicy('kugouForceProxy', checked)}
+                    aria-label="酷狗强制服务器代理"
+                  />
+                </SettingRow>
+              </div>
+            </>
           )}
         </TabsContent>
       </Tabs>
