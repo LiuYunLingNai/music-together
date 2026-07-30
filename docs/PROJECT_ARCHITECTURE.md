@@ -157,6 +157,8 @@ UI 操作
 
 `ServerCatalog.kt` 保存多个服务端地址。大厅为每个服务端建立 discovery socket，并将房间列表合并到统一界面。
 
+`/api/music/search` 的普通音源关键词最多为 100 个字符。B 站搜索兼容关键词、BV 号、可信 B 站视频链接和 `b23.tv` 分享链接，输入最多为 2000 个字符；短链解析与目标域名校验由服务端完成。
+
 ### WebSocket 协议
 
 `MusicTogetherSocket.kt` 使用 OkHttp 原生 WebSocket。消息采用统一信封：

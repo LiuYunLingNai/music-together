@@ -36,6 +36,7 @@ import io.github.yueby.musictogether.network.RoomJoinTargetParser
 import io.github.yueby.musictogether.network.ServerAddress
 import io.github.yueby.musictogether.network.ServerCatalog
 import io.github.yueby.musictogether.network.SocketEvents
+import io.github.yueby.musictogether.network.normalizeSearchKeyword
 import io.github.yueby.musictogether.network.stringOrNull
 import io.github.yueby.musictogether.network.audioQuality
 import io.github.yueby.musictogether.network.toChatMessage
@@ -630,7 +631,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
 
     fun search(keyword: String, source: String) {
         if (keyword.isBlank()) return
-        val query = keyword.trim().take(100)
+        val query = normalizeSearchKeyword(keyword, source)
         searchJob?.cancel()
         _state.value = _state.value.copy(
             searchLoading = true,

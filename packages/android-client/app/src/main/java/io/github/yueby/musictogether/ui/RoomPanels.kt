@@ -81,6 +81,7 @@ import io.github.yueby.musictogether.model.BilibiliMetadataMatchState
 import io.github.yueby.musictogether.model.ChatMessage
 import io.github.yueby.musictogether.model.RoomState
 import io.github.yueby.musictogether.model.Track
+import io.github.yueby.musictogether.network.searchInputMaxLength
 import kotlinx.coroutines.delay
 
 @Composable
@@ -299,9 +300,11 @@ internal fun SearchPane(state: AppState, viewModel: MusicTogetherViewModel) {
         }
         OutlinedTextField(
             value = keyword,
-            onValueChange = { keyword = it.take(100) },
+            onValueChange = { keyword = it.take(searchInputMaxLength(source)) },
             modifier = Modifier.fillMaxWidth(),
-            label = { Text(if (source == "bilibili") "搜索 B 站视频" else "歌曲、歌手或专辑") },
+            label = {
+                Text(if (source == "bilibili") "视频关键词、B 站链接或 BV 号" else "歌曲、歌手或专辑")
+            },
             singleLine = true,
             trailingIcon = {
                 IconButton(onClick = { viewModel.search(keyword, source) }) { Icon(Icons.Default.Search, "搜索") }
@@ -318,7 +321,15 @@ internal fun SearchPane(state: AppState, viewModel: MusicTogetherViewModel) {
                 color = MaterialTheme.colorScheme.error,
             )
         } else if (state.searchHasSearched && state.searchResults.isEmpty()) {
-            Text("未找到结果，请尝试其他关键词或音乐源。", Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                if (state.searchSource == "bilibili") {
+                    "未找到结果，请检查链接、BV 号或更换关键词。"
+                } else {
+                    "未找到结果，请尝试其他关键词或音乐源。"
+                },
+                Modifier.padding(20.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         } else {
             LazyColumn(
                 Modifier.weight(1f),
