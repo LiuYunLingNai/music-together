@@ -8,6 +8,7 @@ import {
 } from '@music-together/shared'
 import type { TypedServer, TypedSocket } from '../middleware/types.js'
 import { createWithOwnerOnly } from '../middleware/withControl.js'
+import { createWithRoom } from '../middleware/withRoom.js'
 import { cleanupSocketRateLimit } from '../middleware/socketRateLimiter.js'
 import { roomRepo } from '../repositories/roomRepository.js'
 import { userRepo } from '../repositories/userRepository.js'
@@ -20,6 +21,7 @@ import * as voteService from '../services/voteService.js'
 import { logger } from '../utils/logger.js'
 
 export function registerRoomController(io: TypedServer, socket: TypedSocket) {
+  const withRoom = createWithRoom(io)
   const withOwnerOnly = createWithOwnerOnly(io)
 
   // ---- Room list (不需要在房间内) ----
@@ -195,15 +197,29 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
     }
   })
 
-  // ---- Room settings (仅房主，含密码管理) ----
+  // ---- Room settings (房主可管理全部设置，管理员仅可调整音质) ----
   socket.on(
     EVENTS.ROOM_SETTINGS,
-    withOwnerOnly((ctx, raw) => {
+    withRoom((ctx, raw) => {
       const parsed = roomSettingsSchema.safeParse(raw)
       if (!parsed.success) {
         ctx.socket.emit(EVENTS.ROOM_ERROR, {
           code: ERROR_CODE.INVALID_INPUT,
           message: parsed.error.issues[0]?.message ?? '输入格式错误',
+        })
+        return
+      }
+
+      const changedFields = Object.keys(parsed.data).filter(
+        (key) => parsed.data[key as keyof typeof parsed.data] !== undefined,
+      )
+      const canManageAllSettings = ctx.user.role === 'owner' || userRepo.isServerAdmin(ctx.user.id)
+      const canAdjustAudioQuality =
+        ctx.user.role === 'admin' && changedFields.length === 1 && changedFields[0] === 'audioQuality'
+      if (!canManageAllSettings && !canAdjustAudioQuality) {
+        ctx.socket.emit(EVENTS.ROOM_ERROR, {
+          code: ERROR_CODE.NO_PERMISSION,
+          message: '只有房主可以修改房间设置，管理员仅可调整音质',
         })
         return
       }
@@ -219,7 +235,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
       const updatedRoom = roomRepo.get(ctx.roomId)
       if (!updatedRoom) return
 
-      // 仅 owner 收到密码明文，其他成员只收到 hasPassword 标记
+      // 仅房主或服务器管理员操作时向操作者返回密码明文。
       const baseSettings = {
         name: updatedRoom.name,
         hasPassword: updatedRoom.password !== null,
@@ -227,13 +243,15 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         permanent: updatedRoom.permanent,
         audioQuality: updatedRoom.audioQuality,
       }
-      // 给 owner 发送含密码的设置
-      ctx.socket.emit(EVENTS.ROOM_SETTINGS, {
-        ...baseSettings,
-        password: updatedRoom.password ?? null,
-      })
-      // 给房间内其他成员发送不含密码的设置
-      ctx.socket.to(ctx.roomId).emit(EVENTS.ROOM_SETTINGS, baseSettings)
+      if (canManageAllSettings) {
+        ctx.socket.emit(EVENTS.ROOM_SETTINGS, {
+          ...baseSettings,
+          password: updatedRoom.password ?? null,
+        })
+        ctx.socket.to(ctx.roomId).emit(EVENTS.ROOM_SETTINGS, baseSettings)
+      } else {
+        io.to(ctx.roomId).emit(EVENTS.ROOM_SETTINGS, baseSettings)
+      }
 
       logger.info(`房间 ${ctx.roomId} 的设置已更新`, {
         event: 'room.settings_updated',
@@ -246,9 +264,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         passwordProtected: updatedRoom.password !== null,
         hidden: updatedRoom.hidden,
         permanent: updatedRoom.permanent,
-        changedFields: Object.keys(parsed.data).filter(
-          (key) => parsed.data[key as keyof typeof parsed.data] !== undefined,
-        ),
+        changedFields,
       })
 
       // 密码变更也要刷新大厅列表

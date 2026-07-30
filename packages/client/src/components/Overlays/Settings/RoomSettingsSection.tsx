@@ -36,6 +36,7 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
   const syncDrift = usePlayerStore((s) => s.syncDrift)
   const isServerAdmin = useAccountStore((state) => state.profile?.role === 'admin')
   const isOwner = currentUser?.role === 'owner' || isServerAdmin
+  const canAdjustAudioQuality = isOwner || currentUser?.role === 'admin'
   const { platformStatus } = useAuth()
   const qualityOptions = useMemo(() => getAudioQualityOptions(platformStatus), [platformStatus])
 
@@ -196,7 +197,7 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
         </SettingRow>
 
         <SettingRow label="音质" description={isOwner ? '切换后对下一首歌生效' : undefined}>
-          {isOwner ? (
+          {canAdjustAudioQuality ? (
             <Select
               value={String(room?.audioQuality ?? 320)}
               onValueChange={(v) => {
