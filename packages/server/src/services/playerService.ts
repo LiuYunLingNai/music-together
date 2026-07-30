@@ -90,6 +90,7 @@ interface ResolvedStreamUrl {
   providerFormat?: string
   streamFormat?: Track['streamFormat']
   fileSize?: number
+  requiresServerProxy?: boolean
   fromCache: boolean
 }
 
@@ -208,7 +209,12 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
 
   // Never trust/reuse a client-provided URL here. Resolving on the server is
   // what lets us record the provider's actual bitrate and refresh expired URLs.
-  const resolved: Track = { ...track, streamUrl: undefined, streamFormat: undefined }
+  const resolved: Track = {
+    ...track,
+    streamUrl: undefined,
+    streamFormat: undefined,
+    requiresServerProxy: undefined,
+  }
   let streamResolution: ResolvedStreamUrl | null = null
   let usedAuthenticatedAccount = false
 
@@ -287,6 +293,7 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
                     requestedBy: resolved.requestedBy,
                     streamUrl: url2.url,
                     streamFormat: url2.streamFormat,
+                    requiresServerProxy: url2.requiresServerProxy,
                   }
                   streamResolution = url2
                   usedAuthenticatedAccount = Boolean(fallbackAuth)
@@ -320,6 +327,7 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
                   resolved.cover = replacement.cover
                   resolved.streamUrl = replacement.streamUrl
                   resolved.streamFormat = replacement.streamFormat
+                  resolved.requiresServerProxy = replacement.requiresServerProxy
                 }
               }
             } catch (fallbackErr) {
@@ -355,6 +363,7 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
       if (url) streamResolution = url
       resolved.streamUrl = url?.url ?? resolved.streamUrl
       resolved.streamFormat = url?.streamFormat ?? resolved.streamFormat
+      resolved.requiresServerProxy = url?.requiresServerProxy ?? resolved.requiresServerProxy
     } catch (err) {
       logger.error('解析歌曲播放地址时发生异常', err, {
         roomId,
@@ -427,6 +436,7 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
       actualQuality: streamResolution.actualQuality ?? null,
       providerFormat: streamResolution.providerFormat ?? null,
       streamFileSize: streamResolution.fileSize ?? null,
+      requiresServerProxy: Boolean(resolved.requiresServerProxy),
       qualityDowngraded,
       streamUrlFromCache: streamResolution.fromCache,
       authenticated: usedAuthenticatedAccount,
@@ -630,13 +640,23 @@ export function refreshStreamUrlForJoin(roomId: string): Promise<boolean> {
       )
       if (!refreshed) {
         if (room.currentTrack?.id === track.id) {
-          room.currentTrack = { ...room.currentTrack, streamUrl: undefined, streamFormat: undefined }
+          room.currentTrack = {
+            ...room.currentTrack,
+            streamUrl: undefined,
+            streamFormat: undefined,
+            requiresServerProxy: undefined,
+          }
         }
         return false
       }
 
       if (room.currentTrack?.id !== track.id) return false
-      room.currentTrack = { ...room.currentTrack, streamUrl: refreshed.url, streamFormat: refreshed.streamFormat }
+      room.currentTrack = {
+        ...room.currentTrack,
+        streamUrl: refreshed.url,
+        streamFormat: refreshed.streamFormat,
+        requiresServerProxy: refreshed.requiresServerProxy,
+      }
       logger.info('Refreshed stale stream URL when user joined permanent room', {
         event: 'player.stream_url_refreshed_on_join',
         roomId,
@@ -645,7 +665,12 @@ export function refreshStreamUrlForJoin(roomId: string): Promise<boolean> {
       return true
     } catch (err) {
       if (room.currentTrack?.id === track.id) {
-        room.currentTrack = { ...room.currentTrack, streamUrl: undefined, streamFormat: undefined }
+        room.currentTrack = {
+          ...room.currentTrack,
+          streamUrl: undefined,
+          streamFormat: undefined,
+          requiresServerProxy: undefined,
+        }
       }
       logger.warn('Failed to refresh stale stream URL when user joined permanent room', {
         roomId,

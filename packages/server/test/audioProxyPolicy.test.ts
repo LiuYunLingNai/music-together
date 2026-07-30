@@ -16,24 +16,17 @@ after(() => {
   rmSync(testDataDir, { recursive: true, force: true })
 })
 
-test('defaults both providers to forced proxy for existing installations', () => {
+test('defaults Kugou to forced proxy for existing installations', () => {
   assert.deepEqual(audioProxyPolicyRepo.get(), {
-    bilibiliForceProxy: true,
     kugouForceProxy: true,
   })
 })
 
-test('persists partial policy updates without overwriting the other provider', () => {
-  assert.deepEqual(audioProxyPolicyRepo.update({ bilibiliForceProxy: false }), {
-    bilibiliForceProxy: false,
-    kugouForceProxy: true,
-  })
+test('persists Kugou policy updates', () => {
   assert.deepEqual(audioProxyPolicyRepo.update({ kugouForceProxy: false }), {
-    bilibiliForceProxy: false,
     kugouForceProxy: false,
   })
   assert.deepEqual(audioProxyPolicyRepo.get(), {
-    bilibiliForceProxy: false,
     kugouForceProxy: false,
   })
 })

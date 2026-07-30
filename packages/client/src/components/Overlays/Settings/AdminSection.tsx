@@ -39,13 +39,12 @@ export function AdminSection() {
   const [users, setUsers] = useState<AdminUser[]>([])
   const [rooms, setRooms] = useState<AdminRoom[]>([])
   const [audioProxyPolicy, setAudioProxyPolicy] = useState<AudioProxyPolicy>({
-    bilibiliForceProxy: true,
     kugouForceProxy: true,
   })
   const [passwords, setPasswords] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [workingId, setWorkingId] = useState<string | null>(null)
-  const [workingProxyPolicy, setWorkingProxyPolicy] = useState<keyof AudioProxyPolicy | null>(null)
+  const [updatingProxyPolicy, setUpdatingProxyPolicy] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -71,19 +70,19 @@ export function AdminSection() {
 
   useSocketEvent(EVENTS.SERVER_AUDIO_PROXY_POLICY, setAudioProxyPolicy)
 
-  const updateAudioProxyPolicy = async (field: keyof AudioProxyPolicy, checked: boolean) => {
-    setWorkingProxyPolicy(field)
+  const updateAudioProxyPolicy = async (checked: boolean) => {
+    setUpdatingProxyPolicy(true)
     try {
       const policy = await requestJson<AudioProxyPolicy>('/api/admin/audio-proxy-policy', {
         method: 'PATCH',
-        body: JSON.stringify({ [field]: checked }),
+        body: JSON.stringify({ kugouForceProxy: checked }),
       })
       setAudioProxyPolicy(policy)
       toast.success('音频代理策略已更新')
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '音频代理策略更新失败')
     } finally {
-      setWorkingProxyPolicy(null)
+      setUpdatingProxyPolicy(false)
     }
   }
 
@@ -264,28 +263,17 @@ export function AdminSection() {
           ) : (
             <>
               <div className="border-b bg-muted/40 p-3 text-xs leading-relaxed text-muted-foreground">
-                这些开关仅影响原生客户端。Web 端受跨域和加密音频资源限制，始终通过服务器代理播放。
+                B 站始终通过服务器代理播放，Cookie 仅保留在服务端。酷狗开关仅影响原生客户端；Web 端始终使用服务器代理。
               </div>
               <div className="divide-y px-3">
                 <SettingRow
-                  label="B 站强制服务器代理"
-                  description="关闭后，客户端优先直连音频 CDN，失败时回退服务器代理"
-                >
-                  <Switch
-                    checked={audioProxyPolicy.bilibiliForceProxy}
-                    disabled={workingProxyPolicy !== null}
-                    onCheckedChange={(checked) => void updateAudioProxyPolicy('bilibiliForceProxy', checked)}
-                    aria-label="B 站强制服务器代理"
-                  />
-                </SettingRow>
-                <SettingRow
                   label="酷狗强制服务器代理"
-                  description="同时控制酷狗标准版和概念版；关闭后客户端优先直连，失败时回退代理"
+                  description="同时控制标准版和概念版；关闭后明文资源优先直连，加密资源仍由服务器代理解密"
                 >
                   <Switch
                     checked={audioProxyPolicy.kugouForceProxy}
-                    disabled={workingProxyPolicy !== null}
-                    onCheckedChange={(checked) => void updateAudioProxyPolicy('kugouForceProxy', checked)}
+                    disabled={updatingProxyPolicy}
+                    onCheckedChange={(checked) => void updateAudioProxyPolicy(checked)}
                     aria-label="酷狗强制服务器代理"
                   />
                 </SettingRow>

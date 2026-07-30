@@ -34,14 +34,9 @@ const resetPasswordSchema = z.object({
   password: z.string().min(8, '密码至少需要 8 个字符').max(128),
 })
 
-const audioProxyPolicyPatchSchema = z
-  .object({
-    bilibiliForceProxy: z.boolean().optional(),
-    kugouForceProxy: z.boolean().optional(),
-  })
-  .refine((value) => value.bilibiliForceProxy !== undefined || value.kugouForceProxy !== undefined, {
-    message: '至少需要提供一个代理策略字段',
-  })
+const audioProxyPolicyPatchSchema = z.object({
+  kugouForceProxy: z.boolean(),
+})
 
 export function createAdminRoutes(io: TypedServer): Router {
   const router = Router()

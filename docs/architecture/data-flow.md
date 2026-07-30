@@ -68,6 +68,7 @@ interface Track {
   lyricId?: string
   picId?: string
   streamUrl?: string
+  requiresServerProxy?: boolean // 上游字节需要服务器解密等处理
   requestedBy?: string // 点歌人昵称
   vip?: boolean // 是否为 VIP / 付费歌曲（可能无法播放或仅试听）
 }
@@ -79,7 +80,6 @@ type PlayMode = 'sequential' | 'loop-all' | 'loop-one' | 'shuffle'
 type AudioQuality = 128 | 192 | 320 | 999 | 'highest' | ProviderSpecificQuality
 
 interface AudioProxyPolicy {
-  bilibiliForceProxy: boolean
   kugouForceProxy: boolean
 }
 
@@ -257,12 +257,13 @@ B站没有与房间 128K、320K 完全对应的普通 DASH 音轨，因此分别
 
 ## 音频代理策略
 
-- 全局 `AudioProxyPolicy` 持久化在 SQLite `server_settings` 表，旧数据库或无效配置默认 B站、酷狗均强制代理。
-- 只有服务器管理员可以通过 `GET/PATCH /api/admin/audio-proxy-policy` 读取或修改策略；PATCH 接受任一布尔字段并返回完整策略。
+- B站音频始终通过服务器代理，播放所需 Cookie 只保留在服务端，不提供关闭入口。
+- 全局 `AudioProxyPolicy` 只包含酷狗策略并持久化在 SQLite `server_settings` 表，旧数据库或无效配置默认酷狗强制代理。
+- 只有服务器管理员可以通过 `GET/PATCH /api/admin/audio-proxy-policy` 读取或修改酷狗策略；PATCH 接受 `kugouForceProxy` 并返回完整策略。
 - 新 WebSocket 连接会收到 `server:audio_proxy_policy`，管理员修改后服务端向 `lobby` 中的全部连接广播完整策略。
-- `forceProxy=false` 表示允许具备能力的原生客户端直连，不要求所有客户端直连。Android 先请求 CDN，失败时仅回退一次现有服务器代理；Web 管理页会明确提示浏览器受跨域和加密资源限制，始终通过服务器代理播放。
-- 重新启用强制代理时，Android 将正在直连的对应曲目保留位置切回代理；关闭强制代理不打断当前播放，从下一次加载开始生效。
-- 酷狗策略同时覆盖 `kugou` 与 `kugou_concept`。概念版加密资源直连通常会失败，Android 随后通过代理使用服务端流式解密。
+- `kugouForceProxy=false` 表示允许具备能力的原生客户端直连酷狗明文资源，不要求所有客户端直连。Android 先请求 CDN，失败时仅回退一次现有服务器代理；Web 始终通过服务器代理播放。
+- 重新启用酷狗强制代理时，Android 将正在直连的对应曲目保留位置切回代理；关闭强制代理不打断当前播放，从下一次加载开始生效。
+- 酷狗策略同时覆盖 `kugou` 与 `kugou_concept`。服务端为已注册 QMC2 解密器的流设置 `Track.requiresServerProxy=true`；Android 即使在关闭强制代理时也直接使用服务器代理解密，仅对明文资源尝试 CDN 直连。旧服务端缺少该字段时按明文资源处理并保留失败回退。
 
 ## 队列清空
 
@@ -299,7 +300,7 @@ B站没有与房间 128K、320K 完全对应的普通 DASH 音轨，因此分别
 | `/api/music/cover`              | GET   | 获取封面图                                                                                              |
 | `/api/music/playlist`           | GET   | 获取歌单曲目列表（`source` + `id` + `limit` + `offset`），分页返回 `{ tracks, total, offset, hasMore }` |
 | `/api/rooms/:roomId/check`      | GET   | 房间预检（存在性 + 是否需要密码），用于分享链接直接访问时的前置校验                                     |
-| `/api/admin/audio-proxy-policy` | GET   | 服务器管理员读取 B站与酷狗全局强制代理策略                                                              |
+| `/api/admin/audio-proxy-policy` | GET   | 服务器管理员读取酷狗全局强制代理策略                                                                    |
 | `/api/admin/audio-proxy-policy` | PATCH | 服务器管理员部分更新代理策略并广播完整结果                                                              |
 | `/api/health`                   | GET   | 健康检查                                                                                                |
 

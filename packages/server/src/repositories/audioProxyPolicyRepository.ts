@@ -4,7 +4,6 @@ import { db } from './database.js'
 const POLICY_KEY = 'audio_proxy_policy'
 
 export const DEFAULT_AUDIO_PROXY_POLICY: Readonly<AudioProxyPolicy> = Object.freeze({
-  bilibiliForceProxy: true,
   kugouForceProxy: true,
 })
 
@@ -24,10 +23,6 @@ function parsePolicy(value: string | undefined): AudioProxyPolicy {
   try {
     const parsed = JSON.parse(value) as Partial<AudioProxyPolicy>
     return {
-      bilibiliForceProxy:
-        typeof parsed.bilibiliForceProxy === 'boolean'
-          ? parsed.bilibiliForceProxy
-          : DEFAULT_AUDIO_PROXY_POLICY.bilibiliForceProxy,
       kugouForceProxy:
         typeof parsed.kugouForceProxy === 'boolean'
           ? parsed.kugouForceProxy

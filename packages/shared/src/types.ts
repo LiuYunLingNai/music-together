@@ -22,9 +22,8 @@ export type ErrorCode = (typeof ERROR_CODE)[keyof typeof ERROR_CODE]
 
 export type MusicSource = 'netease' | 'tencent' | 'kugou' | 'kugou_concept' | 'bilibili'
 
-/** Server-wide transport policy. A disabled flag allows capable clients to try the provider CDN directly. */
+/** Server-wide Kugou transport policy. Bilibili always uses the server proxy. */
 export interface AudioProxyPolicy {
-  bilibiliForceProxy: boolean
   kugouForceProxy: boolean
 }
 
@@ -94,6 +93,8 @@ export interface Track {
    */
   metadataSource?: BilibiliMetadataSource
   streamUrl?: string
+  /** The upstream bytes require server-side processing, such as QMC2 decryption. */
+  requiresServerProxy?: boolean
   /** Codec family selected for Bilibili DASH playback. */
   streamFormat?: BilibiliStreamFormat
   /** 是否为 VIP / 付费歌曲（可能无法播放或仅试听） */

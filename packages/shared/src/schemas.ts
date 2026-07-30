@@ -102,6 +102,7 @@ const trackSchema = z.object({
   picId: z.string().max(200).optional(),
   metadataSource: z.enum(['netease', 'tencent']).optional(),
   streamUrl: z.string().max(2000).optional(),
+  requiresServerProxy: z.boolean().optional(),
   streamFormat: z.enum(['m4a', 'flac']).optional(),
   vip: z.boolean().optional(),
 })

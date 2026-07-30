@@ -115,6 +115,8 @@ export interface StreamUrlResult {
   streamFormat?: BilibiliStreamFormat
   /** Expected upstream file size in bytes. */
   fileSize?: number
+  /** The returned bytes must pass through server-side processing before playback. */
+  requiresServerProxy?: boolean
   fromCache: boolean
 }
 
@@ -1770,6 +1772,7 @@ class MusicProvider {
                 actualQuality,
                 providerFormat: `${selected.quality}/${streamFormat}${encrypted ? ' (QMC2)' : ''}`,
                 fileSize,
+                requiresServerProxy: encrypted || undefined,
               }
             }
           }
