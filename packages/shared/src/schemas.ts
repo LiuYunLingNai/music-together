@@ -144,14 +144,25 @@ export const chatMessageSchema = z.object({
 
 const musicSourceSchema = z.enum(['netease', 'tencent', 'kugou', 'kugou_concept', 'bilibili'])
 
-export const searchQuerySchema = z.object({
-  source: musicSourceSchema,
-  keyword: z.string().min(1).max(LIMITS.SEARCH_KEYWORD_MAX_LENGTH),
+const searchQueryCommonShape = {
   limit: z.coerce.number().int().min(1).max(LIMITS.SEARCH_PAGE_SIZE_MAX).default(20),
   page: z.coerce.number().int().min(1).max(LIMITS.SEARCH_PAGE_MAX).default(1),
   type: z.enum(['song', 'album', 'playlist']).optional().default('song'),
   roomId: z.string().min(1).max(10).optional(),
-})
+}
+
+export const searchQuerySchema = z.discriminatedUnion('source', [
+  z.object({
+    source: z.literal('bilibili'),
+    keyword: z.string().min(1).max(LIMITS.BILIBILI_SEARCH_INPUT_MAX_LENGTH),
+    ...searchQueryCommonShape,
+  }),
+  z.object({
+    source: z.enum(['netease', 'tencent', 'kugou', 'kugou_concept']),
+    keyword: z.string().min(1).max(LIMITS.SEARCH_KEYWORD_MAX_LENGTH),
+    ...searchQueryCommonShape,
+  }),
+])
 
 export const urlQuerySchema = z.object({
   source: musicSourceSchema,

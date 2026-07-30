@@ -11,6 +11,7 @@ import * as tencentAuth from './tencentAuthService.js'
 import * as bilibiliAuth from './bilibiliAuthService.js'
 import { getKugouQualityFallbacks } from './audioQualityPolicy.js'
 import { collectBilibiliAudioCandidates, selectBilibiliAudioCandidate } from './bilibiliAudioQuality.js'
+import { resolveBilibiliVideoId } from './bilibiliInput.js'
 import {
   collectKugouV6Goods,
   kugouProviderQualityToAudioQuality,
@@ -228,6 +229,10 @@ interface BilibiliSearchVideo {
 interface BilibiliViewData {
   aid: number
   cid: number
+  bvid: string
+  title: string
+  author: string
+  duration: number
   cover: string
 }
 
@@ -676,6 +681,27 @@ class MusicProvider {
   /** Search public Bilibili video results. The audio URL is resolved only when queued for playback. */
   private async searchBilibili(keyword: string, limit = 20, page = 1): Promise<Track[]> {
     try {
+      const directBvid = await resolveBilibiliVideoId(keyword)
+      if (directBvid) {
+        if (page !== 1) return []
+        const view = await this.getBilibiliView(directBvid)
+        if (!view) return []
+        const track: Track = {
+          id: nanoid(),
+          source: 'bilibili',
+          sourceId: view.bvid,
+          urlId: view.bvid,
+          title: view.title || 'Unknown',
+          artist: [view.author || 'Bilibili'],
+          album: 'Bilibili',
+          duration: view.duration,
+          cover: view.cover,
+          bilibiliCover: view.cover,
+        }
+        this.registerTracks([track])
+        return [track]
+      }
+
       let response = await this.searchBilibiliWbi(keyword, limit, page)
       if (!response || response.code !== 0) {
         const params = new URLSearchParams({
@@ -723,8 +749,18 @@ class MusicProvider {
     const aid = Number(response?.data?.aid)
     const cid = Number(response?.data?.cid)
     if (!Number.isFinite(aid) || aid <= 0 || !Number.isFinite(cid) || cid <= 0) return null
-    const value = { aid, cid, cover: normalizeBilibiliCoverUrl(response?.data?.pic) }
+    const canonicalBvid = String(response?.data?.bvid ?? bvid).trim()
+    const value = {
+      aid,
+      cid,
+      bvid: canonicalBvid,
+      title: MusicProvider.stripBilibiliMarkup(response?.data?.title),
+      author: MusicProvider.stripBilibiliMarkup(response?.data?.owner?.name),
+      duration: Math.max(0, Number(response?.data?.duration) || 0),
+      cover: normalizeBilibiliCoverUrl(response?.data?.pic),
+    }
     this.bilibiliViewCache.set(bvid, value)
+    if (canonicalBvid !== bvid) this.bilibiliViewCache.set(canonicalBvid, value)
     return value
   }
 

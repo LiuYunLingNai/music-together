@@ -349,7 +349,7 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                 <Input
                   placeholder={
                     source === 'bilibili'
-                      ? '搜索 B 站视频...'
+                      ? '搜索视频，或粘贴 B站链接 / BV号...'
                       : searchType === 'song'
                         ? '搜索歌曲、歌手...'
                         : searchType === 'album'
@@ -386,7 +386,9 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                       handleSearch(artist)
                     }}
                     emptyIcon={<Music2 className="h-8 w-8" />}
-                    emptyMessage="暂无结果，换个关键词试试"
+                    emptyMessage={
+                      source === 'bilibili' ? '暂无结果，请检查链接、BV号或更换关键词' : '暂无结果，换个关键词试试'
+                    }
                   />
                 ) : (
                   <div className="min-h-0 flex-1 overflow-y-auto rounded-md border p-2">

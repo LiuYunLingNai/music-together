@@ -19,6 +19,7 @@ import {
   kugouAudioContentType,
 } from '../services/kugouEncryptedAudio.js'
 import { normalizeKugouAudioUrl } from '../services/kugouAudioUrl.js'
+import { BILIBILI_BVID_PATTERN } from '../services/bilibiliInput.js'
 
 const router: RouterType = Router()
 
@@ -141,7 +142,6 @@ const ALLOWED_COVER_HOSTS = [
 ]
 
 const BILIBILI_AUDIO_HOST_SUFFIXES = ['bilivideo.com', 'bilivideo.cn']
-const BILIBILI_BVID_PATTERN = /^BV[0-9A-Za-z]{10}$/
 const KUGOU_AUDIO_HOST_SUFFIXES = ['kugou.com', 'kugou.net']
 const KUGOU_UPSTREAM_CONNECT_TIMEOUT_MS = 15_000
 
