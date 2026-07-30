@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,10 +17,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AccountCircle
-import androidx.compose.material.icons.filled.FileUpload
-import androidx.compose.material.icons.filled.DeleteSweep
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Headphones
@@ -29,27 +24,21 @@ import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -58,9 +47,7 @@ import coil3.compose.AsyncImage
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
-import io.github.yueby.musictogether.BuildConfig
 import io.github.yueby.musictogether.MusicTogetherViewModel
-import io.github.yueby.musictogether.logging.AppLogger
 import io.github.yueby.musictogether.model.AppState
 import io.github.yueby.musictogether.model.ConnectionStatus
 import io.github.yueby.musictogether.model.RoomListItem
@@ -73,14 +60,8 @@ fun LobbyScreen(state: AppState, contentPadding: PaddingValues, viewModel: Music
     var createDialog by remember { mutableStateOf(false) }
     var joinTarget by remember { mutableStateOf<RoomTarget?>(null) }
     var directRoomId by remember { mutableStateOf("") }
-    var connectionExpanded by remember {
-        mutableStateOf(state.connectionStatus != ConnectionStatus.Connected)
-    }
+    var connectionSettingsOpen by remember { mutableStateOf(false) }
     var accountSettingsOpen by remember { mutableStateOf(false) }
-    val context = LocalContext.current
-    LaunchedEffect(state.connectionStatus) {
-        if (state.connectionStatus == ConnectionStatus.Connected) connectionExpanded = false
-    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(contentPadding),
@@ -98,8 +79,8 @@ fun LobbyScreen(state: AppState, contentPadding: PaddingValues, viewModel: Music
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                TextButton(onClick = { connectionExpanded = !connectionExpanded }) {
-                    Text(if (connectionExpanded) "收起" else "连接设置")
+                TextButton(onClick = { connectionSettingsOpen = true }) {
+                    Text("连接设置")
                 }
                 IconButton(
                     onClick = { accountSettingsOpen = true },
@@ -113,105 +94,6 @@ fun LobbyScreen(state: AppState, contentPadding: PaddingValues, viewModel: Music
                         )
                     } else {
                         Icon(Icons.Default.AccountCircle, "账号设置")
-                    }
-                }
-            }
-        }
-        item {
-            if (connectionExpanded) {
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("服务器连接", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        OutlinedTextField(
-                            value = state.serverUrl,
-                            onValueChange = viewModel::updateServerUrl,
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            label = { Text("服务器 URL") },
-                            supportingText = { Text("例如 https://music.example.com") },
-                        )
-                        OutlinedTextField(
-                            value = state.nickname,
-                            onValueChange = viewModel::updateNickname,
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            label = { Text("昵称") },
-                        )
-                        Button(onClick = viewModel::connect, modifier = Modifier.fillMaxWidth()) {
-                            if (state.connectionStatus == ConnectionStatus.Connecting) {
-                                CircularProgressIndicator(Modifier.height(18.dp), strokeWidth = 2.dp)
-                                Spacer(Modifier.padding(4.dp))
-                            }
-                            Text(when (state.connectionStatus) {
-                                ConnectionStatus.Connected -> "添加并切换"
-                                ConnectionStatus.Connecting -> "正在连接"
-                                ConnectionStatus.Disconnected -> "添加并连接"
-                            })
-                        }
-                        state.servers.forEachIndexed { index, server ->
-                            if (index > 0) HorizontalDivider()
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Icon(
-                                    Icons.Default.Dns,
-                                    contentDescription = null,
-                                    tint = if (server.status == ConnectionStatus.Connected) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    },
-                                )
-                                Column(Modifier.weight(1f)) {
-                                    Text(
-                                        server.url,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = if (server.url == state.selectedServerUrl) FontWeight.SemiBold else FontWeight.Normal,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    Text(
-                                        when (server.status) {
-                                            ConnectionStatus.Connected -> "已连接 · ${server.rooms.size} 个房间"
-                                            ConnectionStatus.Connecting -> "连接中"
-                                            ConnectionStatus.Disconnected -> server.error ?: "未连接"
-                                        },
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                                if (server.url != state.selectedServerUrl) {
-                                    TextButton(onClick = { viewModel.selectServer(server.url) }) { Text("切换") }
-                                }
-                                IconButton(
-                                    onClick = { viewModel.removeServer(server.url) },
-                                    enabled = state.servers.size > 1,
-                                ) {
-                                    Icon(Icons.Default.Delete, "移除服务器")
-                                }
-                            }
-                        }
-                        if (BuildConfig.DEBUG) {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                FilledTonalButton(
-                                    onClick = { AppLogger.export(context) },
-                                    modifier = Modifier.weight(1f),
-                                ) {
-                                    Icon(Icons.Default.FileUpload, null)
-                                    Spacer(Modifier.padding(3.dp))
-                                    Text("导出日志")
-                                }
-                                FilledTonalButton(onClick = viewModel::clearLogs, modifier = Modifier.weight(1f)) {
-                                    Icon(Icons.Default.DeleteSweep, null)
-                                    Spacer(Modifier.padding(3.dp))
-                                    Text("清空日志")
-                                }
-                            }
-                        }
                     }
                 }
             }
@@ -377,6 +259,13 @@ fun LobbyScreen(state: AppState, contentPadding: PaddingValues, viewModel: Music
         }
     }
 
+    if (connectionSettingsOpen) {
+        ConnectionSettingsDialog(
+            state = state,
+            viewModel = viewModel,
+            onDismiss = { connectionSettingsOpen = false },
+        )
+    }
     if (createDialog) {
         CreateRoomDialog(
             servers = state.servers,

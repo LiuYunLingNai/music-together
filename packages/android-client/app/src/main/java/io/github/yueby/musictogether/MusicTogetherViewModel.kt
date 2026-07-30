@@ -34,6 +34,7 @@ import io.github.yueby.musictogether.network.MusicTogetherApi
 import io.github.yueby.musictogether.network.MusicTogetherSocket
 import io.github.yueby.musictogether.network.PersistentCookieJar
 import io.github.yueby.musictogether.network.PlaybackTarget
+import io.github.yueby.musictogether.network.ReconnectBackoff
 import io.github.yueby.musictogether.network.RoomJoinTargetParser
 import io.github.yueby.musictogether.network.ServerAddress
 import io.github.yueby.musictogether.network.ServerCatalog
@@ -174,6 +175,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private var pendingRoomCreation: PendingRoomCreation? = null
     private var shouldReconnect = false
     private var reconnectJob: Job? = null
+    private val reconnectBackoff = ReconnectBackoff()
     private var clockJob: Job? = null
     private var bilibiliMetadataSearchJob: Job? = null
     private var syncJob: Job? = null
@@ -332,16 +334,22 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         }
     }
 
-    private fun connectToServer(parsed: ServerAddress, keepDesiredRoom: Boolean) {
+    private fun connectToServer(
+        parsed: ServerAddress,
+        keepDesiredRoom: Boolean,
+        resetReconnectAttempts: Boolean = true,
+    ) {
         if (_state.value.servers.none { it.url == parsed.displayUrl } && _state.value.servers.size >= MAX_SERVERS) {
             setError("最多同时连接 $MAX_SERVERS 台服务器")
             return
         }
+        if (resetReconnectAttempts) reconnectBackoff.reset()
         AppLogger.info("Connection", "connect server=${parsed.displayUrl}")
         shouldReconnect = true
         reconnectJob?.cancel()
-        socket.disconnect()
+        reconnectJob = null
         socketServerUrl = null
+        socket.disconnect()
         val serverChanged = activeServer?.displayUrl != null && activeServer?.displayUrl != parsed.displayUrl
         activeServer = parsed
         if (serverChanged && !keepDesiredRoom) {
@@ -420,6 +428,8 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     fun disconnect() {
         shouldReconnect = false
         reconnectJob?.cancel()
+        reconnectJob = null
+        reconnectBackoff.reset()
         stopPeriodicJobs()
         resetPlatformRoomState()
         socket.disconnect()
@@ -952,6 +962,8 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             }
             AppLogger.info("WebSocket", "connected server=${activeServer?.displayUrl}")
             reconnectJob?.cancel()
+            reconnectJob = null
+            reconnectBackoff.reset()
             _state.value = _state.value.copy(
                 connectionStatus = ConnectionStatus.Connected,
                 pingMs = null,
@@ -1862,9 +1874,37 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
 
     private fun scheduleReconnect() {
         if (!shouldReconnect || reconnectJob?.isActive == true) return
+        val attempt = reconnectBackoff.nextAttempt()
+        if (attempt == null) {
+            shouldReconnect = false
+            val message = "连接失败，已停止自动重试，请手动重试"
+            AppLogger.warn(
+                "Connection",
+                "automatic reconnect exhausted attempts=${reconnectBackoff.maxAttempts}",
+            )
+            activeServer?.displayUrl?.let { url ->
+                updateServerConnection(url) {
+                    it.copy(status = ConnectionStatus.Disconnected, error = message)
+                }
+            }
+            setError(message)
+            return
+        }
+        AppLogger.info(
+            "Connection",
+            "schedule reconnect attempt=${attempt.number}/${reconnectBackoff.maxAttempts} " +
+                "delayMs=${attempt.delayMs}",
+        )
         reconnectJob = viewModelScope.launch {
-            delay(2_000)
-            if (shouldReconnect) activeServer?.let { connectToServer(it, keepDesiredRoom = true) }
+            delay(attempt.delayMs)
+            if (!shouldReconnect) return@launch
+            val server = activeServer ?: return@launch
+            reconnectJob = null
+            connectToServer(
+                parsed = server,
+                keepDesiredRoom = true,
+                resetReconnectAttempts = false,
+            )
         }
     }
 
