@@ -240,5 +240,6 @@ fun RoomScreen(
                 }
             }
         }
+        BilibiliMetadataDialog(appState.bilibiliMetadataMatch, viewModel)
     }
 }

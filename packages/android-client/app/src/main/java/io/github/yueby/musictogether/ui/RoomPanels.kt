@@ -74,7 +74,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import io.github.yueby.musictogether.MusicTogetherViewModel
 import io.github.yueby.musictogether.model.AppState
@@ -166,7 +165,6 @@ internal fun QueuePane(
     viewModel: MusicTogetherViewModel,
     onClose: (() -> Unit)? = null,
 ) {
-    val appState by viewModel.state.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     var confirmClear by remember { mutableStateOf(false) }
     val currentIndex = room.queue.indexOfFirst { it.id == room.currentTrack?.id }
@@ -262,7 +260,6 @@ internal fun QueuePane(
             HorizontalDivider()
         }
     }
-    BilibiliMetadataDialog(appState.bilibiliMetadataMatch, viewModel)
 }
 
 @Composable
@@ -373,11 +370,10 @@ internal fun SearchPane(state: AppState, viewModel: MusicTogetherViewModel) {
             }
         }
     }
-    BilibiliMetadataDialog(state.bilibiliMetadataMatch, viewModel)
 }
 
 @Composable
-private fun BilibiliMetadataDialog(
+internal fun BilibiliMetadataDialog(
     match: BilibiliMetadataMatchState,
     viewModel: MusicTogetherViewModel,
 ) {
