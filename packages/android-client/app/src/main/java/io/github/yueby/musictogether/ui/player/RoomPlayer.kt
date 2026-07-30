@@ -24,6 +24,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
@@ -124,6 +125,15 @@ private fun playerLayoutMetrics(width: Dp, height: Dp, portrait: Boolean): Playe
             controlsScale = scale,
         )
     }
+}
+
+internal fun portraitPlayerContentWidth(containerWidth: Dp): Dp {
+    val sideGutter = ((containerWidth.value - 600f) * 0.1f)
+        .coerceIn(0f, 48f)
+        .dp
+    return (containerWidth - sideGutter * 2)
+        .coerceAtMost(760.dp)
+        .coerceAtLeast(0.dp)
 }
 
 @OptIn(ExperimentalSharedTransitionApi::class)
@@ -245,6 +255,7 @@ private fun MobilePlayerSurface(
             val portrait = maxHeight >= maxWidth
             val metrics = playerLayoutMetrics(maxWidth, maxHeight, portrait)
             if (portrait) {
+                val contentWidth = portraitPlayerContentWidth(maxWidth)
                 PortraitPlayerContent(
                     track = track,
                     room = room,
@@ -257,6 +268,9 @@ private fun MobilePlayerSurface(
                     onOpenQueue = onOpenQueue,
                     onOpenChat = onOpenChat,
                     metrics = metrics,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .width(contentWidth),
                 )
             } else {
                 LandscapePlayerContent(

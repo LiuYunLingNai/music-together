@@ -94,10 +94,10 @@ internal fun PortraitPlayerContent(
     onOpenQueue: () -> Unit,
     onOpenChat: () -> Unit,
     metrics: PlayerLayoutMetrics,
+    modifier: Modifier = Modifier,
 ) {
     Column(
-        modifier = Modifier
-            .widthIn(max = 448.dp)
+        modifier = modifier
             .fillMaxHeight()
             .fillMaxWidth()
             .padding(
