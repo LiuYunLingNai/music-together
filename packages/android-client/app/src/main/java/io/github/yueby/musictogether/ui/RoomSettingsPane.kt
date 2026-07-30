@@ -58,8 +58,10 @@ import kotlin.math.roundToInt
 fun RoomSettingsPane(state: AppState, viewModel: MusicTogetherViewModel) {
     val room = state.room ?: return
     val currentUser = room.users.firstOrNull { it.id == state.userId }
-    val canManage = currentUser?.role == "owner" || currentUser?.isServerAdmin == true ||
-        state.accountProfile?.role == "admin"
+    val permissions = roomSettingsPermissions(
+        role = currentUser?.role,
+        isServerAdmin = currentUser?.isServerAdmin == true || state.accountProfile?.role == "admin",
+    )
     val options = remember { availableAudioQualities() }
     var expanded by remember { mutableStateOf(false) }
     var syncIntervalDraft by remember(state.syncPacketIntervalSeconds) {
@@ -200,7 +202,11 @@ fun RoomSettingsPane(state: AppState, viewModel: MusicTogetherViewModel) {
                 Column(Modifier.weight(1f)) {
                     Text("播放音质", fontWeight = FontWeight.SemiBold)
                     Text(
-                        if (canManage) "切换后对下一首歌生效" else "仅房主或服务器管理员可修改",
+                        if (permissions.canAdjustAudioQuality) {
+                            "切换后对下一首歌生效"
+                        } else {
+                            "仅房主、房间管理员或服务器管理员可修改"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -208,14 +214,14 @@ fun RoomSettingsPane(state: AppState, viewModel: MusicTogetherViewModel) {
             }
             ExposedDropdownMenuBox(
                 expanded = expanded,
-                onExpandedChange = { if (canManage) expanded = it },
+                onExpandedChange = { if (permissions.canAdjustAudioQuality) expanded = it },
                 modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
             ) {
                 OutlinedTextField(
                     value = audioQualityLabel(room.audioQuality),
                     onValueChange = {},
                     readOnly = true,
-                    enabled = canManage,
+                    enabled = permissions.canAdjustAudioQuality,
                     modifier = Modifier.fillMaxWidth().menuAnchor(),
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
                 )
@@ -254,7 +260,7 @@ fun RoomSettingsPane(state: AppState, viewModel: MusicTogetherViewModel) {
                 Switch(
                     checked = room.hidden,
                     onCheckedChange = viewModel::updateRoomHidden,
-                    enabled = canManage,
+                    enabled = permissions.canManageAllSettings,
                 )
             }
         }
@@ -273,7 +279,7 @@ fun RoomSettingsPane(state: AppState, viewModel: MusicTogetherViewModel) {
                 Switch(
                     checked = room.permanent,
                     onCheckedChange = viewModel::updateRoomPermanent,
-                    enabled = canManage,
+                    enabled = permissions.canManageAllSettings,
                 )
             }
         }
