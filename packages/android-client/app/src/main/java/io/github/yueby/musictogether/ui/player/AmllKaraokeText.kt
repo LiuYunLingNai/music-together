@@ -14,6 +14,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -25,21 +26,28 @@ import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.AlignmentLine
+import androidx.compose.ui.layout.FirstBaseline
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.sp
 import io.github.yueby.musictogether.lyrics.AmllEmphasisProfile
 import io.github.yueby.musictogether.lyrics.AmllMeasuredChunk
 import io.github.yueby.musictogether.lyrics.AmllWordChunk
+import io.github.yueby.musictogether.lyrics.amllContinuousWordMaskProgresses
 import io.github.yueby.musictogether.lyrics.amllEmphasisEasing
 import io.github.yueby.musictogether.lyrics.amllEmphasisProfile
 import io.github.yueby.musictogether.lyrics.amllMaskAlphaAt
 import io.github.yueby.musictogether.lyrics.amllMaskBoundaries
+import io.github.yueby.musictogether.lyrics.amllReleasedEffectProgress
 import io.github.yueby.musictogether.lyrics.amllWordProgress
 import io.github.yueby.musictogether.lyrics.calculateAmllBalancedBreaks
 import io.github.yueby.musictogether.lyrics.chunkAmllWords
@@ -53,12 +61,36 @@ import kotlin.math.sin
 
 private val AmllWordFloatEasing = CubicBezierEasing(0f, 0f, 0.58f, 1f)
 
+internal fun amllBaselineTransformOrigin(
+    firstBaselinePx: Int,
+    heightPx: Int,
+): Float {
+    if (heightPx <= 0 || firstBaselinePx < 0) return 1f
+    return firstBaselinePx.toFloat().div(heightPx).coerceIn(0f, 1f)
+}
+
+internal fun amllBaselinePlacementOffset(
+    lineBaselinePx: Int,
+    itemBaselinePx: Int,
+): Int = lineBaselinePx - itemBaselinePx
+
+internal fun amllCollapsedEffectWidth(
+    measuredWidthPx: Int,
+    horizontalHeadroomPx: Int,
+): Int = (measuredWidthPx - horizontalHeadroomPx.coerceAtLeast(0) * 2)
+    .coerceAtLeast(0)
+
+private data class AmllMaskWordMeasurement(
+    val size: IntSize,
+    val horizontalHeadroomPx: Int,
+)
+
 @Composable
 internal fun AmllWordLine(
     line: LyricLine,
     positionMs: Float,
     active: Boolean,
-    floatReleaseProgress: Float = if (active) 1f else 0f,
+    effectReleaseProgress: Float = if (active) 1f else 0f,
     onPrimaryTextCenterInRootChanged: ((Float) -> Unit)? = null,
     previewed: Boolean = false,
     isPlaying: Boolean,
@@ -110,6 +142,39 @@ internal fun AmllWordLine(
     }
 
     val chunks = remember(line.words) { chunkAmllWords(line) }
+    val maskWords = remember(chunks) {
+        chunks
+            .filterNot { it.text.isBlank() }
+            .flatMap(AmllWordChunk::words)
+    }
+    val chunkMaskWordOffsets = remember(chunks) {
+        var wordOffset = 0
+        chunks.map { chunk ->
+            if (chunk.text.isBlank()) {
+                -1
+            } else {
+                wordOffset.also { wordOffset += chunk.words.size }
+            }
+        }
+    }
+    val maskWordMeasurements = remember(chunks) {
+        mutableStateMapOf<Int, AmllMaskWordMeasurement>()
+    }
+    val continuousMaskProgresses = maskWords.indices
+        .mapNotNull(maskWordMeasurements::get)
+        .takeIf { it.size == maskWords.size }
+        ?.let { measurements ->
+            amllContinuousWordMaskProgresses(
+                words = maskWords,
+                widthsPx = measurements.map { it.size.width.toFloat() },
+                heightsPx = measurements.map { it.size.height.toFloat() },
+                positionMs = positionMs,
+                horizontalPaddingsPx = measurements.map {
+                    it.horizontalHeadroomPx.toFloat()
+                },
+            )
+        }
+        .orEmpty()
     val hasRomanWords = line.words.any { it.romanText.isNotBlank() }
     val hasRubyWords = line.words.any { it.ruby.isNotEmpty() }
     val density = LocalDensity.current
@@ -133,7 +198,7 @@ internal fun AmllWordLine(
                     }
                 } ?: Modifier,
             ),
-    ) { chunk ->
+    ) { chunkIndex, chunk ->
         if (chunk.text.isBlank()) {
             Text(
                 // Compose may measure a trailing regular space as zero width.
@@ -151,7 +216,7 @@ internal fun AmllWordLine(
                 chunk = chunk,
                 lastLineWord = line.words.lastOrNull()?.text.orEmpty(),
                 positionMs = positionMs,
-                floatReleaseProgress = floatReleaseProgress,
+                effectReleaseProgress = effectReleaseProgress,
                 reserveRomanSpace = hasRomanWords,
                 reserveRubySpace = hasRubyWords,
                 fontSize = fontSize,
@@ -159,6 +224,13 @@ internal fun AmllWordLine(
                 darkAlpha = baseAlpha,
                 brightAlpha = brightAlpha,
                 isBackground = isBackground,
+                maskWordIndexOffset = chunkMaskWordOffsets[chunkIndex],
+                continuousMaskProgresses = continuousMaskProgresses,
+                onMaskWordSizeChanged = { wordIndex, measurement ->
+                    if (maskWordMeasurements[wordIndex] != measurement) {
+                        maskWordMeasurements[wordIndex] = measurement
+                    }
+                },
             )
         }
     }
@@ -168,6 +240,8 @@ private data class AmllFlowLine(
     val itemIndices: MutableList<Int> = mutableListOf(),
     var width: Int = 0,
     var height: Int = 0,
+    var firstBaseline: Int = 0,
+    var belowBaseline: Int = 0,
 )
 
 @Composable
@@ -176,13 +250,13 @@ private fun AmllBalancedWordLayout(
     alignEnd: Boolean,
     verticalGapPx: Int,
     modifier: Modifier = Modifier,
-    content: @Composable (AmllWordChunk) -> Unit,
+    content: @Composable (Int, AmllWordChunk) -> Unit,
 ) {
     Layout(
         modifier = modifier,
         content = {
-            for (chunk in chunks) {
-                content(chunk)
+            chunks.forEachIndexed { index, chunk ->
+                content(index, chunk)
             }
         },
     ) { measurables, constraints ->
@@ -204,9 +278,16 @@ private fun AmllBalancedWordLayout(
         fun append(index: Int) {
             val placeable = placeables[index]
             val line = lines.last()
+            val firstBaseline = placeable[FirstBaseline].takeIf { it >= 0 }
+                ?: placeable.height
             line.itemIndices += index
             line.width += placeable.width
-            line.height = maxOf(line.height, placeable.height)
+            line.firstBaseline = maxOf(line.firstBaseline, firstBaseline)
+            line.belowBaseline = maxOf(
+                line.belowBaseline,
+                placeable.height - firstBaseline,
+            )
+            line.height = line.firstBaseline + line.belowBaseline
         }
 
         chunks.indices.forEach { index ->
@@ -227,9 +308,14 @@ private fun AmllBalancedWordLayout(
                 var x = if (alignEnd) constraints.maxWidth - line.width else 0
                 line.itemIndices.forEach { index ->
                     val placeable = placeables[index]
+                    val firstBaseline = placeable[FirstBaseline].takeIf { it >= 0 }
+                        ?: placeable.height
                     placeable.placeRelative(
                         x = x,
-                        y = y + line.height - placeable.height,
+                        y = y + amllBaselinePlacementOffset(
+                            lineBaselinePx = line.firstBaseline,
+                            itemBaselinePx = firstBaseline,
+                        ),
                     )
                     x += placeable.width
                 }
@@ -244,7 +330,7 @@ private fun AmllKaraokeChunk(
     chunk: AmllWordChunk,
     lastLineWord: String,
     positionMs: Float,
-    floatReleaseProgress: Float,
+    effectReleaseProgress: Float,
     reserveRomanSpace: Boolean,
     reserveRubySpace: Boolean,
     fontSize: Float,
@@ -252,6 +338,9 @@ private fun AmllKaraokeChunk(
     darkAlpha: Float,
     brightAlpha: Float,
     isBackground: Boolean,
+    maskWordIndexOffset: Int,
+    continuousMaskProgresses: List<Float>,
+    onMaskWordSizeChanged: (Int, AmllMaskWordMeasurement) -> Unit,
 ) {
     val mergedWord = remember(chunk.words) {
         LyricWord(
@@ -285,13 +374,13 @@ private fun AmllKaraokeChunk(
         }
     }
 
-    Row(verticalAlignment = Alignment.Bottom) {
+    Row {
         chunk.words.forEachIndexed { index, word ->
             AmllKaraokeWord(
                 word = word,
                 graphemes = graphemesByWord[index],
                 positionMs = positionMs,
-                floatReleaseProgress = floatReleaseProgress,
+                effectReleaseProgress = effectReleaseProgress,
                 reserveRomanSpace = reserveRomanSpace,
                 reserveRubySpace = reserveRubySpace,
                 fontSize = fontSize,
@@ -304,6 +393,15 @@ private fun AmllKaraokeChunk(
                 profile = profile,
                 glyphIndexOffset = glyphOffsets[index],
                 glyphCount = glyphCount,
+                continuousHighlightProgress =
+                    continuousMaskProgresses.getOrNull(maskWordIndexOffset + index),
+                onMainTextSizeChanged = { size, horizontalHeadroomPx ->
+                    onMaskWordSizeChanged(
+                        maskWordIndexOffset + index,
+                        AmllMaskWordMeasurement(size, horizontalHeadroomPx),
+                    )
+                },
+                modifier = Modifier.alignByBaseline(),
             )
         }
     }
@@ -314,7 +412,7 @@ private fun AmllKaraokeWord(
     word: LyricWord,
     graphemes: List<String>,
     positionMs: Float,
-    floatReleaseProgress: Float,
+    effectReleaseProgress: Float,
     reserveRomanSpace: Boolean,
     reserveRubySpace: Boolean,
     fontSize: Float,
@@ -327,6 +425,9 @@ private fun AmllKaraokeWord(
     profile: AmllEmphasisProfile,
     glyphIndexOffset: Int,
     glyphCount: Int,
+    continuousHighlightProgress: Float?,
+    onMainTextSizeChanged: (IntSize, Int) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
     val fontSizePx = with(density) { fontSize.sp.toPx() }
@@ -335,91 +436,66 @@ private fun AmllKaraokeWord(
         ((positionMs - word.startTimeMs) / wordFloatDuration).coerceIn(0f, 1f)
     val wordFloat = AmllWordFloatEasing.transform(wordFloatProgress)
     val wordFloatAmount = if (isBackground) 0.1f else 0.05f
-    val highlightProgress = amllWordProgress(word, positionMs)
+    val highlightProgress =
+        continuousHighlightProgress ?: amllWordProgress(word, positionMs)
+    val effectHeadroom =
+        with(density) { fontSize.sp.toDp() } * if (emphasize) 1f else 0f
+    val effectHeadroomPx = with(density) { effectHeadroom.roundToPx() }
 
-    Column(
-        modifier = Modifier.graphicsLayer {
-            translationY =
-                -wordFloat * wordFloatAmount * fontSizePx * floatReleaseProgress
-        },
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        if (reserveRubySpace) {
-            Row(verticalAlignment = Alignment.Bottom) {
-                if (word.ruby.isEmpty()) {
-                    Text(
-                        text = " ",
-                        color = Color.Transparent,
-                        fontSize = (fontSize * 0.5f).sp,
-                        lineHeight = (fontSize * 0.5f).sp,
-                        maxLines = 1,
-                    )
-                } else {
-                    word.ruby.forEach { ruby ->
-                        val rubyProgress = when {
-                            positionMs <= ruby.startTimeMs -> 0f
-                            positionMs >= ruby.endTimeMs -> 1f
-                            else -> (
-                                (positionMs - ruby.startTimeMs) /
-                                    (ruby.endTimeMs - ruby.startTimeMs).coerceAtLeast(1L)
-                                ).coerceIn(0f, 1f)
-                        }
-                        Text(
-                            text = ruby.text,
-                            color = Color.White.copy(
-                                alpha = darkAlpha +
-                                    rubyProgress * (brightAlpha - darkAlpha),
-                            ),
-                            fontSize = (fontSize * 0.5f).sp,
-                            lineHeight = (fontSize * 0.5f).sp,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                        )
-                    }
-                }
+    Layout(
+        modifier = modifier
+            .graphicsLayer {
+                translationY =
+                    -wordFloat * wordFloatAmount * fontSizePx * effectReleaseProgress
             }
-        }
-
-        Box {
-            AmllAnimatedWordLayer(
-                text = word.text.trim(),
+            .onSizeChanged { size ->
+                onMainTextSizeChanged(size, effectHeadroomPx)
+            },
+        content = {
+            AmllKaraokeWordLayer(
+                word = word,
                 graphemes = graphemes,
                 positionMs = positionMs,
+                reserveRomanSpace = reserveRomanSpace,
+                reserveRubySpace = reserveRubySpace,
                 fontSize = fontSize,
                 fontWeight = fontWeight,
                 color = Color.White.copy(alpha = darkAlpha),
                 emphasize = emphasize,
+                isBackground = isBackground,
                 chunkStartTimeMs = chunkStartTimeMs,
                 profile = profile,
                 glyphIndexOffset = glyphIndexOffset,
                 glyphCount = glyphCount,
                 drawGlow = false,
-                isBackground = isBackground,
-                floatReleaseProgress = floatReleaseProgress,
+                effectReleaseProgress = effectReleaseProgress,
+                modifier = Modifier.padding(horizontal = effectHeadroom),
             )
-            AmllAnimatedWordLayer(
-                text = word.text.trim(),
+            AmllKaraokeWordLayer(
+                word = word,
                 graphemes = graphemes,
                 positionMs = positionMs,
+                reserveRomanSpace = reserveRomanSpace,
+                reserveRubySpace = reserveRubySpace,
                 fontSize = fontSize,
                 fontWeight = fontWeight,
                 color = Color.White.copy(
                     alpha = (brightAlpha - darkAlpha).coerceAtLeast(0f),
                 ),
                 emphasize = emphasize,
+                isBackground = isBackground,
                 chunkStartTimeMs = chunkStartTimeMs,
                 profile = profile,
                 glyphIndexOffset = glyphIndexOffset,
                 glyphCount = glyphCount,
                 drawGlow = true,
-                isBackground = isBackground,
-                floatReleaseProgress = floatReleaseProgress,
+                effectReleaseProgress = effectReleaseProgress,
                 modifier = Modifier
                     .graphicsLayer {
                         // AMLL switches an inactive line to SOLID rendering:
                         // the paused mask remains, but its bright layer,
-                        // including the emphasis shadow, must release.
-                        alpha = floatReleaseProgress
+                        // including Ruby, romanization and emphasis, must release.
+                        alpha = effectReleaseProgress
                         compositingStrategy = CompositingStrategy.Offscreen
                     }
                     .drawWithContent {
@@ -471,20 +547,119 @@ private fun AmllKaraokeWord(
                                 )
                             }
                         }
-                    },
+                    }
+                    .padding(horizontal = effectHeadroom),
             )
+        },
+    ) { measurables, constraints ->
+        val expandedConstraints = constraints
+            .copy(
+                minWidth = 0,
+                minHeight = 0,
+                maxWidth = if (constraints.hasBoundedWidth) {
+                    (constraints.maxWidth + effectHeadroomPx * 2)
+                        .coerceAtMost(Constraints.Infinity)
+                } else {
+                    Constraints.Infinity
+                },
+            )
+        val placeables = measurables.map { measurable ->
+            measurable.measure(expandedConstraints)
         }
+        val measuredWidth = placeables.maxOfOrNull { it.width } ?: 0
+        val measuredHeight = placeables.maxOfOrNull { it.height } ?: 0
+        val contentWidth = amllCollapsedEffectWidth(
+            measuredWidthPx = measuredWidth,
+            horizontalHeadroomPx = effectHeadroomPx,
+        )
+        val firstBaseline = placeables
+            .firstOrNull()
+            ?.get(FirstBaseline)
+            ?.takeIf { it >= 0 }
+        layout(
+            width = contentWidth.coerceIn(constraints.minWidth, constraints.maxWidth),
+            height = measuredHeight.coerceIn(constraints.minHeight, constraints.maxHeight),
+            alignmentLines = firstBaseline?.let {
+                mapOf<AlignmentLine, Int>(FirstBaseline to it)
+            }.orEmpty(),
+        ) {
+            placeables.forEach { placeable ->
+                placeable.placeRelative(x = -effectHeadroomPx, y = 0)
+            }
+        }
+    }
+}
+
+@Composable
+private fun AmllKaraokeWordLayer(
+    word: LyricWord,
+    graphemes: List<String>,
+    positionMs: Float,
+    reserveRomanSpace: Boolean,
+    reserveRubySpace: Boolean,
+    fontSize: Float,
+    fontWeight: FontWeight,
+    color: Color,
+    emphasize: Boolean,
+    isBackground: Boolean,
+    chunkStartTimeMs: Long,
+    profile: AmllEmphasisProfile,
+    glyphIndexOffset: Int,
+    glyphCount: Int,
+    drawGlow: Boolean,
+    effectReleaseProgress: Float,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        if (reserveRubySpace) {
+            Row(verticalAlignment = Alignment.Bottom) {
+                if (word.ruby.isEmpty()) {
+                    Text(
+                        text = " ",
+                        color = Color.Transparent,
+                        fontSize = (fontSize * 0.5f).sp,
+                        lineHeight = (fontSize * 0.5f).sp,
+                        maxLines = 1,
+                    )
+                } else {
+                    word.ruby.forEach { ruby ->
+                        Text(
+                            text = ruby.text,
+                            color = color,
+                            fontSize = (fontSize * 0.5f).sp,
+                            lineHeight = (fontSize * 0.5f).sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        }
+
+        AmllAnimatedWordLayer(
+            text = word.text.trim(),
+            graphemes = graphemes,
+            positionMs = positionMs,
+            fontSize = fontSize,
+            fontWeight = fontWeight,
+            color = color,
+            emphasize = emphasize,
+            chunkStartTimeMs = chunkStartTimeMs,
+            profile = profile,
+            glyphIndexOffset = glyphIndexOffset,
+            glyphCount = glyphCount,
+            drawGlow = drawGlow,
+            isBackground = isBackground,
+            effectReleaseProgress = effectReleaseProgress,
+        )
 
         if (reserveRomanSpace) {
             Text(
                 text = word.romanText.ifBlank { " " },
-                color = Color.White.copy(
-                    alpha = when {
-                        word.romanText.isBlank() -> 0f
-                        else -> darkAlpha +
-                            highlightProgress * (brightAlpha - darkAlpha)
-                    },
-                ),
+                color = if (word.romanText.isBlank()) Color.Transparent else color,
                 fontSize = (fontSize * 0.5f).sp,
                 lineHeight = (fontSize * 0.5f).sp,
                 fontWeight = FontWeight.Medium,
@@ -509,7 +684,7 @@ private fun AmllAnimatedWordLayer(
     glyphCount: Int,
     drawGlow: Boolean,
     isBackground: Boolean,
-    floatReleaseProgress: Float,
+    effectReleaseProgress: Float,
     modifier: Modifier = Modifier,
 ) {
     if (emphasize) {
@@ -526,7 +701,7 @@ private fun AmllAnimatedWordLayer(
             glyphCount = glyphCount,
             drawGlow = drawGlow,
             isBackground = isBackground,
-            floatReleaseProgress = floatReleaseProgress,
+            effectReleaseProgress = effectReleaseProgress,
             modifier = modifier,
         )
     } else {
@@ -556,13 +731,10 @@ private fun AmllAnimatedGlyphRow(
     glyphCount: Int,
     drawGlow: Boolean,
     isBackground: Boolean,
-    floatReleaseProgress: Float,
+    effectReleaseProgress: Float,
     modifier: Modifier = Modifier,
 ) {
-    Row(
-        modifier = modifier,
-        verticalAlignment = Alignment.Bottom,
-    ) {
+    Row(modifier = modifier) {
         graphemes.forEachIndexed { index, grapheme ->
             AmllAnimatedCharacter(
                 grapheme = grapheme,
@@ -577,7 +749,8 @@ private fun AmllAnimatedGlyphRow(
                 glyphCount = glyphCount,
                 drawGlow = drawGlow,
                 isBackground = isBackground,
-                floatReleaseProgress = floatReleaseProgress,
+                effectReleaseProgress = effectReleaseProgress,
+                modifier = Modifier.alignByBaseline(),
             )
         }
     }
@@ -597,13 +770,18 @@ private fun AmllAnimatedCharacter(
     glyphCount: Int,
     drawGlow: Boolean,
     isBackground: Boolean,
-    floatReleaseProgress: Float,
+    effectReleaseProgress: Float,
+    modifier: Modifier = Modifier,
 ) {
     val staggerMs = profile.durationMs.toFloat() / 2.5f / glyphCount
     val entryTimeMs = chunkStartTimeMs + staggerMs * glyphIndex
     val emphasisProgress =
         ((positionMs - entryTimeMs) / profile.durationMs).coerceIn(0f, 1f)
     val emphasis = if (emphasize) amllEmphasisEasing(emphasisProgress) else 0f
+    val releasedEmphasis = amllReleasedEffectProgress(
+        effectProgress = emphasis,
+        releaseProgress = effectReleaseProgress,
+    )
     val floatStartMs = entryTimeMs - 400f
     val floatProgress =
         ((positionMs - floatStartMs) / (profile.durationMs * 1.4f)).coerceIn(0f, 1f)
@@ -615,36 +793,62 @@ private fun AmllAnimatedCharacter(
     val density = LocalDensity.current
     val fontSizePx = with(density) { fontSize.sp.toPx() }
     val centerOffset = glyphCount / 2f - glyphIndex
-    val glowLevel = (emphasis * profile.blur).coerceIn(0f, 0.8f)
-    val glowRadius = fontSizePx * minOf(0.3f, profile.blur * 0.3f) * emphasis
+    val glowLevel = (releasedEmphasis * profile.blur).coerceIn(0f, 0.8f)
+    val glowRadius =
+        fontSizePx * minOf(0.3f, profile.blur * 0.3f) * releasedEmphasis
 
-    Text(
-        text = grapheme,
-        color = color,
-        fontSize = fontSize.sp,
-        lineHeight = (fontSize * 1.25f).sp,
-        fontWeight = fontWeight,
-        maxLines = 1,
-        style = TextStyle(
-            shadow = Shadow(
-                color = Color.White.copy(alpha = if (drawGlow) glowLevel else 0f),
-                blurRadius = if (drawGlow) glowRadius else 0f,
-            ),
-        ),
-        modifier = Modifier.graphicsLayer {
-            val scale = 1f + emphasis * 0.1f * profile.amount
-            scaleX = scale
-            scaleY = scale
-            translationX =
-                -emphasis * 0.03f * profile.amount * centerOffset * fontSizePx
-            translationY =
-                -(
-                    emphasis * 0.025f * profile.amount +
-                        floatLift * 0.05f * floatReleaseProgress
-                    ) * fontSizePx
-            transformOrigin = TransformOrigin.Center
+    val scale = 1f + releasedEmphasis * 0.1f * profile.amount
+    val translationX =
+        -releasedEmphasis * 0.03f * profile.amount * centerOffset * fontSizePx
+    val translationY =
+        -(
+            releasedEmphasis * 0.025f * profile.amount +
+                floatLift * 0.05f * effectReleaseProgress
+            ) * fontSizePx
+
+    Layout(
+        modifier = modifier,
+        content = {
+            Text(
+                text = grapheme,
+                color = color,
+                fontSize = fontSize.sp,
+                lineHeight = (fontSize * 1.25f).sp,
+                fontWeight = fontWeight,
+                maxLines = 1,
+                style = TextStyle(
+                    shadow = Shadow(
+                        color = Color.White.copy(
+                            alpha = if (drawGlow) glowLevel else 0f,
+                        ),
+                        blurRadius = if (drawGlow) glowRadius else 0f,
+                    ),
+                ),
+            )
         },
-    )
+    ) { measurables, constraints ->
+        val placeable = measurables.single().measure(constraints)
+        val firstBaseline = placeable[FirstBaseline]
+        layout(
+            width = placeable.width,
+            height = placeable.height,
+            alignmentLines = mapOf(FirstBaseline to firstBaseline),
+        ) {
+            placeable.placeWithLayer(0, 0) {
+                scaleX = scale
+                scaleY = scale
+                this.translationX = translationX
+                this.translationY = translationY
+                transformOrigin = TransformOrigin(
+                    pivotFractionX = 0.5f,
+                    pivotFractionY = amllBaselineTransformOrigin(
+                        firstBaselinePx = firstBaseline,
+                        heightPx = placeable.height,
+                    ),
+                )
+            }
+        }
+    }
 }
 
 @Composable

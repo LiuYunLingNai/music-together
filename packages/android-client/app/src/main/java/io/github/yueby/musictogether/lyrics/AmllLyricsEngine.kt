@@ -233,8 +233,6 @@ internal fun findAmllInterlude(
     currentTimeMs: Long,
     currentGroupIndex: Int,
 ): AmllInterlude? {
-    val adjustedTime = currentTimeMs + 20L
-
     fun checkGap(anchorIndex: Int): AmllInterlude? {
         if (anchorIndex < -1 || anchorIndex >= groups.lastIndex) return null
         val previous = groups.getOrNull(anchorIndex)
@@ -242,18 +240,90 @@ internal fun findAmllInterlude(
         val gapStart = previous?.endTimeMs ?: 0L
         val gapEnd = maxOf(gapStart, next.startTimeMs - 250L)
         if (gapEnd - gapStart < 4_000L) return null
-        if (adjustedTime <= gapStart || adjustedTime >= gapEnd) return null
-        return AmllInterlude(
+        val interlude = AmllInterlude(
             startTimeMs = gapStart,
             endTimeMs = gapEnd,
             anchorGroupIndex = anchorIndex,
             isNextDuet = next.main.isDuet,
         )
+        return interlude.takeIf {
+            isAmllInterludeActiveAt(it, currentTimeMs)
+        }
     }
 
     return checkGap(currentGroupIndex - 1) ?:
         checkGap(currentGroupIndex) ?:
         checkGap(currentGroupIndex + 1)
+}
+
+internal fun buildAmllInterludes(
+    groups: List<AmllLyricGroup>,
+): List<AmllInterlude> = buildList {
+    groups.forEachIndexed { nextGroupIndex, next ->
+        val anchorGroupIndex = nextGroupIndex - 1
+        val gapStart = groups.getOrNull(anchorGroupIndex)?.endTimeMs ?: 0L
+        val gapEnd = maxOf(gapStart, next.startTimeMs - 250L)
+        if (gapEnd - gapStart >= 4_000L) {
+            add(
+                AmllInterlude(
+                    startTimeMs = gapStart,
+                    endTimeMs = gapEnd,
+                    anchorGroupIndex = anchorGroupIndex,
+                    isNextDuet = next.main.isDuet,
+                ),
+            )
+        }
+    }
+}
+
+internal fun findActiveAmllInterlude(
+    interludes: List<AmllInterlude>,
+    currentTimeMs: Long,
+): AmllInterlude? {
+    var low = 0
+    var high = interludes.lastIndex
+    while (low <= high) {
+        val middle = (low + high) ushr 1
+        val candidate = interludes[middle]
+        when {
+            currentTimeMs + 20L <= candidate.startTimeMs -> high = middle - 1
+            currentTimeMs + 20L >= candidate.endTimeMs -> low = middle + 1
+            else -> return candidate
+        }
+    }
+    return null
+}
+
+internal fun findAmllInterlude(
+    groups: List<AmllLyricGroup>,
+    currentTimeMs: Long,
+): AmllInterlude? {
+    var low = 0
+    var high = groups.lastIndex
+    var currentGroupIndex = -1
+    while (low <= high) {
+        val middle = (low + high) ushr 1
+        if (groups[middle].startTimeMs <= currentTimeMs) {
+            currentGroupIndex = middle
+            low = middle + 1
+        } else {
+            high = middle - 1
+        }
+    }
+    return findAmllInterlude(
+        groups = groups,
+        currentTimeMs = currentTimeMs,
+        currentGroupIndex = currentGroupIndex,
+    )
+}
+
+internal fun isAmllInterludeActiveAt(
+    interlude: AmllInterlude,
+    currentTimeMs: Long,
+): Boolean {
+    val adjustedTime = currentTimeMs + 20L
+    return adjustedTime > interlude.startTimeMs &&
+        adjustedTime < interlude.endTimeMs
 }
 
 /**
@@ -535,6 +605,11 @@ internal fun amllEmphasisEasing(progress: Float): Float {
     }
 }
 
+internal fun amllReleasedEffectProgress(
+    effectProgress: Float,
+    releaseProgress: Float,
+): Float = effectProgress.coerceIn(0f, 1f) * releaseProgress.coerceIn(0f, 1f)
+
 private object AmllEasing {
     private val emphasisIn = CubicBezier(0.2, 0.4, 0.58, 1.0)
     private val emphasisOut = CubicBezier(0.3, 0.0, 0.58, 1.0)
@@ -616,9 +691,94 @@ internal fun amllEmphasisProfile(
 }
 
 internal fun amllWordProgress(word: LyricWord, positionMs: Float): Float {
-    val start = word.startTimeMs.toFloat()
-    val end = word.endTimeMs.toFloat()
-    if (positionMs <= start) return 0f
-    if (positionMs >= end) return 1f
-    return ((positionMs - start) / (end - start).coerceAtLeast(1f)).coerceIn(0f, 1f)
+    fun progressBetween(startTimeMs: Long, endTimeMs: Long): Float {
+        val start = startTimeMs.toFloat()
+        val end = endTimeMs.toFloat()
+        if (positionMs <= start) return 0f
+        if (positionMs >= end) return 1f
+        return ((positionMs - start) / (end - start).coerceAtLeast(1f))
+            .coerceIn(0f, 1f)
+    }
+
+    val rubySegments = word.ruby.filter { it.text.isNotBlank() }
+    if (rubySegments.isEmpty()) {
+        return progressBetween(word.startTimeMs, word.endTimeMs)
+    }
+
+    val wordEndTimeMs = maxOf(word.startTimeMs, word.endTimeMs)
+    val weightedSegments = rubySegments.mapNotNull { ruby ->
+        val unitCount = splitAmllGraphemes(ruby.text).size
+        if (unitCount == 0) return@mapNotNull null
+        val startTimeMs = ruby.startTimeMs.coerceIn(word.startTimeMs, wordEndTimeMs)
+        val endTimeMs = ruby.endTimeMs.coerceIn(startTimeMs, wordEndTimeMs)
+        Triple(unitCount, startTimeMs, endTimeMs)
+    }
+    val totalUnits = weightedSegments.sumOf { it.first }
+    if (totalUnits == 0) {
+        return progressBetween(word.startTimeMs, word.endTimeMs)
+    }
+
+    val completedUnits = weightedSegments.sumOf { (unitCount, startTimeMs, endTimeMs) ->
+        unitCount * progressBetween(startTimeMs, endTimeMs).toDouble()
+    }
+    return (completedUnits / totalUnits).toFloat().coerceIn(0f, 1f)
+}
+
+/**
+ * Projects AMLL's line-wide mask travel back into each rendered word.
+ *
+ * The fade front is continuous across adjacent words and remains stationary
+ * during timestamp gaps. Each returned value can still be rendered with the
+ * existing per-word gradient, while preserving the spill from the previous
+ * word instead of restarting at zero.
+ */
+internal fun amllContinuousWordMaskProgresses(
+    words: List<LyricWord>,
+    widthsPx: List<Float>,
+    heightsPx: List<Float>,
+    positionMs: Float,
+    horizontalPaddingsPx: List<Float> = List(words.size) { 0f },
+): List<Float> {
+    if (
+        words.isEmpty() ||
+        words.size != widthsPx.size ||
+        words.size != heightsPx.size ||
+        words.size != horizontalPaddingsPx.size ||
+        widthsPx.any { it <= 0f } ||
+        heightsPx.any { it <= 0f } ||
+        horizontalPaddingsPx.any { it < 0f }
+    ) {
+        return emptyList()
+    }
+
+    val wordProgresses = words.map { word ->
+        amllWordProgress(word, positionMs)
+    }
+    val widthsBeforeWord = buildList(words.size) {
+        var prefix = 0f
+        widthsPx.forEach { width ->
+            add(prefix)
+            prefix += width
+        }
+    }
+    val timedWidthTravelPx = words.indices.fold(0f) { total, wordIndex ->
+        total + widthsPx[wordIndex] * wordProgresses[wordIndex]
+    }
+    val edgeFadeTravel =
+        wordProgresses.first() * 1.5f + wordProgresses.last() * 0.5f
+
+    return words.indices.map { targetIndex ->
+        val fadeWidthPx = heightsPx[targetIndex] * 0.5f
+        val horizontalPaddingPx = horizontalPaddingsPx[targetIndex]
+        val travelledPx =
+            timedWidthTravelPx + fadeWidthPx * edgeFadeTravel
+        val localFadeEndPx =
+            travelledPx -
+                widthsBeforeWord[targetIndex] +
+                horizontalPaddingPx -
+                fadeWidthPx
+        val localTravelPx =
+            widthsPx[targetIndex] + horizontalPaddingPx * 2f + fadeWidthPx
+        (localFadeEndPx / localTravelPx).coerceIn(0f, 1f)
+    }
 }

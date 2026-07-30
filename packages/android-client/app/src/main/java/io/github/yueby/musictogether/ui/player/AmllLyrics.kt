@@ -6,8 +6,10 @@ import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -26,7 +28,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
@@ -42,6 +43,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.structuralEqualityPolicy
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,6 +69,8 @@ import androidx.compose.ui.unit.sp
 import io.github.yueby.musictogether.lyrics.AmllInterlude
 import io.github.yueby.musictogether.lyrics.AmllLyricGroup
 import io.github.yueby.musictogether.lyrics.amllLineSpringParameters
+import io.github.yueby.musictogether.lyrics.buildAmllInterludes
+import io.github.yueby.musictogether.lyrics.findActiveAmllInterlude
 import io.github.yueby.musictogether.lyrics.prepareAmllLyricGroups
 import io.github.yueby.musictogether.model.LyricLine
 import io.github.yueby.musictogether.model.LyricsState
@@ -97,17 +101,20 @@ private sealed interface AmllListItem {
     val stableKey: String
 
     data class Line(
+        val trackId: String?,
         val groupIndex: Int,
         val group: AmllLyricGroup,
     ) : AmllListItem {
-        override val stableKey = "line:${group.main.startTimeMs}:$groupIndex"
+        override val stableKey =
+            "line:$trackId:${group.main.startTimeMs}:$groupIndex"
     }
 
     data class Interlude(
+        val trackId: String?,
         val value: AmllInterlude,
     ) : AmllListItem {
         override val stableKey =
-            "interlude:${value.startTimeMs}:${value.anchorGroupIndex}"
+            "interlude:$trackId:${value.startTimeMs}:${value.anchorGroupIndex}"
     }
 }
 
@@ -174,11 +181,9 @@ internal fun amllFocusDistance(
 
 internal fun shouldResetAmllFocus(
     previousGroupIndex: Int,
-    focusedGroupIndex: Int,
     timelineDiscontinuity: Boolean,
 ): Boolean =
     previousGroupIndex < 0 ||
-        abs(focusedGroupIndex - previousGroupIndex) > 1 ||
         timelineDiscontinuity
 
 private fun formatLyricTimestamp(timeMs: Long): String {
@@ -236,45 +241,70 @@ internal fun LyricsPanel(
         groups = groups,
         rawPositionMs = rawPositionMs,
         isPlaying = isPlaying,
-        resetKey = lyrics.trackId,
+        resetKey = lyrics.trackId to lyricOffsetMs,
     )
     val timelineFrame by playbackTimeline.frame
     val smoothPositionMs = playbackTimeline.positionMs
     val isDynamic = lyrics.source in setOf("ttml", "wordByWord", "yrc")
     val activeGroupIndices = timelineFrame.bufferedGroupIndices
-    val timelineInterlude = timelineFrame.interlude
-    val timelineInterludeKey = timelineInterlude?.let {
+    val interludeSlots = remember(groups) { buildAmllInterludes(groups) }
+    // Keep the waiting indicator lifecycle on the current playback time, as AMLL does.
+    // The derived state only changes the active stable slot when the interval changes,
+    // while sharing the same frame clock as the word masks and line focus.
+    // It also prevents a delayed timeline-frame boundary from retaining an
+    // expired indicator.
+    val currentInterlude by remember(interludeSlots, smoothPositionMs) {
+        derivedStateOf(structuralEqualityPolicy()) {
+            findActiveAmllInterlude(
+                interludes = interludeSlots,
+                currentTimeMs = smoothPositionMs.value.toLong(),
+            )
+        }
+    }
+    val currentInterludeKey = currentInterlude?.let {
         "${it.startTimeMs}:${it.endTimeMs}:${it.anchorGroupIndex}"
     }
-    var dismissedInterludeKey by remember(lyrics.trackId) {
+    var dismissedInterludeKey by remember(lyrics.trackId, groups) {
         mutableStateOf<String?>(null)
     }
-    LaunchedEffect(timelineInterludeKey, dismissedInterludeKey) {
+    LaunchedEffect(currentInterludeKey, dismissedInterludeKey) {
         val dismissedKey = dismissedInterludeKey ?: return@LaunchedEffect
-        if (timelineInterludeKey != dismissedKey) {
+        if (currentInterludeKey != dismissedKey) {
             dismissedInterludeKey = null
         } else {
             // If the remote seek is rejected, restore the still-current
             // interlude instead of leaving the lyric layout permanently blank.
             delay(2_000)
-            if (timelineInterludeKey == dismissedInterludeKey) {
+            if (currentInterludeKey == dismissedInterludeKey) {
                 dismissedInterludeKey = null
             }
         }
     }
-    val interlude = timelineInterlude.takeUnless {
-        timelineInterludeKey != null && timelineInterludeKey == dismissedInterludeKey
+    val interlude = currentInterlude.takeUnless {
+        currentInterludeKey != null && currentInterludeKey == dismissedInterludeKey
     }
-    val mainLyricCenterByGroup = remember(lyrics.trackId) {
+    val mainLyricCenterByGroup = remember(lyrics.trackId, groups) {
         mutableStateMapOf<Int, Float>()
     }
-    val listItems = remember(groups, interlude) {
+    val listItems = remember(lyrics.trackId, groups, interludeSlots) {
+        val interludeByAnchor = interludeSlots.associateBy(AmllInterlude::anchorGroupIndex)
         buildList {
             groups.forEachIndexed { index, group ->
-                if (interlude?.anchorGroupIndex == index - 1) {
-                    add(AmllListItem.Interlude(interlude))
+                interludeByAnchor[index - 1]?.let { interludeSlot ->
+                    add(
+                        AmllListItem.Interlude(
+                            trackId = lyrics.trackId,
+                            value = interludeSlot,
+                        ),
+                    )
                 }
-                add(AmllListItem.Line(index, group))
+                add(
+                    AmllListItem.Line(
+                        trackId = lyrics.trackId,
+                        groupIndex = index,
+                        group = group,
+                    ),
+                )
             }
         }
     }
@@ -318,16 +348,16 @@ internal fun LyricsPanel(
                 maxOf(edgePadding, maxHeight * AmllTopFadeEnd + lineGap)
             val lastLineInset =
                 maxOf(edgePadding, maxHeight * (1f - AmllBottomFadeStart) + lineGap)
-            val listState = rememberLazyListState()
+            val listState = remember(lyrics.trackId, groups) { LazyListState() }
             val scrollMotion = remember(listState) { Animatable(0f) }
             val isDragged by listState.interactionSource.collectIsDraggedAsState()
-            var manualBrowseActive by remember(lyrics.trackId) {
+            var manualBrowseActive by remember(lyrics.trackId, groups) {
                 mutableStateOf(false)
             }
-            var previousFocusedGroupIndex by remember(lyrics.trackId) {
+            var previousFocusedGroupIndex by remember(lyrics.trackId, groups) {
                 mutableIntStateOf(-1)
             }
-            var handledSeekGeneration by remember(lyrics.trackId) {
+            var handledSeekGeneration by remember(lyrics.trackId, groups) {
                 mutableIntStateOf(timelineFrame.seekGeneration)
             }
             val previewGroupIndex by remember(
@@ -400,6 +430,8 @@ internal fun LyricsPanel(
             }
 
             LaunchedEffect(
+                lyrics.trackId,
+                groups,
                 focusedListIndex,
                 listItems.size,
                 timelineFrame.seekGeneration,
@@ -415,7 +447,6 @@ internal fun LyricsPanel(
                     handledSeekGeneration = timelineFrame.seekGeneration
                     val shouldReset = shouldResetAmllFocus(
                         previousGroupIndex = previousGroupIndex,
-                        focusedGroupIndex = focusedGroupIndex,
                         timelineDiscontinuity = timelineDiscontinuity,
                     )
                     // Record the new focus before any suspending animation.
@@ -502,22 +533,7 @@ internal fun LyricsPanel(
                     key = { _, item -> item.stableKey },
                 ) { _, item ->
                     Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .then(
-                                if (item is AmllListItem.Interlude) {
-                                    Modifier.animateItem(
-                                        fadeInSpec = tween(240),
-                                        placementSpec = spring(
-                                            dampingRatio = AmllPositionDampingRatio,
-                                            stiffness = AmllSpringStiffness,
-                                        ),
-                                        fadeOutSpec = tween(180),
-                                    )
-                                } else {
-                                    Modifier
-                                },
-                            ),
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
                         when (item) {
                             is AmllListItem.Line -> AmllLineGroup(
@@ -534,7 +550,7 @@ internal fun LyricsPanel(
                                 userScrolling = manualBrowseActive,
                                 onClick = onSeek?.let { seek ->
                                     {
-                                        dismissedInterludeKey = timelineInterludeKey
+                                        dismissedInterludeKey = currentInterludeKey
                                         manualBrowseActive = false
                                         seek(item.group.main.startTimeMs / 1_000.0)
                                     }
@@ -551,9 +567,10 @@ internal fun LyricsPanel(
                                 backgroundFontSize = backgroundFontSize,
                             )
 
-                            is AmllListItem.Interlude -> AmllInterludeDots(
+                            is AmllListItem.Interlude -> AmllInterludeSlot(
                                 interlude = item.value,
                                 positionMs = smoothPositionMs,
+                                active = item.value == interlude,
                                 fontSize = mainFontSize,
                                 modifier = Modifier.fillMaxWidth(),
                             )
@@ -595,7 +612,7 @@ private fun AmllLineGroup(
     backgroundFontSize: Float,
 ) {
     val line = group.main
-    var retainedPositionMs by remember(line.startTimeMs, line.endTimeMs) {
+    var retainedPositionMs by remember(line) {
         mutableFloatStateOf(line.startTimeMs.toFloat())
     }
     val livePositionMs = if (active) positionMs.value else null
@@ -603,10 +620,10 @@ private fun AmllLineGroup(
         livePositionMs?.let { retainedPositionMs = it }
     }
     val currentPositionMs = livePositionMs ?: retainedPositionMs
-    val floatReleaseProgress by animateFloatAsState(
+    val effectReleaseProgress by animateFloatAsState(
         targetValue = if (active) 1f else 0f,
         animationSpec = tween(durationMillis = if (active) 70 else 300),
-        label = "amllFloatRelease",
+        label = "amllEffectRelease",
     )
     val scale by animateFloatAsState(
         targetValue = when {
@@ -674,7 +691,7 @@ private fun AmllLineGroup(
                     line = line,
                     positionMs = currentPositionMs,
                     active = active,
-                    floatReleaseProgress = floatReleaseProgress,
+                    effectReleaseProgress = effectReleaseProgress,
                     onPrimaryTextCenterInRootChanged = onMainLyricCenterInRootChanged,
                     previewed = previewed,
                     isPlaying = isPlaying,
@@ -691,7 +708,7 @@ private fun AmllLineGroup(
                         line = backgroundLine,
                         positionMs = currentPositionMs,
                         visible = active,
-                        floatReleaseProgress = floatReleaseProgress,
+                        effectReleaseProgress = effectReleaseProgress,
                         revealProgress = backgroundRevealProgress,
                         placeBeforeMain = backgroundFirst,
                         fontSize = backgroundFontSize,
@@ -867,7 +884,7 @@ private fun AmllMainLine(
     line: LyricLine,
     positionMs: Float,
     active: Boolean,
-    floatReleaseProgress: Float,
+    effectReleaseProgress: Float,
     onPrimaryTextCenterInRootChanged: (Float) -> Unit,
     previewed: Boolean,
     isPlaying: Boolean,
@@ -910,7 +927,7 @@ private fun AmllMainLine(
             line = line,
             positionMs = positionMs,
             active = active,
-            floatReleaseProgress = floatReleaseProgress,
+            effectReleaseProgress = effectReleaseProgress,
             onPrimaryTextCenterInRootChanged = onPrimaryTextCenterInRootChanged,
             previewed = previewed,
             isPlaying = isPlaying,
@@ -951,7 +968,7 @@ private fun AmllBackgroundLine(
     line: LyricLine,
     positionMs: Float,
     visible: Boolean,
-    floatReleaseProgress: Float,
+    effectReleaseProgress: Float,
     revealProgress: Float,
     placeBeforeMain: Boolean,
     fontSize: Float,
@@ -1000,7 +1017,7 @@ private fun AmllBackgroundLine(
                     positionMs < (
                         line.words.maxOfOrNull { it.endTimeMs } ?: line.endTimeMs
                         ),
-                floatReleaseProgress = floatReleaseProgress,
+                effectReleaseProgress = effectReleaseProgress,
                 isPlaying = true,
                 isDynamic = isDynamic,
                 lineScale = lineScale,
@@ -1009,6 +1026,39 @@ private fun AmllBackgroundLine(
                 isBackground = true,
             )
         }
+    }
+}
+
+@Composable
+private fun AmllInterludeSlot(
+    interlude: AmllInterlude,
+    positionMs: State<Float>,
+    active: Boolean,
+    fontSize: Float,
+    modifier: Modifier = Modifier,
+) {
+    AnimatedVisibility(
+        visible = active,
+        modifier = modifier,
+        enter = fadeIn(tween(250)) +
+            expandVertically(
+                animationSpec = tween(250),
+                expandFrom = Alignment.Top,
+                clip = false,
+            ),
+        exit = fadeOut(tween(250)) +
+            shrinkVertically(
+                animationSpec = tween(250),
+                shrinkTowards = Alignment.Top,
+                clip = false,
+            ),
+    ) {
+        AmllInterludeDots(
+            interlude = interlude,
+            positionMs = positionMs,
+            fontSize = fontSize,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 

@@ -173,6 +173,142 @@ class AmllLyricsEngineTest {
     }
 
     @Test
+    fun releasesEveryEmphasisTransformWhenLineBecomesInactive() {
+        assertEquals(0.8f, amllReleasedEffectProgress(0.8f, 1f), 0.0001f)
+        assertEquals(0.4f, amllReleasedEffectProgress(0.8f, 0.5f), 0.0001f)
+        assertEquals(0f, amllReleasedEffectProgress(0.8f, 0f), 0.0001f)
+    }
+
+    @Test
+    fun rubyTimingDrivesTheParentWordMask() {
+        val word = LyricWord(
+            text = "空",
+            startTimeMs = 1_000,
+            endTimeMs = 3_000,
+            ruby = listOf(
+                LyricRuby("そ", 1_000, 1_500),
+                LyricRuby("ら", 2_000, 3_000),
+            ),
+        )
+
+        assertEquals(0.25f, amllWordProgress(word, 1_250f), 0.0001f)
+        assertEquals(0.5f, amllWordProgress(word, 1_750f), 0.0001f)
+        assertEquals(0.75f, amllWordProgress(word, 2_500f), 0.0001f)
+    }
+
+    @Test
+    fun continuousMaskCarriesTheFadeAcrossWordsAndTimestampGaps() {
+        val words = listOf(
+            word("one", 1_000, 2_000),
+            word("two", 2_500, 3_500),
+        )
+        val widths = listOf(100f, 100f)
+        val heights = listOf(40f, 40f)
+
+        val atFirstEnd = amllContinuousWordMaskProgresses(
+            words,
+            widths,
+            heights,
+            positionMs = 2_000f,
+        )
+        val duringGap = amllContinuousWordMaskProgresses(
+            words,
+            widths,
+            heights,
+            positionMs = 2_250f,
+        )
+        val atSecondStart = amllContinuousWordMaskProgresses(
+            words,
+            widths,
+            heights,
+            positionMs = 2_500f,
+        )
+
+        assertEquals(11f / 12f, atFirstEnd[0], 0.0001f)
+        assertEquals(1f / 12f, atFirstEnd[1], 0.0001f)
+        assertEquals(atFirstEnd[0], duringGap[0], 0.0001f)
+        assertEquals(atFirstEnd[1], duringGap[1], 0.0001f)
+        assertEquals(duringGap[0], atSecondStart[0], 0.0001f)
+        assertEquals(duringGap[1], atSecondStart[1], 0.0001f)
+
+        val atLineEnd = amllContinuousWordMaskProgresses(
+            words,
+            widths,
+            heights,
+            positionMs = 3_500f,
+        )
+        assertEquals(1f, atLineEnd[0], 0.0001f)
+        assertEquals(1f, atLineEnd[1], 0.0001f)
+    }
+
+    @Test
+    fun continuousMaskRetainsRubyWeightedTiming() {
+        val rubyWord = LyricWord(
+            text = "空",
+            startTimeMs = 1_000,
+            endTimeMs = 3_000,
+            ruby = listOf(
+                LyricRuby("そ", 1_000, 1_500),
+                LyricRuby("ら", 2_000, 3_000),
+            ),
+        )
+
+        val progresses = amllContinuousWordMaskProgresses(
+            words = listOf(rubyWord, word("next", 3_000, 4_000)),
+            widthsPx = listOf(100f, 100f),
+            heightsPx = listOf(40f, 40f),
+            positionMs = 1_750f,
+        )
+
+        assertEquals(0.375f, progresses[0], 0.0001f)
+        assertEquals(0f, progresses[1], 0.0001f)
+    }
+
+    @Test
+    fun continuousMaskAccountsForEmphasisDrawingHeadroom() {
+        val progresses = amllContinuousWordMaskProgresses(
+            words = listOf(
+                word("long", 1_000, 2_000),
+                word("next", 2_500, 3_500),
+            ),
+            widthsPx = listOf(100f, 100f),
+            heightsPx = listOf(40f, 40f),
+            positionMs = 2_000f,
+            horizontalPaddingsPx = listOf(40f, 0f),
+        )
+
+        assertEquals(0.75f, progresses[0], 0.0001f)
+        assertEquals(1f / 12f, progresses[1], 0.0001f)
+    }
+
+    @Test
+    fun buildsStableInterludeSlotsIndependentlyFromPlaybackTime() {
+        val groups = listOf(
+            AmllLyricGroup(line(listOf(word("first", 1_000, 2_000)), 1_000, 2_000)),
+            AmllLyricGroup(line(listOf(word("second", 7_000, 8_000)), 7_000, 8_000)),
+            AmllLyricGroup(
+                line(
+                    words = listOf(word("third", 14_000, 15_000)),
+                    start = 14_000,
+                    end = 15_000,
+                    duet = true,
+                ),
+            ),
+        )
+
+        val interludes = buildAmllInterludes(groups)
+
+        assertEquals(2, interludes.size)
+        assertEquals(0, interludes[0].anchorGroupIndex)
+        assertEquals(2_000L, interludes[0].startTimeMs)
+        assertEquals(6_750L, interludes[0].endTimeMs)
+        assertEquals(1, interludes[1].anchorGroupIndex)
+        assertEquals(true, interludes[1].isNextDuet)
+        assertEquals(interludes[0], findActiveAmllInterlude(interludes, 3_000))
+        assertEquals(null, findActiveAmllInterlude(interludes, 6_730))
+    }
+
+    @Test
     fun rubyWordRemainsOneTimedLayoutChunk() {
         val rubyWord = LyricWord(
             text = "空",

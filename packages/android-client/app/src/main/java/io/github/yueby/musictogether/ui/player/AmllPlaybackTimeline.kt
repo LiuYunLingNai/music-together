@@ -12,12 +12,13 @@ import androidx.compose.runtime.withFrameNanos
 import io.github.yueby.musictogether.lyrics.AmllInterlude
 import io.github.yueby.musictogether.lyrics.AmllLyricGroup
 import io.github.yueby.musictogether.lyrics.findAmllInterlude
+import io.github.yueby.musictogether.lyrics.isAmllInterludeActiveAt
 import kotlin.math.abs
 import kotlin.math.max
 
 private const val AmllClockSnapThresholdMs = 2_000f
 private const val AmllClockMaximumExtrapolationMs = 750f
-private const val AmllClockMaximumLeadMs = 90f
+private const val AmllClockMaximumLeadMs = 16f
 
 internal data class AmllTimelineFrame(
     val hotGroupIndices: Set<Int> = emptySet(),
@@ -126,10 +127,29 @@ internal fun isAmllTimelineSeek(
     sampleIntervalMs: Float,
 ): Boolean {
     val rawDelta = rawPositionMs - previousRawPositionMs
-    if (rawDelta < -120f) return true
+    // AMLL treats every backwards movement as a seek. Media3's playback
+    // position is monotonic during normal playback, so even a small negative
+    // delta represents a real discontinuity.
+    if (rawDelta < 0f) return true
     if (abs(rawPositionMs - currentPositionMs) > AmllClockSnapThresholdMs) return true
     val maximumExpectedAdvance = max(350f, sampleIntervalMs * 1.75f + 120f)
     return rawDelta > maximumExpectedAdvance
+}
+
+internal fun shouldReevaluateAmllTimeline(
+    frame: AmllTimelineFrame,
+    positionMs: Long,
+    seeking: Boolean,
+    playbackChanged: Boolean,
+    nextTimelineBoundaryMs: Long,
+): Boolean {
+    val expiredInterlude = frame.interlude?.let { interlude ->
+        !isAmllInterludeActiveAt(interlude, positionMs)
+    } == true
+    return seeking ||
+        playbackChanged ||
+        expiredInterlude ||
+        positionMs >= nextTimelineBoundaryMs
 }
 
 internal fun nextAmllTimelineBoundaryMs(
@@ -156,7 +176,7 @@ internal fun rememberAmllPlaybackTimeline(
     groups: List<AmllLyricGroup>,
     rawPositionMs: Float,
     isPlaying: Boolean,
-    resetKey: String?,
+    resetKey: Any?,
 ): AmllPlaybackTimeline {
     val position = remember(resetKey) { mutableFloatStateOf(rawPositionMs) }
     val frame = remember(resetKey, groups) {
@@ -223,21 +243,25 @@ internal fun rememberAmllPlaybackTimeline(
                     isPlaying = latestPlaying,
                 )
 
-                if (
-                    seeking ||
-                    playbackChanged ||
-                    position.floatValue.toLong() >= nextTimelineBoundary
+                val timelinePositionMs = position.floatValue.toLong()
+                if (shouldReevaluateAmllTimeline(
+                        frame = frame.value,
+                        positionMs = timelinePositionMs,
+                        seeking = seeking,
+                        playbackChanged = playbackChanged,
+                        nextTimelineBoundaryMs = nextTimelineBoundary,
+                    )
                 ) {
                     val nextFrame = advanceAmllTimelineFrame(
                         previous = frame.value,
                         groups = latestGroups,
-                        positionMs = position.floatValue.toLong(),
+                        positionMs = timelinePositionMs,
                         seeking = seeking,
                     )
                     if (nextFrame != frame.value) frame.value = nextFrame
                     nextTimelineBoundary = nextAmllTimelineBoundaryMs(
                         groups = latestGroups,
-                        positionMs = position.floatValue.toLong(),
+                        positionMs = timelinePositionMs,
                     )
                 }
                 lastFrameNanos = frameNanos

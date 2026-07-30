@@ -2,9 +2,12 @@ package io.github.yueby.musictogether.ui.player
 
 import io.github.yueby.musictogether.lyrics.AmllLyricGroup
 import io.github.yueby.musictogether.lyrics.amllWordProgress
+import io.github.yueby.musictogether.lyrics.findAmllInterlude
 import io.github.yueby.musictogether.model.LyricLine
 import io.github.yueby.musictogether.model.LyricWord
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -47,18 +50,30 @@ class AmllLyricsPlaybackTest {
     }
 
     @Test
-    fun onlyResetsFocusForInitialLayoutSeekOrNonAdjacentJump() {
-        assertTrue(shouldResetAmllFocus(-1, 0, timelineDiscontinuity = false))
+    fun onlyResetsFocusForInitialLayoutOrTimelineDiscontinuity() {
+        assertTrue(shouldResetAmllFocus(-1, timelineDiscontinuity = false))
         assertEquals(
             false,
-            shouldResetAmllFocus(4, 5, timelineDiscontinuity = false),
+            shouldResetAmllFocus(4, timelineDiscontinuity = false),
         )
-        assertEquals(
-            false,
-            shouldResetAmllFocus(5, 4, timelineDiscontinuity = false),
-        )
-        assertTrue(shouldResetAmllFocus(4, 6, timelineDiscontinuity = false))
-        assertTrue(shouldResetAmllFocus(4, 5, timelineDiscontinuity = true))
+        assertTrue(shouldResetAmllFocus(4, timelineDiscontinuity = true))
+    }
+
+    @Test
+    fun emphasisScaleUsesTheTextBaselineAsItsTransformOrigin() {
+        assertEquals(0.8f, amllBaselineTransformOrigin(40, 50), 0.0001f)
+        assertEquals(1f, amllBaselineTransformOrigin(-1, 50), 0.0001f)
+        assertEquals(1f, amllBaselineTransformOrigin(0, 0), 0.0001f)
+    }
+
+    @Test
+    fun normalAndEmphasizedChunksShareTheSameFlowLineBaseline() {
+        val lineBaseline = maxOf(40, 32)
+        val normalTop = amllBaselinePlacementOffset(lineBaseline, 40)
+        val emphasizedTop = amllBaselinePlacementOffset(lineBaseline, 32)
+
+        assertEquals(lineBaseline, normalTop + 40)
+        assertEquals(lineBaseline, emphasizedTop + 32)
     }
 
     @Test
@@ -125,12 +140,44 @@ class AmllLyricsPlaybackTest {
     }
 
     @Test
+    fun sharedClockDoesNotRunFarEnoughAheadToSkipFastOpeningWords() {
+        val corrected = extrapolateAmllPlaybackPosition(
+            currentPositionMs = 1_000f,
+            rawPositionMs = 1_000f,
+            sampleAgeMs = 0f,
+            deltaMs = 100f,
+            isPlaying = true,
+        )
+
+        assertEquals(1_016f, corrected, 0.001f)
+    }
+
+    @Test
+    fun emphasisHeadroomDoesNotChangeTheWordLayoutAdvance() {
+        assertEquals(
+            100,
+            amllCollapsedEffectWidth(
+                measuredWidthPx = 180,
+                horizontalHeadroomPx = 40,
+            ),
+        )
+    }
+
+    @Test
     fun detectsSmallBackwardSeeksWithoutMistakingNormalSnapshotsForSeeks() {
         assertTrue(
             isAmllTimelineSeek(
                 currentPositionMs = 2_000f,
                 previousRawPositionMs = 1_900f,
                 rawPositionMs = 1_500f,
+                sampleIntervalMs = 250f,
+            ),
+        )
+        assertTrue(
+            isAmllTimelineSeek(
+                currentPositionMs = 2_000f,
+                previousRawPositionMs = 1_900f,
+                rawPositionMs = 1_850f,
                 sampleIntervalMs = 250f,
             ),
         )
@@ -164,6 +211,49 @@ class AmllLyricsPlaybackTest {
     }
 
     @Test
+    fun displayedInterludeFollowsCurrentPlaybackPosition() {
+        val groups = listOf(group(1_000, 2_000), group(7_000, 8_000))
+
+        assertNull(findAmllInterlude(groups, 1_979))
+        assertNotNull(findAmllInterlude(groups, 2_000))
+        assertNotNull(findAmllInterlude(groups, 6_729))
+        assertNull(findAmllInterlude(groups, 6_730))
+        assertNull(findAmllInterlude(groups, 7_000))
+    }
+
+    @Test
+    fun expiredInterludeForcesTimelineReevaluationWithoutScheduledBoundary() {
+        val groups = listOf(group(1_000, 2_000), group(7_000, 8_000))
+        val activeFrame = advanceAmllTimelineFrame(
+            previous = AmllTimelineFrame(),
+            groups = groups,
+            positionMs = 3_000,
+            seeking = false,
+        )
+
+        assertNotNull(activeFrame.interlude)
+        assertEquals(
+            false,
+            shouldReevaluateAmllTimeline(
+                frame = activeFrame,
+                positionMs = 3_000,
+                seeking = false,
+                playbackChanged = false,
+                nextTimelineBoundaryMs = Long.MAX_VALUE,
+            ),
+        )
+        assertTrue(
+            shouldReevaluateAmllTimeline(
+                frame = activeFrame,
+                positionMs = 6_730,
+                seeking = false,
+                playbackChanged = false,
+                nextTimelineBoundaryMs = Long.MAX_VALUE,
+            ),
+        )
+    }
+
+    @Test
     fun timelineHandsFocusToTheNewHotGroupAndTracksSeekGeneration() {
         val groups = listOf(group(1_000, 2_000), group(2_000, 3_000))
         val first = advanceAmllTimelineFrame(
@@ -191,6 +281,39 @@ class AmllLyricsPlaybackTest {
         assertEquals(1, second.focusDirection)
         assertEquals(setOf(0), sought.bufferedGroupIndices)
         assertEquals(second.seekGeneration + 1, sought.seekGeneration)
+    }
+
+    @Test
+    fun simultaneousLinesAdvanceContinuouslyToTheFollowingGroup() {
+        val groups = listOf(
+            group(1_000, 3_000),
+            group(1_100, 3_000),
+            group(3_000, 4_000),
+        )
+        val simultaneous = advanceAmllTimelineFrame(
+            previous = AmllTimelineFrame(),
+            groups = groups,
+            positionMs = 1_500,
+            seeking = false,
+        )
+        val following = advanceAmllTimelineFrame(
+            previous = simultaneous,
+            groups = groups,
+            positionMs = 3_010,
+            seeking = false,
+        )
+
+        assertEquals(setOf(0, 1), simultaneous.bufferedGroupIndices)
+        assertEquals(0, simultaneous.focusedGroupIndex)
+        assertEquals(setOf(2), following.bufferedGroupIndices)
+        assertEquals(2, following.focusedGroupIndex)
+        assertEquals(
+            false,
+            shouldResetAmllFocus(
+                previousGroupIndex = simultaneous.focusedGroupIndex,
+                timelineDiscontinuity = false,
+            ),
+        )
     }
 
     @Test
