@@ -81,6 +81,7 @@ import io.github.yueby.musictogether.model.BilibiliMetadataMatchState
 import io.github.yueby.musictogether.model.ChatMessage
 import io.github.yueby.musictogether.model.RoomState
 import io.github.yueby.musictogether.model.Track
+import io.github.yueby.musictogether.model.queueIdentity
 import io.github.yueby.musictogether.network.searchInputMaxLength
 import kotlinx.coroutines.delay
 
@@ -337,7 +338,8 @@ internal fun SearchPane(state: AppState, viewModel: MusicTogetherViewModel) {
                 contentPadding = PaddingValues(vertical = 8.dp),
             ) {
                 items(state.searchResults, key = { it.id }) { track ->
-                    val isAdded = state.room?.queue?.any { it.id == track.id } == true
+                    val trackKey = track.queueIdentity()
+                    val isAdded = state.room?.queue?.any { it.queueIdentity() == trackKey } == true
                     TrackRow(
                         track = track,
                         subtitle = "${track.artist.joinToString(" / ")} · ${track.album}",

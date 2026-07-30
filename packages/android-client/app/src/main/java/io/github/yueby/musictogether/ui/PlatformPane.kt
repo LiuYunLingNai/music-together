@@ -75,6 +75,7 @@ import io.github.yueby.musictogether.model.PlatformAuthStatus
 import io.github.yueby.musictogether.model.Playlist
 import io.github.yueby.musictogether.model.QrLoginState
 import io.github.yueby.musictogether.model.Track
+import io.github.yueby.musictogether.model.queueIdentity
 
 private val platformOptions = listOf(
     "netease" to "网易云",
@@ -426,9 +427,12 @@ private fun PlaylistRow(playlist: Playlist, onClick: () -> Unit) {
 private fun PlaylistDetailPane(state: AppState, playlist: Playlist, viewModel: MusicTogetherViewModel) {
     val hub = state.platformHub
     val listState = rememberLazyListState()
-    val queueIds = state.room?.queue.orEmpty().mapTo(hashSetOf()) { it.id }
+    val queueKeys = state.room?.queue.orEmpty().mapTo(hashSetOf()) { it.queueIdentity() }
     val availableCount = (1000 - (state.room?.queue?.size ?: 0)).coerceAtLeast(0)
-    val addableCount = hub.playlistTracks.count { it.id !in queueIds }.coerceAtMost(availableCount)
+    val addableCount = hub.playlistTracks
+        .distinctBy { it.queueIdentity() }
+        .count { it.queueIdentity() !in queueKeys }
+        .coerceAtMost(availableCount)
     val shouldLoadMore by remember(
         listState,
         hub.playlistTracks.size,
@@ -497,7 +501,7 @@ private fun PlaylistDetailPane(state: AppState, playlist: Playlist, viewModel: M
                 items(hub.playlistTracks, key = { "${it.source}:${it.id}" }) { track ->
                     PlatformTrackRow(
                         track = track,
-                        isAdded = track.id in queueIds,
+                        isAdded = track.queueIdentity() in queueKeys,
                         onAdd = { viewModel.addTrack(track) },
                         onPin = { viewModel.insertAfterCurrent(track) },
                     )

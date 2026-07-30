@@ -26,6 +26,7 @@ import io.github.yueby.musictogether.model.Track
 import io.github.yueby.musictogether.model.UiNotice
 import io.github.yueby.musictogether.model.User
 import io.github.yueby.musictogether.model.UpdateDownloadSource
+import io.github.yueby.musictogether.model.queueIdentity
 import io.github.yueby.musictogether.network.AppUpdateInstaller
 import io.github.yueby.musictogether.network.AppUpdateService
 import io.github.yueby.musictogether.network.Events
@@ -172,7 +173,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private var waitingForJoinRoomState = false
     private var recoveredTrackId: String? = null
     private val pendingQueueActions = linkedMapOf<String, PendingQueueAction>()
-    private val pendingQueueTrackIds = mutableSetOf<String>()
+    private val pendingQueueTrackKeys = mutableSetOf<String>()
     private val autoRestoringPlatforms = mutableSetOf<String>()
     private val loadedPlaylistPlatforms = mutableSetOf<String>()
     private var downloadedUpdateApk: java.io.File? = null
@@ -620,7 +621,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         nativePlayer.stop()
         recoveredTrackId = null
         pendingQueueActions.clear()
-        pendingQueueTrackIds.clear()
+        pendingQueueTrackKeys.clear()
         chatVisible = false
         chatNotifications.clear()
         dismissBilibiliMetadata()
@@ -662,11 +663,13 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun addTrack(track: Track) {
+        if (rejectDuplicateQueueTrack(track)) return
         if (track.source == "bilibili") beginBilibiliMetadataMatch(track, pinned = false)
         else emitSearchQueueAction(track, pinned = false)
     }
 
     fun insertAfterCurrent(track: Track) {
+        if (rejectDuplicateQueueTrack(track)) return
         if (track.source == "bilibili") beginBilibiliMetadataMatch(track, pinned = true)
         else emitSearchQueueAction(track, pinned = true)
     }
@@ -861,13 +864,13 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
 
     fun addPlaylistTracksToQueue(playlist: Playlist) {
         val room = _state.value.room ?: return
-        val queueIds = room.queue.mapTo(mutableSetOf()) { it.id }
-        val reservedIds = pendingQueueTrackIds - queueIds
-        val unavailableIds = queueIds + reservedIds
-        val available = (MAX_QUEUE_SIZE - room.queue.size - reservedIds.size).coerceAtLeast(0)
+        val queueKeys = room.queue.mapTo(mutableSetOf()) { it.queueIdentity() }
+        val reservedKeys = pendingQueueTrackKeys - queueKeys
+        val unavailableKeys = queueKeys + reservedKeys
+        val available = (MAX_QUEUE_SIZE - room.queue.size - reservedKeys.size).coerceAtLeast(0)
         val tracks = _state.value.platformHub.playlistTracks
-            .filterNot { it.id in unavailableIds }
-            .distinctBy { it.id }
+            .filterNot { it.queueIdentity() in unavailableKeys }
+            .distinctBy { it.queueIdentity() }
             .take(available)
         if (tracks.isEmpty()) {
             setNotice(if (available == 0) "播放队列已满" else "当前已加载歌曲都在队列中")
@@ -881,7 +884,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     .put("tracks", JSONArray(page.map { it.toJson() }))
                     .put("playlistName", playlist.name),
             )
-            if (pageSent) pendingQueueTrackIds.addAll(page.map { it.id })
+            if (pageSent) pendingQueueTrackKeys.addAll(page.map { it.queueIdentity() })
             sent = pageSent && sent
         }
         AppLogger.info("Queue", "playlist batch=${tracks.size} source=${playlist.source} sent=$sent")
@@ -918,7 +921,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         val sent = socket.emit(Events.QUEUE_CLEAR)
         if (sent) {
             pendingQueueActions.clear()
-            pendingQueueTrackIds.clear()
+            pendingQueueTrackKeys.clear()
         }
         setNotice(
             if (sent) "播放列表已清空" else "清空播放列表失败，请检查连接",
@@ -1270,7 +1273,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             lastRtt = null
             recoveredTrackId = null
             pendingQueueActions.clear()
-            pendingQueueTrackIds.clear()
+            pendingQueueTrackKeys.clear()
             resetPlatformRoomState()
             _state.value = _state.value.copy(
                 connectionStatus = ConnectionStatus.Disconnected,
@@ -1405,9 +1408,9 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     desiredRoomId = null
                     desiredRoomPassword = null
                 }
-                if (pendingQueueActions.isNotEmpty() || pendingQueueTrackIds.isNotEmpty()) {
+                if (pendingQueueActions.isNotEmpty() || pendingQueueTrackKeys.isNotEmpty()) {
                     pendingQueueActions.clear()
-                    pendingQueueTrackIds.clear()
+                    pendingQueueTrackKeys.clear()
                     setError("点歌失败：$message")
                 } else {
                     setError(message)
@@ -1417,8 +1420,9 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 val queueJson = (data as? JSONObject)?.optJSONArray("queue") ?: JSONArray()
                 val queue = List(queueJson.length()) { index -> queueJson.getJSONObject(index).toTrack() }
                 updateRoom { it.copy(queue = queue) }
-                pendingQueueTrackIds.removeAll(queue.mapTo(hashSetOf()) { it.id })
-                val completed = pendingQueueActions.filterKeys { id -> queue.any { it.id == id } }
+                val queueKeys = queue.mapTo(hashSetOf()) { it.queueIdentity() }
+                pendingQueueTrackKeys.removeAll(queueKeys)
+                val completed = pendingQueueActions.filterKeys { it in queueKeys }
                 if (completed.isNotEmpty()) {
                     completed.keys.forEach(pendingQueueActions::remove)
                     val action = completed.values.last()
@@ -1973,21 +1977,27 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     private fun emitSearchQueueAction(track: Track, pinned: Boolean) {
-        if (_state.value.room?.queue.orEmpty().any { it.id == track.id } || track.id in pendingQueueTrackIds) {
-            setNotice("《${track.title}》已在播放列表中")
-            return
-        }
+        if (rejectDuplicateQueueTrack(track)) return
         val event = if (pinned) Events.QUEUE_INSERT_AFTER_CURRENT else Events.QUEUE_ADD
         val sent = socket.emit(event, JSONObject().put("track", track.toJson()))
         AppLogger.info("Queue", "search action=${if (pinned) "pin" else "add"} track=${track.id} sent=$sent")
         if (sent) {
-            pendingQueueTrackIds += track.id
-            pendingQueueActions[track.id] = PendingQueueAction(track.title, pinned)
+            val key = track.queueIdentity()
+            pendingQueueTrackKeys += key
+            pendingQueueActions[key] = PendingQueueAction(track.title, pinned)
         } else {
             _state.value = _state.value.copy(
                 notice = UiNotice(text = "点歌失败：消息未发送，请检查连接", isError = true),
             )
         }
+    }
+
+    private fun rejectDuplicateQueueTrack(track: Track): Boolean {
+        val key = track.queueIdentity()
+        val duplicate = key in pendingQueueTrackKeys ||
+            _state.value.room?.queue.orEmpty().any { it.queueIdentity() == key }
+        if (duplicate) setNotice("《${track.title}》已在播放列表中")
+        return duplicate
     }
 
     private fun startVote(
