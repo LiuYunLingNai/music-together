@@ -1,13 +1,6 @@
 package io.github.yueby.musictogether.ui.player
 
 import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -26,17 +19,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil3.compose.AsyncImage
 import io.github.yueby.musictogether.MusicTogetherViewModel
 import io.github.yueby.musictogether.lyrics.lyricOffsetKey
 import io.github.yueby.musictogether.model.LyricsState
@@ -44,7 +31,6 @@ import io.github.yueby.musictogether.model.RoomState
 import io.github.yueby.musictogether.model.Track
 import io.github.yueby.musictogether.model.VoteState
 import io.github.yueby.musictogether.player.PlayerUiState
-import io.github.yueby.musictogether.ui.rememberCoverImageRequest
 @Composable
 internal fun PlayerPane(
     room: RoomState,
@@ -52,6 +38,8 @@ internal fun PlayerPane(
     lyricOffsets: Map<String, Int>,
     activeVote: VoteState?,
     userId: String?,
+    chatUnreadCount: Int,
+    visualMotionEnabled: Boolean,
     viewModel: MusicTogetherViewModel,
     immersiveLandscape: Boolean,
     landscapeChromeVisible: Boolean,
@@ -74,6 +62,8 @@ internal fun PlayerPane(
         lyricOffsetMs = lyricOffsetMs,
         activeVote = activeVote,
         userId = userId,
+        chatUnreadCount = chatUnreadCount,
+        visualMotionEnabled = visualMotionEnabled,
         player = player,
         viewModel = viewModel,
         immersiveLandscape = immersiveLandscape,
@@ -136,6 +126,15 @@ internal fun portraitPlayerContentWidth(containerWidth: Dp): Dp {
         .coerceAtLeast(0.dp)
 }
 
+internal fun portraitPlayerPrimaryContentWidth(
+    contentWidth: Dp,
+    containerHeight: Dp,
+): Dp {
+    val heightConstrainedWidth = (containerHeight - 240.dp).coerceAtLeast(280.dp)
+    return minOf(contentWidth, heightConstrainedWidth, 560.dp)
+        .coerceAtLeast(0.dp)
+}
+
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun MobilePlayerSurface(
@@ -145,6 +144,8 @@ private fun MobilePlayerSurface(
     lyricOffsetMs: Int,
     activeVote: VoteState?,
     userId: String?,
+    chatUnreadCount: Int,
+    visualMotionEnabled: Boolean,
     player: PlayerUiState,
     viewModel: MusicTogetherViewModel,
     immersiveLandscape: Boolean,
@@ -157,30 +158,6 @@ private fun MobilePlayerSurface(
     onOpenChat: () -> Unit,
 ) {
     val playerShape = RoundedCornerShape(16.dp)
-    val backgroundScale by animateFloatAsState(
-        targetValue = if (player.playing) 1.30f else 1.22f,
-        animationSpec = tween(3200),
-        label = "background-scale",
-    )
-    val backgroundFlow = rememberInfiniteTransition(label = "background-flow")
-    val backgroundDrift by backgroundFlow.animateFloat(
-        initialValue = -1f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(12_000, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "background-drift",
-    )
-    val backgroundPulse by backgroundFlow.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(9_000, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "background-pulse",
-    )
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
@@ -188,50 +165,12 @@ private fun MobilePlayerSurface(
             .clip(if (immersiveLandscape) RoundedCornerShape(0.dp) else playerShape)
             .background(Color(0xFF111111)),
     ) {
-        val driftDistancePx = with(LocalDensity.current) {
-            (minOf(maxWidth, maxHeight) * 0.035f).toPx()
-        }
-
-        if (!track?.cover.isNullOrBlank()) {
-            AsyncImage(
-                model = rememberCoverImageRequest(track?.cover),
-                contentDescription = null,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        val flowScale = if (player.playing) backgroundPulse * 0.045f else 0f
-                        scaleX = backgroundScale + flowScale
-                        scaleY = backgroundScale + flowScale
-                        translationX = if (player.playing) backgroundDrift * driftDistancePx else 0f
-                        translationY =
-                            if (player.playing) -backgroundDrift * driftDistancePx * 0.62f else 0f
-                        rotationZ = if (player.playing) backgroundDrift * 0.12f else 0f
-                        alpha = 0.68f
-                    }
-                    .blur(32.dp),
-                contentScale = ContentScale.Crop,
-            )
-        }
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.radialGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            Color.Black.copy(alpha = 0.10f),
-                            Color.Black.copy(alpha = 0.38f),
-                        ),
-                        radius = 1250f,
-                    ),
-                )
-                .background(
-                    Brush.verticalGradient(
-                        0f to Color.Black.copy(alpha = 0.18f),
-                        0.50f to Color.Black.copy(alpha = 0.04f),
-                        1f to Color.Black.copy(alpha = 0.30f),
-                    ),
-                ),
+        PlayerBackdrop(
+            coverUrl = track?.cover,
+            playing = player.playing,
+            motionAllowed = visualMotionEnabled,
+            shortestSide = minOf(maxWidth, maxHeight),
+            modifier = Modifier.fillMaxSize(),
         )
         if (immersiveLandscape) {
             Box(
@@ -256,6 +195,8 @@ private fun MobilePlayerSurface(
             val metrics = playerLayoutMetrics(maxWidth, maxHeight, portrait)
             if (portrait) {
                 val contentWidth = portraitPlayerContentWidth(maxWidth)
+                val primaryContentWidth =
+                    portraitPlayerPrimaryContentWidth(contentWidth, maxHeight)
                 PortraitPlayerContent(
                     track = track,
                     room = room,
@@ -263,11 +204,15 @@ private fun MobilePlayerSurface(
                     lyricOffsetMs = lyricOffsetMs,
                     player = player,
                     viewModel = viewModel,
+                    activeVote = activeVote,
+                    userId = userId,
+                    chatUnreadCount = chatUnreadCount,
                     lyricsExpanded = lyricsExpanded,
                     onToggleLyrics = onToggleLyrics,
                     onOpenQueue = onOpenQueue,
                     onOpenChat = onOpenChat,
                     metrics = metrics,
+                    primaryContentWidth = primaryContentWidth,
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .width(contentWidth),
@@ -280,6 +225,7 @@ private fun MobilePlayerSurface(
                     lyricOffsetMs = lyricOffsetMs,
                     activeVote = activeVote,
                     userId = userId,
+                    chatUnreadCount = chatUnreadCount,
                     player = player,
                     viewModel = viewModel,
                     onOpenQueue = onOpenQueue,

@@ -5,19 +5,18 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.net.Uri
-import android.util.Base64
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.yueby.musictogether.account.AccountCoordinator
 import io.github.yueby.musictogether.logging.AppLogger
 import io.github.yueby.musictogether.lyrics.LyricsParser
 import io.github.yueby.musictogether.lyrics.lyricOffsetKey
 import io.github.yueby.musictogether.model.AppState
-import io.github.yueby.musictogether.model.AccountProfile
 import io.github.yueby.musictogether.model.AudioProxyPolicy
 import io.github.yueby.musictogether.model.BilibiliMetadataMatchState
-import io.github.yueby.musictogether.model.ChatMessage
 import io.github.yueby.musictogether.model.ConnectionStatus
 import io.github.yueby.musictogether.model.LyricsState
+import io.github.yueby.musictogether.model.nextChatUnreadCount
 import io.github.yueby.musictogether.model.PlatformHubState
 import io.github.yueby.musictogether.model.Playlist
 import io.github.yueby.musictogether.model.QrLoginState
@@ -28,8 +27,8 @@ import io.github.yueby.musictogether.model.UiNotice
 import io.github.yueby.musictogether.model.User
 import io.github.yueby.musictogether.model.UpdateDownloadSource
 import io.github.yueby.musictogether.model.queueIdentity
-import io.github.yueby.musictogether.network.AppUpdateInstaller
 import io.github.yueby.musictogether.network.AppUpdateService
+import io.github.yueby.musictogether.network.DiscoveryConnectionCoordinator
 import io.github.yueby.musictogether.network.Events
 import io.github.yueby.musictogether.network.MusicTogetherApi
 import io.github.yueby.musictogether.network.MusicTogetherSocket
@@ -57,6 +56,9 @@ import io.github.yueby.musictogether.player.ClockSync
 import io.github.yueby.musictogether.player.NativePlayer
 import io.github.yueby.musictogether.player.PlaybackCommandBridge
 import io.github.yueby.musictogether.player.PlayerUiState
+import io.github.yueby.musictogether.queue.QueueActionTracker
+import io.github.yueby.musictogether.settings.AppPreferences
+import io.github.yueby.musictogether.updates.AppUpdateCoordinator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -65,19 +67,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 
 class MusicTogetherViewModel(application: Application) : AndroidViewModel(application), SocketEvents {
-    private data class PendingQueueAction(val title: String, val pinned: Boolean)
     private data class PendingRoomCreation(val name: String, val password: String)
     private data class PlaylistContext(val source: String, val id: String, val roomId: String)
-    private data class PlaybackSyncSettings(val tempoEnabled: Boolean, val hardSeekEnabled: Boolean)
 
     private companion object {
         const val QR_EXPIRED = 800
@@ -86,30 +83,17 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         const val MAX_QUEUE_SIZE = 1000
         const val MAX_QUEUE_BATCH_SIZE = 200
         val BILIBILI_METADATA_SOURCES = setOf("netease", "tencent")
-        val ACCOUNT_ID_PATTERN = Regex("^[a-z0-9_-]{3,32}$")
-        const val MAX_AVATAR_BYTES = 5 * 1024 * 1024
         const val DEFAULT_SERVER_URL = "https://sharemusic.lyln114514.com"
-        const val SERVERS_KEY = "server_urls"
         const val MAX_SERVERS = 10
-        const val UPDATE_SOURCE_KEY = "update_download_source"
-        const val LYRIC_OFFSETS_KEY = "lyric_offsets"
-        const val PLAYBACK_TEMPO_SYNC_KEY = "playback_tempo_sync_enabled"
-        const val PLAYBACK_HARD_SEEK_SYNC_KEY = "playback_hard_seek_sync_enabled"
-        const val PLAYBACK_SETTINGS_SCHEMA_KEY = "playback_settings_schema_version"
-        const val PLAYBACK_SETTINGS_SCHEMA_VERSION = 2
-        const val SYNC_PACKET_INTERVAL_KEY = "sync_packet_interval_seconds"
         const val DEFAULT_SYNC_PACKET_INTERVAL_SECONDS = 3
         const val MIN_SYNC_PACKET_INTERVAL_SECONDS = 1
         const val MAX_SYNC_PACKET_INTERVAL_SECONDS = 60
         const val GITHUB_RELEASES_API = "https://api.github.com/repos/LiuYunLingNai/music-together/releases"
     }
 
-    private val preferences = application.getSharedPreferences("music_together", Context.MODE_PRIVATE)
-    private val playbackSyncSettings = loadPlaybackSyncSettings()
-    private val initialServerUrls = ServerCatalog.decode(
-        preferences.getString(SERVERS_KEY, null),
-        preferences.getString("server_url", DEFAULT_SERVER_URL).orEmpty().ifBlank { DEFAULT_SERVER_URL },
-    ).ifEmpty { listOf(DEFAULT_SERVER_URL) }
+    private val appPreferences = AppPreferences(application)
+    private val playbackSyncSettings = appPreferences.loadPlaybackSyncSettings()
+    private val initialServerUrls = appPreferences.initialServerUrls(DEFAULT_SERVER_URL)
     private val okHttp = OkHttpClient.Builder()
         .cookieJar(PersistentCookieJar(application))
         .connectTimeout(12, TimeUnit.SECONDS)
@@ -117,7 +101,6 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         .pingInterval(25, TimeUnit.SECONDS)
         .build()
     private val api = MusicTogetherApi(okHttp)
-    private val appUpdateService = AppUpdateService(okHttp)
     private val socket = MusicTogetherSocket(okHttp, this)
     private val chatNotifications = ChatNotificationManager(application)
     private val clock = ClockSync()
@@ -126,19 +109,26 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             serverUrl = initialServerUrls.first(),
             selectedServerUrl = initialServerUrls.first(),
             servers = initialServerUrls.map { ServerConnection(it) },
-            nickname = preferences.getString("nickname", "").orEmpty(),
-            lyricOffsets = loadLyricOffsets(),
+            nickname = appPreferences.nickname(),
+            lyricOffsets = appPreferences.loadLyricOffsets(),
             playbackTempoSyncEnabled = playbackSyncSettings.tempoEnabled,
             playbackHardSeekSyncEnabled = playbackSyncSettings.hardSeekEnabled,
-            syncPacketIntervalSeconds = preferences
-                .getInt(SYNC_PACKET_INTERVAL_KEY, DEFAULT_SYNC_PACKET_INTERVAL_SECONDS)
-                .coerceIn(MIN_SYNC_PACKET_INTERVAL_SECONDS, MAX_SYNC_PACKET_INTERVAL_SECONDS),
-            updateSource = preferences.getString(UPDATE_SOURCE_KEY, null)
-                ?.let { runCatching { UpdateDownloadSource.valueOf(it) }.getOrNull() }
-                ?: UpdateDownloadSource.GitHub,
+            syncPacketIntervalSeconds = appPreferences.syncPacketInterval(
+                defaultValue = DEFAULT_SYNC_PACKET_INTERVAL_SECONDS,
+                range = MIN_SYNC_PACKET_INTERVAL_SECONDS..MAX_SYNC_PACKET_INTERVAL_SECONDS,
+            ),
+            updateSource = appPreferences.updateSource(),
         ),
     )
     val state: StateFlow<AppState> = _state.asStateFlow()
+    private val appUpdates = AppUpdateCoordinator(
+        application = application,
+        service = AppUpdateService(okHttp),
+        scope = viewModelScope,
+        state = { _state.value },
+        updateState = { transform -> _state.value = transform(_state.value) },
+        showNotice = ::showNotice,
+    )
     private val nativePlayer = NativePlayer(
         application,
         viewModelScope,
@@ -147,13 +137,38 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         _state.value.playbackHardSeekSyncEnabled,
         ::onTrackEnded,
     )
+    private val accounts = AccountCoordinator(
+        application = application,
+        api = api,
+        preferences = appPreferences,
+        scope = viewModelScope,
+        state = { _state.value },
+        updateState = { transform -> _state.value = transform(_state.value) },
+        activeServer = { activeServer },
+        desiredRoomId = { desiredRoomId },
+        clearIdentityBoundState = ::clearIdentityBoundClientState,
+        reconnect = ::reconnectSocket,
+        prepareLogout = {
+            desiredRoomId = null
+            desiredRoomPassword = null
+            nativePlayer.stop()
+        },
+        applyAudioProxyPolicy = ::applyAudioProxyPolicy,
+        showNotice = ::showNotice,
+        setError = ::setError,
+    )
     val playerState: StateFlow<PlayerUiState> = nativePlayer.state
 
     private var activeServer: ServerAddress? = null
+    private val discovery = DiscoveryConnectionCoordinator(
+        okHttp = okHttp,
+        api = api,
+        scope = viewModelScope,
+        activeServer = { activeServer },
+        servers = { _state.value.servers },
+        updateServer = ::updateServerConnection,
+    )
     private var socketServerUrl: String? = null
-    private val discoverySockets = linkedMapOf<String, MusicTogetherSocket>()
-    private val discoveryReconnectJobs = mutableMapOf<String, Job>()
-    private val discoveryStarting = mutableSetOf<String>()
     private var desiredRoomId: String? = null
     private var desiredRoomPassword: String? = null
     private var pendingRoomCreation: PendingRoomCreation? = null
@@ -174,11 +189,9 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private var lastRtt: Long? = null
     private var waitingForJoinRoomState = false
     private var recoveredTrackId: String? = null
-    private val pendingQueueActions = linkedMapOf<String, PendingQueueAction>()
-    private val pendingQueueTrackKeys = mutableSetOf<String>()
+    private val queueActions = QueueActionTracker()
     private val autoRestoringPlatforms = mutableSetOf<String>()
     private val loadedPlaylistPlatforms = mutableSetOf<String>()
-    private var downloadedUpdateApk: java.io.File? = null
     private val supportedPlatforms = listOf("netease", "tencent", "kugou", "kugou_concept", "bilibili")
 
     init {
@@ -197,194 +210,37 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
 
     fun updateNickname(value: String) {
         val safe = value.take(40)
-        preferences.edit().putString("nickname", safe).apply()
+        appPreferences.setNickname(safe)
         _state.value = _state.value.copy(nickname = safe)
     }
 
-    fun refreshAccount(showError: Boolean = true) {
-        val server = activeServer ?: return
-        if (_state.value.accountLoading) return
-        _state.value = _state.value.copy(accountLoading = true)
-        viewModelScope.launch {
-            runCatching { api.currentProfile(server) }
-                .onSuccess(::applyAccountProfile)
-                .onFailure {
-                    AppLogger.warn("Account", "profile refresh failed: ${it.message}")
-                    _state.value = _state.value.copy(accountLoading = false)
-                    if (showError) setError(it.message ?: "账号资料加载失败")
-                }
-        }
-    }
+    fun refreshAccount(showError: Boolean = true) = accounts.refresh(showError)
 
-    fun saveNickname() {
-        val server = activeServer ?: return setError("请先连接服务端")
-        val nickname = _state.value.nickname.trim()
-        if (nickname.isBlank()) return setError("昵称不能为空")
-        runAccountAction("昵称已保存到服务器") { api.updateNickname(server, nickname) }
-    }
+    fun saveNickname() = accounts.saveNickname()
 
-    fun uploadAvatar(uri: Uri) {
-        val server = activeServer ?: return setError("请先连接服务端")
-        if (_state.value.accountProfile == null) return setError("请先保存昵称后再上传头像")
-        if (_state.value.accountBusy) return
-        _state.value = _state.value.copy(accountBusy = true)
-        viewModelScope.launch {
-            runCatching {
-                val resolver = getApplication<Application>().contentResolver
-                val mime = resolver.getType(uri)?.lowercase()
-                if (mime !in setOf("image/png", "image/jpeg", "image/jpg", "image/webp")) {
-                    error("仅支持 PNG、JPEG 和 WebP 图片")
-                }
-                val bytes = withContext(Dispatchers.IO) {
-                    resolver.openInputStream(uri)?.use(::readAvatarBytes) ?: error("无法读取图片")
-                }
-                val data = "data:$mime;base64,${Base64.encodeToString(bytes, Base64.NO_WRAP)}"
-                api.uploadAvatar(server, data)
-            }.onSuccess {
-                applyAccountProfile(it)
-                showNotice("头像已保存到服务器")
-            }.onFailure {
-                _state.value = _state.value.copy(accountBusy = false)
-                setError(it.message ?: "头像上传失败")
-            }
-        }
-    }
+    fun uploadAvatar(uri: Uri) = accounts.uploadAvatar(uri)
 
-    fun setInitialPassword(password: String) {
-        val server = activeServer ?: return setError("请先连接服务端")
-        if (password.length < 8) return setError("密码至少需要 8 个字符")
-        if (_state.value.accountBusy) return
-        _state.value = _state.value.copy(accountBusy = true)
-        viewModelScope.launch {
-            runCatching {
-                api.setInitialPassword(server, password)
-                api.currentProfile(server) ?: error("请先设置昵称")
-            }.onSuccess {
-                applyAccountProfile(it)
-                showNotice("账号密码已设置")
-            }.onFailure {
-                _state.value = _state.value.copy(accountBusy = false)
-                setError(it.message ?: "密码设置失败")
-            }
-        }
-    }
+    fun setInitialPassword(password: String) = accounts.setInitialPassword(password)
 
-    fun updateAccountId(accountId: String, currentPassword: String?) {
-        val server = activeServer ?: return setError("请先连接服务端")
-        val normalized = accountId.trim().lowercase()
-        if (!ACCOUNT_ID_PATTERN.matches(normalized)) {
-            return setError("账号 ID 需为 3-32 位小写字母、数字、下划线或连字符")
-        }
-        if (_state.value.accountBusy) return
-        _state.value = _state.value.copy(accountBusy = true)
-        viewModelScope.launch {
-            runCatching { api.updateAccountId(server, normalized, currentPassword) }
-                .onSuccess { profile ->
-                    val roomId = desiredRoomId
-                    roomId?.let {
-                        preferences.edit().remove(rejoinKey(it)).remove("${rejoinKey(it)}:expires").apply()
-                    }
-                    applyAccountProfile(profile)
-                    showNotice("账号 ID 已修改")
-                    reconnectSocket(server)
-                }
-                .onFailure {
-                    _state.value = _state.value.copy(accountBusy = false)
-                    setError(it.message ?: "账号 ID 修改失败")
-                }
-        }
-    }
+    fun updateAccountId(accountId: String, currentPassword: String?) =
+        accounts.updateAccountId(accountId, currentPassword)
 
-    fun loginIdentity(accountId: String, password: String) {
-        val server = activeServer ?: return setError("请先连接服务端")
-        if (accountId.isBlank() || password.isBlank()) return setError("请输入账号 ID 和密码")
-        if (_state.value.accountBusy) return
-        _state.value = _state.value.copy(accountBusy = true)
-        viewModelScope.launch {
-            runCatching {
-                api.recoverIdentity(server, accountId.trim(), password)
-                api.currentProfile(server) ?: error("账号资料恢复失败")
-            }.onSuccess {
-                clearIdentityBoundClientState(server)
-                applyAccountProfile(it)
-                showNotice("账号登录成功")
-                reconnectSocket(server)
-            }.onFailure {
-                _state.value = _state.value.copy(accountBusy = false)
-                setError(it.message ?: "账号登录失败")
-            }
-        }
-    }
+    fun loginIdentity(accountId: String, password: String) = accounts.login(accountId, password)
 
-    fun logoutIdentity() {
-        val server = activeServer ?: return setError("请先连接服务端")
-        if (_state.value.accountBusy) return
-        _state.value = _state.value.copy(accountBusy = true)
-        viewModelScope.launch {
-            runCatching { api.logoutIdentity(server) }
-                .onSuccess { temporaryId ->
-                    desiredRoomId = null
-                    desiredRoomPassword = null
-                    nativePlayer.stop()
-                    clearIdentityBoundClientState(server)
-                    preferences.edit().remove("nickname").apply()
-                    _state.value = _state.value.copy(
-                        userId = temporaryId,
-                        nickname = "",
-                        accountProfile = null,
-                        accountBusy = false,
-                        room = null,
-                    )
-                    showNotice("已退出账号并切换到访客身份")
-                    reconnectSocket(server)
-                }
-                .onFailure {
-                    _state.value = _state.value.copy(accountBusy = false)
-                    setError(it.message ?: "退出账号失败")
-                }
-        }
-    }
+    fun logoutIdentity() = accounts.logout()
 
-    fun loadAdminData() {
-        val server = activeServer ?: return setError("请先连接服务端")
-        if (_state.value.accountProfile?.role != "admin") return setError("需要服务器管理员权限")
-        if (_state.value.adminLoading) return
-        _state.value = _state.value.copy(adminLoading = true)
-        viewModelScope.launch {
-            runCatching {
-                Triple(api.adminUsers(server), api.adminRooms(server), api.adminAudioProxyPolicy(server))
-            }
-                .onSuccess { (users, rooms, policy) ->
-                    _state.value = _state.value.copy(
-                        adminUsers = users,
-                        adminRooms = rooms,
-                        audioProxyPolicy = policy,
-                        adminLoading = false,
-                    )
-                }
-                .onFailure {
-                    _state.value = _state.value.copy(adminLoading = false)
-                    setError(it.message ?: "管理员数据加载失败")
-                }
-        }
-    }
+    fun loadAdminData() = accounts.loadAdminData()
 
-    fun deleteAdminUser(userId: String) = runAdminAction(userId, "账号已删除") { server ->
-        api.deleteAdminUser(server, userId)
-    }
+    fun deleteAdminUser(userId: String) = accounts.deleteAdminUser(userId)
 
-    fun resetAdminPassword(userId: String, password: String) {
-        if (password.length < 8) return setError("密码至少需要 8 个字符")
-        runAdminAction(userId, "密码已重置") { server -> api.resetAdminPassword(server, userId, password) }
-    }
+    fun resetAdminPassword(userId: String, password: String) =
+        accounts.resetAdminPassword(userId, password)
 
-    fun dissolveAdminRoom(roomId: String) = runAdminAction(roomId, "房间已解散") { server ->
-        api.dissolveAdminRoom(server, roomId)
-    }
+    fun dissolveAdminRoom(roomId: String) = accounts.dissolveAdminRoom(roomId)
 
-    fun updateBilibiliForceProxy(enabled: Boolean) = updateAudioProxyPolicy("bilibili", enabled)
+    fun updateBilibiliForceProxy(enabled: Boolean) = accounts.updateBilibiliForceProxy(enabled)
 
-    fun updateKugouForceProxy(enabled: Boolean) = updateAudioProxyPolicy("kugou", enabled)
+    fun updateKugouForceProxy(enabled: Boolean) = accounts.updateKugouForceProxy(enabled)
 
     fun updateRoomAudioQuality(quality: String) {
         val value: Any = quality.toIntOrNull() ?: quality
@@ -400,13 +256,13 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun updatePlaybackTempoSync(enabled: Boolean) {
-        preferences.edit().putBoolean(PLAYBACK_TEMPO_SYNC_KEY, enabled).apply()
+        appPreferences.setPlaybackTempoSync(enabled)
         _state.value = _state.value.copy(playbackTempoSyncEnabled = enabled)
         nativePlayer.setTempoSyncEnabled(enabled)
     }
 
     fun updatePlaybackHardSeekSync(enabled: Boolean) {
-        preferences.edit().putBoolean(PLAYBACK_HARD_SEEK_SYNC_KEY, enabled).apply()
+        appPreferences.setPlaybackHardSeekSync(enabled)
         _state.value = _state.value.copy(playbackHardSeekSyncEnabled = enabled)
         nativePlayer.setHardSeekSyncEnabled(enabled)
     }
@@ -414,7 +270,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     fun updateSyncPacketInterval(seconds: Int) {
         val value = seconds.coerceIn(MIN_SYNC_PACKET_INTERVAL_SECONDS, MAX_SYNC_PACKET_INTERVAL_SECONDS)
         if (value == _state.value.syncPacketIntervalSeconds) return
-        preferences.edit().putInt(SYNC_PACKET_INTERVAL_KEY, value).apply()
+        appPreferences.setSyncPacketInterval(value)
         _state.value = _state.value.copy(syncPacketIntervalSeconds = value)
         if (_state.value.connectionStatus == ConnectionStatus.Connected) {
             stopPeriodicJobs()
@@ -455,10 +311,8 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         val normalized = ServerAddress.parse(serverUrl)?.displayUrl ?: return
         val remaining = _state.value.servers.filterNot { it.url == normalized }
         if (remaining.isEmpty()) return setError("至少保留一个服务器")
-        discoveryReconnectJobs.remove(normalized)?.cancel()
-        discoveryStarting -= normalized
-        discoverySockets.remove(normalized)?.disconnect()
-        persistServers(remaining.map(ServerConnection::url))
+        discovery.remove(normalized)
+        appPreferences.persistServers(remaining.map(ServerConnection::url))
         _state.value = _state.value.copy(servers = remaining)
         if (activeServer?.displayUrl == normalized) selectServer(remaining.first().url)
     }
@@ -474,7 +328,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         desiredRoomPassword = password
         pendingRoomCreation = null
         if (activeServer?.displayUrl == server.displayUrl && _state.value.connectionStatus == ConnectionStatus.Connected) {
-            withPersistedNickname { emitJoin(roomId, password) }
+            accounts.withPersistedNickname { emitJoin(roomId, password) }
         } else {
             connectToServer(server, keepDesiredRoom = true)
         }
@@ -501,11 +355,9 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             resetPlatformRoomState()
         }
         val serverUrls = ServerCatalog.normalize(_state.value.servers.map(ServerConnection::url) + parsed.displayUrl)
-        persistServers(serverUrls)
-        discoveryReconnectJobs.remove(parsed.displayUrl)?.cancel()
-        discoveryStarting -= parsed.displayUrl
-        discoverySockets.remove(parsed.displayUrl)?.disconnect()
-        preferences.edit().putString("server_url", parsed.displayUrl).apply()
+        appPreferences.persistServers(serverUrls)
+        discovery.remove(parsed.displayUrl)
+        appPreferences.selectServer(parsed.displayUrl)
         val existingServers = _state.value.servers
         val selectedRooms = existingServers.firstOrNull { it.url == parsed.displayUrl }?.rooms.orEmpty()
         _state.value = _state.value.copy(
@@ -531,7 +383,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             audioProxyPolicy = if (serverChanged) AudioProxyPolicy() else _state.value.audioProxyPolicy,
             error = null,
         )
-        syncDiscoveryConnections()
+        discovery.sync()
         viewModelScope.launch {
             runCatching { api.bootstrapIdentity(parsed) }
                 .onSuccess { userId ->
@@ -539,7 +391,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                         _state.value = _state.value.copy(userId = userId, accountLoading = true)
                         runCatching { api.currentProfile(parsed) }
                             .onSuccess { profile ->
-                                if (activeServer?.displayUrl == parsed.displayUrl) applyAccountProfile(profile)
+                                if (activeServer?.displayUrl == parsed.displayUrl) accounts.applyProfile(profile)
                             }
                             .onFailure {
                                 if (activeServer?.displayUrl == parsed.displayUrl) {
@@ -574,11 +426,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         resetPlatformRoomState()
         socket.disconnect()
         socketServerUrl = null
-        discoveryReconnectJobs.values.forEach { it.cancel() }
-        discoveryReconnectJobs.clear()
-        discoveryStarting.clear()
-        discoverySockets.values.forEach(MusicTogetherSocket::disconnect)
-        discoverySockets.clear()
+        discovery.disconnectAll()
         _state.value = _state.value.copy(
             connectionStatus = ConnectionStatus.Disconnected,
             servers = _state.value.servers.map { it.copy(status = ConnectionStatus.Disconnected) },
@@ -587,7 +435,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
 
     fun refreshRooms() {
         socket.emit(Events.ROOM_LIST)
-        discoverySockets.values.forEach { it.emit(Events.ROOM_LIST) }
+        discovery.refreshRooms()
     }
 
     fun createRoomOnServer(serverUrl: String, roomName: String, password: String) {
@@ -634,14 +482,18 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         desiredRoomPassword = null
         nativePlayer.stop()
         recoveredTrackId = null
-        pendingQueueActions.clear()
-        pendingQueueTrackKeys.clear()
+        queueActions.clear()
         chatVisible = false
         chatNotifications.clear()
         dismissBilibiliMetadata()
         resetPlatformRoomState()
         waitingForJoinRoomState = false
-        _state.value = _state.value.copy(room = null, messages = emptyList(), activeVote = null)
+        _state.value = _state.value.copy(
+            room = null,
+            messages = emptyList(),
+            chatUnreadCount = 0,
+            activeVote = null,
+        )
     }
 
     fun search(keyword: String, source: String) {
@@ -785,7 +637,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
 
     fun logoutPlatform(platform: String) {
         if (platform !in supportedPlatforms) return
-        removeStoredPlatformCookie(platform)
+        appPreferences.removePlatformCookie(activeServer?.displayUrl.orEmpty(), platform)
         loadedPlaylistPlatforms.remove(platform)
         socket.emit(Events.AUTH_LOGOUT, JSONObject().put("platform", platform))
         val hub = _state.value.platformHub
@@ -879,7 +731,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     fun addPlaylistTracksToQueue(playlist: Playlist) {
         val room = _state.value.room ?: return
         val queueKeys = room.queue.mapTo(mutableSetOf()) { it.queueIdentity() }
-        val reservedKeys = pendingQueueTrackKeys - queueKeys
+        val reservedKeys = queueActions.reservedKeys(queueKeys)
         val unavailableKeys = queueKeys + reservedKeys
         val available = (MAX_QUEUE_SIZE - room.queue.size - reservedKeys.size).coerceAtLeast(0)
         val tracks = _state.value.platformHub.playlistTracks
@@ -898,7 +750,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     .put("tracks", JSONArray(page.map { it.toJson() }))
                     .put("playlistName", playlist.name),
             )
-            if (pageSent) pendingQueueTrackKeys.addAll(page.map { it.queueIdentity() })
+            if (pageSent) queueActions.reserveAll(page.map { it.queueIdentity() })
             sent = pageSent && sent
         }
         AppLogger.info("Queue", "playlist batch=${tracks.size} source=${playlist.source} sent=$sent")
@@ -934,8 +786,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         if (!canControl()) return
         val sent = socket.emit(Events.QUEUE_CLEAR)
         if (sent) {
-            pendingQueueActions.clear()
-            pendingQueueTrackKeys.clear()
+            queueActions.clear()
         }
         setNotice(
             if (sent) "播放列表已清空" else "清空播放列表失败，请检查连接",
@@ -989,7 +840,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         val value = offsetMs.coerceIn(-10_000, 10_000)
         val lyricOffsets = _state.value.lyricOffsets.toMutableMap()
         if (value == 0) lyricOffsets.remove(key) else lyricOffsets[key] = value
-        persistLyricOffsets(lyricOffsets)
+        appPreferences.persistLyricOffsets(lyricOffsets)
         _state.value = _state.value.copy(lyricOffsets = lyricOffsets)
     }
 
@@ -1030,7 +881,10 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
 
     fun setChatVisible(visible: Boolean) {
         chatVisible = visible
-        if (visible) chatNotifications.clear()
+        if (visible) {
+            chatNotifications.clear()
+            _state.value = _state.value.copy(chatUnreadCount = 0)
+        }
     }
 
     fun castVote(approve: Boolean) = socket.emit(Events.VOTE_CAST, JSONObject().put("approve", approve))
@@ -1044,81 +898,16 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun selectUpdateDownloadSource(source: UpdateDownloadSource) {
-        preferences.edit().putString(UPDATE_SOURCE_KEY, source.name).apply()
+        appPreferences.setUpdateSource(source)
         _state.value = _state.value.copy(updateSource = source)
     }
 
-    fun checkForAppUpdate(silent: Boolean = false) {
-        if (_state.value.updateChecking || _state.value.updateDownloading) return
-        _state.value = _state.value.copy(updateChecking = true, updateError = null)
-        viewModelScope.launch {
-            runCatching {
-                appUpdateService.latestRelease(GITHUB_RELEASES_API, BuildConfig.VERSION_NAME, BuildConfig.FLAVOR)
-            }.onSuccess { update ->
-                val keepDownloadedApk = update?.versionName == _state.value.updateInfo?.versionName &&
-                    downloadedUpdateApk?.exists() == true
-                if (!keepDownloadedApk) downloadedUpdateApk = null
-                _state.value = _state.value.copy(
-                    updateChecking = false,
-                    updateInfo = update,
-                    updateReadyToInstall = keepDownloadedApk,
-                    updateError = null,
-                )
-                if (update != null && !silent) showNotice("发现新版本 v${update.versionName}")
-            }.onFailure { error ->
-                AppLogger.warn("Update", "release check failed: ${error.message}")
-                _state.value = _state.value.copy(
-                    updateChecking = false,
-                    updateError = if (silent) null else "更新检查失败，请检查网络后重试",
-                )
-            }
-        }
-    }
+    fun checkForAppUpdate(silent: Boolean = false) =
+        appUpdates.check(silent = silent, releasesApi = GITHUB_RELEASES_API)
 
-    fun downloadAppUpdate() {
-        val update = _state.value.updateInfo ?: return
-        val source = _state.value.updateSource
-        if (_state.value.updateDownloading) return
-        downloadedUpdateApk = null
-        _state.value = _state.value.copy(
-            updateDownloading = true,
-            updateDownloadProgress = 0,
-            updateReadyToInstall = false,
-            updateError = null,
-        )
-        viewModelScope.launch {
-            runCatching {
-                appUpdateService.downloadAndVerify(getApplication<Application>(), update, source) { progress ->
-                    _state.value = _state.value.copy(updateDownloadProgress = progress)
-                }
-            }.onSuccess { apk ->
-                downloadedUpdateApk = apk
-                _state.value = _state.value.copy(
-                    updateDownloading = false,
-                    updateDownloadProgress = 100,
-                    updateReadyToInstall = true,
-                )
-                showNotice("更新包已下载并完成校验")
-            }.onFailure { error ->
-                AppLogger.warn("Update", "download failed: ${error.message}")
-                _state.value = _state.value.copy(
-                    updateDownloading = false,
-                    updateDownloadProgress = null,
-                    updateError = "更新下载或校验失败，请切换下载源后重试",
-                )
-            }
-        }
-    }
+    fun downloadAppUpdate() = appUpdates.download()
 
-    fun installDownloadedUpdate() {
-        val apk = downloadedUpdateApk?.takeIf { it.exists() } ?: run {
-            _state.value = _state.value.copy(updateError = "更新包不可用，请重新下载")
-            return
-        }
-        if (!AppUpdateInstaller.install(getApplication<Application>(), apk)) {
-            showNotice("请允许本应用安装未知来源应用后，再次点击安装")
-        }
-    }
+    fun installDownloadedUpdate() = appUpdates.install()
 
     fun clearLogs() {
         val cleared = AppLogger.clear()
@@ -1144,100 +933,11 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             state.accountProfile?.role == "admin"
     }
 
-    private fun persistServers(urls: List<String>) {
-        preferences.edit().putString(SERVERS_KEY, ServerCatalog.encode(urls)).apply()
-    }
-
     private fun updateServerConnection(url: String, transform: (ServerConnection) -> ServerConnection) {
         val current = _state.value
         _state.value = current.copy(
             servers = current.servers.map { if (it.url == url) transform(it) else it },
         )
-    }
-
-    private fun syncDiscoveryConnections() {
-        val activeUrl = activeServer?.displayUrl
-        val wanted = _state.value.servers.map(ServerConnection::url).filterNot { it == activeUrl }.toSet()
-        (discoverySockets.keys - wanted).forEach { url ->
-            discoverySockets.remove(url)?.disconnect()
-            discoveryReconnectJobs.remove(url)?.cancel()
-            discoveryStarting -= url
-        }
-        wanted.forEach { url ->
-            if (url !in discoverySockets && url !in discoveryStarting) {
-                ServerAddress.parse(url)?.let(::connectDiscoveryServer)
-            }
-        }
-    }
-
-    private fun connectDiscoveryServer(server: ServerAddress) {
-        val url = server.displayUrl
-        if (url == activeServer?.displayUrl || url in discoveryStarting || url in discoverySockets) return
-        discoveryStarting += url
-        updateServerConnection(url) { it.copy(status = ConnectionStatus.Connecting, error = null) }
-        viewModelScope.launch {
-            runCatching { api.bootstrapIdentity(server) }
-                .onSuccess {
-                    discoveryStarting -= url
-                    if (url == activeServer?.displayUrl || _state.value.servers.none { it.url == url }) return@onSuccess
-                    val discoverySocket = MusicTogetherSocket(okHttp, DiscoverySocketEvents(url))
-                    discoverySockets[url] = discoverySocket
-                    discoverySocket.connect(server)
-                }
-                .onFailure { error ->
-                    discoveryStarting -= url
-                    AppLogger.warn("Discovery", "bootstrap failed server=$url reason=${error.message.orEmpty()}")
-                    updateServerConnection(url) {
-                        it.copy(status = ConnectionStatus.Disconnected, error = error.message ?: "连接失败")
-                    }
-                    scheduleDiscoveryReconnect(url)
-                }
-        }
-    }
-
-    private fun scheduleDiscoveryReconnect(url: String) {
-        if (url == activeServer?.displayUrl || _state.value.servers.none { it.url == url }) return
-        discoveryReconnectJobs.remove(url)?.cancel()
-        discoveryReconnectJobs[url] = viewModelScope.launch {
-            delay(3_000)
-            discoverySockets.remove(url)?.disconnect()
-            ServerAddress.parse(url)?.let(::connectDiscoveryServer)
-        }
-    }
-
-    private inner class DiscoverySocketEvents(private val serverUrl: String) : SocketEvents {
-        override fun onConnected() {
-            viewModelScope.launch {
-                discoveryReconnectJobs.remove(serverUrl)?.cancel()
-                updateServerConnection(serverUrl) {
-                    it.copy(status = ConnectionStatus.Connected, error = null)
-                }
-                discoverySockets[serverUrl]?.emit(Events.ROOM_LIST)
-            }
-        }
-
-        override fun onDisconnected(reason: String?) {
-            viewModelScope.launch {
-                updateServerConnection(serverUrl) {
-                    it.copy(status = ConnectionStatus.Disconnected, error = reason?.takeIf(String::isNotBlank))
-                }
-                scheduleDiscoveryReconnect(serverUrl)
-            }
-        }
-
-        override fun onEvent(event: String, data: Any?) {
-            if (event == Events.ROOM_LIST_UPDATE) {
-                val rooms = (data as? JSONArray)?.toRoomList().orEmpty()
-                viewModelScope.launch {
-                    updateServerConnection(serverUrl) { it.copy(rooms = rooms, error = null) }
-                }
-            } else if (event == "connect_error") {
-                val message = (data as? JSONObject)?.optString("message")?.takeIf(String::isNotBlank)
-                viewModelScope.launch {
-                    updateServerConnection(serverUrl) { it.copy(error = message ?: "连接认证失败") }
-                }
-            }
-        }
     }
 
     override fun onConnected() {
@@ -1286,8 +986,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             clock.reset()
             lastRtt = null
             recoveredTrackId = null
-            pendingQueueActions.clear()
-            pendingQueueTrackKeys.clear()
+            queueActions.clear()
             resetPlatformRoomState()
             _state.value = _state.value.copy(
                 connectionStatus = ConnectionStatus.Disconnected,
@@ -1344,7 +1043,10 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 val isJoinSnapshot = waitingForJoinRoomState
                 waitingForJoinRoomState = false
                 desiredRoomId = room.id
-                _state.value = _state.value.copy(room = room)
+                _state.value = _state.value.copy(
+                    room = room,
+                    chatUnreadCount = if (isJoinSnapshot) 0 else _state.value.chatUnreadCount,
+                )
                 if (_state.value.accountProfile == null) refreshAccount(showError = false)
                 restorePlatformAccounts(room.id)
                 if (room.currentTrack == null) {
@@ -1368,10 +1070,12 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 val roomId = value.optString("roomId")
                 val token = value.optString("token")
                 val expiresAt = value.optLong("expiresAt")
-                preferences.edit()
-                    .putString(rejoinKey(roomId), token)
-                    .putLong("${rejoinKey(roomId)}:expires", expiresAt)
-                    .apply()
+                appPreferences.saveRoomRejoin(
+                    serverUrl = activeServer?.displayUrl.orEmpty(),
+                    roomId = roomId,
+                    token = token,
+                    expiresAt = expiresAt,
+                )
             }
             Events.ROOM_LIST_UPDATE -> {
                 val rooms = (data as? JSONArray)?.toRoomList().orEmpty()
@@ -1432,9 +1136,8 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     desiredRoomId = null
                     desiredRoomPassword = null
                 }
-                if (pendingQueueActions.isNotEmpty() || pendingQueueTrackKeys.isNotEmpty()) {
-                    pendingQueueActions.clear()
-                    pendingQueueTrackKeys.clear()
+                if (queueActions.hasPending()) {
+                    queueActions.clear()
                     setError("点歌失败：$message")
                 } else {
                     setError(message)
@@ -1445,11 +1148,8 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 val queue = List(queueJson.length()) { index -> queueJson.getJSONObject(index).toTrack() }
                 updateRoom { it.copy(queue = queue) }
                 val queueKeys = queue.mapTo(hashSetOf()) { it.queueIdentity() }
-                pendingQueueTrackKeys.removeAll(queueKeys)
-                val completed = pendingQueueActions.filterKeys { it in queueKeys }
-                if (completed.isNotEmpty()) {
-                    completed.keys.forEach(pendingQueueActions::remove)
-                    val action = completed.values.last()
+                val action = queueActions.completePublished(queueKeys)
+                if (action != null) {
                     _state.value = _state.value.copy(
                         notice = UiNotice(
                             text = if (action.pinned) "已置顶点歌：《${action.title}》" else "点歌成功：《${action.title}》",
@@ -1492,11 +1192,23 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             }
             Events.CHAT_HISTORY -> {
                 val array = data as? JSONArray ?: JSONArray()
-                _state.value = _state.value.copy(messages = List(array.length()) { array.getJSONObject(it).toChatMessage() })
+                _state.value = _state.value.copy(
+                    messages = List(array.length()) { array.getJSONObject(it).toChatMessage() },
+                    chatUnreadCount = 0,
+                )
             }
             Events.CHAT_MESSAGE -> {
                 val message = (data as? JSONObject)?.toChatMessage() ?: return
-                _state.value = _state.value.copy(messages = (_state.value.messages + message).takeLast(200))
+                val current = _state.value
+                _state.value = current.copy(
+                    messages = (current.messages + message).takeLast(200),
+                    chatUnreadCount = nextChatUnreadCount(
+                        currentCount = current.chatUnreadCount,
+                        message = message,
+                        currentUserId = current.userId,
+                        chatVisible = chatVisible,
+                    ),
+                )
                 if (
                     message.type == "user" &&
                     message.userId != _state.value.userId &&
@@ -1591,7 +1303,13 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 val automatic = platform != null && autoRestoringPlatforms.remove(platform)
                 if (!success && platform == null) autoRestoringPlatforms.clear()
                 if (success && platform != null) {
-                    value.stringOrNull("cookie")?.let { storePlatformCookie(platform, it) }
+                    value.stringOrNull("cookie")?.let {
+                        appPreferences.storePlatformCookie(
+                            serverUrl = activeServer?.displayUrl.orEmpty(),
+                            platform = platform,
+                            cookie = it,
+                        )
+                    }
                     loadedPlaylistPlatforms.remove(platform)
                     socket.emit(Events.AUTH_GET_STATUS)
                 }
@@ -1649,9 +1367,16 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     private fun emitJoin(roomId: String, password: String) {
-        val tokenKey = rejoinKey(roomId)
-        val token = preferences.getString(tokenKey, null)
-        val expires = preferences.getLong("$tokenKey:expires", 0)
+        val rejoin = appPreferences.roomRejoin(activeServer?.displayUrl.orEmpty(), roomId)
+        val token = rejoin.token
+        val expires = rejoin.expiresAt
+        if (_state.value.room?.id != roomId) {
+            _state.value = _state.value.copy(
+                messages = emptyList(),
+                chatUnreadCount = 0,
+                activeVote = null,
+            )
+        }
         waitingForJoinRoomState = true
         AppLogger.info(
             "Room",
@@ -1669,8 +1394,6 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         }
     }
 
-    private fun rejoinKey(roomId: String): String = "rejoin:${activeServer?.displayUrl}:$roomId"
-
     private fun restorePlatformAccounts(roomId: String) {
         if (restoredAuthRoomId == roomId) return
         restoredAuthRoomId = roomId
@@ -1680,7 +1403,10 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             platformHub = PlatformHubState(statusLoaded = false),
         )
         supportedPlatforms.forEach { platform ->
-            val cookie = storedPlatformCookie(platform) ?: return@forEach
+            val cookie = appPreferences.platformCookie(
+                serverUrl = activeServer?.displayUrl.orEmpty(),
+                platform = platform,
+            ) ?: return@forEach
             autoRestoringPlatforms += platform
             socket.emit(
                 Events.AUTH_SET_COOKIE,
@@ -1777,56 +1503,6 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         autoRestoringPlatforms.clear()
         loadedPlaylistPlatforms.clear()
         _state.value = _state.value.copy(platformHub = PlatformHubState())
-    }
-
-    private fun platformCookieKey(platform: String): String =
-        "platform_auth:${activeServer?.displayUrl.orEmpty()}:$platform"
-
-    private fun loadPlaybackSyncSettings(): PlaybackSyncSettings {
-        val schemaVersion = preferences.getInt(PLAYBACK_SETTINGS_SCHEMA_KEY, 0)
-        if (schemaVersion < PLAYBACK_SETTINGS_SCHEMA_VERSION) {
-            preferences.edit()
-                .putBoolean(PLAYBACK_TEMPO_SYNC_KEY, false)
-                .putBoolean(PLAYBACK_HARD_SEEK_SYNC_KEY, false)
-                .putInt(PLAYBACK_SETTINGS_SCHEMA_KEY, PLAYBACK_SETTINGS_SCHEMA_VERSION)
-                .apply()
-            return PlaybackSyncSettings(tempoEnabled = false, hardSeekEnabled = false)
-        }
-        return PlaybackSyncSettings(
-            tempoEnabled = preferences.getBoolean(PLAYBACK_TEMPO_SYNC_KEY, false),
-            hardSeekEnabled = preferences.getBoolean(PLAYBACK_HARD_SEEK_SYNC_KEY, false),
-        )
-    }
-
-    private fun loadLyricOffsets(): Map<String, Int> {
-        val raw = preferences.getString(LYRIC_OFFSETS_KEY, null) ?: return emptyMap()
-        val json = runCatching { JSONObject(raw) }.getOrNull() ?: return emptyMap()
-        return buildMap {
-            val keys = json.keys()
-            while (keys.hasNext()) {
-                val key = keys.next()
-                val value = json.optInt(key, 0).coerceIn(-10_000, 10_000)
-                if (value != 0) put(key, value)
-            }
-        }
-    }
-
-    private fun persistLyricOffsets(offsets: Map<String, Int>) {
-        val json = JSONObject()
-        offsets.forEach { (key, value) -> json.put(key, value) }
-        preferences.edit().putString(LYRIC_OFFSETS_KEY, json.toString()).apply()
-    }
-
-    private fun storedPlatformCookie(platform: String): String? =
-        preferences.getString(platformCookieKey(platform), null)?.takeIf { it.isNotBlank() }
-
-    private fun storePlatformCookie(platform: String, cookie: String) {
-        preferences.edit().putString(platformCookieKey(platform), cookie).apply()
-        AppLogger.info("Auth", "stored platform credential platform=$platform server=${activeServer?.displayUrl.orEmpty()}")
-    }
-
-    private fun removeStoredPlatformCookie(platform: String) {
-        preferences.edit().remove(platformCookieKey(platform)).apply()
     }
 
     private fun setNotice(message: String, isError: Boolean = false) {
@@ -2032,8 +1708,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         AppLogger.info("Queue", "search action=${if (pinned) "pin" else "add"} track=${track.id} sent=$sent")
         if (sent) {
             val key = track.queueIdentity()
-            pendingQueueTrackKeys += key
-            pendingQueueActions[key] = PendingQueueAction(track.title, pinned)
+            queueActions.reserve(key, track.title, pinned)
         } else {
             _state.value = _state.value.copy(
                 notice = UiNotice(text = "点歌失败：消息未发送，请检查连接", isError = true),
@@ -2043,7 +1718,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
 
     private fun rejectDuplicateQueueTrack(track: Track): Boolean {
         val key = track.queueIdentity()
-        val duplicate = key in pendingQueueTrackKeys ||
+        val duplicate = queueActions.contains(key) ||
             _state.value.room?.queue.orEmpty().any { it.queueIdentity() == key }
         if (duplicate) setNotice("《${track.title}》已在播放列表中")
         return duplicate
@@ -2130,115 +1805,6 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         }
     }
 
-    private fun applyAccountProfile(profile: AccountProfile?) {
-        if (profile == null) {
-            _state.value = _state.value.copy(accountProfile = null, accountLoading = false, accountBusy = false)
-            return
-        }
-        val server = activeServer
-        val resolved = profile.copy(avatarUrl = server?.let { api.resolveResource(it, profile.avatarUrl) } ?: profile.avatarUrl)
-        preferences.edit().putString("nickname", resolved.nickname).apply()
-        val previousId = _state.value.userId
-        _state.value = _state.value.copy(
-            userId = resolved.id,
-            nickname = resolved.nickname,
-            accountProfile = resolved,
-            accountLoading = false,
-            accountBusy = false,
-            room = _state.value.room?.let { room ->
-                room.copy(
-                    users = room.users.map { user ->
-                        if (user.id == resolved.id || user.id == previousId) {
-                            user.copy(id = resolved.id, nickname = resolved.nickname, avatarUrl = resolved.avatarUrl)
-                        } else {
-                            user
-                        }
-                    },
-                )
-            },
-        )
-    }
-
-    private fun withPersistedNickname(action: () -> Unit) {
-        val server = activeServer
-        val nickname = _state.value.nickname.trim()
-        if (server == null || _state.value.accountProfile?.nickname == nickname) {
-            action()
-            return
-        }
-        viewModelScope.launch {
-            runCatching { api.updateNickname(server, nickname) }
-                .onSuccess(::applyAccountProfile)
-                .onFailure { AppLogger.warn("Account", "nickname sync before room action failed: ${it.message}") }
-            action()
-        }
-    }
-
-    private fun runAccountAction(successMessage: String, action: suspend () -> AccountProfile) {
-        if (_state.value.accountBusy) return
-        _state.value = _state.value.copy(accountBusy = true)
-        viewModelScope.launch {
-            runCatching { action() }
-                .onSuccess {
-                    applyAccountProfile(it)
-                    showNotice(successMessage)
-                }
-                .onFailure {
-                    _state.value = _state.value.copy(accountBusy = false)
-                    setError(it.message ?: "账号操作失败")
-                }
-        }
-    }
-
-    private fun runAdminAction(
-        targetId: String,
-        successMessage: String,
-        action: suspend (ServerAddress) -> Unit,
-    ) {
-        val server = activeServer ?: return setError("请先连接服务端")
-        if (_state.value.accountProfile?.role != "admin") return setError("需要服务器管理员权限")
-        if (_state.value.adminWorkingId != null) return
-        _state.value = _state.value.copy(adminWorkingId = targetId)
-        viewModelScope.launch {
-            runCatching { action(server) }
-                .onSuccess {
-                    _state.value = _state.value.copy(adminWorkingId = null)
-                    showNotice(successMessage)
-                    loadAdminData()
-                }
-                .onFailure {
-                    _state.value = _state.value.copy(adminWorkingId = null)
-                    setError(it.message ?: "管理员操作失败")
-                }
-        }
-    }
-
-    private fun updateAudioProxyPolicy(source: String, enabled: Boolean) {
-        val server = activeServer ?: return setError("请先连接服务端")
-        if (_state.value.accountProfile?.role != "admin") return setError("需要服务器管理员权限")
-        if (_state.value.adminWorkingId != null) return
-        val targetId = "audio-proxy-policy:$source"
-        _state.value = _state.value.copy(adminWorkingId = targetId)
-        viewModelScope.launch {
-            runCatching {
-                when (source) {
-                    "bilibili" -> api.updateAdminAudioProxyPolicy(server, bilibiliForceProxy = enabled)
-                    "kugou" -> api.updateAdminAudioProxyPolicy(server, kugouForceProxy = enabled)
-                    else -> error("不支持的音源")
-                }
-            }
-                .onSuccess { policy ->
-                    _state.value = _state.value.copy(adminWorkingId = null)
-                    applyAudioProxyPolicy(policy)
-                    showNotice("音频代理策略已更新")
-                }
-                .onFailure {
-                    _state.value = _state.value.copy(adminWorkingId = null)
-                    setError(it.message ?: "音频代理策略更新失败")
-                }
-        }
-    }
-
     private fun reconnectSocket(server: ServerAddress) {
         if (activeServer?.displayUrl != server.displayUrl) {
             AppLogger.warn(
@@ -2255,7 +1821,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     private fun emitCreateRoom(creation: PendingRoomCreation) {
-        withPersistedNickname {
+        accounts.withPersistedNickname {
             AppLogger.info(
                 "Room",
                 "create request socketServer=$socketServerUrl activeServer=${activeServer?.displayUrl}",
@@ -2275,23 +1841,8 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     private fun clearIdentityBoundClientState(server: ServerAddress) {
-        val prefixes = listOf("platform_auth:${server.displayUrl}:", "rejoin:${server.displayUrl}:")
-        val editor = preferences.edit()
-        preferences.all.keys.filter { key -> prefixes.any(key::startsWith) }.forEach(editor::remove)
-        editor.apply()
+        appPreferences.clearIdentityBoundState(server.displayUrl)
         resetPlatformRoomState()
-    }
-
-    private fun readAvatarBytes(input: java.io.InputStream): ByteArray {
-        val output = ByteArrayOutputStream()
-        val buffer = ByteArray(16 * 1024)
-        while (true) {
-            val count = input.read(buffer)
-            if (count < 0) break
-            output.write(buffer, 0, count)
-            if (output.size() > MAX_AVATAR_BYTES) error("头像不能超过 5MB")
-        }
-        return output.toByteArray()
     }
 
     private fun showNotice(message: String) {
@@ -2368,9 +1919,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         PlaybackCommandBridge.listener = null
         socket.disconnect()
         socketServerUrl = null
-        discoveryReconnectJobs.values.forEach { it.cancel() }
-        discoverySockets.values.forEach(MusicTogetherSocket::disconnect)
-        discoverySockets.clear()
+        discovery.disconnectAll()
         nativePlayer.release()
         okHttp.dispatcher.executorService.shutdown()
         super.onCleared()

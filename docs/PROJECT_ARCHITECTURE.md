@@ -35,7 +35,7 @@ Android 客户端包含以下主要能力：
 | 用户界面 | Jetpack Compose，Material 3 |
 | 网络 | OkHttp 4.12，HTTP API，原生 WebSocket |
 | 播放 | Media3 ExoPlayer，MediaSessionService |
-| 图片 | Coil 3 |
+| 图片与取色 | Coil 3，AndroidX Palette |
 | 状态 | Kotlin Flow，Compose State |
 | 测试 | JUnit 4 JVM 单元测试 |
 
@@ -73,6 +73,7 @@ Kotlin 入口和功能包位于应用主命名空间：
 
 ```text
 io/github/yueby/musictogether/
+├── account/
 ├── MainActivity.kt
 ├── MusicTogetherViewModel.kt
 ├── logging/
@@ -81,6 +82,9 @@ io/github/yueby/musictogether/
 ├── network/
 ├── notifications/
 ├── player/
+├── queue/
+├── settings/
+├── updates/
 └── ui/
     └── player/
 ```
@@ -88,10 +92,14 @@ io/github/yueby/musictogether/
 | 路径 | 内容 |
 | --- | --- |
 | `MainActivity.kt` | 应用入口、主题和 Compose 挂载 |
-| `MusicTogetherViewModel.kt` | 应用状态与业务模块编排 |
+| `MusicTogetherViewModel.kt` | 应用状态、主 WebSocket 事件和业务模块编排 |
+| `account/` | 身份资料、头像、密码和管理员操作流程 |
 | `model/` | 房间、曲目、歌词、账号和界面状态 |
-| `network/` | 服务端连接、协议转换和应用更新 |
+| `network/` | 服务端连接、协议转换和多服务器房间发现 |
 | `player/` | 后台播放、系统媒体控制和同步 |
+| `queue/` | 点歌操作的乐观占用、去重和服务端确认 |
+| `settings/` | 应用本地设置、房间重进凭据和平台凭据 |
+| `updates/` | 应用更新检查、下载校验和安装流程 |
 | `lyrics/` | 歌词解析和 Apple Music-like Lyrics (AMLL) 数据处理 |
 | `ui/` | 大厅、房间、设置、账号和平台界面 |
 | `ui/player/` | 播放器布局与歌词绘制 |
@@ -106,11 +114,13 @@ io/github/yueby/musictogether/
 MainActivity
   -> MusicTogetherApp
     -> LobbyScreen / RoomScreen
-      -> RoomHeader / RoomPanels / Settings / Player
+      -> RoomHeader / Room panes / Settings / Player
 
 UI 操作
   -> MusicTogetherViewModel
-    -> MusicTogetherApi / MusicTogetherSocket / SharedPreferences
+    -> AccountCoordinator / QueueActionTracker / AppUpdateCoordinator
+    -> DiscoveryConnectionCoordinator / MusicTogetherApi / MusicTogetherSocket
+    -> AppPreferences
     -> NativePlayer
       -> MediaController
         -> PlaybackService
@@ -125,7 +135,9 @@ UI 操作
 
 ### 应用状态
 
-`MusicTogetherViewModel` 持有 `StateFlow<AppState>`。`AppState` 包含服务器、房间、账号、搜索、歌词、平台中心、同步设置、服务端音频代理策略和应用更新状态。旧服务端没有代理策略事件时，B 站和酷狗默认强制代理。
+`MusicTogetherViewModel` 持有 `StateFlow<AppState>`，并作为 Compose 使用的统一操作门面。账号、队列待确认状态、应用更新、本地设置和多服务器发现分别由独立协调组件管理；这些组件通过显式状态变换回调更新 `AppState`，不直接持有第二份应用状态。
+
+`AppState` 包含服务器、房间、账号、搜索、歌词、平台中心、同步设置、服务端音频代理策略和应用更新状态。旧服务端没有代理策略事件时，B 站和酷狗默认强制代理。
 
 播放器通过独立的 `StateFlow<PlayerUiState>` 发布当前曲目、播放状态、进度、时长、缓冲和错误。Compose 页面同时收集两个状态流。
 
@@ -136,10 +148,15 @@ UI 操作
 | 文件 | 内容 |
 | --- | --- |
 | `RoomHeader.kt` | 房间标题、连接状态和横屏侧栏 |
-| `RoomPanels.kt` | 成员、队列、搜索、聊天和投票 |
+| `RoomMembersPane.kt` | 房间成员列表 |
+| `RoomQueuePane.kt` | 播放队列、固定操作栏和队列控制 |
+| `RoomSearchPane.kt` | 搜索、点歌和 B 站元数据选择 |
+| `RoomChatPane.kt` | 房间聊天 |
 | `RoomSettingsPane.kt` | 房间设置 |
 | `AccountSettingsPane.kt` | 身份账号和服务器管理 |
-| `PlatformPane.kt` | 平台登录、歌单和收藏 |
+| `PlatformPane.kt` | 平台页面入口与账号列表 |
+| `PlatformLoginPane.kt` | 平台登录和二维码流程 |
+| `PlatformPlaylistPane.kt` | 歌单、收藏和曲目列表 |
 | `AppUpdatePane.kt` | 更新检查、下载和安装 |
 | `ui/player/` | 横竖屏播放器、播放控制和歌词 |
 
@@ -256,22 +273,27 @@ MusicTogetherApi
 
 ### AMLL 数据层
 
-`AmllLyricsEngine.kt` 负责：
+AMLL 纯算法按职责分布：
 
-- 清理和校正歌词时间
-- 组合主歌词与背景人声
-- 识别间奏
-- 按字素和词块组织歌词
-- 计算平衡换行
-- 计算遮罩、强调曲线和弹簧参数
+- `AmllLyricsEngine.kt` 清理和校正歌词时间，并组合主歌词与背景人声
+- `AmllInterludeEngine.kt` 识别间奏和计算行切换弹簧参数
+- `AmllWordLayout.kt` 按字素和词块组织歌词并计算平衡换行
+- `AmllLyricEffects.kt` 计算遮罩、强调曲线和逐词进度
+- `AmllLyricsModels.kt` 保存以上算法共享的不可变数据结构
 
 `AmllPlaybackTimeline.kt` 使用共享单调时钟推进热行、缓冲行和间奏。Seek 会更新代际并重新校准焦点。
 
 ### Compose 绘制层
 
-`AmllLyrics.kt` 负责列表布局、焦点滚动、距离模糊、间奏点和时间预览。`AmllKaraokeText.kt` 负责逐词遮罩、长音强调、Ruby 和字素动画。
+`AmllLyrics.kt` 负责列表状态、焦点滚动和手动浏览编排；行绘制、时间预览和间奏分别位于 `AmllLyricLine.kt`、`AmllLyricPreview.kt` 和 `AmllInterlude.kt`。
+
+`AmllKaraokeText.kt` 负责逐词行入口；平衡布局、词层与字素动画分别位于 `AmllKaraokeLayout.kt`、`AmllKaraokeWord.kt` 和 `AmllKaraokeGlyph.kt`。这些文件共享同一播放时间轴，不得各自创建独立时钟。
+
+竖屏播放器由 `PortraitPlayer.kt` 编排宽度和模式切换，`PortraitPlayerHeroes.kt` 管理封面与歌词视觉区，`PortraitPlayerControls.kt` 管理歌曲信息、进度和播放控制。横屏播放器继续由 `LandscapePlayer.kt` 编排，双方复用 `PlayerArtwork`、`PlayerBackdrop`、`PlayerChrome` 和 `PlayerProgressSlider`。
 
 竖屏播放器使用顶部焦点锚点，横屏播放器使用中心锚点。歌词偏移按曲目和歌词来源保存，B 站曲目还包含元数据来源。
+
+播放器背景复用 Coil 缓存并单独解码低分辨率软件位图，通过 AndroidX Palette 提取少量主色。封面、背景和曲目信息在切歌时交叉过渡；打开房间弹层、处于低内存或省电模式、或系统关闭动画时停止持续背景运动。
 
 ## 7. 本地数据与 Android 集成
 
