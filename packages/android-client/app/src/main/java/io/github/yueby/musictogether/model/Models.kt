@@ -46,7 +46,6 @@ data class AdminRoom(
 
 @Immutable
 data class AudioProxyPolicy(
-    val bilibiliForceProxy: Boolean = true,
     val kugouForceProxy: Boolean = true,
 )
 
@@ -66,6 +65,7 @@ data class Track(
     val bilibiliCover: String? = null,
     val metadataSource: String? = null,
     val streamUrl: String? = null,
+    val requiresServerProxy: Boolean = false,
     val streamFormat: String? = null,
     val vip: Boolean = false,
     val requestedBy: String? = null,

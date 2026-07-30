@@ -382,9 +382,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         api.dissolveAdminRoom(server, roomId)
     }
 
-    fun updateBilibiliForceProxy(enabled: Boolean) = updateAudioProxyPolicy("bilibili", enabled)
-
-    fun updateKugouForceProxy(enabled: Boolean) = updateAudioProxyPolicy("kugou", enabled)
+    fun updateKugouForceProxy(enabled: Boolean) = updateAudioProxyPolicy(enabled)
 
     fun updateRoomAudioQuality(quality: String) {
         val value: Any = quality.toIntOrNull() ?: quality
@@ -1326,7 +1324,6 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 val value = data as? JSONObject ?: return
                 applyAudioProxyPolicy(
                     AudioProxyPolicy(
-                        bilibiliForceProxy = value.optBoolean("bilibiliForceProxy", true),
                         kugouForceProxy = value.optBoolean("kugouForceProxy", true),
                     ),
                 )
@@ -1981,6 +1978,11 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
 
     private fun loadTrack(track: Track, playState: PlayState) {
         val target = playbackTarget(track)
+        AppLogger.info(
+            "Player",
+            "transport track=${track.id} mode=${if (target?.usesServerProxy == true) "proxy" else "direct"} " +
+                "requiresServerProxy=${track.requiresServerProxy}",
+        )
         nativePlayer.load(track, playState, target?.primaryUrl, target?.fallbackUrl)
     }
 
@@ -1988,11 +1990,10 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         val previous = _state.value.audioProxyPolicy
         _state.value = _state.value.copy(audioProxyPolicy = policy)
         val track = _state.value.room?.currentTrack ?: return
-        val becameForced = when (track.source) {
-            "bilibili" -> !previous.bilibiliForceProxy && policy.bilibiliForceProxy
-            "kugou", "kugou_concept" -> !previous.kugouForceProxy && policy.kugouForceProxy
-            else -> false
-        }
+        val becameForced =
+            (track.source == "kugou" || track.source == "kugou_concept") &&
+                !previous.kugouForceProxy &&
+                policy.kugouForceProxy
         if (becameForced) {
             playbackTarget(track, policy)?.let { target ->
                 nativePlayer.switchPlaybackUrl(track.id, target.primaryUrl)
@@ -2213,20 +2214,14 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         }
     }
 
-    private fun updateAudioProxyPolicy(source: String, enabled: Boolean) {
+    private fun updateAudioProxyPolicy(enabled: Boolean) {
         val server = activeServer ?: return setError("请先连接服务端")
         if (_state.value.accountProfile?.role != "admin") return setError("需要服务器管理员权限")
         if (_state.value.adminWorkingId != null) return
-        val targetId = "audio-proxy-policy:$source"
+        val targetId = "audio-proxy-policy:kugou"
         _state.value = _state.value.copy(adminWorkingId = targetId)
         viewModelScope.launch {
-            runCatching {
-                when (source) {
-                    "bilibili" -> api.updateAdminAudioProxyPolicy(server, bilibiliForceProxy = enabled)
-                    "kugou" -> api.updateAdminAudioProxyPolicy(server, kugouForceProxy = enabled)
-                    else -> error("不支持的音源")
-                }
-            }
+            runCatching { api.updateAdminAudioProxyPolicy(server, enabled) }
                 .onSuccess { policy ->
                     _state.value = _state.value.copy(adminWorkingId = null)
                     applyAudioProxyPolicy(policy)

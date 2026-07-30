@@ -47,6 +47,7 @@ internal fun JSONObject.toTrack(): Track {
         bilibiliCover = stringOrNull("bilibiliCover"),
         metadataSource = stringOrNull("metadataSource"),
         streamUrl = stringOrNull("streamUrl"),
+        requiresServerProxy = optBoolean("requiresServerProxy", false),
         streamFormat = stringOrNull("streamFormat"),
         vip = optBoolean("vip", false),
         requestedBy = stringOrNull("requestedBy"),
@@ -68,6 +69,7 @@ internal fun Track.toJson(): JSONObject = JSONObject().apply {
     bilibiliCover?.let { put("bilibiliCover", it) }
     metadataSource?.let { put("metadataSource", it) }
     streamUrl?.let { put("streamUrl", it) }
+    put("requiresServerProxy", requiresServerProxy)
     streamFormat?.let { put("streamFormat", it) }
     put("vip", vip)
     requestedBy?.let { put("requestedBy", it) }

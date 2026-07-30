@@ -33,6 +33,7 @@ data class PlaylistPage(
 data class PlaybackTarget(
     val primaryUrl: String,
     val fallbackUrl: String? = null,
+    val usesServerProxy: Boolean = false,
 )
 
 class ApiException(val statusCode: Int, message: String) : IOException(message)
@@ -120,13 +121,9 @@ class MusicTogetherApi(private val client: OkHttpClient) {
 
     suspend fun updateAdminAudioProxyPolicy(
         server: ServerAddress,
-        bilibiliForceProxy: Boolean? = null,
-        kugouForceProxy: Boolean? = null,
+        kugouForceProxy: Boolean,
     ): AudioProxyPolicy = withContext(Dispatchers.IO) {
-        val body = JSONObject().apply {
-            bilibiliForceProxy?.let { put("bilibiliForceProxy", it) }
-            kugouForceProxy?.let { put("kugouForceProxy", it) }
-        }
+        val body = JSONObject().put("kugouForceProxy", kugouForceProxy)
         requireNotNull(
             jsonRequest(server, listOf("admin", "audio-proxy-policy"), "PATCH", body, "update audio proxy policy"),
         ).toAudioProxyPolicy()
@@ -191,12 +188,12 @@ class MusicTogetherApi(private val client: OkHttpClient) {
             else -> null
         }
         val forceProxy = when (track.source) {
-            "bilibili" -> policy.bilibiliForceProxy
+            "bilibili" -> true
             "kugou", "kugou_concept" -> policy.kugouForceProxy
             else -> false
         }
-        return if (forceProxy && proxyUrl != null) {
-            PlaybackTarget(primaryUrl = proxyUrl)
+        return if ((forceProxy || track.requiresServerProxy) && proxyUrl != null) {
+            PlaybackTarget(primaryUrl = proxyUrl, usesServerProxy = true)
         } else {
             PlaybackTarget(primaryUrl = streamUrl, fallbackUrl = proxyUrl)
         }
@@ -375,7 +372,6 @@ class MusicTogetherApi(private val client: OkHttpClient) {
     )
 
     private fun JSONObject.toAudioProxyPolicy() = AudioProxyPolicy(
-        bilibiliForceProxy = optBoolean("bilibiliForceProxy", true),
         kugouForceProxy = optBoolean("kugouForceProxy", true),
     )
 

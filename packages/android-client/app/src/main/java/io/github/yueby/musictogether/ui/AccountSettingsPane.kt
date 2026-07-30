@@ -423,16 +423,16 @@ private fun AudioProxyPolicySection(state: AppState, viewModel: MusicTogetherVie
             SettingsTitle("音频传输")
         }
         item {
-            AudioProxyPolicyRow(
-                label = "B站强制服务器代理",
-                checked = state.audioProxyPolicy.bilibiliForceProxy,
-                enabled = state.adminWorkingId == null,
-                onCheckedChange = viewModel::updateBilibiliForceProxy,
+            Text(
+                "B站始终通过服务器代理播放，Cookie 仅保留在服务端。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         item {
             AudioProxyPolicyRow(
                 label = "酷狗强制服务器代理",
+                description = "关闭后明文资源优先直连，加密资源仍由服务器代理解密",
                 checked = state.audioProxyPolicy.kugouForceProxy,
                 enabled = state.adminWorkingId == null,
                 onCheckedChange = viewModel::updateKugouForceProxy,
@@ -444,6 +444,7 @@ private fun AudioProxyPolicySection(state: AppState, viewModel: MusicTogetherVie
 @Composable
 private fun AudioProxyPolicyRow(
     label: String,
+    description: String,
     checked: Boolean,
     enabled: Boolean,
     onCheckedChange: (Boolean) -> Unit,
@@ -453,7 +454,10 @@ private fun AudioProxyPolicyRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(label, modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium)
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(label, fontWeight = FontWeight.Medium)
+            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
     }
 }

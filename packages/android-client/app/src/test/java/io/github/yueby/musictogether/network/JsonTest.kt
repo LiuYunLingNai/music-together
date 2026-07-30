@@ -68,6 +68,16 @@ class JsonTest {
     }
 
     @Test
+    fun trackPreservesRequiredServerProxyWithLegacyFallback() {
+        val marked = JSONObject("""{"source":"kugou_concept","requiresServerProxy":true}""").toTrack()
+        val legacy = JSONObject("""{"source":"kugou_concept"}""").toTrack()
+
+        assertTrue(marked.requiresServerProxy)
+        assertTrue(marked.toJson().getBoolean("requiresServerProxy"))
+        assertFalse(legacy.requiresServerProxy)
+    }
+
+    @Test
     fun platformAuthPreservesMembershipDetails() {
         val roomStatus = JSONObject(
             """{"platform":"kugou_concept","loggedInCount":1,"hasVip":true,"maxVipType":1,"maxVipLabel":"畅听 VIP","maxVipLevel":3}""",

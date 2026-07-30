@@ -4,6 +4,8 @@ import io.github.yueby.musictogether.model.AudioProxyPolicy
 import io.github.yueby.musictogether.model.Track
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -47,17 +49,18 @@ class PlaybackUrlTest {
     }
 
     @Test
-    fun `allows bilibili direct playback with a proxy fallback`() {
+    fun `always routes bilibili through the server proxy`() {
         val streamUrl = "https://cdn.bilivideo.com/audio.m4s"
         val target = api.playbackTarget(
             server,
             track(source = "bilibili", urlId = "BV1234567890", streamUrl = streamUrl),
             "ROOM01",
-            AudioProxyPolicy(bilibiliForceProxy = false),
+            AudioProxyPolicy(kugouForceProxy = false),
         )!!
 
-        assertEquals(streamUrl, target.primaryUrl)
-        assertTrue(target.fallbackUrl!!.contains("/api/music/bilibili-audio-proxy?"))
+        assertTrue(target.primaryUrl.contains("/api/music/bilibili-audio-proxy?"))
+        assertNull(target.fallbackUrl)
+        assertTrue(target.usesServerProxy)
     }
 
     @Test
@@ -72,10 +75,30 @@ class PlaybackUrlTest {
 
             assertEquals(streamUrl, target.primaryUrl)
             assertTrue(target.fallbackUrl!!.contains("/api/music/kugou-audio-proxy?"))
+            assertFalse(target.usesServerProxy)
         }
     }
 
-    private fun track(source: String, urlId: String = "song-id", streamUrl: String): Track = Track(
+    @Test
+    fun `routes encrypted kugou audio directly through the proxy when forced proxy is disabled`() {
+        val streamUrl = "http://fs.kugou.com/audio.mflac"
+        val target = api.playbackTarget(
+            server,
+            track(source = "kugou_concept", streamUrl = streamUrl, requiresServerProxy = true),
+            policy = AudioProxyPolicy(kugouForceProxy = false),
+        )!!
+
+        assertTrue(target.primaryUrl.contains("/api/music/kugou-audio-proxy?"))
+        assertNull(target.fallbackUrl)
+        assertTrue(target.usesServerProxy)
+    }
+
+    private fun track(
+        source: String,
+        urlId: String = "song-id",
+        streamUrl: String,
+        requiresServerProxy: Boolean = false,
+    ): Track = Track(
         id = "track-id",
         title = "title",
         artist = listOf("artist"),
@@ -86,5 +109,6 @@ class PlaybackUrlTest {
         sourceId = "source-id",
         urlId = urlId,
         streamUrl = streamUrl,
+        requiresServerProxy = requiresServerProxy,
     )
 }
