@@ -1,10 +1,10 @@
 package io.github.yueby.musictogether.ui.player
 
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -26,24 +26,16 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.FastForward
-import androidx.compose.material.icons.filled.FastRewind
-import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -56,20 +48,25 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil3.compose.AsyncImage
 import io.github.yueby.musictogether.MusicTogetherViewModel
 import io.github.yueby.musictogether.model.LyricsState
 import io.github.yueby.musictogether.model.RoomState
 import io.github.yueby.musictogether.model.Track
 import io.github.yueby.musictogether.model.VoteState
 import io.github.yueby.musictogether.player.PlayerUiState
-import io.github.yueby.musictogether.ui.rememberCoverImageRequest
+
+private data class LandscapeTrackText(
+    val trackId: String?,
+    val title: String,
+    val subtitle: String,
+    val isError: Boolean,
+)
+
 @Composable
 internal fun LandscapePlayerContent(
     track: Track?,
@@ -78,6 +75,7 @@ internal fun LandscapePlayerContent(
     lyricOffsetMs: Int,
     activeVote: VoteState?,
     userId: String?,
+    chatUnreadCount: Int,
     player: PlayerUiState,
     viewModel: MusicTogetherViewModel,
     onOpenQueue: () -> Unit,
@@ -121,6 +119,7 @@ internal fun LandscapePlayerContent(
                     track = track,
                     error = player.error,
                     onOpenChat = onOpenChat,
+                    chatUnreadCount = chatUnreadCount,
                     chromeVisible = chromeVisible,
                     layoutScale = metrics.controlsScale,
                 )
@@ -139,16 +138,14 @@ internal fun LandscapePlayerContent(
                             viewModel.seek(lyricTimeSeconds + lyricOffsetMs / 1_000.0)
                         },
                     )
-                    activeVote?.let { vote ->
-                        LandscapeVotePrompt(
-                            vote = vote,
-                            userId = userId,
-                            onCastVote = viewModel::castVote,
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .padding(horizontal = 18.dp, vertical = 4.dp),
-                        )
-                    }
+                    AnimatedPlayerVotePrompt(
+                        vote = activeVote,
+                        userId = userId,
+                        onCastVote = viewModel::castVote,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(horizontal = 18.dp, vertical = 4.dp),
+                    )
                 }
             }
         }
@@ -187,35 +184,19 @@ private fun LandscapeCoverArtwork(
         LaunchedEffect(horizontalInset) {
             onHorizontalInsetChanged(horizontalInset)
         }
-        if (track != null && track.cover.isNotBlank()) {
-            AsyncImage(
-                model = rememberCoverImageRequest(track.cover),
-                contentDescription = track.title,
-                modifier = Modifier
-                    .size(artworkSize)
-                    .graphicsLayer {
-                        shadowElevation = 18.dp.toPx()
-                        shape = RoundedCornerShape(24.dp)
-                        clip = true
-                    },
-                contentScale = ContentScale.Crop,
-            )
-        } else {
-            Box(
-                modifier = Modifier
-                    .size(artworkSize)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(Color.White.copy(alpha = 0.10f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Default.LibraryMusic,
-                    contentDescription = null,
-                    modifier = Modifier.size((artworkSize * 0.28f).coerceAtLeast(40.dp)),
-                    tint = Color.White.copy(alpha = 0.72f),
-                )
-            }
-        }
+        PlayerArtwork(
+            track = track,
+            cornerRadius = 24.dp,
+            placeholderIconSize = (artworkSize * 0.28f).coerceAtLeast(40.dp),
+            contentDescription = track?.title,
+            modifier = Modifier
+                .size(artworkSize)
+                .graphicsLayer {
+                    shadowElevation = 18.dp.toPx()
+                    shape = RoundedCornerShape(24.dp)
+                    clip = true
+                },
+        )
     }
 }
 
@@ -224,6 +205,7 @@ private fun LandscapeSongHeader(
     track: Track?,
     error: String?,
     onOpenChat: () -> Unit,
+    chatUnreadCount: Int,
     chromeVisible: Boolean,
     layoutScale: Float,
 ) {
@@ -240,119 +222,47 @@ private fun LandscapeSongHeader(
         verticalAlignment = Alignment.Bottom,
         horizontalArrangement = Arrangement.spacedBy((10f * scale).dp),
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = track?.title ?: "暂无歌曲",
-                modifier = Modifier.basicMarquee(),
-                color = Color.White.copy(alpha = 0.94f),
-                fontSize = (23f * scale).sp,
-                lineHeight = (27f * scale).sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Clip,
-            )
-            Text(
-                text = error ?: track?.artist?.joinToString(" / ") ?: "点击搜索添加歌曲到队列",
-                modifier = Modifier.basicMarquee(),
-                color =
-                    if (error == null) Color.White.copy(alpha = 0.52f) else Color(0xFFFF8A80),
-                fontSize = (13f * scale).sp,
-                lineHeight = (17f * scale).sp,
-                maxLines = 1,
-                overflow = TextOverflow.Clip,
-            )
+        Crossfade(
+            targetState = LandscapeTrackText(
+                trackId = track?.id,
+                title = track?.title ?: "暂无歌曲",
+                subtitle = error ?: track?.artist?.joinToString(" / ") ?: "点击搜索添加歌曲到队列",
+                isError = error != null,
+            ),
+            animationSpec = tween(280),
+            modifier = Modifier.weight(1f),
+            label = "landscape-track-text-crossfade",
+        ) { label ->
+            Column {
+                Text(
+                    text = label.title,
+                    modifier = Modifier.basicMarquee(),
+                    color = Color.White.copy(alpha = 0.94f),
+                    fontSize = (23f * scale).sp,
+                    lineHeight = (27f * scale).sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Clip,
+                )
+                Text(
+                    text = label.subtitle,
+                    modifier = Modifier.basicMarquee(),
+                    color =
+                        if (label.isError) Color(0xFFFF8A80) else Color.White.copy(alpha = 0.52f),
+                    fontSize = (13f * scale).sp,
+                    lineHeight = (17f * scale).sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Clip,
+                )
+            }
         }
-        IconButton(
+        PlayerChatButton(
+            unreadCount = chatUnreadCount,
             onClick = onOpenChat,
             enabled = !chromeVisible,
             modifier = Modifier.size((42f * scale).dp),
-        ) {
-            Icon(
-                Icons.AutoMirrored.Filled.Chat,
-                contentDescription = "打开聊天",
-                modifier = Modifier
-                    .size((22f * scale).dp)
-                    .graphicsLayer { alpha = chatAlpha },
-                tint = Color.White.copy(alpha = 0.72f),
-            )
-        }
-    }
-}
-
-@Composable
-private fun LandscapeVotePrompt(
-    vote: VoteState,
-    userId: String?,
-    onCastVote: (Boolean) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val hasVoted = userId?.let(vote.votes::containsKey) == true
-    val approveCount = vote.votes.values.count { it }
-    val rejectCount = vote.votes.values.count { !it }
-
-    Surface(
-        modifier = modifier.widthIn(max = 390.dp),
-        shape = RoundedCornerShape(16.dp),
-        color = Color.Black.copy(alpha = 0.72f),
-        tonalElevation = 0.dp,
-        shadowElevation = 12.dp,
-    ) {
-        Row(
-            modifier = Modifier.padding(start = 14.dp, top = 8.dp, end = 8.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = "${vote.initiatorNickname} 发起“${playerVoteActionLabel(vote.action)}”投票",
-                    color = Color.White.copy(alpha = 0.92f),
-                    fontSize = 13.sp,
-                    lineHeight = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = buildString {
-                        vote.payload["trackTitle"]?.takeIf { it.isNotBlank() }?.let {
-                            append(it)
-                            append(" · ")
-                        }
-                        append("赞成 $approveCount · 反对 $rejectCount · 需要 ${vote.requiredVotes} 票")
-                    },
-                    color = Color.White.copy(alpha = 0.54f),
-                    fontSize = 10.sp,
-                    lineHeight = 13.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            if (hasVoted) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(3.dp),
-                ) {
-                    Icon(
-                        Icons.Default.Check,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = Color.White.copy(alpha = 0.76f),
-                    )
-                    Text(
-                        if (vote.initiatorId == userId) "已发起" else "已投票",
-                        color = Color.White.copy(alpha = 0.68f),
-                        fontSize = 11.sp,
-                    )
-                }
-            } else {
-                TextButton(onClick = { onCastVote(false) }) {
-                    Text("反对", color = Color.White.copy(alpha = 0.68f), fontSize = 12.sp)
-                }
-                FilledTonalButton(onClick = { onCastVote(true) }) {
-                    Text("同意", fontSize = 12.sp)
-                }
-            }
-        }
+            iconAlpha = chatAlpha * 0.72f,
+        )
     }
 }
 
@@ -375,11 +285,6 @@ private fun LandscapeTransportRail(
     }
     val reportedDuration = maxOf(track?.duration ?: 0.0, player.durationSeconds)
     val seekRangeDuration = reportedDuration.coerceAtLeast(1.0)
-    val seekThumbSize by animateDpAsState(
-        targetValue = ((if (seeking) 10f else 7f) * scale).dp,
-        animationSpec = spring(dampingRatio = 0.72f, stiffness = 520f),
-        label = "landscape-seek-thumb-size",
-    )
     val playInteraction = remember { MutableInteractionSource() }
     val playPressed by playInteraction.collectIsPressedAsState()
     val playButtonScale by animateFloatAsState(
@@ -387,6 +292,14 @@ private fun LandscapeTransportRail(
         animationSpec = spring(dampingRatio = 0.76f, stiffness = 520f),
         label = "landscape-play-button-press",
     )
+    var transportCoolingDown by remember(track?.id) { mutableStateOf(false) }
+    LaunchedEffect(transportCoolingDown) {
+        if (transportCoolingDown) {
+            kotlinx.coroutines.delay(500)
+            transportCoolingDown = false
+        }
+    }
+    val transportEnabled = track != null && !transportCoolingDown
 
     Row(
         modifier = modifier
@@ -394,8 +307,12 @@ private fun LandscapeTransportRail(
             .padding(horizontal = (8f * scale).dp, vertical = (4f * scale).dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Slider(
+        PlayerProgressSlider(
             value = seekPosition.coerceIn(0.0, seekRangeDuration).toFloat(),
+            maximumValue = seekRangeDuration.toFloat(),
+            seeking = seeking,
+            enabled = track != null && viewModel.canControl(),
+            scale = scale,
             onValueChange = {
                 seeking = true
                 seekPosition = it.toDouble()
@@ -404,32 +321,8 @@ private fun LandscapeTransportRail(
                 seeking = false
                 viewModel.seek(seekPosition)
             },
-            valueRange = 0f..seekRangeDuration.toFloat(),
-            enabled = track != null && viewModel.canControl(),
             modifier = Modifier
-                .weight(1f)
-                .height((32f * scale).dp),
-            thumb = {
-                Box(
-                    Modifier
-                        .size(seekThumbSize)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = if (seeking) 0.96f else 0.78f)),
-                )
-            },
-            track = { sliderState ->
-                SliderDefaults.Track(
-                    sliderState = sliderState,
-                    modifier = Modifier.height((3f * scale).dp),
-                    colors = SliderDefaults.colors(
-                        activeTrackColor = Color.White.copy(alpha = 0.72f),
-                        inactiveTrackColor = Color.White.copy(alpha = 0.20f),
-                    ),
-                    thumbTrackGapSize = 0.dp,
-                    trackInsideCornerSize = 1.5.dp,
-                    drawStopIndicator = null,
-                )
-            },
+                .weight(1f),
         )
         Spacer(Modifier.width((14f * scale).dp))
         Text(
@@ -449,20 +342,26 @@ private fun LandscapeTransportRail(
             onModeSelected = viewModel::setPlayMode,
         )
         IconButton(
-            onClick = viewModel::previous,
-            enabled = track != null,
+            onClick = {
+                transportCoolingDown = true
+                viewModel.previous()
+            },
+            enabled = transportEnabled,
             modifier = Modifier.size((40f * scale).dp),
         ) {
             Icon(
-                Icons.Default.FastRewind,
+                Icons.Default.SkipPrevious,
                 contentDescription = "上一首",
                 modifier = Modifier.size((23f * scale).dp),
-                tint = Color.White.copy(alpha = 0.84f),
+                tint = Color.White.copy(alpha = if (transportEnabled) 0.84f else 0.28f),
             )
         }
         IconButton(
-            onClick = viewModel::togglePlayback,
-            enabled = track != null,
+            onClick = {
+                transportCoolingDown = true
+                viewModel.togglePlayback()
+            },
+            enabled = transportEnabled,
             interactionSource = playInteraction,
             modifier = Modifier
                 .size((54f * scale).dp)
@@ -477,19 +376,22 @@ private fun LandscapeTransportRail(
                 if (player.playing) Icons.Default.Pause else Icons.Default.PlayArrow,
                 contentDescription = if (player.playing) "暂停" else "播放",
                 modifier = Modifier.size((29f * scale).dp),
-                tint = Color.White.copy(alpha = 0.94f),
+                tint = Color.White.copy(alpha = if (transportEnabled) 0.94f else 0.28f),
             )
         }
         IconButton(
-            onClick = viewModel::next,
-            enabled = track != null,
+            onClick = {
+                transportCoolingDown = true
+                viewModel.next()
+            },
+            enabled = transportEnabled,
             modifier = Modifier.size((40f * scale).dp),
         ) {
             Icon(
-                Icons.Default.FastForward,
+                Icons.Default.SkipNext,
                 contentDescription = "下一首",
                 modifier = Modifier.size((23f * scale).dp),
-                tint = Color.White.copy(alpha = 0.84f),
+                tint = Color.White.copy(alpha = if (transportEnabled) 0.84f else 0.28f),
             )
         }
         IconButton(

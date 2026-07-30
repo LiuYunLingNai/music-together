@@ -94,7 +94,7 @@ internal fun PlayModeMenuButton(
                         .graphicsLayer {
                             rotationZ = if (item.mode == "sequential") 90f else 0f
                         },
-                    tint = Color.White.copy(alpha = 0.72f),
+                    tint = Color.White.copy(alpha = if (enabled) 0.72f else 0.28f),
                 )
             }
         }

@@ -1,43 +1,28 @@
 package io.github.yueby.musictogether.ui.player
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.scrollBy
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -47,23 +32,14 @@ import androidx.compose.runtime.structuralEqualityPolicy
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.BlurredEdgeTreatment
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.Layout
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.yueby.musictogether.lyrics.AmllInterlude
@@ -72,29 +48,25 @@ import io.github.yueby.musictogether.lyrics.amllLineSpringParameters
 import io.github.yueby.musictogether.lyrics.buildAmllInterludes
 import io.github.yueby.musictogether.lyrics.findActiveAmllInterlude
 import io.github.yueby.musictogether.lyrics.prepareAmllLyricGroups
-import io.github.yueby.musictogether.model.LyricLine
 import io.github.yueby.musictogether.model.LyricsState
-import kotlin.math.PI
 import kotlin.math.abs
-import kotlin.math.ceil
 import kotlin.math.pow
 import kotlin.math.roundToInt
-import kotlin.math.sin
 import kotlinx.coroutines.delay
 import java.util.Locale
 
-private const val AmllCenteredAlignPosition = 0.35f
-private const val AmllPortraitAlignPosition = 0.10f
-private const val AmllTopFadeEnd = 0.10f
-private const val AmllBottomFadeStart = 0.91f
-private const val AmllMainFontScale = 0.9f
-private const val AmllTranslationFontScale = 0.75f
-private const val AmllRomanFontScale = 0.75f
-private const val AmllBackgroundFontScale = 0.7f
-private const val AmllInactiveScale = 0.97f
-private const val AmllPositionDampingRatio = 0.83f
-private const val AmllScaleDampingRatio = 0.88f
-private const val AmllSpringStiffness = 100f
+internal const val AmllCenteredAlignPosition = 0.35f
+internal const val AmllPortraitAlignPosition = 0.10f
+internal const val AmllTopFadeEnd = 0.10f
+internal const val AmllBottomFadeStart = 0.91f
+internal const val AmllMainFontScale = 0.9f
+internal const val AmllTranslationFontScale = 0.75f
+internal const val AmllRomanFontScale = 0.75f
+internal const val AmllBackgroundFontScale = 0.7f
+internal const val AmllInactiveScale = 0.97f
+internal const val AmllPositionDampingRatio = 0.83f
+internal const val AmllScaleDampingRatio = 0.88f
+internal const val AmllSpringStiffness = 100f
 
 
 private sealed interface AmllListItem {
@@ -118,7 +90,7 @@ private sealed interface AmllListItem {
     }
 }
 
-private data class AmllPreviewGeometry(
+internal data class AmllPreviewGeometry(
     val centerYInRootPx: Float,
     val group: AmllLyricGroup,
 )
@@ -186,7 +158,7 @@ internal fun shouldResetAmllFocus(
     previousGroupIndex < 0 ||
         timelineDiscontinuity
 
-private fun formatLyricTimestamp(timeMs: Long): String {
+internal fun formatLyricTimestamp(timeMs: Long): String {
     val totalSeconds = timeMs.coerceAtLeast(0L) / 1_000L
     return String.format(
         Locale.ROOT,
@@ -590,556 +562,5 @@ internal fun LyricsPanel(
                 modifier = Modifier.fillMaxSize(),
             )
         }
-    }
-}
-
-@Composable
-private fun AmllLineGroup(
-    group: AmllLyricGroup,
-    positionMs: State<Float>,
-    active: Boolean,
-    previewed: Boolean,
-    isPlaying: Boolean,
-    isDynamic: Boolean,
-    groupIndex: Int,
-    focusedGroupIndex: Int,
-    userScrolling: Boolean,
-    onClick: (() -> Unit)?,
-    onMainLyricCenterInRootChanged: (Float) -> Unit,
-    mainFontSize: Float,
-    translationFontSize: Float,
-    romanFontSize: Float,
-    backgroundFontSize: Float,
-) {
-    val line = group.main
-    var retainedPositionMs by remember(line) {
-        mutableFloatStateOf(line.startTimeMs.toFloat())
-    }
-    val livePositionMs = if (active) positionMs.value else null
-    SideEffect {
-        livePositionMs?.let { retainedPositionMs = it }
-    }
-    val currentPositionMs = livePositionMs ?: retainedPositionMs
-    val effectReleaseProgress by animateFloatAsState(
-        targetValue = if (active) 1f else 0f,
-        animationSpec = tween(durationMillis = if (active) 70 else 300),
-        label = "amllEffectRelease",
-    )
-    val scale by animateFloatAsState(
-        targetValue = when {
-            !isPlaying || active -> 1f
-            previewed -> 0.992f
-            else -> AmllInactiveScale
-        },
-        animationSpec = spring(
-            dampingRatio = AmllScaleDampingRatio,
-            stiffness = AmllSpringStiffness,
-        ),
-        label = "amllLineScale",
-    )
-    val background = group.background
-    val backgroundFirst =
-        background?.words?.firstOrNull()?.startTimeMs
-            ?.let { backgroundStart ->
-                backgroundStart < (line.words.firstOrNull()?.startTimeMs ?: line.startTimeMs)
-            }
-            ?: false
-    val backgroundRevealed = background != null && (active || !isPlaying)
-    val backgroundRevealProgress by animateFloatAsState(
-        targetValue = if (backgroundRevealed) 1f else 0f,
-        animationSpec = spring(
-            dampingRatio = 1f,
-            stiffness = AmllSpringStiffness,
-        ),
-        label = "amllBackgroundReveal",
-    )
-    val blurRadius by animateFloatAsState(
-        targetValue = amllLineBlurRadiusDp(
-            groupIndex = groupIndex,
-            focusedGroupIndex = focusedGroupIndex,
-            active = active,
-            userScrolling = userScrolling,
-        ),
-        animationSpec = tween(durationMillis = 400),
-        label = "amllLineBlur",
-    )
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .blur(
-                radius = blurRadius.dp,
-                edgeTreatment = BlurredEdgeTreatment.Unbounded,
-            )
-            .then(
-                if (onClick != null) {
-                    Modifier.clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = onClick,
-                    )
-                } else {
-                    Modifier
-                },
-            ),
-    ) {
-        AmllMainAndBackgroundLayout(
-            backgroundFirst = backgroundFirst,
-            backgroundRevealProgress = backgroundRevealProgress,
-            main = {
-                AmllMainLine(
-                    line = line,
-                    positionMs = currentPositionMs,
-                    active = active,
-                    effectReleaseProgress = effectReleaseProgress,
-                    onPrimaryTextCenterInRootChanged = onMainLyricCenterInRootChanged,
-                    previewed = previewed,
-                    isPlaying = isPlaying,
-                    isDynamic = isDynamic,
-                    lineScale = scale,
-                    mainFontSize = mainFontSize,
-                    translationFontSize = translationFontSize,
-                    romanFontSize = romanFontSize,
-                )
-            },
-            background = background?.let { backgroundLine ->
-                @Composable {
-                    AmllBackgroundLine(
-                        line = backgroundLine,
-                        positionMs = currentPositionMs,
-                        visible = active,
-                        effectReleaseProgress = effectReleaseProgress,
-                        revealProgress = backgroundRevealProgress,
-                        placeBeforeMain = backgroundFirst,
-                        fontSize = backgroundFontSize,
-                        isDynamic = isDynamic,
-                    )
-                }
-            },
-        )
-
-    }
-}
-
-@Composable
-private fun AmllTimestampPreview(
-    geometry: AmllPreviewGeometry?,
-    visible: Boolean,
-    containerWidth: androidx.compose.ui.unit.Dp,
-    mainFontSize: Float,
-    translationFontSize: Float,
-    romanFontSize: Float,
-    backgroundFontSize: Float,
-    modifier: Modifier = Modifier,
-) {
-    var containerTopInRootPx by remember { mutableFloatStateOf(0f) }
-    val group = geometry?.group
-    val line = group?.main
-    val timestampText = line?.let {
-        formatLyricTimestamp(it.words.firstOrNull()?.startTimeMs ?: it.startTimeMs)
-    }.orEmpty()
-    val timestampFontSize = (mainFontSize * 0.42f).coerceAtLeast(10f)
-    val textMeasurer = rememberTextMeasurer()
-    val density = LocalDensity.current
-    val hasRoom = remember(
-        line,
-        group?.background,
-        timestampText,
-        mainFontSize,
-        translationFontSize,
-        romanFontSize,
-        backgroundFontSize,
-        timestampFontSize,
-        containerWidth,
-        density,
-    ) {
-        fun measureWidth(text: String, style: TextStyle): Float {
-            if (text.isBlank()) return 0f
-            return textMeasurer.measure(
-                text = text,
-                style = style,
-                softWrap = false,
-                maxLines = 1,
-            ).size.width.toFloat()
-        }
-
-        val lyricWidth = maxOf(
-            measureWidth(
-                line?.text.orEmpty(),
-                TextStyle(
-                    fontSize = mainFontSize.sp,
-                    fontWeight = FontWeight.SemiBold,
-                ),
-            ),
-            measureWidth(
-                line?.translatedLyric.orEmpty(),
-                TextStyle(fontSize = translationFontSize.sp),
-            ),
-            measureWidth(
-                line?.romanLyric.orEmpty(),
-                TextStyle(fontSize = romanFontSize.sp),
-            ),
-            measureWidth(
-                group?.background?.text.orEmpty(),
-                TextStyle(
-                    fontSize = backgroundFontSize.sp,
-                    fontWeight = FontWeight.SemiBold,
-                ),
-            ),
-        )
-        val timestampWidth = measureWidth(
-            timestampText,
-            TextStyle(
-                fontSize = timestampFontSize.sp,
-                fontWeight = FontWeight.Medium,
-            ),
-        )
-        hasAmllLyricTimestampRoom(
-            lyricWidthPx = lyricWidth,
-            timestampWidthPx = timestampWidth,
-            containerWidthPx = with(density) { containerWidth.toPx() },
-            gapPx = with(density) { 12.dp.toPx() },
-        )
-    }
-
-    Box(
-        modifier.onGloballyPositioned { coordinates ->
-            containerTopInRootPx = coordinates.positionInRoot().y
-        },
-    ) {
-        AnimatedVisibility(
-            visible = visible && geometry != null && hasRoom,
-            modifier = Modifier
-                .align(
-                    if (line?.isDuet == true) Alignment.TopStart else Alignment.TopEnd,
-                )
-                .graphicsLayer {
-                    translationY =
-                        (geometry?.centerYInRootPx ?: 0f) -
-                        containerTopInRootPx -
-                        size.height / 2f
-                },
-            enter = fadeIn(tween(140)),
-            exit = fadeOut(tween(180)),
-        ) {
-            Text(
-                text = timestampText,
-                color = Color.White.copy(alpha = 0.38f),
-                fontSize = timestampFontSize.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-            )
-        }
-    }
-}
-
-/**
- * AMLL positions an inactive background vocal outside the main flow, then
- * progressively restores its measured height while the group becomes active.
- */
-@Composable
-private fun AmllMainAndBackgroundLayout(
-    backgroundFirst: Boolean,
-    backgroundRevealProgress: Float,
-    main: @Composable () -> Unit,
-    background: (@Composable () -> Unit)?,
-) {
-    Layout(
-        modifier = Modifier.fillMaxWidth(),
-        content = {
-            main()
-            background?.invoke()
-        },
-    ) { measurables, constraints ->
-        val mainPlaceable = measurables.first().measure(constraints)
-        val backgroundPlaceable = measurables.getOrNull(1)?.measure(
-            constraints.copy(minHeight = 0),
-        )
-        val backgroundContribution = amllBackgroundHeightContribution(
-            backgroundHeight = backgroundPlaceable?.height ?: 0,
-            revealProgress = backgroundRevealProgress,
-        )
-        layout(
-            width = mainPlaceable.width,
-            height = mainPlaceable.height + backgroundContribution,
-        ) {
-            mainPlaceable.placeRelative(
-                x = 0,
-                y = if (backgroundFirst) backgroundContribution else 0,
-            )
-            backgroundPlaceable?.placeRelative(
-                x = 0,
-                y = if (backgroundFirst) {
-                    backgroundContribution - backgroundPlaceable.height
-                } else {
-                    mainPlaceable.height
-                },
-            )
-        }
-    }
-}
-
-@Composable
-private fun AmllMainLine(
-    line: LyricLine,
-    positionMs: Float,
-    active: Boolean,
-    effectReleaseProgress: Float,
-    onPrimaryTextCenterInRootChanged: (Float) -> Unit,
-    previewed: Boolean,
-    isPlaying: Boolean,
-    isDynamic: Boolean,
-    lineScale: Float,
-    mainFontSize: Float,
-    translationFontSize: Float,
-    romanFontSize: Float,
-) {
-    val textAlign = if (line.isDuet) TextAlign.End else TextAlign.Start
-    val firstWordStart = line.words.firstOrNull()?.startTimeMs ?: line.startTimeMs
-    val lastWordEnd = line.words.lastOrNull()?.endTimeMs ?: line.endTimeMs
-    val lineProgress = when {
-        !active || positionMs <= firstWordStart -> 0f
-        positionMs >= lastWordEnd -> 1f
-        else -> (
-            (positionMs - firstWordStart) /
-                (lastWordEnd - firstWordStart).coerceAtLeast(1L)
-            ).coerceIn(0f, 1f)
-    }
-    val subLineTargetAlpha = when {
-        active && positionMs >= firstWordStart ->
-            0.38f + amllSubLineHighlight(lineProgress) * 0.30f
-        previewed -> 0.46f
-        else -> 0.30f
-    }
-    val subLineAlpha = rememberAmllMaskAlpha(subLineTargetAlpha).value
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .graphicsLayer {
-                scaleX = lineScale
-                scaleY = lineScale
-                transformOrigin =
-                    if (line.isDuet) TransformOrigin(1f, 0.5f) else TransformOrigin(0f, 0.5f)
-            },
-        verticalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
-        AmllWordLine(
-            line = line,
-            positionMs = positionMs,
-            active = active,
-            effectReleaseProgress = effectReleaseProgress,
-            onPrimaryTextCenterInRootChanged = onPrimaryTextCenterInRootChanged,
-            previewed = previewed,
-            isPlaying = isPlaying,
-            isDynamic = isDynamic,
-            lineScale = lineScale,
-            fontSize = mainFontSize,
-            fontWeight = FontWeight.SemiBold,
-        )
-        line.translatedLyric.takeIf(String::isNotBlank)?.let { translated ->
-            Text(
-                text = translated,
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = textAlign,
-                fontSize = translationFontSize.sp,
-                lineHeight = (translationFontSize * 1.5f).sp,
-                color = Color.White.copy(alpha = subLineAlpha),
-            )
-        }
-        line.romanLyric
-            .takeIf {
-                it.isNotBlank() && line.words.none { word -> word.romanText.isNotBlank() }
-            }
-            ?.let { roman ->
-                Text(
-                    text = roman,
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = textAlign,
-                    fontSize = romanFontSize.sp,
-                    lineHeight = (romanFontSize * 1.5f).sp,
-                    color = Color.White.copy(alpha = subLineAlpha),
-                )
-            }
-    }
-}
-
-@Composable
-private fun AmllBackgroundLine(
-    line: LyricLine,
-    positionMs: Float,
-    visible: Boolean,
-    effectReleaseProgress: Float,
-    revealProgress: Float,
-    placeBeforeMain: Boolean,
-    fontSize: Float,
-    isDynamic: Boolean,
-) {
-    val wrapperScale = 0.8f + revealProgress * 0.2f
-    val lineScale = 0.75f + revealProgress * 0.25f
-    val backgroundTransformOrigin =
-        if (line.isDuet) {
-            TransformOrigin(1f, if (placeBeforeMain) 1f else 0f)
-        } else {
-            TransformOrigin(0f, if (placeBeforeMain) 1f else 0f)
-        }
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .graphicsLayer {
-                alpha = revealProgress * 0.4f
-                scaleX = wrapperScale
-                scaleY = wrapperScale
-                translationY =
-                    (if (placeBeforeMain) 1f else -1f) *
-                    (1f - revealProgress) *
-                    size.height *
-                    0.8f
-                transformOrigin = backgroundTransformOrigin
-            },
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .graphicsLayer {
-                    scaleX = lineScale
-                    scaleY = lineScale
-                    transformOrigin = backgroundTransformOrigin
-                },
-        ) {
-            AmllWordLine(
-                line = line,
-                positionMs = positionMs,
-                active = visible &&
-                    positionMs >= (
-                        line.words.minOfOrNull { it.startTimeMs } ?: line.startTimeMs
-                        ) &&
-                    positionMs < (
-                        line.words.maxOfOrNull { it.endTimeMs } ?: line.endTimeMs
-                        ),
-                effectReleaseProgress = effectReleaseProgress,
-                isPlaying = true,
-                isDynamic = isDynamic,
-                lineScale = lineScale,
-                fontSize = fontSize,
-                fontWeight = FontWeight.SemiBold,
-                isBackground = true,
-            )
-        }
-    }
-}
-
-@Composable
-private fun AmllInterludeSlot(
-    interlude: AmllInterlude,
-    positionMs: State<Float>,
-    active: Boolean,
-    fontSize: Float,
-    modifier: Modifier = Modifier,
-) {
-    AnimatedVisibility(
-        visible = active,
-        modifier = modifier,
-        enter = fadeIn(tween(250)) +
-            expandVertically(
-                animationSpec = tween(250),
-                expandFrom = Alignment.Top,
-                clip = false,
-            ),
-        exit = fadeOut(tween(250)) +
-            shrinkVertically(
-                animationSpec = tween(250),
-                shrinkTowards = Alignment.Top,
-                clip = false,
-            ),
-    ) {
-        AmllInterludeDots(
-            interlude = interlude,
-            positionMs = positionMs,
-            fontSize = fontSize,
-            modifier = Modifier.fillMaxWidth(),
-        )
-    }
-}
-
-@Composable
-private fun AmllInterludeDots(
-    interlude: AmllInterlude,
-    positionMs: State<Float>,
-    fontSize: Float,
-    modifier: Modifier = Modifier,
-) {
-    val currentPositionMs = positionMs.value
-    val duration = (interlude.endTimeMs - interlude.startTimeMs).coerceAtLeast(1L).toFloat()
-    val elapsed = (currentPositionMs - interlude.startTimeMs).coerceIn(0f, duration)
-    val remaining = (duration - elapsed).coerceAtLeast(0f)
-    val dotTimeline = (duration - 750f).coerceAtLeast(1f)
-    val fadeInProgress = ((elapsed - 500f) / 500f).coerceIn(0f, 1f)
-    val fadeOutProgress = (remaining / 375f).coerceIn(0f, 1f)
-    val globalAlpha = minOf(fadeInProgress, fadeOutProgress)
-    val breatheDuration = duration / ceil(duration / 1_500f).coerceAtLeast(1f)
-    val breathe =
-        1f + sin(1.5f * PI.toFloat() - (elapsed / breatheDuration) * 2f) / 20f
-    val enterScale = if (elapsed < 2_000f) {
-        1f - 2f.pow(-10f * (elapsed / 2_000f).coerceIn(0f, 1f))
-    } else {
-        1f
-    }
-    val exitScale = if (remaining < 750f) {
-        1f - amllEaseInOutBack(
-            ((750f - remaining) / 750f / 2f).coerceIn(0f, 0.5f),
-        )
-    } else {
-        1f
-    }
-    val scale = (breathe * enterScale * exitScale * 0.7f).coerceAtLeast(0f)
-    val dotAlphas = List(3) { index ->
-        val offset = dotTimeline / 3f * index
-        (((elapsed - offset) * 3f / dotTimeline) * 0.75f)
-            .coerceIn(0.25f, 1f) * globalAlpha
-    }
-    val density = LocalDensity.current
-    val dotSize = with(density) { (fontSize * 0.62f).sp.toDp() }
-    val dotGap = with(density) { (fontSize * 0.25f).sp.toDp() }
-
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(dotSize),
-        contentAlignment =
-            if (interlude.isNextDuet) Alignment.CenterEnd else Alignment.CenterStart,
-    ) {
-        Row(
-            modifier = Modifier
-                .widthIn(min = dotSize * 3 + dotGap * 2)
-                .graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
-                },
-            horizontalArrangement = Arrangement.spacedBy(dotGap),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            repeat(3) { index ->
-                Box(
-                    modifier = Modifier
-                        .size(dotSize)
-                        .graphicsLayer { shape = CircleShape }
-                        .drawWithContent {
-                            drawCircle(Color.White.copy(alpha = dotAlphas[index]))
-                        },
-                )
-            }
-        }
-    }
-}
-
-private fun amllEaseInOutBack(value: Float): Float {
-    val x = value.coerceIn(0f, 1f)
-    val c1 = 1.70158f
-    val c2 = c1 * 1.525f
-    return if (x < 0.5f) {
-        ((2f * x).pow(2) * ((c2 + 1f) * 2f * x - c2)) / 2f
-    } else {
-        ((2f * x - 2f).pow(2) * ((c2 + 1f) * (2f * x - 2f) + c2) + 2f) / 2f
     }
 }

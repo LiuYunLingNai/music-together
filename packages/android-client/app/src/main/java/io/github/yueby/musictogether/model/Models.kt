@@ -287,6 +287,7 @@ data class AppState(
     val adminLoading: Boolean = false,
     val adminWorkingId: String? = null,
     val messages: List<ChatMessage> = emptyList(),
+    val chatUnreadCount: Int = 0,
     val searchResults: List<Track> = emptyList(),
     val searchLoading: Boolean = false,
     val searchLoadingMore: Boolean = false,

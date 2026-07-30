@@ -21,4 +21,16 @@ class PortraitPlayerLayoutTest {
     fun expandedPortraitKeepsALegibleMaximumWidth() {
         assertEquals(760.dp, portraitPlayerContentWidth(1_200.dp))
     }
+
+    @Test
+    fun coverModeKeepsArtworkInfoAndControlsOnOneVisualAxis() {
+        assertEquals(400.dp, portraitPlayerPrimaryContentWidth(400.dp, 700.dp))
+        assertEquals(560.dp, portraitPlayerPrimaryContentWidth(600.dp, 900.dp))
+        assertEquals(560.dp, portraitPlayerPrimaryContentWidth(760.dp, 1_100.dp))
+    }
+
+    @Test
+    fun shortPortraitReducesTheAlignedContentWidthBeforeCrowdingControls() {
+        assertEquals(360.dp, portraitPlayerPrimaryContentWidth(400.dp, 600.dp))
+    }
 }
