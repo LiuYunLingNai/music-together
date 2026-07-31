@@ -121,8 +121,10 @@ class AmllLyricsEngineTest {
 
         assertEquals(220f, rapid.stiffness, 0.001f)
         assertEquals(170f, relaxed.stiffness, 0.001f)
-        assertEquals(1.1f, rapid.dampingRatio, 0.001f)
+        assertEquals(244.444f, rapid.composeStiffness, 0.001f)
+        assertEquals(1.1595f, rapid.dampingRatio, 0.001f)
         assertEquals(90f, seeking.stiffness, 0.001f)
+        assertEquals(100f, seeking.composeStiffness, 0.001f)
         assertEquals(15f, seeking.damping, 0.001f)
     }
 

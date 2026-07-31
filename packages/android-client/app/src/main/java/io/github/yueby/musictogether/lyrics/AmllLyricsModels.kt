@@ -48,9 +48,14 @@ internal data class AmllLineSpringParameters(
     val stiffness: Float,
     val damping: Float,
 ) {
+    val composeStiffness: Float
+        get() = stiffness / AmllLinePositionMass
+
     val dampingRatio: Float
-        get() = damping / (2f * sqrt(stiffness))
+        get() = damping / (2f * sqrt(stiffness * AmllLinePositionMass))
 }
+
+internal const val AmllLinePositionMass = 0.9f
 
 /**
  * Kotlin port of AMLL core's default optimizeLyricLines pipeline.

@@ -119,10 +119,9 @@ internal fun AmllKaraokeWord(
                 effectReleaseProgress = effectReleaseProgress,
                 modifier = Modifier
                     .graphicsLayer {
-                        // AMLL switches an inactive line to SOLID rendering:
-                        // the paused mask remains, but its bright layer,
-                        // including Ruby, romanization and emphasis, must release.
-                        alpha = effectReleaseProgress
+                        // Bright/dark mask alpha owns the line transition.
+                        // This layer only needs offscreen compositing; multiplying
+                        // it by effectReleaseProgress would fade the same mask twice.
                         compositingStrategy = CompositingStrategy.Offscreen
                     }
                     .drawWithContent {

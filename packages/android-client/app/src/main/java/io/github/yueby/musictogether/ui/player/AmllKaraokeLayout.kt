@@ -6,10 +6,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.FirstBaseline
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Constraints
 import io.github.yueby.musictogether.lyrics.AmllEmphasisProfile
@@ -32,16 +36,44 @@ internal data class AmllFlowLine(
     var belowBaseline: Int = 0,
 )
 
+private class AmllVisualLineGeometryReporter {
+    var localBounds: List<Rect> = emptyList()
+    var coordinates: LayoutCoordinates? = null
+    var onChanged: ((List<Rect>) -> Unit)? = null
+
+    fun publish() {
+        val currentCoordinates = coordinates?.takeIf(LayoutCoordinates::isAttached) ?: return
+        val rootBounds = localBounds.map { bounds ->
+            val topLeft = currentCoordinates.localToRoot(bounds.topLeft)
+            val bottomRight = currentCoordinates.localToRoot(bounds.bottomRight)
+            Rect(
+                left = minOf(topLeft.x, bottomRight.x),
+                top = minOf(topLeft.y, bottomRight.y),
+                right = maxOf(topLeft.x, bottomRight.x),
+                bottom = maxOf(topLeft.y, bottomRight.y),
+            )
+        }
+        onChanged?.invoke(rootBounds)
+    }
+}
+
 @Composable
 internal fun AmllBalancedWordLayout(
     chunks: List<AmllWordChunk>,
     alignEnd: Boolean,
     verticalGapPx: Int,
+    onVisualLineBoundsInRootChanged: ((List<Rect>) -> Unit)? = null,
     modifier: Modifier = Modifier,
     content: @Composable (Int, AmllWordChunk) -> Unit,
 ) {
+    val geometryReporter = remember { AmllVisualLineGeometryReporter() }
+    geometryReporter.onChanged = onVisualLineBoundsInRootChanged
+    SideEffect { geometryReporter.publish() }
     Layout(
-        modifier = modifier,
+        modifier = modifier.onGloballyPositioned { coordinates ->
+            geometryReporter.coordinates = coordinates
+            geometryReporter.publish()
+        },
         content = {
             chunks.forEachIndexed { index, chunk ->
                 content(index, chunk)
@@ -87,6 +119,16 @@ internal fun AmllBalancedWordLayout(
 
         val contentHeight = lines.sumOf { it.height } +
             verticalGapPx * (lines.size - 1).coerceAtLeast(0)
+        var lineTop = 0
+        geometryReporter.localBounds = lines.map { line ->
+            val lineLeft = if (alignEnd) constraints.maxWidth - line.width else 0
+            Rect(
+                left = lineLeft.toFloat(),
+                top = lineTop.toFloat(),
+                right = (lineLeft + line.width).toFloat(),
+                bottom = (lineTop + line.height).toFloat(),
+            ).also { lineTop += line.height + verticalGapPx }
+        }
         layout(
             width = constraints.maxWidth,
             height = contentHeight.coerceIn(constraints.minHeight, constraints.maxHeight),

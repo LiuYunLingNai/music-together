@@ -1,5 +1,6 @@
 package io.github.yueby.musictogether.ui.player
 
+import androidx.compose.ui.geometry.Rect
 import io.github.yueby.musictogether.lyrics.AmllLyricGroup
 import io.github.yueby.musictogether.lyrics.AmllInterlude
 import io.github.yueby.musictogether.lyrics.amllWordProgress
@@ -25,14 +26,14 @@ class AmllLyricsPlaybackTest {
     }
 
     @Test
-    fun matchesAmllVerticalTopAndCenteredAnchorGeometry() {
+    fun keepsMobileTopAndLandscapeCenteredAnchorGeometry() {
         assertEquals(
             0f,
             amllFocusDistance(
                 itemOffset = 100,
                 itemSize = 80,
                 viewportHeight = 1_000,
-                alignPosition = 0.10f,
+                alignPosition = AmllPortraitAlignPosition,
                 alignToTop = true,
             ),
             0.001f,
@@ -43,7 +44,7 @@ class AmllLyricsPlaybackTest {
                 itemOffset = 300,
                 itemSize = 100,
                 viewportHeight = 1_000,
-                alignPosition = 0.35f,
+                alignPosition = AmllCenteredAlignPosition,
                 alignToTop = false,
             ),
             0.001f,
@@ -58,6 +59,14 @@ class AmllLyricsPlaybackTest {
             shouldResetAmllFocus(4, timelineDiscontinuity = false),
         )
         assertTrue(shouldResetAmllFocus(4, timelineDiscontinuity = true))
+    }
+
+    @Test
+    fun initialListCompositionStartsAtTheCurrentFocusedLyric() {
+        assertEquals(18, initialAmllListIndex(focusedListIndex = 18, itemCount = 50))
+        assertEquals(0, initialAmllListIndex(focusedListIndex = -1, itemCount = 50))
+        assertEquals(49, initialAmllListIndex(focusedListIndex = 60, itemCount = 50))
+        assertEquals(0, initialAmllListIndex(focusedListIndex = 0, itemCount = 0))
     }
 
     @Test
@@ -86,24 +95,66 @@ class AmllLyricsPlaybackTest {
     }
 
     @Test
-    fun timestampOnlyAppearsWhenTheBlankSideCanContainIt() {
-        assertTrue(
-            hasAmllLyricTimestampRoom(
-                lyricWidthPx = 300f,
+    fun timestampKeepsItsFixedSideAndUsesTheActualWrappedVisualLineForCollision() {
+        val container = Rect(0f, 0f, 420f, 800f)
+
+        assertEquals(
+            356f,
+            amllFixedTimestampXInRoot(
+                visualLine = Rect(20f, 100f, 332f, 140f),
                 timestampWidthPx = 44f,
-                containerWidthPx = 420f,
+                containerBoundsInRoot = container,
+                horizontalInsetPx = 20f,
                 gapPx = 12f,
-            ),
+                preferLeft = false,
+            )!!,
+            0.001f,
         )
         assertEquals(
-            false,
-            hasAmllLyricTimestampRoom(
-                lyricWidthPx = 340f,
+            null,
+            amllFixedTimestampXInRoot(
+                visualLine = Rect(100f, 160f, 400f, 200f),
                 timestampWidthPx = 44f,
-                containerWidthPx = 420f,
+                containerBoundsInRoot = container,
+                horizontalInsetPx = 20f,
                 gapPx = 12f,
+                preferLeft = false,
             ),
         )
+        assertNull(
+            amllFixedTimestampXInRoot(
+                visualLine = Rect(20f, 220f, 400f, 260f),
+                timestampWidthPx = 44f,
+                containerBoundsInRoot = container,
+                horizontalInsetPx = 20f,
+                gapPx = 12f,
+                preferLeft = false,
+            ),
+        )
+    }
+
+    @Test
+    fun duetTimestampPrefersTheBlankLeftSide() {
+        assertEquals(
+            20f,
+            amllFixedTimestampXInRoot(
+                visualLine = Rect(140f, 100f, 400f, 140f),
+                timestampWidthPx = 44f,
+                containerBoundsInRoot = Rect(0f, 0f, 420f, 800f),
+                horizontalInsetPx = 20f,
+                gapPx = 12f,
+                preferLeft = true,
+            )!!,
+            0.001f,
+        )
+    }
+
+    @Test
+    fun previewOverlayRejectsGeometryMeasuredForAnOldSelection() {
+        val current = IndexedValue(index = 7, value = Rect(20f, 100f, 300f, 160f))
+
+        assertEquals(current.value, amllMeasurementForGroup(current, groupIndex = 7))
+        assertNull(amllMeasurementForGroup(current, groupIndex = 8))
     }
 
     @Test
@@ -354,11 +405,34 @@ class AmllLyricsPlaybackTest {
     }
 
     @Test
-    fun distanceBlurDisappearsForActiveLinesAndManualBrowsing() {
-        assertEquals(0f, amllLineBlurRadiusDp(4, 4, active = false, userScrolling = false))
-        assertEquals(0f, amllLineBlurRadiusDp(2, 4, active = true, userScrolling = false))
-        assertEquals(0f, amllLineBlurRadiusDp(2, 4, active = false, userScrolling = true))
-        assertTrue(amllLineBlurRadiusDp(0, 4, active = false, userScrolling = false) > 0f)
+    fun matchesUpstreamMaskAndGroupTransitionValues() {
+        assertEquals(0.10f, AmllPortraitAlignPosition, 0.001f)
+        assertEquals(0.35f, AmllCenteredAlignPosition, 0.001f)
+        assertEquals(0.10f, AmllTopFadeEnd, 0.001f)
+        assertEquals(0.91f, AmllBottomFadeStart, 0.001f)
+        assertEquals(300, AmllMaskAttackDurationMs)
+        assertEquals(450, AmllMaskReleaseDurationMs)
+        assertEquals(0.85f, amllGroupTargetAlpha(active = true), 0.001f)
+        assertEquals(1f, amllGroupTargetAlpha(active = false), 0.001f)
+        assertEquals(0.2f, amllInactiveMainLineAlpha(readingMode = false), 0.001f)
+        assertEquals(0.4f, amllInactiveMainLineAlpha(readingMode = true), 0.001f)
+        assertEquals(false, shouldRevealAmllBackground(active = false, readingMode = false))
+        assertTrue(shouldRevealAmllBackground(active = true, readingMode = false))
+        assertTrue(shouldRevealAmllBackground(active = false, readingMode = true))
+        assertEquals(50f, AmllMainScaleStiffness, 0.001f)
+        assertEquals(0.8839f, AmllMainScaleDampingRatio, 0.001f)
+        assertEquals(50f, AmllBackgroundScaleStiffness, 0.001f)
+        assertEquals(1.4142f, AmllBackgroundScaleDampingRatio, 0.001f)
+    }
+
+    @Test
+    fun onlyEnablesWordAnimationForTimedLyricSources() {
+        assertEquals(false, shouldUseAmllWordAnimation("lrc"))
+        assertEquals(false, shouldUseAmllWordAnimation(null))
+        assertTrue(shouldUseAmllWordAnimation("ttml"))
+        assertTrue(shouldUseAmllWordAnimation("wordByWord"))
+        assertTrue(shouldUseAmllWordAnimation("yrc"))
+        assertEquals(30, AmllPlaybackRelayoutFrameCount)
     }
 
     @Test

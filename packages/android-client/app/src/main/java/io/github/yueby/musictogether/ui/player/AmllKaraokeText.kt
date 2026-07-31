@@ -7,13 +7,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntSize
@@ -49,37 +52,65 @@ internal data class AmllMaskWordMeasurement(
     val horizontalHeadroomPx: Int,
 )
 
+private class AmllTextGeometryReporter {
+    var localBounds: List<Rect> = emptyList()
+    var coordinates: LayoutCoordinates? = null
+    var onChanged: ((AmllPrimaryTextGeometry) -> Unit)? = null
+
+    fun publish() {
+        val currentCoordinates = coordinates?.takeIf(LayoutCoordinates::isAttached) ?: return
+        if (localBounds.isEmpty()) return
+        val visualLines = localBounds.map { bounds ->
+            val topLeft = currentCoordinates.localToRoot(bounds.topLeft)
+            val bottomRight = currentCoordinates.localToRoot(bounds.bottomRight)
+            Rect(
+                left = minOf(topLeft.x, bottomRight.x),
+                top = minOf(topLeft.y, bottomRight.y),
+                right = maxOf(topLeft.x, bottomRight.x),
+                bottom = maxOf(topLeft.y, bottomRight.y),
+            )
+        }
+        onChanged?.invoke(AmllPrimaryTextGeometry.fromVisualLines(visualLines))
+    }
+}
+
+private fun TextLayoutResult.amllVisualLineBounds(): List<Rect> =
+    (0 until lineCount).map { lineIndex ->
+        Rect(
+            left = getLineLeft(lineIndex),
+            top = getLineTop(lineIndex),
+            right = getLineRight(lineIndex),
+            bottom = getLineBottom(lineIndex),
+        )
+    }
+
+internal fun hasAmllTimedWords(line: LyricLine): Boolean =
+    line.words.any { word -> word.endTimeMs > word.startTimeMs }
+
 @Composable
 internal fun AmllWordLine(
     line: LyricLine,
     positionMs: Float,
     active: Boolean,
     effectReleaseProgress: Float = if (active) 1f else 0f,
-    onPrimaryTextCenterInRootChanged: ((Float) -> Unit)? = null,
-    previewed: Boolean = false,
-    isPlaying: Boolean,
-    isDynamic: Boolean,
-    lineScale: Float,
+    onPrimaryTextGeometryChanged: ((AmllPrimaryTextGeometry) -> Unit)? = null,
+    wordAnimationEnabled: Boolean,
+    readingMode: Boolean,
     fontSize: Float,
     fontWeight: FontWeight,
     isBackground: Boolean = false,
 ) {
-    val hasDynamicTiming = isDynamic && line.words.any {
-        it.endTimeMs > it.startTimeMs
-    }
+    val hasDynamicTiming = wordAnimationEnabled && hasAmllTimedWords(line)
     val textAlign = if (line.isDuet) TextAlign.End else TextAlign.Start
-    val scaleFactor = ((lineScale - 0.97f) / 0.03f).coerceIn(0f, 1f)
-    val dynamicDarkAlpha = scaleFactor * 0.2f + 0.2f
-    val dynamicBrightAlpha = scaleFactor * 0.8f + 0.2f
-    val targetDarkAlpha = dynamicDarkAlpha
-    val targetBrightAlpha = when {
-        active -> dynamicBrightAlpha
-        previewed -> maxOf(dynamicDarkAlpha, 0.56f)
-        else -> dynamicDarkAlpha
-    }
+    val inactiveAlpha = amllInactiveMainLineAlpha(readingMode)
+    val targetDarkAlpha = if (active) 0.4f else inactiveAlpha
+    val targetBrightAlpha = if (active) 1f else inactiveAlpha
     val darkAlpha = rememberAmllMaskAlpha(targetDarkAlpha).value
     val brightAlpha = rememberAmllMaskAlpha(targetBrightAlpha).value
-    val baseAlpha = if (previewed && !active) brightAlpha else darkAlpha
+    val baseAlpha = darkAlpha
+    val geometryReporter = remember { AmllTextGeometryReporter() }
+    geometryReporter.onChanged = onPrimaryTextGeometryChanged
+    SideEffect { geometryReporter.publish() }
 
     if (!hasDynamicTiming) {
         Text(
@@ -87,12 +118,10 @@ internal fun AmllWordLine(
             modifier = Modifier
                 .fillMaxWidth()
                 .then(
-                    onPrimaryTextCenterInRootChanged?.let { onCenterChanged ->
+                    onPrimaryTextGeometryChanged?.let {
                         Modifier.onGloballyPositioned { coordinates ->
-                            onCenterChanged(
-                                coordinates.positionInRoot().y +
-                                    coordinates.size.height / 2f,
-                            )
+                            geometryReporter.coordinates = coordinates
+                            geometryReporter.publish()
                         }
                     } ?: Modifier,
                 ),
@@ -101,6 +130,12 @@ internal fun AmllWordLine(
             fontSize = fontSize.sp,
             lineHeight = (fontSize * 1.25f).sp,
             fontWeight = fontWeight,
+            onTextLayout = { result ->
+                if (onPrimaryTextGeometryChanged != null) {
+                    geometryReporter.localBounds = result.amllVisualLineBounds()
+                    geometryReporter.publish()
+                }
+            },
         )
         return
     }
@@ -149,19 +184,16 @@ internal fun AmllWordLine(
         chunks = chunks,
         alignEnd = line.isDuet,
         verticalGapPx = wrappedLineGap,
+        onVisualLineBoundsInRootChanged = onPrimaryTextGeometryChanged?.let { onChanged ->
+            { visualLines ->
+                if (visualLines.isNotEmpty()) {
+                    onChanged(AmllPrimaryTextGeometry.fromVisualLines(visualLines))
+                }
+            }
+        },
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = emphasisHeadroom)
-            .then(
-                onPrimaryTextCenterInRootChanged?.let { onCenterChanged ->
-                    Modifier.onGloballyPositioned { coordinates ->
-                        onCenterChanged(
-                            coordinates.positionInRoot().y +
-                                coordinates.size.height / 2f,
-                        )
-                    }
-                } ?: Modifier,
-            ),
+            .padding(top = emphasisHeadroom),
     ) { chunkIndex, chunk ->
         if (chunk.text.isBlank()) {
             Text(

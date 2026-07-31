@@ -1,11 +1,11 @@
 package io.github.yueby.musictogether.ui.player
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,16 +21,17 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.BlurredEdgeTreatment
-import androidx.compose.ui.draw.blur
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.yueby.musictogether.lyrics.AmllLyricGroup
 import io.github.yueby.musictogether.model.LyricLine
@@ -40,21 +41,21 @@ internal fun AmllLineGroup(
     group: AmllLyricGroup,
     positionMs: State<Float>,
     active: Boolean,
-    previewed: Boolean,
-    isPlaying: Boolean,
-    isDynamic: Boolean,
-    groupIndex: Int,
-    focusedGroupIndex: Int,
-    userScrolling: Boolean,
+    readingMode: Boolean,
+    wordAnimationEnabled: Boolean,
     onClick: (() -> Unit)?,
-    onMainLyricCenterInRootChanged: (Float) -> Unit,
+    onMainLyricGeometryChanged: ((AmllPrimaryTextGeometry) -> Unit)?,
+    onGroupBoundsInRootChanged: ((Rect) -> Unit)?,
     mainFontSize: Float,
     translationFontSize: Float,
     romanFontSize: Float,
     backgroundFontSize: Float,
+    horizontalContentPadding: Dp,
     duetInset: Dp,
+    backgroundGap: Dp,
+    positionSpringStiffness: Float,
+    positionSpringDampingRatio: Float,
 ) {
-    val expensiveEffectsEnabled = LocalAmllExpensiveEffectsEnabled.current
     val line = group.main
     var retainedPositionMs by remember(line) {
         mutableFloatStateOf(line.startTimeMs.toFloat())
@@ -66,18 +67,21 @@ internal fun AmllLineGroup(
     val currentPositionMs = livePositionMs ?: retainedPositionMs
     val effectReleaseProgress by animateFloatAsState(
         targetValue = if (active) 1f else 0f,
-        animationSpec = tween(durationMillis = if (active) 70 else 300),
+        animationSpec = tween(
+            durationMillis =
+                if (active) AmllMaskAttackDurationMs else AmllMaskReleaseDurationMs,
+            easing = AmllMaskAlphaEasing,
+        ),
         label = "amllEffectRelease",
     )
     val scale by animateFloatAsState(
         targetValue = when {
-            !isPlaying || active -> 1f
-            previewed -> 0.992f
+            readingMode || active -> 1f
             else -> AmllInactiveScale
         },
         animationSpec = spring(
-            dampingRatio = AmllScaleDampingRatio,
-            stiffness = AmllSpringStiffness,
+            dampingRatio = AmllMainScaleDampingRatio,
+            stiffness = AmllMainScaleStiffness,
         ),
         label = "amllLineScale",
     )
@@ -88,24 +92,37 @@ internal fun AmllLineGroup(
                 backgroundStart < (line.words.firstOrNull()?.startTimeMs ?: line.startTimeMs)
             }
             ?: false
-    val backgroundRevealed = background != null && (active || !isPlaying)
-    val backgroundRevealProgress by animateFloatAsState(
+    val backgroundRevealed = background != null && shouldRevealAmllBackground(
+        active = active,
+        readingMode = readingMode,
+    )
+    val backgroundSlideProgress by animateFloatAsState(
         targetValue = if (backgroundRevealed) 1f else 0f,
         animationSpec = spring(
-            dampingRatio = 1f,
-            stiffness = AmllSpringStiffness,
+            dampingRatio = positionSpringDampingRatio,
+            stiffness = positionSpringStiffness,
         ),
-        label = "amllBackgroundReveal",
+        label = "amllBackgroundSlide",
     )
-    val blurRadius by animateFloatAsState(
-        targetValue = amllLineBlurRadiusDp(
-            groupIndex = groupIndex,
-            focusedGroupIndex = focusedGroupIndex,
+    val backgroundAlphaProgress by animateFloatAsState(
+        targetValue = if (backgroundRevealed) 1f else 0f,
+        animationSpec = tween(durationMillis = 300, easing = AmllCssEase),
+        label = "amllBackgroundAlpha",
+    )
+    val backgroundLineScale by animateFloatAsState(
+        targetValue = if (backgroundRevealed) 1f else 0.75f,
+        animationSpec = spring(
+            dampingRatio = AmllBackgroundScaleDampingRatio,
+            stiffness = AmllBackgroundScaleStiffness,
+        ),
+        label = "amllBackgroundLineScale",
+    )
+    val groupAlpha by animateFloatAsState(
+        targetValue = amllGroupTargetAlpha(
             active = active,
-            userScrolling = userScrolling,
-        ).takeIf { expensiveEffectsEnabled } ?: 0f,
-        animationSpec = tween(durationMillis = 400),
-        label = "amllLineBlur",
+        ),
+        animationSpec = tween(durationMillis = 400, easing = AmllCssEase),
+        label = "amllGroupAlpha",
     )
     val (startInsetFraction, endInsetFraction) = amllDuetInsetFractions(
         hasDuetLines = duetInset > 0.dp,
@@ -115,10 +132,7 @@ internal fun AmllLineGroup(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .blur(
-                radius = blurRadius.dp,
-                edgeTreatment = BlurredEdgeTreatment.Unbounded,
-            )
+            .graphicsLayer { alpha = groupAlpha }
             .then(
                 if (onClick != null) {
                     Modifier.clickable(
@@ -129,47 +143,68 @@ internal fun AmllLineGroup(
                 } else {
                     Modifier
                 },
-            )
-            .padding(
-                start = duetInset * (startInsetFraction / AmllDuetInsetFraction),
-                end = duetInset * (endInsetFraction / AmllDuetInsetFraction),
             ),
     ) {
-        AmllMainAndBackgroundLayout(
-            backgroundFirst = backgroundFirst,
-            backgroundRevealProgress = backgroundRevealProgress,
-            main = {
-                AmllMainLine(
-                    line = line,
-                    positionMs = currentPositionMs,
-                    active = active,
-                    effectReleaseProgress = effectReleaseProgress,
-                    onPrimaryTextCenterInRootChanged = onMainLyricCenterInRootChanged,
-                    previewed = previewed,
-                    isPlaying = isPlaying,
-                    isDynamic = isDynamic,
-                    lineScale = scale,
-                    mainFontSize = mainFontSize,
-                    translationFontSize = translationFontSize,
-                    romanFontSize = romanFontSize,
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(
+                    start = horizontalContentPadding +
+                        duetInset * (startInsetFraction / AmllDuetInsetFraction),
+                    end = horizontalContentPadding +
+                        duetInset * (endInsetFraction / AmllDuetInsetFraction),
+                ),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        onGroupBoundsInRootChanged?.let { onBoundsChanged ->
+                            Modifier.onGloballyPositioned { coordinates ->
+                                onBoundsChanged(coordinates.boundsInRoot())
+                            }
+                        } ?: Modifier,
+                    ),
+            ) {
+                AmllMainAndBackgroundLayout(
+                    backgroundFirst = backgroundFirst,
+                    backgroundRevealProgress = backgroundSlideProgress,
+                    backgroundGap = backgroundGap,
+                    main = {
+                        AmllMainLine(
+                            line = line,
+                            positionMs = currentPositionMs,
+                            active = active,
+                            effectReleaseProgress = effectReleaseProgress,
+                            onPrimaryTextGeometryChanged = onMainLyricGeometryChanged,
+                            wordAnimationEnabled = wordAnimationEnabled,
+                            readingMode = readingMode,
+                            lineScale = scale,
+                            mainFontSize = mainFontSize,
+                            translationFontSize = translationFontSize,
+                            romanFontSize = romanFontSize,
+                        )
+                    },
+                    background = background?.let { backgroundLine ->
+                        @Composable {
+                            AmllBackgroundLine(
+                                line = backgroundLine,
+                                positionMs = currentPositionMs,
+                                visible = active,
+                                effectReleaseProgress = effectReleaseProgress,
+                                revealProgress = backgroundSlideProgress,
+                                alphaProgress = backgroundAlphaProgress,
+                                lineScale = backgroundLineScale,
+                                wordAnimationEnabled = wordAnimationEnabled,
+                                readingMode = readingMode,
+                                placeBeforeMain = backgroundFirst,
+                                fontSize = backgroundFontSize,
+                            )
+                        }
+                    },
                 )
-            },
-            background = background?.let { backgroundLine ->
-                @Composable {
-                    AmllBackgroundLine(
-                        line = backgroundLine,
-                        positionMs = currentPositionMs,
-                        visible = active,
-                        effectReleaseProgress = effectReleaseProgress,
-                        revealProgress = backgroundRevealProgress,
-                        placeBeforeMain = backgroundFirst,
-                        fontSize = backgroundFontSize,
-                        isDynamic = isDynamic,
-                    )
-                }
-            },
-        )
-
+            }
+        }
     }
 }
 
@@ -178,6 +213,7 @@ internal fun AmllLineGroup(
 internal fun AmllMainAndBackgroundLayout(
     backgroundFirst: Boolean,
     backgroundRevealProgress: Float,
+    backgroundGap: Dp,
     main: @Composable () -> Unit,
     background: (@Composable () -> Unit)?,
 ) {
@@ -192,8 +228,9 @@ internal fun AmllMainAndBackgroundLayout(
         val backgroundPlaceable = measurables.getOrNull(1)?.measure(
             constraints.copy(minHeight = 0),
         )
+        val backgroundGapPx = if (backgroundPlaceable == null) 0 else backgroundGap.roundToPx()
         val backgroundContribution = amllBackgroundHeightContribution(
-            backgroundHeight = backgroundPlaceable?.height ?: 0,
+            backgroundHeight = (backgroundPlaceable?.height ?: 0) + backgroundGapPx,
             revealProgress = backgroundRevealProgress,
         )
         layout(
@@ -207,9 +244,10 @@ internal fun AmllMainAndBackgroundLayout(
             backgroundPlaceable?.placeRelative(
                 x = 0,
                 y = if (backgroundFirst) {
-                    backgroundContribution - backgroundPlaceable.height
+                    backgroundContribution - backgroundPlaceable.height - backgroundGapPx
                 } else {
-                    mainPlaceable.height
+                    mainPlaceable.height +
+                        (backgroundGapPx * backgroundRevealProgress).toInt()
                 },
             )
         }
@@ -222,10 +260,9 @@ internal fun AmllMainLine(
     positionMs: Float,
     active: Boolean,
     effectReleaseProgress: Float,
-    onPrimaryTextCenterInRootChanged: (Float) -> Unit,
-    previewed: Boolean,
-    isPlaying: Boolean,
-    isDynamic: Boolean,
+    onPrimaryTextGeometryChanged: ((AmllPrimaryTextGeometry) -> Unit)?,
+    wordAnimationEnabled: Boolean,
+    readingMode: Boolean,
     lineScale: Float,
     mainFontSize: Float,
     translationFontSize: Float,
@@ -241,18 +278,15 @@ internal fun AmllMainLine(
                 transformOrigin =
                     if (line.isDuet) TransformOrigin(1f, 0.5f) else TransformOrigin(0f, 0.5f)
             },
-        verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         AmllWordLine(
             line = line,
             positionMs = positionMs,
             active = active,
             effectReleaseProgress = effectReleaseProgress,
-            onPrimaryTextCenterInRootChanged = onPrimaryTextCenterInRootChanged,
-            previewed = previewed,
-            isPlaying = isPlaying,
-            isDynamic = isDynamic,
-            lineScale = lineScale,
+            onPrimaryTextGeometryChanged = onPrimaryTextGeometryChanged,
+            wordAnimationEnabled = wordAnimationEnabled,
+            readingMode = readingMode,
             fontSize = mainFontSize,
             fontWeight = FontWeight.SemiBold,
         )
@@ -263,7 +297,9 @@ internal fun AmllMainLine(
                 textAlign = textAlign,
                 fontSize = translationFontSize.sp,
                 lineHeight = (translationFontSize * 1.5f).sp,
-                color = Color.White.copy(alpha = AmllSubLineAlpha),
+                color = Color.White.copy(
+                    alpha = if (readingMode) AmllReadingSubLineAlpha else AmllSubLineAlpha,
+                ),
             )
         }
         line.romanLyric
@@ -277,7 +313,9 @@ internal fun AmllMainLine(
                     textAlign = textAlign,
                     fontSize = romanFontSize.sp,
                     lineHeight = (romanFontSize * 1.5f).sp,
-                    color = Color.White.copy(alpha = AmllSubLineAlpha),
+                    color = Color.White.copy(
+                        alpha = if (readingMode) AmllReadingSubLineAlpha else AmllSubLineAlpha,
+                    ),
                 )
             }
     }
@@ -290,12 +328,14 @@ internal fun AmllBackgroundLine(
     visible: Boolean,
     effectReleaseProgress: Float,
     revealProgress: Float,
+    alphaProgress: Float,
+    lineScale: Float,
+    wordAnimationEnabled: Boolean,
+    readingMode: Boolean,
     placeBeforeMain: Boolean,
     fontSize: Float,
-    isDynamic: Boolean,
 ) {
     val wrapperScale = 0.8f + revealProgress * 0.2f
-    val lineScale = 0.75f + revealProgress * 0.25f
     val backgroundTransformOrigin =
         if (line.isDuet) {
             TransformOrigin(1f, if (placeBeforeMain) 1f else 0f)
@@ -307,7 +347,7 @@ internal fun AmllBackgroundLine(
         modifier = Modifier
             .fillMaxWidth()
             .graphicsLayer {
-                alpha = revealProgress * 0.4f
+                alpha = alphaProgress * 0.4f
                 scaleX = wrapperScale
                 scaleY = wrapperScale
                 translationY =
@@ -338,9 +378,8 @@ internal fun AmllBackgroundLine(
                         line.words.maxOfOrNull { it.endTimeMs } ?: line.endTimeMs
                         ),
                 effectReleaseProgress = effectReleaseProgress,
-                isPlaying = true,
-                isDynamic = isDynamic,
-                lineScale = lineScale,
+                wordAnimationEnabled = wordAnimationEnabled,
+                readingMode = readingMode,
                 fontSize = fontSize,
                 fontWeight = FontWeight.SemiBold,
                 isBackground = true,
@@ -348,3 +387,9 @@ internal fun AmllBackgroundLine(
         }
     }
 }
+
+internal const val AmllMainScaleStiffness = 50f
+internal const val AmllMainScaleDampingRatio = 0.8838835f
+internal const val AmllBackgroundScaleStiffness = 50f
+internal const val AmllBackgroundScaleDampingRatio = 1.4142135f
+private val AmllCssEase = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)

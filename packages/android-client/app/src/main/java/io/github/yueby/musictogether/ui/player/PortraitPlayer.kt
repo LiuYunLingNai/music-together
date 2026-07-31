@@ -10,6 +10,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
@@ -30,6 +31,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.yueby.musictogether.MusicTogetherViewModel
@@ -80,6 +82,7 @@ internal fun PortraitPlayerContent(
             animationSpec = spring(dampingRatio = 0.86f, stiffness = 260f),
             label = "portrait-player-aligned-width",
         )
+        val lyricTransitionOffsetPx = with(LocalDensity.current) { 20.dp.roundToPx() }
         Column(Modifier.fillMaxSize()) {
             SharedTransitionLayout(
                 modifier = Modifier
@@ -91,13 +94,17 @@ internal fun PortraitPlayerContent(
                     transitionSpec = {
                         if (targetState) {
                             (
-                                fadeIn(tween(300, delayMillis = 60)) +
-                                    slideInVertically(tween(300)) { it / 14 }
-                                ) togetherWith fadeOut(tween(170))
+                                fadeIn(tween(300, easing = LinearOutSlowInEasing)) +
+                                    slideInVertically(
+                                        tween(300, easing = LinearOutSlowInEasing),
+                                    ) { lyricTransitionOffsetPx }
+                                ) togetherWith fadeOut(tween(300))
                         } else {
-                            fadeIn(tween(260)) togetherWith (
-                                fadeOut(tween(180)) +
-                                    slideOutVertically(tween(220)) { it / 14 }
+                            fadeIn(tween(300)) togetherWith (
+                                fadeOut(tween(300, easing = LinearOutSlowInEasing)) +
+                                    slideOutVertically(
+                                        tween(300, easing = LinearOutSlowInEasing),
+                                    ) { lyricTransitionOffsetPx }
                                 )
                         }
                     },

@@ -5,6 +5,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
@@ -154,6 +155,8 @@ internal fun AmllAnimatedCharacter(
     }
     val density = LocalDensity.current
     val fontSizePx = with(density) { fontSize.sp.toPx() }
+    val glyphEffectHeadroom = with(density) { fontSizePx.toDp() }
+    val glyphEffectHeadroomPx = with(density) { glyphEffectHeadroom.roundToPx() }
     val centerOffset = glyphCount / 2f - glyphIndex
     val glowLevel = (releasedEmphasis * profile.blur).coerceIn(0f, 0.8f)
     val glowRadius =
@@ -173,6 +176,7 @@ internal fun AmllAnimatedCharacter(
         content = {
             Text(
                 text = grapheme,
+                modifier = Modifier.padding(horizontal = glyphEffectHeadroom),
                 color = color,
                 fontSize = fontSize.sp,
                 lineHeight = (fontSize * 1.25f).sp,
@@ -199,14 +203,28 @@ internal fun AmllAnimatedCharacter(
             )
         },
     ) { measurables, constraints ->
-        val placeable = measurables.single().measure(constraints)
+        val expandedConstraints = constraints.copy(
+            minWidth = 0,
+            minHeight = 0,
+            maxWidth = if (constraints.hasBoundedWidth) {
+                (constraints.maxWidth + glyphEffectHeadroomPx * 2)
+                    .coerceAtMost(Constraints.Infinity)
+            } else {
+                Constraints.Infinity
+            },
+        )
+        val placeable = measurables.single().measure(expandedConstraints)
         val firstBaseline = placeable[FirstBaseline]
+        val contentWidth = amllCollapsedEffectWidth(
+            measuredWidthPx = placeable.width,
+            horizontalHeadroomPx = glyphEffectHeadroomPx,
+        )
         layout(
-            width = placeable.width,
-            height = placeable.height,
+            width = contentWidth.coerceIn(constraints.minWidth, constraints.maxWidth),
+            height = placeable.height.coerceIn(constraints.minHeight, constraints.maxHeight),
             alignmentLines = mapOf(FirstBaseline to firstBaseline),
         ) {
-            placeable.placeWithLayer(0, 0) {
+            placeable.placeWithLayer(-glyphEffectHeadroomPx, 0) {
                 scaleX = scale
                 scaleY = scale
                 this.translationX = translationX
@@ -226,11 +244,19 @@ internal fun AmllAnimatedCharacter(
 @Composable
 internal fun rememberAmllMaskAlpha(target: Float): State<Float> {
     var previousTarget = remember { target }
-    val durationMs = if (target > previousTarget) 70 else 300
+    val durationMs =
+        if (target > previousTarget) AmllMaskAttackDurationMs else AmllMaskReleaseDurationMs
     SideEffect { previousTarget = target }
     return animateFloatAsState(
         targetValue = target,
-        animationSpec = tween(durationMillis = durationMs),
+        animationSpec = tween(
+            durationMillis = durationMs,
+            easing = AmllMaskAlphaEasing,
+        ),
         label = "amllMaskAlpha",
     )
 }
+
+internal const val AmllMaskAttackDurationMs = 300
+internal const val AmllMaskReleaseDurationMs = 450
+internal val AmllMaskAlphaEasing = CubicBezierEasing(0f, 0f, 0.58f, 1f)

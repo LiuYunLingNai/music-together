@@ -1,144 +1,208 @@
 package io.github.yueby.musictogether.ui.player
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.yueby.musictogether.lyrics.AmllLyricGroup
+
+internal data class AmllPrimaryTextGeometry(
+    val boundsInRoot: Rect,
+    val visualLinesInRoot: List<Rect>,
+) {
+    companion object {
+        fun fromVisualLines(visualLines: List<Rect>): AmllPrimaryTextGeometry {
+            require(visualLines.isNotEmpty())
+            return AmllPrimaryTextGeometry(
+                boundsInRoot = Rect(
+                    left = visualLines.minOf(Rect::left),
+                    top = visualLines.minOf(Rect::top),
+                    right = visualLines.maxOf(Rect::right),
+                    bottom = visualLines.maxOf(Rect::bottom),
+                ),
+                visualLinesInRoot = visualLines,
+            )
+        }
+    }
+}
+
+internal data class AmllPreviewGeometry(
+    val primaryText: AmllPrimaryTextGeometry,
+    val groupBoundsInRoot: Rect,
+    val group: AmllLyricGroup,
+)
+
+private data class AmllTimestampRenderState(
+    val text: String,
+    val xInRootPx: Float,
+    val centerYInRootPx: Float,
+)
+
+internal fun amllFixedTimestampXInRoot(
+    visualLine: Rect,
+    timestampWidthPx: Float,
+    containerBoundsInRoot: Rect,
+    horizontalInsetPx: Float,
+    gapPx: Float,
+    preferLeft: Boolean,
+): Float? {
+    val leftLimit = containerBoundsInRoot.left + horizontalInsetPx.coerceAtLeast(0f)
+    val rightLimit = containerBoundsInRoot.right - horizontalInsetPx.coerceAtLeast(0f)
+    val timestampWidth = timestampWidthPx.coerceAtLeast(0f)
+    val gap = gapPx.coerceAtLeast(0f)
+    return if (preferLeft) {
+        leftLimit.takeIf { fixedX ->
+            fixedX + timestampWidth + gap <= visualLine.left
+        }
+    } else {
+        (rightLimit - timestampWidth).takeIf { fixedX ->
+            visualLine.right + gap <= fixedX
+        }
+    }
+}
 
 @Composable
 internal fun AmllTimestampPreview(
     geometry: AmllPreviewGeometry?,
     visible: Boolean,
-    containerWidth: androidx.compose.ui.unit.Dp,
     mainFontSize: Float,
-    translationFontSize: Float,
-    romanFontSize: Float,
-    backgroundFontSize: Float,
     modifier: Modifier = Modifier,
 ) {
-    var containerTopInRootPx by remember { mutableFloatStateOf(0f) }
-    val group = geometry?.group
-    val line = group?.main
+    var containerBoundsInRoot by remember { mutableStateOf(Rect.Zero) }
+    val line = geometry?.group?.main
     val timestampText = line?.let {
         formatLyricTimestamp(it.words.firstOrNull()?.startTimeMs ?: it.startTimeMs)
     }.orEmpty()
     val timestampFontSize = (mainFontSize * 0.42f).coerceAtLeast(10f)
     val textMeasurer = rememberTextMeasurer()
     val density = LocalDensity.current
-    val hasRoom = remember(
-        line,
-        group?.background,
-        timestampText,
-        mainFontSize,
-        translationFontSize,
-        romanFontSize,
-        backgroundFontSize,
-        timestampFontSize,
-        containerWidth,
-        density,
-    ) {
-        fun measureWidth(text: String, style: TextStyle): Float {
-            if (text.isBlank()) return 0f
-            return textMeasurer.measure(
-                text = text,
-                style = style,
-                softWrap = false,
-                maxLines = 1,
-            ).size.width.toFloat()
-        }
-
-        val lyricWidth = maxOf(
-            measureWidth(
-                line?.text.orEmpty(),
-                TextStyle(
-                    fontSize = mainFontSize.sp,
-                    fontWeight = FontWeight.SemiBold,
-                ),
-            ),
-            measureWidth(
-                line?.translatedLyric.orEmpty(),
-                TextStyle(fontSize = translationFontSize.sp),
-            ),
-            measureWidth(
-                line?.romanLyric.orEmpty(),
-                TextStyle(fontSize = romanFontSize.sp),
-            ),
-            measureWidth(
-                group?.background?.text.orEmpty(),
-                TextStyle(
-                    fontSize = backgroundFontSize.sp,
-                    fontWeight = FontWeight.SemiBold,
-                ),
-            ),
-        )
-        val timestampWidth = measureWidth(
-            timestampText,
-            TextStyle(
+    val timestampWidth = remember(timestampText, timestampFontSize) {
+        textMeasurer.measure(
+            text = timestampText,
+            style = TextStyle(
                 fontSize = timestampFontSize.sp,
                 fontWeight = FontWeight.Medium,
             ),
-        )
-        hasAmllLyricTimestampRoom(
-            lyricWidthPx = lyricWidth,
+            softWrap = false,
+            maxLines = 1,
+        ).size.width.toFloat()
+    }
+    val targetVisualLine = geometry?.primaryText?.visualLinesInRoot?.lastOrNull()
+    val timestampX = targetVisualLine?.let { visualLine ->
+        amllFixedTimestampXInRoot(
+            visualLine = visualLine,
             timestampWidthPx = timestampWidth,
-            containerWidthPx = with(density) { containerWidth.toPx() },
+            containerBoundsInRoot = containerBoundsInRoot,
+            horizontalInsetPx = with(density) { 20.dp.toPx() },
             gapPx = with(density) { 12.dp.toPx() },
+            preferLeft = line?.isDuet == true,
         )
     }
-
-    Box(
-        modifier.onGloballyPositioned { coordinates ->
-            containerTopInRootPx = coordinates.positionInRoot().y
-        },
-    ) {
-        AnimatedVisibility(
-            visible = visible && geometry != null && hasRoom,
-            modifier = Modifier
-                .align(
-                    if (line?.isDuet == true) Alignment.TopStart else Alignment.TopEnd,
-                )
-                .graphicsLayer {
-                    translationY =
-                        (geometry?.centerYInRootPx ?: 0f) -
-                        containerTopInRootPx -
-                        size.height / 2f
-                },
-            enter = fadeIn(tween(140)),
-            exit = fadeOut(tween(180)),
-        ) {
-            Text(
+    val currentTimestamp = timestampX?.let { xInRootPx ->
+        targetVisualLine?.let { visualLine ->
+            AmllTimestampRenderState(
                 text = timestampText,
-                color = Color.White.copy(alpha = 0.38f),
-                fontSize = timestampFontSize.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
+                xInRootPx = xInRootPx,
+                centerYInRootPx = geometry.groupBoundsInRoot.center.y,
             )
         }
     }
-}
+    var retainedTimestamp by remember { mutableStateOf<AmllTimestampRenderState?>(null) }
+    SideEffect {
+        if (currentTimestamp != null && retainedTimestamp != currentTimestamp) {
+            retainedTimestamp = currentTimestamp
+        }
+    }
+    val renderedTimestamp = currentTimestamp ?: retainedTimestamp
+    val previewAlpha by animateFloatAsState(
+        targetValue = if (visible && geometry != null) 1f else 0f,
+        animationSpec = tween(if (visible) 140 else 180),
+        label = "amllBrowsePreview",
+    )
 
-/**
- * AMLL positions an inactive background vocal outside the main flow, then
- * progressively restores its measured height while the group becomes active.
- */
+    Box(
+        modifier = modifier.onGloballyPositioned { coordinates ->
+            containerBoundsInRoot = coordinates.boundsInRoot()
+        },
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val groupBounds = geometry?.groupBoundsInRoot ?: return@Canvas
+            if (previewAlpha <= 0f) return@Canvas
+            val horizontalPadding = 7.dp.toPx()
+            val verticalPadding = 5.dp.toPx()
+            val left = groupBounds.left - containerBoundsInRoot.left - horizontalPadding
+            val top = groupBounds.top - containerBoundsInRoot.top - verticalPadding
+            val frameSize = Size(
+                width = groupBounds.width + horizontalPadding * 2f,
+                height = groupBounds.height + verticalPadding * 2f,
+            )
+            val radius = 10.dp.toPx()
+            drawRoundRect(
+                color = Color.White.copy(alpha = 0.045f * previewAlpha),
+                topLeft = Offset(left, top),
+                size = frameSize,
+                cornerRadius = CornerRadius(radius),
+            )
+            drawRoundRect(
+                color = Color.White.copy(alpha = 0.13f * previewAlpha),
+                topLeft = Offset(left, top),
+                size = frameSize,
+                cornerRadius = CornerRadius(radius),
+                style = Stroke(width = 1.dp.toPx()),
+            )
+        }
+
+        renderedTimestamp?.let { timestamp ->
+            AnimatedVisibility(
+                visible = visible && currentTimestamp != null,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .graphicsLayer {
+                        translationX = timestamp.xInRootPx - containerBoundsInRoot.left
+                        translationY =
+                            timestamp.centerYInRootPx -
+                            containerBoundsInRoot.top -
+                            size.height / 2f
+                    },
+                enter = fadeIn(tween(140)),
+                exit = fadeOut(tween(180)),
+            ) {
+                Text(
+                    text = timestamp.text,
+                    color = Color.White.copy(alpha = 0.38f),
+                    fontSize = timestampFontSize.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
