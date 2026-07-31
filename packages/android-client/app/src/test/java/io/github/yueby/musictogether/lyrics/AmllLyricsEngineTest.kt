@@ -11,6 +11,19 @@ import org.junit.Test
 
 class AmllLyricsEngineTest {
     @Test
+    fun keepsOriginalLineTimingWhenAmllAdvanceIsDisabled() {
+        val groups = prepareAmllLyricGroups(
+            input = listOf(
+                line(listOf(word("first", 1_000, 2_000)), 1_000, 2_000),
+                line(listOf(word("second", 2_000, 3_000)), 2_000, 3_000),
+            ),
+            tryAdvanceStartTime = false,
+        )
+
+        assertEquals(listOf(1_000L, 2_000L), groups.map { it.startTimeMs })
+    }
+
+    @Test
     fun optimizesAndGroupsFollowingBackgroundLineLikeAmll() {
         val main = line(
             words = listOf(word("主", 2_000, 3_000)),

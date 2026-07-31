@@ -3,7 +3,10 @@ package io.github.yueby.musictogether.lyrics
 import io.github.yueby.musictogether.model.LyricLine
 import kotlin.math.roundToLong
 
-internal fun prepareAmllLyricGroups(input: List<LyricLine>): List<AmllLyricGroup> {
+internal fun prepareAmllLyricGroups(
+    input: List<LyricLine>,
+    tryAdvanceStartTime: Boolean = true,
+): List<AmllLyricGroup> {
     if (input.isEmpty()) return emptyList()
 
     var lines = input
@@ -13,7 +16,9 @@ internal fun prepareAmllLyricGroups(input: List<LyricLine>): List<AmllLyricGroup
     lines = convertExcessiveBackgroundLines(lines)
     lines = syncMainAndBackgroundLines(lines)
     lines = cleanUnintentionalOverlaps(lines)
-    lines = tryAdvanceStartTime(lines)
+    if (tryAdvanceStartTime) {
+        lines = tryAdvanceStartTime(lines)
+    }
 
     val groups = mutableListOf<AmllLyricGroup>()
     lines.forEach { line ->

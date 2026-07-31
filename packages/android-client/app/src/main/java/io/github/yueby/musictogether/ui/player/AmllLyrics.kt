@@ -55,7 +55,20 @@ internal fun LyricsPanel(
     alignToTop: Boolean = false,
 ) {
     val rawPositionMs = (positionSeconds * 1_000.0 - lyricOffsetMs).toFloat().coerceAtLeast(0f)
-    val groups = remember(lyrics.lines) { prepareAmllLyricGroups(lyrics.lines) }
+    val wordAnimationEnabled = remember(lyrics.source) {
+        shouldUseAmllWordAnimation(lyrics.source)
+    }
+    val groups = remember(lyrics.lines, wordAnimationEnabled) {
+        prepareAmllLyricGroups(
+            input = lyrics.lines,
+            tryAdvanceStartTime = wordAnimationEnabled,
+        )
+    }
+    val focusLeadTimeMs = if (!wordAnimationEnabled && isPlaying) {
+        PlainLyricFocusLeadTimeMs
+    } else {
+        0L
+    }
     val motionPolicy = rememberAmllMotionPolicy()
     val playbackTimeline = rememberAmllPlaybackTimeline(
         groups = groups,
@@ -63,12 +76,10 @@ internal fun LyricsPanel(
         isPlaying = isPlaying,
         resetKey = lyrics.trackId to lyricOffsetMs,
         minimumFrameIntervalNanos = motionPolicy.minimumFrameIntervalNanos,
+        focusLeadTimeMs = focusLeadTimeMs,
     )
     val timelineFrame by playbackTimeline.frame
     val smoothPositionMs = playbackTimeline.positionMs
-    val wordAnimationEnabled = remember(lyrics.source) {
-        shouldUseAmllWordAnimation(lyrics.source)
-    }
     val activeGroupIndices = timelineFrame.bufferedGroupIndices
     val currentInterlude = timelineFrame.interlude
     val currentInterludeKey = currentInterlude?.let {
@@ -523,3 +534,5 @@ internal fun LyricsPanel(
         }
     }
 }
+
+private const val PlainLyricFocusLeadTimeMs = 300L

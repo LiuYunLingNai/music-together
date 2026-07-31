@@ -39,6 +39,7 @@ internal fun advanceAmllTimelineFrame(
     groups: List<AmllLyricGroup>,
     positionMs: Long,
     seeking: Boolean,
+    focusLeadTimeMs: Long = 0L,
 ): AmllTimelineFrame {
     if (groups.isEmpty()) {
         return AmllTimelineFrame(
@@ -70,6 +71,23 @@ internal fun advanceAmllTimelineFrame(
 
     val timelineIndex = hot.lastOrNull()
         ?: groups.indexOfLast { positionMs >= it.startTimeMs }
+    val nextTimelineIndex = timelineIndex + 1
+    val currentGroup = groups.getOrNull(timelineIndex)
+    val nextGroup = groups.getOrNull(nextTimelineIndex)
+    // Keep rapid lines anchored for at least one lead interval. Otherwise a
+    // newly activated short line could immediately scroll past the focus.
+    val anticipatedTimelineIndex = if (
+        !seeking &&
+        focusLeadTimeMs > 0L &&
+        currentGroup != null &&
+        nextGroup != null &&
+        nextGroup.startTimeMs - currentGroup.startTimeMs > focusLeadTimeMs * 2 &&
+        positionMs + focusLeadTimeMs >= nextGroup.startTimeMs
+    ) {
+        nextTimelineIndex
+    } else {
+        timelineIndex
+    }
     val detectedInterlude = findAmllInterlude(groups, positionMs, timelineIndex)
     val interlude = if (seeking && detectedInterlude != null) {
         detectedInterlude.copy(
@@ -82,6 +100,7 @@ internal fun advanceAmllTimelineFrame(
         interlude != null ->
             (interlude.anchorGroupIndex + 1).coerceIn(groups.indices)
 
+        anticipatedTimelineIndex > timelineIndex -> anticipatedTimelineIndex
         buffered.isNotEmpty() -> buffered.min()
         timelineIndex >= 0 -> timelineIndex
         else -> 0
@@ -173,6 +192,7 @@ internal fun shouldAdvanceAmllClockFrame(
 internal fun nextAmllTimelineBoundaryMs(
     groups: List<AmllLyricGroup>,
     positionMs: Long,
+    focusLeadTimeMs: Long = 0L,
 ): Long {
     var next = Long.MAX_VALUE
     fun include(candidate: Long) {
@@ -180,6 +200,14 @@ internal fun nextAmllTimelineBoundaryMs(
     }
 
     groups.forEachIndexed { index, group ->
+        val previousStartTimeMs = groups.getOrNull(index - 1)?.startTimeMs
+        if (
+            focusLeadTimeMs > 0L &&
+            previousStartTimeMs != null &&
+            group.startTimeMs - previousStartTimeMs > focusLeadTimeMs * 2
+        ) {
+            include((group.startTimeMs - focusLeadTimeMs).coerceAtLeast(0L))
+        }
         include(group.startTimeMs)
         include(group.endTimeMs)
         val previousEnd = groups.getOrNull(index - 1)?.endTimeMs ?: 0L
@@ -196,6 +224,7 @@ internal fun rememberAmllPlaybackTimeline(
     isPlaying: Boolean,
     resetKey: Any?,
     minimumFrameIntervalNanos: Long = 0L,
+    focusLeadTimeMs: Long = 0L,
 ): AmllPlaybackTimeline {
     val position = remember(resetKey) { mutableFloatStateOf(rawPositionMs) }
     val lastRawSample = remember(resetKey) { mutableFloatStateOf(rawPositionMs) }
@@ -206,6 +235,7 @@ internal fun rememberAmllPlaybackTimeline(
                 groups = groups,
                 positionMs = rawPositionMs.toLong(),
                 seeking = true,
+                focusLeadTimeMs = focusLeadTimeMs,
             ),
         )
     }
@@ -215,7 +245,7 @@ internal fun rememberAmllPlaybackTimeline(
     val latestMinimumFrameIntervalNanos by rememberUpdatedState(minimumFrameIntervalNanos)
     val pausedPositionKey = if (isPlaying) null else rawPositionMs
 
-    LaunchedEffect(resetKey, groups, isPlaying, pausedPositionKey) {
+    LaunchedEffect(resetKey, groups, isPlaying, pausedPositionKey, focusLeadTimeMs) {
         if (!isPlaying) {
             // Stopping playback can leave the extrapolated clock a few
             // milliseconds ahead of the latest Media3 sample; that is not a
@@ -228,6 +258,7 @@ internal fun rememberAmllPlaybackTimeline(
                 groups = groups,
                 positionMs = rawPositionMs.toLong(),
                 seeking = seeking,
+                focusLeadTimeMs = focusLeadTimeMs,
             )
             if (pausedFrame != frame.value) frame.value = pausedFrame
             return@LaunchedEffect
@@ -240,6 +271,7 @@ internal fun rememberAmllPlaybackTimeline(
         var nextTimelineBoundary = nextAmllTimelineBoundaryMs(
             groups = latestGroups,
             positionMs = position.floatValue.toLong(),
+            focusLeadTimeMs = focusLeadTimeMs,
         )
 
         while (true) {
@@ -305,12 +337,14 @@ internal fun rememberAmllPlaybackTimeline(
                         previous = frame.value,
                         groups = latestGroups,
                         positionMs = timelinePositionMs,
+                        focusLeadTimeMs = focusLeadTimeMs,
                         seeking = seeking,
                     )
                     if (nextFrame != frame.value) frame.value = nextFrame
                     nextTimelineBoundary = nextAmllTimelineBoundaryMs(
                         groups = latestGroups,
                         positionMs = timelinePositionMs,
+                        focusLeadTimeMs = focusLeadTimeMs,
                     )
                 }
                 lastFrameNanos = frameNanos

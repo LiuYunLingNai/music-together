@@ -375,6 +375,66 @@ class AmllLyricsPlaybackTest {
     }
 
     @Test
+    fun plainLyricsPrepositionTheNextLineWithoutActivatingItEarly() {
+        val groups = listOf(group(1_000, 2_000), group(2_000, 3_000))
+
+        val frame = advanceAmllTimelineFrame(
+            previous = AmllTimelineFrame(),
+            groups = groups,
+            positionMs = 1_700,
+            seeking = false,
+            focusLeadTimeMs = 300,
+        )
+
+        assertEquals(setOf(0), frame.bufferedGroupIndices)
+        assertEquals(1, frame.focusedGroupIndex)
+        assertEquals(
+            1_700L,
+            nextAmllTimelineBoundaryMs(
+                groups = groups,
+                positionMs = 1_600,
+                focusLeadTimeMs = 300,
+            ),
+        )
+    }
+
+    @Test
+    fun plainLyricsDoNotAnticipateFocusDuringSeek() {
+        val groups = listOf(group(1_000, 2_000), group(2_000, 3_000))
+
+        val frame = advanceAmllTimelineFrame(
+            previous = AmllTimelineFrame(),
+            groups = groups,
+            positionMs = 1_700,
+            seeking = true,
+            focusLeadTimeMs = 300,
+        )
+
+        assertEquals(setOf(0), frame.bufferedGroupIndices)
+        assertEquals(0, frame.focusedGroupIndex)
+    }
+
+    @Test
+    fun rapidPlainLyricsNeverSkipAheadDuringPrepositioning() {
+        val groups = listOf(
+            group(1_000, 1_200),
+            group(1_200, 1_400),
+            group(1_400, 1_600),
+        )
+
+        val frame = advanceAmllTimelineFrame(
+            previous = AmllTimelineFrame(),
+            groups = groups,
+            positionMs = 1_150,
+            seeking = false,
+            focusLeadTimeMs = 300,
+        )
+
+        assertEquals(setOf(0), frame.bufferedGroupIndices)
+        assertEquals(0, frame.focusedGroupIndex)
+    }
+
+    @Test
     fun simultaneousLinesAdvanceContinuouslyToTheFollowingGroup() {
         val groups = listOf(
             group(1_000, 3_000),
