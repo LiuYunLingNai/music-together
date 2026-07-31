@@ -241,7 +241,8 @@ export function parseTencentRecommendationSongs(value: unknown): Record<string, 
     if (!item || typeof item !== 'object') return []
     const song = item as Record<string, unknown>
     const track = (song.musicData ?? song) as Record<string, unknown>
-    return String(track.mid ?? '').trim() ? [track] : []
+    const mid = String(track.mid ?? track.songmid ?? '').trim()
+    return mid ? [{ ...track, mid }] : []
   })
 }
 

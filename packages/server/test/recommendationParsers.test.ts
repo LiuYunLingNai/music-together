@@ -14,9 +14,15 @@ test('parses QQ Music recommendation song mids from escaped HTML', () => {
 
 test('parses QQ Music native recommendation songs', () => {
   const songs = parseTencentRecommendationSongs({
-    songlist: [{ musicData: { mid: 'mid-one', name: '推荐歌曲' } }, { mid: 'mid-two', name: '另一首' }],
+    songlist: [
+      { musicData: { mid: 'mid-one', name: '推荐歌曲' } },
+      { songmid: 'mid-two', name: '另一首' },
+    ],
   })
-  assert.deepEqual(songs, [{ mid: 'mid-one', name: '推荐歌曲' }, { mid: 'mid-two', name: '另一首' }])
+  assert.deepEqual(songs, [
+    { mid: 'mid-one', name: '推荐歌曲' },
+    { songmid: 'mid-two', mid: 'mid-two', name: '另一首' },
+  ])
 })
 
 test('finds Kugou recommendation songs in nested response data', () => {
