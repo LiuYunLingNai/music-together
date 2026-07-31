@@ -1535,12 +1535,8 @@ class MusicProvider {
         await this.batchResolveCover(tracks, source)
         break
       }
-      case 'tencent': {
-        const songs = await tencentAuth.getRecommendationSongs(cookie, limit)
-        tracks = songs.map((song) => this.rawToTrack(song, source))
-        await this.batchResolveCover(tracks, source)
-        break
-      }
+      case 'tencent':
+        throw new Error('QQ Music recommendations are not supported')
       case 'kugou':
       case 'kugou_concept': {
         const songs =

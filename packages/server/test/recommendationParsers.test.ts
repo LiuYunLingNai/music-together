@@ -2,28 +2,6 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { parseBilibiliRecommendedVideos } from '../src/services/bilibiliAuthService.js'
 import { parseKugouRecommendationSongs } from '../src/services/kugouAuthService.js'
-import {
-  parseTencentRecommendationSongMids,
-  parseTencentRecommendationSongs,
-} from '../src/services/tencentAuthService.js'
-
-test('parses QQ Music recommendation song mids from escaped HTML', () => {
-  const html = String.raw`<div songmid=\"mid-one\"></div><div songmid="mid-two"></div><div songmid="mid-one"></div>`
-  assert.deepEqual(parseTencentRecommendationSongMids(html), ['mid-one', 'mid-two'])
-})
-
-test('parses QQ Music native recommendation songs', () => {
-  const songs = parseTencentRecommendationSongs({
-    songlist: [
-      { musicData: { mid: 'mid-one', name: '推荐歌曲' } },
-      { songmid: 'mid-two', name: '另一首' },
-    ],
-  })
-  assert.deepEqual(songs, [
-    { mid: 'mid-one', name: '推荐歌曲' },
-    { songmid: 'mid-two', mid: 'mid-two', name: '另一首' },
-  ])
-})
 
 test('finds Kugou recommendation songs in nested response data', () => {
   const songs = parseKugouRecommendationSongs({ data: { song_list: [{ hash: 'abc123', filename: 'Song' }] } })

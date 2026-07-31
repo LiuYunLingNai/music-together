@@ -95,7 +95,7 @@ router.get(
 
     const loggedPlatforms = authService
       .getUserAuthStatus(identityUserId, roomId)
-      .filter((status) => status.loggedIn)
+      .filter((status) => status.loggedIn && status.platform !== 'tencent')
       .map((status) => status.platform)
 
     const recommendations = await Promise.all(

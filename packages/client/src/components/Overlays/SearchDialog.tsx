@@ -127,9 +127,11 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
     [recommendations, source],
   )
   const visibleSources = useMemo(() => {
-    if (searchType !== 'recommend' || !recommendationsLoaded) return SOURCES
+    if (searchType !== 'recommend') return SOURCES
+    const recommendationSources = SOURCES.filter((item) => item.id !== 'tencent')
+    if (!recommendationsLoaded) return recommendationSources
     const available = new Set(recommendations.map((recommendation) => recommendation.platform))
-    return SOURCES.filter((item) => available.has(item.id))
+    return recommendationSources.filter((item) => available.has(item.id))
   }, [recommendations, recommendationsLoaded, searchType])
 
   // Auto re-search when source or type changes
