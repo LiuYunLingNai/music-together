@@ -9,8 +9,10 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
 import io.github.yueby.musictogether.logging.AppLogger
 
@@ -44,30 +46,34 @@ class PlaybackService : MediaSessionService() {
                     true,
                 )
             }
-        mediaSession = MediaSession.Builder(this, player)
+        val sessionPlayer = RoomMediaSessionPlayer(player)
+        mediaSession = MediaSession.Builder(this, sessionPlayer)
+            .setMediaButtonPreferences(roomMediaButtonPreferences())
             .setCallback(object : MediaSession.Callback {
                 override fun onPlayerCommandRequest(
                     session: MediaSession,
                     controller: MediaSession.ControllerInfo,
                     playerCommand: Int,
                 ): Int {
-                    if (controller.packageName == packageName) return SessionResult.RESULT_SUCCESS
-                    AppLogger.info("MediaSession", "external command=$playerCommand package=${controller.packageName}")
-                    return when (playerCommand) {
-                        Player.COMMAND_PLAY_PAUSE -> {
-                            PlaybackCommandBridge.listener?.onTogglePlayback()
-                            SessionResult.RESULT_ERROR_PERMISSION_DENIED
+                    val roomCommand = roomMediaCommandFor(playerCommand)
+                    val isInternalMedia3Controller =
+                        controller.packageName == packageName &&
+                            controller.controllerVersion != MediaSession.ControllerInfo.LEGACY_CONTROLLER_VERSION
+                    if (shouldRouteMediaCommandToRoom(roomCommand, isInternalMedia3Controller)) {
+                        AppLogger.info(
+                            "MediaSession",
+                            "room command=$roomCommand playerCommand=$playerCommand " +
+                                "package=${controller.packageName} version=${controller.controllerVersion}",
+                        )
+                        when (roomCommand) {
+                            RoomMediaCommand.TogglePlayback -> PlaybackCommandBridge.listener?.onTogglePlayback()
+                            RoomMediaCommand.Previous -> PlaybackCommandBridge.listener?.onPrevious()
+                            RoomMediaCommand.Next -> PlaybackCommandBridge.listener?.onNext()
+                            null -> Unit
                         }
-                        Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM -> {
-                            PlaybackCommandBridge.listener?.onNext()
-                            SessionResult.RESULT_ERROR_PERMISSION_DENIED
-                        }
-                        Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> {
-                            PlaybackCommandBridge.listener?.onPrevious()
-                            SessionResult.RESULT_ERROR_PERMISSION_DENIED
-                        }
-                        else -> SessionResult.RESULT_SUCCESS
+                        return SessionError.ERROR_PERMISSION_DENIED
                     }
+                    return SessionResult.RESULT_SUCCESS
                 }
             })
             .build()
@@ -88,3 +94,17 @@ class PlaybackService : MediaSessionService() {
         super.onDestroy()
     }
 }
+
+@OptIn(markerClass = [UnstableApi::class])
+private fun roomMediaButtonPreferences(): List<CommandButton> = listOf(
+    CommandButton.Builder(CommandButton.ICON_PREVIOUS)
+        .setPlayerCommand(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+        .setDisplayName("上一首")
+        .setSlots(CommandButton.SLOT_BACK)
+        .build(),
+    CommandButton.Builder(CommandButton.ICON_NEXT)
+        .setPlayerCommand(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+        .setDisplayName("下一首")
+        .setSlots(CommandButton.SLOT_FORWARD)
+        .build(),
+)
