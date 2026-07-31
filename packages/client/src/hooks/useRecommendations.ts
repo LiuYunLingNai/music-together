@@ -21,7 +21,7 @@ export function useRecommendations(roomId?: string) {
 
     const controller = new AbortController()
     abortRef.current = controller
-    const params = new URLSearchParams({ roomId, limit: '20' })
+    const params = new URLSearchParams({ roomId, limit: '50', refresh: String(Date.now()) })
     setLoading(true)
 
     fetch(`${SERVER_URL}/api/music/recommendations?${params}`, {

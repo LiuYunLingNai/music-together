@@ -458,7 +458,6 @@ class MusicProvider {
     max: 50,
     ttl: 30 * MINUTE,
   })
-
   // Layer 3: Resource Caches — scalar values for stream URLs, covers, lyrics.
   private streamUrlCache = new LRUCache<string, CachedStreamUrl>({ max: 500, ttl: 1 * HOUR })
   private coverCache = new LRUCache<string, string>({ max: 1000, ttl: 24 * HOUR })
@@ -1527,11 +1526,21 @@ class MusicProvider {
     switch (source) {
       case 'netease': {
         const response = await withTimeout(ncmApi.recommend_songs({ cookie, timestamp: Date.now() }))
-        const songs = response?.body?.data?.dailySongs
-        if (response?.body?.code !== 200 || !Array.isArray(songs)) {
+        const dailySongs = response?.body?.data?.dailySongs
+        if (response?.body?.code !== 200 || !Array.isArray(dailySongs)) {
           throw new Error(`Netease recommendation feed failed: ${response?.body?.code ?? 'empty response'}`)
         }
-        tracks = songs.slice(0, limit).map((song) => this.rawToTrack(song, source))
+
+        const recommendedSongs = await this.getNeteaseRecommendedPlaylistSongs(cookie, limit - dailySongs.length)
+        const sourceIds = new Set<string>()
+        const allTracks = [...dailySongs, ...recommendedSongs]
+          .map((song) => this.rawToTrack(song, source))
+          .filter((track) => {
+            if (sourceIds.has(track.sourceId)) return false
+            sourceIds.add(track.sourceId)
+            return true
+          })
+        tracks = this.shuffle(allTracks).slice(0, limit)
         await this.batchResolveCover(tracks, source)
         break
       }
@@ -1539,14 +1548,20 @@ class MusicProvider {
         throw new Error('QQ Music recommendations are not supported')
       case 'kugou':
       case 'kugou_concept': {
-        const songs =
+        const dailySongs =
           source === 'kugou'
             ? await kugouAuth.getRecommendationSongs(cookie, limit)
             : await kugouAuth.getConceptRecommendationSongs(cookie, limit)
-        tracks = songs.flatMap((song) => {
+        const recommendedSongs =
+          source === 'kugou' ? await this.getKugouRecommendedPlaylistSongs(cookie, limit - dailySongs.length) : []
+        const sourceIds = new Set<string>()
+        const allTracks = [...dailySongs, ...recommendedSongs].flatMap((song) => {
           const track = this.kugouSongToTrack(song, source)
-          return track ? [track] : []
+          if (!track || sourceIds.has(track.sourceId)) return []
+          sourceIds.add(track.sourceId)
+          return [track]
         })
+        tracks = this.shuffle(allTracks).slice(0, limit)
         break
       }
       case 'bilibili': {
@@ -1577,6 +1592,61 @@ class MusicProvider {
     for (const track of tracks) this.enrichFromRegistry(track)
     this.registerTracks(tracks)
     return tracks
+  }
+
+  private async getNeteaseRecommendedPlaylistSongs(cookie: string, needed: number): Promise<Record<string, unknown>[]> {
+    if (needed <= 0) return []
+
+    try {
+      const response = await withTimeout(ncmApi.personalized({ cookie, limit: 4, timestamp: Date.now() }))
+      const playlistIds = this.shuffle(
+        response?.body.result
+          ?.map((playlist) => String(playlist.id ?? '').trim())
+          .filter((playlistId) => playlistId.length > 0) ?? [],
+      ).slice(0, 4)
+
+      const results = await Promise.all(
+        playlistIds.map(async (playlistId) => {
+          const playlist = await withTimeout(
+            ncmApi.playlist_track_all({ cookie, id: playlistId, limit: 10, offset: 0, timestamp: Date.now() }),
+          )
+          return Array.isArray(playlist?.body.songs) ? playlist.body.songs : []
+        }),
+      )
+      return this.shuffle(results.flat()).slice(0, needed * 2)
+    } catch (err) {
+      logger.warn('Netease recommended playlists unavailable', { err })
+      return []
+    }
+  }
+
+  private async getKugouRecommendedPlaylistSongs(
+    cookie: string,
+    needed: number,
+  ): Promise<kugouAuth.KugouPlaylistTrack[]> {
+    if (needed <= 0) return []
+
+    try {
+      const playlistIds = this.shuffle(await kugouAuth.getRecommendationPlaylistIds(12)).slice(0, 4)
+      const playlists = await Promise.all(
+        playlistIds.map((playlistId) => kugouAuth.getPlaylistTracks(playlistId, 1, 10, cookie)),
+      )
+      return this.shuffle(playlists.flatMap((playlist) => playlist.songs)).slice(0, needed * 2)
+    } catch (err) {
+      logger.warn('Kugou recommendation playlists unavailable', { err })
+      return []
+    }
+  }
+
+  private shuffle<T>(items: T[]): T[] {
+    const shuffled = [...items]
+    for (let index = shuffled.length - 1; index > 0; index--) {
+      const randomIndex = crypto.randomInt(index + 1)
+      const track = shuffled[index]!
+      shuffled[index] = shuffled[randomIndex]!
+      shuffled[randomIndex] = track
+    }
+    return shuffled
   }
 
   // ---------------------------------------------------------------------------

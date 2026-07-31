@@ -254,6 +254,50 @@ export function parseKugouRecommendationSongs(value: unknown): Record<string, un
   return []
 }
 
+export function parseKugouRecommendationPlaylistIds(value: unknown): string[] {
+  if (!value || typeof value !== 'object') return []
+  const data = (value as Record<string, unknown>).data as Record<string, unknown> | undefined
+  const playlists = Array.isArray(data?.special_list) ? data.special_list : []
+  const seen = new Set<string>()
+
+  return playlists.flatMap((playlist) => {
+    if (!playlist || typeof playlist !== 'object') return []
+    const item = playlist as Record<string, unknown>
+    const id = String(item.specialid ?? item.special_id ?? '').trim()
+    if (!id || seen.has(id)) return []
+    seen.add(id)
+    return [id]
+  })
+}
+
+export async function getRecommendationPlaylistIds(limit = 4): Promise<string[]> {
+  const payload = {
+    appid: 1001,
+    clienttime: 1566798337219,
+    clientver: 8275,
+    key: 'f1f93580115bb106680d2375f8032d96',
+    mid: '21511157a05844bd085308bc76ef3343',
+    platform: 'pc',
+    userid: '262643156',
+    return_min: Math.min(limit, 6),
+    return_max: Math.max(limit, 6),
+  }
+  const response = await fetch('http://everydayrec.service.kugou.com/guess_special_recommend', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': 'KuGou2012-8275-web_browser_event_handler',
+    },
+    body: new URLSearchParams(Object.entries(payload).map(([key, value]) => [key, String(value)])),
+    signal: AbortSignal.timeout(10_000),
+  })
+  if (!response.ok) throw new Error(`Kugou recommendation playlists HTTP ${response.status}`)
+
+  const body = (await response.json()) as Record<string, unknown>
+  if (Number(body.status) !== 1) throw new Error(`Kugou recommendation playlists returned status ${body.status ?? 'missing'}`)
+  return parseKugouRecommendationPlaylistIds(body).slice(0, limit)
+}
+
 async function getRecommendationSongsForEdition(
   cookie: string,
   limit = 20,

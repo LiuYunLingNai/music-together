@@ -74,6 +74,13 @@ declare module '@neteasecloudmusicapienhanced/api' {
       }
     }>
 
+    personalized(params: { limit?: number } & RequestBaseConfig): Promise<{
+      body: {
+        code?: number
+        result?: Array<{ id?: string | number }>
+      }
+    }>
+
     /** 获取歌词（含逐词 YRC） */
     lyric_new(params: { id: string | number } & RequestBaseConfig): Promise<{
       body: {

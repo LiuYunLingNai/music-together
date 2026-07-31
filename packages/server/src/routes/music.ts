@@ -104,7 +104,8 @@ router.get(
         if (!cookie) return { platform, tracks: [], unavailableReason: 'upstream_unavailable' }
 
         try {
-          const tracks = await musicProvider.getRecommendations(platform, cookie, limit)
+          const recommendationLimit = platform === 'bilibili' ? 20 : limit
+          const tracks = await musicProvider.getRecommendations(platform, cookie, recommendationLimit)
           return tracks.length > 0 ? { platform, tracks } : { platform, tracks, unavailableReason: 'empty' }
         } catch (err) {
           logger.warn('Platform recommendation feed failed', { platform, roomId, identityUserId, err })
