@@ -32,7 +32,7 @@ jobs:
         run: npm ci
 
       - name: Build Windows packages
-        run: npm run dist:win
+        run: npm run dist:win -- --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
