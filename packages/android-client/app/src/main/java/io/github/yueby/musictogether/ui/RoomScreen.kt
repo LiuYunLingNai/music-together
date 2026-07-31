@@ -52,6 +52,7 @@ fun RoomScreen(
     appState: AppState,
     outerPadding: PaddingValues,
     viewModel: MusicTogetherViewModel,
+    onMinimizePlayer: () -> Unit,
 ) {
     val room = appState.room ?: return
     var activeOverlay by remember { mutableStateOf<RoomOverlay?>(null) }
@@ -104,6 +105,7 @@ fun RoomScreen(
                         pingMs = appState.pingMs,
                         viewModel = viewModel,
                         context = context,
+                        onMinimizePlayer = onMinimizePlayer,
                         onOpenOverlay = { activeOverlay = it },
                     )
                 }
@@ -152,6 +154,7 @@ fun RoomScreen(
                         pingMs = appState.pingMs,
                         viewModel = viewModel,
                         context = context,
+                        onMinimizePlayer = onMinimizePlayer,
                         onOpenOverlay = {
                             landscapeChromeVisible = false
                             activeOverlay = it

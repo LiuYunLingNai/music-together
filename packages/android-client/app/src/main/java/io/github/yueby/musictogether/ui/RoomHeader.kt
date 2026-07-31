@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -19,18 +20,25 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.WifiOff
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -41,6 +49,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -54,6 +63,7 @@ import io.github.yueby.musictogether.model.ChatMessage
 import io.github.yueby.musictogether.model.ConnectionStatus
 import io.github.yueby.musictogether.model.RoomState
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun RoomHeader(
     room: RoomState,
@@ -65,6 +75,7 @@ internal fun RoomHeader(
     pingMs: Long?,
     viewModel: MusicTogetherViewModel,
     context: android.content.Context,
+    onMinimizePlayer: (() -> Unit)? = null,
     onOpenOverlay: (RoomOverlay) -> Unit,
 ) {
     val layoutDirection = LocalLayoutDirection.current
@@ -181,68 +192,93 @@ internal fun RoomHeader(
         IconButton(onClick = { onOpenOverlay(RoomOverlay.Search) }) {
             Icon(Icons.Default.Search, "搜索点歌", Modifier.size(20.dp), tint = contentColor)
         }
-        Box {
-            IconButton(onClick = { onMenuExpandedChange(true) }) {
-                Icon(Icons.Default.MoreVert, "更多操作", Modifier.size(20.dp), tint = contentColor)
-            }
-            DropdownMenu(
-                expanded = menuExpanded,
-                onDismissRequest = { onMenuExpandedChange(false) },
-            ) {
-                DropdownMenuItem(
-                    text = { Text("个人账号") },
-                    onClick = {
-                        onMenuExpandedChange(false)
-                        onOpenOverlay(RoomOverlay.AccountSettings)
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text("房间与音质") },
-                    onClick = {
-                        onMenuExpandedChange(false)
-                        onOpenOverlay(RoomOverlay.RoomSettings)
-                    },
-                )
-                DropdownMenuItem(
-                    leadingIcon = { Icon(Icons.Default.ContentCopy, null) },
-                    text = { Text("复制房间链接") },
-                    onClick = {
-                        onMenuExpandedChange(false)
-                        viewModel.copyRoomLink()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text("音源账号与歌单") },
-                    onClick = {
-                        onMenuExpandedChange(false)
-                        onOpenOverlay(RoomOverlay.Accounts)
-                    },
-                )
-                if (BuildConfig.DEBUG) {
-                    DropdownMenuItem(
-                        text = { Text("导出日志") },
-                        onClick = {
-                            onMenuExpandedChange(false)
-                            AppLogger.export(context)
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("清空日志") },
-                        onClick = {
-                            onMenuExpandedChange(false)
-                            viewModel.clearLogs()
-                        },
-                    )
-                }
-                DropdownMenuItem(
-                    text = { Text("离开房间") },
-                    onClick = {
-                        onMenuExpandedChange(false)
-                        viewModel.leaveRoom()
-                    },
-                )
+        onMinimizePlayer?.let { minimize ->
+            IconButton(onClick = minimize) {
+                Icon(Icons.Default.KeyboardArrowDown, "返回主页", Modifier.size(24.dp), tint = contentColor)
             }
         }
+        IconButton(onClick = { onMenuExpandedChange(true) }) {
+            Icon(Icons.Default.MoreVert, "更多操作", Modifier.size(20.dp), tint = contentColor)
+        }
+    }
+
+    if (menuExpanded) {
+        ModalBottomSheet(onDismissRequest = { onMenuExpandedChange(false) }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp),
+            ) {
+                Text(
+                    text = "更多操作",
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                RoomMenuAction(Icons.Default.AccountCircle, "个人账号") {
+                    onMenuExpandedChange(false)
+                    onOpenOverlay(RoomOverlay.AccountSettings)
+                }
+                RoomMenuAction(Icons.Default.Settings, "房间与音质") {
+                    onMenuExpandedChange(false)
+                    onOpenOverlay(RoomOverlay.RoomSettings)
+                }
+                RoomMenuAction(Icons.Default.ContentCopy, "复制房间链接") {
+                    onMenuExpandedChange(false)
+                    viewModel.copyRoomLink()
+                }
+                RoomMenuAction(Icons.Default.MusicNote, "音源账号与歌单") {
+                    onMenuExpandedChange(false)
+                    onOpenOverlay(RoomOverlay.Accounts)
+                }
+                if (BuildConfig.DEBUG) {
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
+                    Text(
+                        text = "调试",
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    RoomMenuAction(Icons.Default.BugReport, "导出日志") {
+                        onMenuExpandedChange(false)
+                        AppLogger.export(context)
+                    }
+                    RoomMenuAction(Icons.Default.BugReport, "清空日志") {
+                        onMenuExpandedChange(false)
+                        viewModel.clearLogs()
+                    }
+                }
+                HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
+                RoomMenuAction(
+                    icon = Icons.AutoMirrored.Filled.Logout,
+                    label = "离开房间",
+                    color = MaterialTheme.colorScheme.error,
+                ) {
+                    onMenuExpandedChange(false)
+                    viewModel.leaveRoom()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RoomMenuAction(
+    icon: ImageVector,
+    label: String,
+    color: Color = MaterialTheme.colorScheme.onSurface,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 24.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp), tint = color)
+        Text(text = label, style = MaterialTheme.typography.bodyLarge, color = color)
     }
 }
 

@@ -42,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import androidx.compose.foundation.shape.CircleShape
@@ -56,7 +57,12 @@ private data class RoomTarget(val serverUrl: String, val room: RoomListItem)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LobbyScreen(state: AppState, contentPadding: PaddingValues, viewModel: MusicTogetherViewModel) {
+fun LobbyScreen(
+    state: AppState,
+    contentPadding: PaddingValues,
+    viewModel: MusicTogetherViewModel,
+    bottomContentPadding: Dp = 0.dp,
+) {
     var createDialog by remember { mutableStateOf(false) }
     var joinTarget by remember { mutableStateOf<RoomTarget?>(null) }
     var directRoomId by remember { mutableStateOf("") }
@@ -65,7 +71,12 @@ fun LobbyScreen(state: AppState, contentPadding: PaddingValues, viewModel: Music
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(contentPadding),
-        contentPadding = PaddingValues(20.dp),
+        contentPadding = PaddingValues(
+            start = 20.dp,
+            top = 20.dp,
+            end = 20.dp,
+            bottom = 20.dp + bottomContentPadding,
+        ),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
