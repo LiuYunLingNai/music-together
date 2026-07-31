@@ -231,8 +231,21 @@ export function parseTencentRecommendationSongMids(html: string): string[] {
   return mids
 }
 
-/** Fetch QQ Music's logged-in daily recommendation feed and hydrate song metadata. */
-export async function getRecommendationSongs(cookie: string, limit = 20): Promise<Record<string, unknown>[]> {
+export function parseTencentRecommendationSongs(value: unknown): Record<string, unknown>[] {
+  if (!value || typeof value !== 'object') return []
+  const data = value as Record<string, unknown>
+  const songList = data.songlist ?? data.song_list ?? data.list
+  if (!Array.isArray(songList)) return []
+
+  return songList.flatMap((item) => {
+    if (!item || typeof item !== 'object') return []
+    const song = item as Record<string, unknown>
+    const track = (song.musicData ?? song) as Record<string, unknown>
+    return String(track.mid ?? '').trim() ? [track] : []
+  })
+}
+
+async function getLegacyRecommendationSongs(cookie: string, limit: number): Promise<Record<string, unknown>[]> {
   const pageUrls = ['https://y.qq.com/portal/guess.html', 'https://y.qq.com/n/ryqq/songRec']
   let mids: string[] = []
 
@@ -252,7 +265,7 @@ export async function getRecommendationSongs(cookie: string, limit = 20): Promis
     if (mids.length > 0) break
   }
 
-  if (mids.length === 0) throw new Error('QQ Music recommendation feed returned no song IDs')
+  if (mids.length === 0) return []
 
   const songs: Record<string, unknown>[] = []
   for (let index = 0; index < mids.length; index += 5) {
@@ -270,8 +283,30 @@ export async function getRecommendationSongs(cookie: string, limit = 20): Promis
     )
     songs.push(...batch.filter((song): song is Record<string, unknown> => song !== null))
   }
-
   return songs
+}
+
+/** Fetch QQ Music's logged-in daily recommendation feed and hydrate song metadata. */
+export async function getRecommendationSongs(cookie: string, limit = 20): Promise<Record<string, unknown>[]> {
+  const rawUin = getCookieValue(cookie, 'uin') || getCookieValue(cookie, 'o_cookie') || '0'
+  const uin = Number(rawUin.replace(/^o0*/, '')) || 0
+
+  try {
+    const data = await tencentApiRequest({
+      module: 'music.recommend.RecommendCgi',
+      method: 'GetRecommendTrack',
+      cookie,
+      param: { uin },
+    })
+    const songs = parseTencentRecommendationSongs(data)
+    if (songs.length > 0) return songs.slice(0, limit)
+  } catch (err) {
+    logger.debug('QQ Music native recommendation API failed; trying legacy page fallback', { err, uin })
+  }
+
+  const legacySongs = await getLegacyRecommendationSongs(cookie, limit)
+  if (legacySongs.length > 0) return legacySongs
+  throw new Error('QQ Music recommendation API returned no songs')
 }
 
 // ---------------------------------------------------------------------------
