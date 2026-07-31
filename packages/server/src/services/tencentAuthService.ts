@@ -276,10 +276,14 @@ async function getWebRecommendationSongs(cookie: string, uin: number, gTk: numbe
   const response = await fetch('https://u.y.qq.com/cgi-bin/musicu.fcg', {
     method: 'POST',
     headers: {
+      Accept: 'application/json, text/plain, */*',
+      'Accept-Language': 'zh-CN,zh;q=0.9',
       'Content-Type': 'application/json',
       Cookie: cookie,
+      Origin: 'https://y.qq.com',
       Referer: 'https://y.qq.com/',
-      'User-Agent': 'QQ%E9%9F%B3%E4%B9%90/73222',
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
     },
     body: JSON.stringify(payload),
     signal: AbortSignal.timeout(10_000),
@@ -341,9 +345,13 @@ async function getLegacyRecommendationSongs(cookie: string, limit: number): Prom
 export async function getRecommendationSongs(cookie: string, limit = 20): Promise<Record<string, unknown>[]> {
   const rawUin = getCookieValue(cookie, 'uin') || getCookieValue(cookie, 'o_cookie') || '0'
   const uin = Number(rawUin.replace(/^o0*/, '')) || 0
-  const musicKey =
-    getCookieValue(cookie, 'qm_keyst') || getCookieValue(cookie, 'qqmusic_key') || getCookieValue(cookie, 'p_skey') || ''
-  const gTk = musicKey ? hashTencentGtk(musicKey) : 5381
+  const sessionKey =
+    getCookieValue(cookie, 'p_skey') ||
+    getCookieValue(cookie, 'skey') ||
+    getCookieValue(cookie, 'qm_keyst') ||
+    getCookieValue(cookie, 'qqmusic_key') ||
+    ''
+  const gTk = sessionKey ? hashTencentGtk(sessionKey) : 5381
   const attempts: string[] = []
 
   try {
