@@ -344,12 +344,15 @@ export async function getRecommendationSongs(cookie: string, limit = 20): Promis
   const musicKey =
     getCookieValue(cookie, 'qm_keyst') || getCookieValue(cookie, 'qqmusic_key') || getCookieValue(cookie, 'p_skey') || ''
   const gTk = musicKey ? hashTencentGtk(musicKey) : 5381
+  const attempts: string[] = []
 
   try {
     const songs = await getWebRecommendationSongs(cookie, uin, gTk)
     if (songs.length > 0) return songs.slice(0, limit)
+    attempts.push('web: returned no playable songs')
     logger.debug('QQ Music web recommendation API returned no songs; trying signed API fallback')
   } catch (err) {
+    attempts.push(`web: ${err instanceof Error ? err.message : String(err)}`)
     logger.debug('QQ Music web recommendation API failed; trying signed API fallback', { err })
   }
 
@@ -369,16 +372,19 @@ export async function getRecommendationSongs(cookie: string, limit = 20): Promis
     })
     const songs = parseTencentRecommendationSongs(data)
     if (songs.length > 0) return songs.slice(0, limit)
+    attempts.push(`signed: returned no playable songs (${Object.keys(data).slice(0, 5).join(', ') || 'no data'})`)
     logger.debug('QQ Music native recommendation API returned no songs; trying legacy page fallback', {
       responseKeys: Object.keys(data).slice(0, 10),
     })
   } catch (err) {
+    attempts.push(`signed: ${err instanceof Error ? err.message : String(err)}`)
     logger.debug('QQ Music native recommendation API failed; trying legacy page fallback', { err })
   }
 
   const legacySongs = await getLegacyRecommendationSongs(cookie, limit)
   if (legacySongs.length > 0) return legacySongs
-  throw new Error('QQ Music recommendation API returned no songs')
+  attempts.push('legacy page: returned no song IDs')
+  throw new Error(`QQ Music recommendation API returned no songs; ${attempts.join('; ')}`)
 }
 
 // ---------------------------------------------------------------------------
