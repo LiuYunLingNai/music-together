@@ -24,6 +24,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.yueby.musictogether.MusicTogetherViewModel
 import io.github.yueby.musictogether.ui.player.MinimizedPlayerBar
+import io.github.yueby.musictogether.ui.player.PlayerMinimizeTransitionHost
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,37 +62,51 @@ fun MusicTogetherApp(viewModel: MusicTogetherViewModel) {
 
     Scaffold { padding ->
         Box(Modifier.fillMaxSize()) {
-            if (state.room == null || playerMinimized) {
-                LobbyScreen(
-                    state = state,
-                    contentPadding = padding,
-                    viewModel = viewModel,
-                    bottomContentPadding = if (playerMinimized) 76.dp else 0.dp,
-                )
-            } else {
-                RoomScreen(
-                    appState = state,
-                    outerPadding = padding,
-                    viewModel = viewModel,
-                    onMinimizePlayer = {
-                        homeQueueVisible = false
-                        playerMinimized = true
-                    },
-                )
-            }
-
-            state.room?.takeIf { playerMinimized }?.let { room ->
-                MinimizedPlayerBar(
-                    track = player.track ?: room.currentTrack,
-                    player = player,
-                    viewModel = viewModel,
-                    onExpand = { playerMinimized = false },
-                    onOpenQueue = { homeQueueVisible = true },
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = padding.calculateBottomPadding()),
-                )
-            }
+            val showHome = state.room == null || playerMinimized
+            val room = state.room
+            PlayerMinimizeTransitionHost(
+                roomId = room?.id,
+                showHome = showHome,
+                minimizedTarget = showHome && playerMinimized,
+                modifier = Modifier.fillMaxSize(),
+                homeContent = {
+                    Box(Modifier.fillMaxSize()) {
+                        LobbyScreen(
+                            state = state,
+                            contentPadding = padding,
+                            viewModel = viewModel,
+                            bottomContentPadding = if (playerMinimized) 76.dp else 0.dp,
+                        )
+                        room?.takeIf { playerMinimized }?.let { activeRoom ->
+                            MinimizedPlayerBar(
+                                track = player.track ?: activeRoom.currentTrack,
+                                player = player,
+                                viewModel = viewModel,
+                                onExpand = { playerMinimized = false },
+                                onOpenQueue = { homeQueueVisible = true },
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(
+                                        bottom = padding.calculateBottomPadding(),
+                                    ),
+                            )
+                        }
+                    }
+                },
+                playerContent = {
+                    room?.let {
+                        RoomScreen(
+                            appState = state,
+                            outerPadding = padding,
+                            viewModel = viewModel,
+                            onMinimizePlayer = {
+                                homeQueueVisible = false
+                                playerMinimized = true
+                            },
+                        )
+                    }
+                },
+            )
 
             state.room?.takeIf { playerMinimized && homeQueueVisible }?.let { room ->
                 ModalBottomSheet(onDismissRequest = { homeQueueVisible = false }) {

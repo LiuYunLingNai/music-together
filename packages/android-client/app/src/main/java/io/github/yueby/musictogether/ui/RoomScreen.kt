@@ -46,6 +46,22 @@ internal enum class RoomOverlay {
     Queue, Search, Chat, Members, Accounts, AccountSettings, RoomSettings
 }
 
+internal enum class RoomBackAction {
+    DismissOverlay,
+    DismissMenu,
+    MinimizePlayer,
+}
+
+internal fun resolveRoomBackAction(
+    hasActiveOverlay: Boolean,
+    roomMenuExpanded: Boolean,
+): RoomBackAction =
+    when {
+        hasActiveOverlay -> RoomBackAction.DismissOverlay
+        roomMenuExpanded -> RoomBackAction.DismissMenu
+        else -> RoomBackAction.MinimizePlayer
+    }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RoomScreen(
@@ -60,14 +76,15 @@ fun RoomScreen(
     var roomMenuExpanded by remember(room.id) { mutableStateOf(false) }
     val overlaySheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
-    val navigateBack = {
-        when {
-            activeOverlay != null -> activeOverlay = null
-            else -> viewModel.leaveRoom()
+    val handleBack = {
+        when (resolveRoomBackAction(activeOverlay != null, roomMenuExpanded)) {
+            RoomBackAction.DismissOverlay -> activeOverlay = null
+            RoomBackAction.DismissMenu -> roomMenuExpanded = false
+            RoomBackAction.MinimizePlayer -> onMinimizePlayer()
         }
     }
 
-    BackHandler(onBack = navigateBack)
+    BackHandler(onBack = handleBack)
     LaunchedEffect(activeOverlay) {
         viewModel.setChatVisible(activeOverlay == RoomOverlay.Chat)
     }

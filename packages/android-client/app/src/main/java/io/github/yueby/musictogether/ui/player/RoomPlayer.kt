@@ -157,6 +157,7 @@ private fun MobilePlayerSurface(
     onOpenQueue: () -> Unit,
     onOpenChat: () -> Unit,
 ) {
+    val minimizeTransition = LocalPlayerMinimizeTransition.current
     val playerShape = RoundedCornerShape(16.dp)
     BoxWithConstraints(
         Modifier
@@ -168,7 +169,8 @@ private fun MobilePlayerSurface(
         PlayerBackdrop(
             coverUrl = track?.cover,
             playing = player.playing,
-            motionAllowed = visualMotionEnabled,
+            motionAllowed =
+                visualMotionEnabled && minimizeTransition?.transitionRunning != true,
             shortestSide = minOf(maxWidth, maxHeight),
             modifier = Modifier.fillMaxSize(),
         )
