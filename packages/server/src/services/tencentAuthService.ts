@@ -213,6 +213,67 @@ async function tencentApiRequest<T = Record<string, unknown>>(reqConfig: Tencent
   return (reqRes?.data || body) as T
 }
 
+export function parseTencentRecommendationSongMids(html: string): string[] {
+  const mids: string[] = []
+  const seen = new Set<string>()
+  const patterns = [/songmid=\\?"([^"\\]+)\\?"/g, /["']songmid["']\s*:\s*["']([^"']+)["']/g, /songmid=([^&"'\\\s]+)/g]
+
+  for (const pattern of patterns) {
+    for (const match of html.matchAll(pattern)) {
+      const mid = match[1]?.trim()
+      if (mid && !seen.has(mid)) {
+        seen.add(mid)
+        mids.push(mid)
+      }
+    }
+  }
+
+  return mids
+}
+
+/** Fetch QQ Music's logged-in daily recommendation feed and hydrate song metadata. */
+export async function getRecommendationSongs(cookie: string, limit = 20): Promise<Record<string, unknown>[]> {
+  const pageUrls = ['https://y.qq.com/portal/guess.html', 'https://y.qq.com/n/ryqq/songRec']
+  let mids: string[] = []
+
+  for (const pageUrl of pageUrls) {
+    const response = await fetch(pageUrl, {
+      headers: {
+        Accept: 'text/html,application/xhtml+xml',
+        Cookie: cookie,
+        Referer: 'https://y.qq.com/',
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      },
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (!response.ok) continue
+    mids = parseTencentRecommendationSongMids(await response.text()).slice(0, limit)
+    if (mids.length > 0) break
+  }
+
+  if (mids.length === 0) throw new Error('QQ Music recommendation feed returned no song IDs')
+
+  const songs: Record<string, unknown>[] = []
+  for (let index = 0; index < mids.length; index += 5) {
+    const batch = await Promise.all(
+      mids.slice(index, index + 5).map(async (songMid) => {
+        const data = await tencentApiRequest<{ track_info?: Record<string, unknown> }>({
+          module: 'music.pf_song_detail_svr',
+          method: 'get_song_detail_yqq',
+          cookie,
+          param: { song_type: 0, song_mid: songMid },
+          commExtras: { ct: '6', cv: '80600', tmeAppID: 'qqmusic' },
+        })
+        return data.track_info ?? null
+      }),
+    )
+    songs.push(...batch.filter((song): song is Record<string, unknown> => song !== null))
+  }
+
+  return songs
+}
+
 // ---------------------------------------------------------------------------
 // QR Code 登录
 // ---------------------------------------------------------------------------

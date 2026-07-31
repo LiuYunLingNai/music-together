@@ -44,6 +44,8 @@ export interface BilibiliFavoriteVideo {
   cover: string
 }
 
+export type BilibiliRecommendedVideo = BilibiliFavoriteVideo
+
 export function parseBilibiliMembership(
   vipStatus: number | undefined,
   providerVipType: number | undefined,
@@ -282,4 +284,51 @@ export async function getFavoriteVideos(
     logger.error('Bilibili getFavoriteVideos failed', err, { favoriteId, page })
     return { videos: [], total: 0 }
   }
+}
+
+export function parseBilibiliRecommendedVideos(value: unknown): BilibiliRecommendedVideo[] {
+  if (!value || typeof value !== 'object') return []
+  const data = value as Record<string, unknown>
+  const items = Array.isArray(data.item) ? data.item : []
+
+  return items.flatMap((item) => {
+    if (!item || typeof item !== 'object') return []
+    const video = item as Record<string, unknown>
+    const bvid = String(video.bvid ?? '').trim()
+    if (!bvid || (video.goto && video.goto !== 'av')) return []
+    const owner = video.owner as { name?: unknown } | undefined
+    return [
+      {
+        bvid,
+        title: String(video.title ?? '').trim() || '未知视频',
+        author: String(owner?.name ?? video.author ?? 'Bilibili'),
+        duration: Number(video.duration ?? video.duraion ?? 0),
+        cover: String(video.pic ?? video.cover ?? '')
+          .replace(/^http:\/\//, 'https://')
+          .replace(/^\/\//, 'https://'),
+      },
+    ]
+  })
+}
+
+/** Fetch Bilibili's logged-in personalized homepage recommendation feed. */
+export async function getRecommendedVideos(cookie: string, limit = 20): Promise<BilibiliRecommendedVideo[]> {
+  const params = new URLSearchParams({
+    fresh_type: '4',
+    feed_version: 'V8',
+    fresh_idx: '1',
+    fresh_idx_1h: '1',
+    brush: '1',
+    homepage_ver: '1',
+    ps: String(limit),
+  })
+  const response = await fetch(`https://api.bilibili.com/x/web-interface/wbi/index/top/feed/rcmd?${params}`, {
+    headers: requestHeaders(cookie),
+    signal: AbortSignal.timeout(15_000),
+  })
+  const body = (await response.json()) as BilibiliResponse<Record<string, unknown>>
+  if (!response.ok || body.code !== 0) {
+    throw new Error(`Bilibili recommendation feed failed: ${body.code ?? response.status}`)
+  }
+  return parseBilibiliRecommendedVideos(body.data).slice(0, limit)
 }

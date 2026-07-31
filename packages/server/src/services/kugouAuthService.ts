@@ -229,6 +229,67 @@ async function kugouRequest(config: KugouRequestConfig): Promise<KugouApiRespons
   return body
 }
 
+export function parseKugouRecommendationSongs(value: unknown): Record<string, unknown>[] {
+  if (!value || typeof value !== 'object') return []
+  if (Array.isArray(value)) {
+    const songs = value.filter((item): item is Record<string, unknown> => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return false
+      const song = item as Record<string, unknown>
+      const audioInfo = song.audio_info as Record<string, unknown> | undefined
+      return Boolean(song.hash || song.audio_id || audioInfo?.hash)
+    })
+    if (songs.length > 0) return songs
+    for (const item of value) {
+      const nested = parseKugouRecommendationSongs(item)
+      if (nested.length > 0) return nested
+    }
+    return []
+  }
+
+  const record = value as Record<string, unknown>
+  for (const key of ['song_list', 'songs', 'info', 'list', 'recommend_list', 'data']) {
+    const nested = parseKugouRecommendationSongs(record[key])
+    if (nested.length > 0) return nested
+  }
+  return []
+}
+
+async function getRecommendationSongsForEdition(
+  cookie: string,
+  limit = 20,
+  edition: KugouEdition = 'standard',
+): Promise<Record<string, unknown>[]> {
+  const cookieObj = parseCookieString(cookie)
+  const body = await kugouRequest({
+    baseURL: 'https://gateway.kugou.com',
+    url: '/everyday_song_recommend',
+    method: 'POST',
+    params: {},
+    data: {
+      platform: 'android',
+      userid: cookieObj.userid || '0',
+    },
+    encryptType: 'android',
+    cookie: cookieObj,
+    headers: { 'x-router': 'everydayrec.service.kugou.com' },
+    edition,
+  })
+  const songs = parseKugouRecommendationSongs(body.data)
+  if (songs.length === 0) throw new Error('Kugou recommendation feed returned no songs')
+  return songs.slice(0, limit)
+}
+
+export async function getRecommendationSongs(cookie: string, limit = 20): Promise<Record<string, unknown>[]> {
+  return getRecommendationSongsForEdition(cookie, limit)
+}
+
+export async function getConceptRecommendationSongs(
+  cookie: string,
+  limit = 20,
+): Promise<Record<string, unknown>[]> {
+  return getRecommendationSongsForEdition(cookie, limit, 'concept')
+}
+
 // ---------------------------------------------------------------------------
 // QR Code Login
 // ---------------------------------------------------------------------------

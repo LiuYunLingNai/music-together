@@ -13,13 +13,14 @@ import { PLATFORM_ACTIVE, PLATFORM_TEXT } from '@/lib/platform'
 import { cn, trackKey } from '@/lib/utils'
 import { useRoomStore } from '@/stores/roomStore'
 import { useSearch } from '@/hooks/useSearch'
+import { useRecommendations } from '@/hooks/useRecommendations'
 import { usePlaylist } from '@/hooks/usePlaylist'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useSocketContext } from '@/providers/socket-context'
 import { EVENTS } from '@music-together/shared'
 import type { MusicSource, Track, Playlist } from '@music-together/shared'
 import type { BilibiliMetadataSource } from '@music-together/shared'
-import { Loader2, Music2, Search, ListMusic } from 'lucide-react'
+import { Loader2, Music2, Search, ListMusic, RefreshCw, Sparkles } from 'lucide-react'
 import { motion } from 'motion/react'
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, useEffect } from 'react'
 import { toast } from 'sonner'
@@ -28,6 +29,7 @@ import { BilibiliMetadataDialog } from './BilibiliMetadataDialog'
 
 const EMPTY_QUEUE: Track[] = []
 type BilibiliQueueAction = 'add' | 'insert'
+type SearchMode = 'song' | 'album' | 'playlist' | 'recommend'
 
 const SOURCES: { id: MusicSource; label: string }[] = [
   { id: 'netease', label: '网易云' },
@@ -46,7 +48,7 @@ interface SearchDialogProps {
 
 export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCurrent }: SearchDialogProps) {
   const [source, setSource] = useState<MusicSource>('netease')
-  const [searchType, setSearchType] = useState<'song' | 'album' | 'playlist'>('song')
+  const [searchType, setSearchType] = useState<SearchMode>('song')
   const [bilibiliMatch, setBilibiliMatch] = useState<{ track: Track; action: BilibiliQueueAction } | null>(null)
   const [keyword, setKeyword] = useState('')
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set())
@@ -110,9 +112,25 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
 
   const { results, loading, loadingMore, hasMore, hasSearched, search, loadMore, resetState } = useSearch(
     source,
-    searchType,
+    searchType === 'recommend' ? 'song' : searchType,
     roomId,
   )
+  const {
+    recommendations,
+    loading: recommendationsLoading,
+    loaded: recommendationsLoaded,
+    load: loadRecommendations,
+    reset: resetRecommendations,
+  } = useRecommendations(roomId)
+  const activeRecommendation = useMemo(
+    () => recommendations.find((recommendation) => recommendation.platform === source),
+    [recommendations, source],
+  )
+  const visibleSources = useMemo(() => {
+    if (searchType !== 'recommend' || !recommendationsLoaded) return SOURCES
+    const available = new Set(recommendations.map((recommendation) => recommendation.platform))
+    return SOURCES.filter((item) => available.has(item.id))
+  }, [recommendations, recommendationsLoaded, searchType])
 
   // Auto re-search when source or type changes
   const prevSourceRef = useRef(source)
@@ -122,11 +140,24 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
     const typeChanged = prevTypeRef.current !== searchType
     prevSourceRef.current = source
     prevTypeRef.current = searchType
-    if ((sourceChanged || typeChanged) && keyword.trim()) {
+    if ((sourceChanged || typeChanged) && searchType !== 'recommend' && keyword.trim()) {
       search(keyword.trim())
       if (searchType === 'song') listRef.current?.scrollToTop()
     }
   }, [source, searchType, keyword, search])
+
+  useEffect(() => {
+    if (open && searchType === 'recommend' && !recommendationsLoaded && !recommendationsLoading) {
+      loadRecommendations()
+    }
+  }, [loadRecommendations, open, recommendationsLoaded, recommendationsLoading, searchType])
+
+  useEffect(() => {
+    if (searchType !== 'recommend' || !recommendationsLoaded || recommendations.length === 0) return
+    if (!recommendations.some((recommendation) => recommendation.platform === source)) {
+      setSource(recommendations[0]!.platform)
+    }
+  }, [recommendations, recommendationsLoaded, searchType, source])
 
   // Measure active source button position for sliding pill
   const measurePill = useCallback(() => {
@@ -135,7 +166,7 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
     const activeBtn = container.querySelector<HTMLButtonElement>(`[data-source="${source}"]`)
     if (!activeBtn) return
     setPillStyle({ left: activeBtn.offsetLeft, width: activeBtn.offsetWidth })
-  }, [source])
+  }, [source, visibleSources])
 
   useLayoutEffect(() => {
     measurePill()
@@ -148,9 +179,12 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
 
   useEffect(() => {
     if (open) return
-    const frame = requestAnimationFrame(() => setSelectedAlbum(null))
+    const frame = requestAnimationFrame(() => {
+      setSelectedAlbum(null)
+      resetRecommendations()
+    })
     return () => cancelAnimationFrame(frame)
-  }, [open])
+  }, [open, resetRecommendations])
 
   const handleSearch = (overrideKeyword?: string) => {
     const searchKeyword = (overrideKeyword ?? keyword).trim()
@@ -272,16 +306,16 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
         <ResponsiveDialogHeader>
           <div className="flex items-center gap-3">
             <ResponsiveDialogTitle className="shrink-0">
-              {selectedAlbum ? selectedAlbum.name : '搜索点歌'}
+              {selectedAlbum ? selectedAlbum.name : searchType === 'recommend' ? '推荐点歌' : '搜索点歌'}
             </ResponsiveDialogTitle>
-            {!selectedAlbum && (
+            {!selectedAlbum && visibleSources.length > 0 && (
               <div ref={sourceContainerRef} className="bg-muted/50 relative flex items-center rounded-lg p-0.5">
                 <motion.div
                   className={cn('absolute inset-y-0.5 rounded-md', PLATFORM_ACTIVE[source])}
                   animate={{ left: pillStyle.left, width: pillStyle.width }}
                   transition={{ type: 'spring', bounce: 0.15, duration: 0.3 }}
                 />
-                {SOURCES.map((s) => (
+                {visibleSources.map((s) => (
                   <button
                     key={s.id}
                     data-source={s.id}
@@ -291,7 +325,12 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                     )}
                     onClick={() => {
                       setSource(s.id)
-                      if (s.id === 'bilibili' || s.id === 'kugou_concept') setSearchType('song')
+                      if (
+                        (s.id === 'bilibili' || s.id === 'kugou_concept') &&
+                        (searchType === 'album' || searchType === 'playlist')
+                      ) {
+                        setSearchType('song')
+                      }
                       resetState()
                       setAddedIds(new Set())
                     }}
@@ -321,55 +360,113 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
             />
           ) : (
             <>
-              {source !== 'bilibili' && source !== 'kugou_concept' && (
-                <Tabs
-                  value={searchType}
-                  onValueChange={(v) => {
-                    setSearchType(v as 'song' | 'album' | 'playlist')
-                    resetState()
-                    setAddedIds(new Set())
-                  }}
-                >
-                  <TabsList className="w-full">
-                    <TabsTrigger value="song" className="flex-1 text-xs sm:text-sm">
-                      单曲
-                    </TabsTrigger>
-                    <TabsTrigger value="album" className="flex-1 text-xs sm:text-sm">
-                      专辑
-                    </TabsTrigger>
-                    <TabsTrigger value="playlist" className="flex-1 text-xs sm:text-sm">
-                      歌单
-                    </TabsTrigger>
-                  </TabsList>
-                </Tabs>
+              <Tabs
+                value={searchType}
+                onValueChange={(value) => {
+                  setSearchType(value as SearchMode)
+                  resetState()
+                  setAddedIds(new Set())
+                }}
+              >
+                <TabsList className="w-full">
+                  <TabsTrigger value="song" className="flex-1 text-xs sm:text-sm">
+                    单曲
+                  </TabsTrigger>
+                  <TabsTrigger value="recommend" className="flex-1 gap-1 text-xs sm:text-sm">
+                    <Sparkles className="h-3.5 w-3.5" />
+                    推荐
+                  </TabsTrigger>
+                  {source !== 'bilibili' && source !== 'kugou_concept' && (
+                    <>
+                      <TabsTrigger value="album" className="flex-1 text-xs sm:text-sm">
+                        专辑
+                      </TabsTrigger>
+                      <TabsTrigger value="playlist" className="flex-1 text-xs sm:text-sm">
+                        歌单
+                      </TabsTrigger>
+                    </>
+                  )}
+                </TabsList>
+              </Tabs>
+
+              {searchType === 'recommend' ? (
+                <div className="bg-muted/40 flex items-center justify-between gap-3 rounded-lg border px-3 py-2">
+                  <div className="flex min-w-0 items-center gap-2 text-sm">
+                    <Sparkles className={cn('h-4 w-4 shrink-0', PLATFORM_TEXT[source])} />
+                    <span className="truncate">展示当前账号在平台上的原生推荐内容</span>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={loadRecommendations}
+                    disabled={recommendationsLoading}
+                    aria-label="刷新推荐"
+                  >
+                    <RefreshCw className={cn('h-4 w-4', recommendationsLoading && 'animate-spin')} />
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <Input
+                    placeholder={
+                      source === 'bilibili'
+                        ? '搜索视频，或粘贴 B站链接 / BV号...'
+                        : searchType === 'song'
+                          ? '搜索歌曲、歌手...'
+                          : searchType === 'album'
+                            ? '搜索专辑...'
+                            : '搜索歌单...'
+                    }
+                    value={keyword}
+                    onChange={(e) => setKeyword(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                    className="flex-1"
+                    autoFocus
+                    aria-label="搜索关键词"
+                  />
+                  <Button onClick={() => handleSearch()} disabled={loading} aria-label="搜索">
+                    {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                  </Button>
+                </div>
               )}
 
-              {/* Search input */}
-              <div className="flex gap-2">
-                <Input
-                  placeholder={
-                    source === 'bilibili'
-                      ? '搜索视频，或粘贴 B站链接 / BV号...'
-                      : searchType === 'song'
-                        ? '搜索歌曲、歌手...'
-                        : searchType === 'album'
-                          ? '搜索专辑...'
-                          : '搜索歌单...'
-                  }
-                  value={keyword}
-                  onChange={(e) => setKeyword(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                  className="flex-1"
-                  autoFocus
-                  aria-label="搜索关键词"
-                />
-                <Button onClick={() => handleSearch()} disabled={loading} aria-label="搜索">
-                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                </Button>
-              </div>
-
               {/* Results area — virtual scrolling with auto-load */}
-              {hasSearched ? (
+              {searchType === 'recommend' ? (
+                !recommendationsLoaded || recommendationsLoading ? (
+                  <div className="flex min-h-0 flex-1 items-center justify-center rounded-md border">
+                    <Loader2 className="text-muted-foreground h-6 w-6 animate-spin" />
+                  </div>
+                ) : recommendations.length === 0 ? (
+                  <div className="flex min-h-0 flex-1 items-center justify-center rounded-md border">
+                    <div className="text-muted-foreground flex h-48 flex-col items-center justify-center gap-2 px-6 text-center">
+                      <Sparkles className="h-8 w-8" />
+                      <span className="text-sm">请先在设置中登录音乐平台，再查看平台推荐</span>
+                    </div>
+                  </div>
+                ) : (
+                  <VirtualTrackList
+                    ref={listRef}
+                    tracks={activeRecommendation?.tracks ?? []}
+                    loading={false}
+                    hasMore={false}
+                    loadingMore={false}
+                    onLoadMore={() => undefined}
+                    isTrackAdded={isTrackAdded}
+                    onAddTrack={handleAdd}
+                    onInsertAfterCurrent={handleInsertAfterCurrent}
+                    onArtistClick={(artist) => {
+                      setSearchType('song')
+                      handleSearch(artist)
+                    }}
+                    emptyIcon={<Sparkles className="h-8 w-8" />}
+                    emptyMessage={
+                      activeRecommendation?.unavailableReason === 'upstream_unavailable'
+                        ? '平台推荐暂时不可用，请刷新重试'
+                        : '平台暂时没有返回推荐内容'
+                    }
+                  />
+                )
+              ) : hasSearched ? (
                 searchType === 'song' ? (
                   <VirtualTrackList
                     ref={listRef}

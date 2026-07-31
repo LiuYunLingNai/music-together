@@ -1520,6 +1520,69 @@ class MusicProvider {
     }
   }
 
+  /** Fetch a platform's native logged-in recommendation feed. */
+  async getRecommendations(source: MusicSource, cookie: string, limit = 20): Promise<Track[]> {
+    let tracks: Track[]
+
+    switch (source) {
+      case 'netease': {
+        const response = await withTimeout(ncmApi.recommend_songs({ cookie, timestamp: Date.now() }))
+        const songs = response?.body?.data?.dailySongs
+        if (response?.body?.code !== 200 || !Array.isArray(songs)) {
+          throw new Error(`Netease recommendation feed failed: ${response?.body?.code ?? 'empty response'}`)
+        }
+        tracks = songs.slice(0, limit).map((song) => this.rawToTrack(song, source))
+        await this.batchResolveCover(tracks, source)
+        break
+      }
+      case 'tencent': {
+        const songs = await tencentAuth.getRecommendationSongs(cookie, limit)
+        tracks = songs.map((song) => this.rawToTrack(song, source))
+        await this.batchResolveCover(tracks, source)
+        break
+      }
+      case 'kugou':
+      case 'kugou_concept': {
+        const songs =
+          source === 'kugou'
+            ? await kugouAuth.getRecommendationSongs(cookie, limit)
+            : await kugouAuth.getConceptRecommendationSongs(cookie, limit)
+        tracks = songs.flatMap((song) => {
+          const track = this.kugouSongToTrack(song, source)
+          return track ? [track] : []
+        })
+        break
+      }
+      case 'bilibili': {
+        const videos = await bilibiliAuth.getRecommendedVideos(cookie, limit)
+        tracks = videos.map((video) => {
+          const cover = normalizeBilibiliCoverUrl(video.cover)
+          return {
+            id: nanoid(),
+            source,
+            sourceId: video.bvid,
+            urlId: video.bvid,
+            title: video.title,
+            artist: [video.author],
+            album: 'Bilibili 推荐',
+            duration: video.duration,
+            cover,
+            bilibiliCover: cover,
+          }
+        })
+        break
+      }
+      default: {
+        const exhaustive: never = source
+        throw new Error(`Unsupported recommendation source: ${exhaustive}`)
+      }
+    }
+
+    for (const track of tracks) this.enrichFromRegistry(track)
+    this.registerTracks(tracks)
+    return tracks
+  }
+
   // ---------------------------------------------------------------------------
   // Public API — Stream URL, Lyric, Cover (unchanged from original)
   // ---------------------------------------------------------------------------

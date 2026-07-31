@@ -103,6 +103,15 @@ export interface Track {
   requestedBy?: string
 }
 
+export type RecommendationUnavailableReason = 'empty' | 'upstream_unavailable'
+
+/** A logged-in platform's native recommendation feed. */
+export interface PlatformRecommendation {
+  platform: MusicSource
+  tracks: Track[]
+  unavailableReason?: RecommendationUnavailableReason
+}
+
 /** 客户端可见的房间状态 */
 export interface RoomState {
   id: string

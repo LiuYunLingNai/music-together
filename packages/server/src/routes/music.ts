@@ -4,6 +4,8 @@ import {
   lyricQuerySchema,
   coverQuerySchema,
   playlistQuerySchema,
+  recommendationsQuerySchema,
+  type PlatformRecommendation,
 } from '@music-together/shared'
 import { Router, type Router as RouterType, type Request, type Response } from 'express'
 import { Readable } from 'node:stream'
@@ -73,6 +75,46 @@ router.get(
       const tracks = await musicProvider.search(source, keyword, pageSize, pageNum, cookie)
       res.json({ tracks, page: pageNum, hasMore: tracks.length >= pageSize })
     }
+  }),
+)
+
+router.get(
+  '/recommendations',
+  validated(recommendationsQuerySchema, 'Get recommendations', async ({ roomId, limit }, req, res) => {
+    const identityUserId = req.identityUserId
+    if (!identityUserId) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+
+    const room = roomRepo.get(roomId)
+    if (!room || !room.users.some((user) => user.id === identityUserId)) {
+      res.status(403).json({ error: 'Forbidden' })
+      return
+    }
+
+    const loggedPlatforms = authService
+      .getUserAuthStatus(identityUserId, roomId)
+      .filter((status) => status.loggedIn)
+      .map((status) => status.platform)
+
+    const recommendations = await Promise.all(
+      loggedPlatforms.map(async (platform): Promise<PlatformRecommendation> => {
+        const cookie = authService.getUserCookie(identityUserId, platform, roomId)
+        if (!cookie) return { platform, tracks: [], unavailableReason: 'upstream_unavailable' }
+
+        try {
+          const tracks = await musicProvider.getRecommendations(platform, cookie, limit)
+          return tracks.length > 0 ? { platform, tracks } : { platform, tracks, unavailableReason: 'empty' }
+        } catch (err) {
+          logger.warn('Platform recommendation feed failed', { platform, roomId, identityUserId, err })
+          return { platform, tracks: [], unavailableReason: 'upstream_unavailable' }
+        }
+      }),
+    )
+
+    res.setHeader('Cache-Control', 'private, no-store')
+    res.json({ recommendations })
   }),
 )
 

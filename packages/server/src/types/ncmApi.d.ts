@@ -67,6 +67,13 @@ declare module '@neteasecloudmusicapienhanced/api' {
       params: { uid: number; limit: number; offset: number } & RequestBaseConfig,
     ): Promise<{ body: UserPlaylistResponse }>
 
+    recommend_songs(params: RequestBaseConfig): Promise<{
+      body: {
+        code?: number
+        data?: { dailySongs?: Record<string, unknown>[] }
+      }
+    }>
+
     /** 获取歌词（含逐词 YRC） */
     lyric_new(params: { id: string | number } & RequestBaseConfig): Promise<{
       body: {
