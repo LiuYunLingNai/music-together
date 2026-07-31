@@ -245,6 +245,56 @@ export function parseTencentRecommendationSongs(value: unknown): Record<string, 
   })
 }
 
+function hashTencentGtk(value: string): number {
+  let hash = 5381
+  for (const character of value) hash += (hash << 5) + character.charCodeAt(0)
+  return hash & 0x7fffffff
+}
+
+async function getWebRecommendationSongs(cookie: string, uin: number, gTk: number): Promise<Record<string, unknown>[]> {
+  const payload = {
+    comm: {
+      ct: 24,
+      cv: 4747474,
+      format: 'json',
+      inCharset: 'utf-8',
+      outCharset: 'utf-8',
+      notice: 0,
+      uin,
+      g_tk: gTk,
+      g_tk_new_20200303: gTk,
+      platform: 'yqq.json',
+      needNewCode: 1,
+    },
+    req_0: {
+      module: 'music.recommend.RecommendCgi',
+      method: 'GetRecommendTrack',
+      param: { uin },
+    },
+  }
+  const response = await fetch('https://u.y.qq.com/cgi-bin/musicu.fcg', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Cookie: cookie,
+      Referer: 'https://y.qq.com/',
+      'User-Agent': 'QQ%E9%9F%B3%E4%B9%90/73222',
+    },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(10_000),
+  })
+  if (!response.ok) throw new Error(`QQ Music recommendation HTTP ${response.status}`)
+
+  const body = (await response.json()) as {
+    req_0?: { code?: number; data?: Record<string, unknown> }
+  }
+  const result = body.req_0
+  if (result?.code !== 0 || !result.data) {
+    throw new Error(`QQ Music recommendation response code ${result?.code ?? 'missing'}`)
+  }
+  return parseTencentRecommendationSongs(result.data)
+}
+
 async function getLegacyRecommendationSongs(cookie: string, limit: number): Promise<Record<string, unknown>[]> {
   const pageUrls = ['https://y.qq.com/portal/guess.html', 'https://y.qq.com/n/ryqq/songRec']
   let mids: string[] = []
@@ -290,6 +340,17 @@ async function getLegacyRecommendationSongs(cookie: string, limit: number): Prom
 export async function getRecommendationSongs(cookie: string, limit = 20): Promise<Record<string, unknown>[]> {
   const rawUin = getCookieValue(cookie, 'uin') || getCookieValue(cookie, 'o_cookie') || '0'
   const uin = Number(rawUin.replace(/^o0*/, '')) || 0
+  const musicKey =
+    getCookieValue(cookie, 'qm_keyst') || getCookieValue(cookie, 'qqmusic_key') || getCookieValue(cookie, 'p_skey') || ''
+  const gTk = musicKey ? hashTencentGtk(musicKey) : 5381
+
+  try {
+    const songs = await getWebRecommendationSongs(cookie, uin, gTk)
+    if (songs.length > 0) return songs.slice(0, limit)
+    logger.debug('QQ Music web recommendation API returned no songs; trying signed API fallback')
+  } catch (err) {
+    logger.debug('QQ Music web recommendation API failed; trying signed API fallback', { err })
+  }
 
   try {
     const data = await tencentApiRequest({
@@ -297,11 +358,21 @@ export async function getRecommendationSongs(cookie: string, limit = 20): Promis
       method: 'GetRecommendTrack',
       cookie,
       param: { uin },
+      commExtras: {
+        uin,
+        g_tk: gTk,
+        g_tk_new_20200303: gTk,
+        platform: 'yqq.json',
+        needNewCode: 1,
+      },
     })
     const songs = parseTencentRecommendationSongs(data)
     if (songs.length > 0) return songs.slice(0, limit)
+    logger.debug('QQ Music native recommendation API returned no songs; trying legacy page fallback', {
+      responseKeys: Object.keys(data).slice(0, 10),
+    })
   } catch (err) {
-    logger.debug('QQ Music native recommendation API failed; trying legacy page fallback', { err, uin })
+    logger.debug('QQ Music native recommendation API failed; trying legacy page fallback', { err })
   }
 
   const legacySongs = await getLegacyRecommendationSongs(cookie, limit)
