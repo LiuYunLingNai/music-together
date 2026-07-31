@@ -1,6 +1,5 @@
 package io.github.yueby.musictogether.ui.player
 
-import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -8,6 +7,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -25,8 +26,6 @@ import io.github.yueby.musictogether.lyrics.AmllWordChunk
 import io.github.yueby.musictogether.lyrics.amllContinuousWordMaskProgresses
 import io.github.yueby.musictogether.lyrics.chunkAmllWords
 import io.github.yueby.musictogether.model.LyricLine
-
-private val AmllWordFloatEasing = CubicBezierEasing(0f, 0f, 0.58f, 1f)
 
 internal fun amllBaselineTransformOrigin(
     firstBaselinePx: Int,
@@ -50,6 +49,12 @@ internal fun amllCollapsedEffectWidth(
 internal data class AmllMaskWordMeasurement(
     val size: IntSize,
     val horizontalHeadroomPx: Int,
+)
+
+private data class AmllMaskGeometry(
+    val widthsPx: List<Float>,
+    val heightsPx: List<Float>,
+    val horizontalPaddingsPx: List<Float>,
 )
 
 private class AmllTextGeometryReporter {
@@ -87,6 +92,12 @@ private fun TextLayoutResult.amllVisualLineBounds(): List<Rect> =
 internal fun hasAmllTimedWords(line: LyricLine): Boolean =
     line.words.any { word -> word.endTimeMs > word.startTimeMs }
 
+internal fun shouldUseAmllGradientRenderMode(
+    hasDynamicTiming: Boolean,
+    active: Boolean,
+    effectReleaseProgress: Float,
+): Boolean = hasDynamicTiming && (active || effectReleaseProgress > 0.001f)
+
 @Composable
 internal fun AmllWordLine(
     line: LyricLine,
@@ -101,6 +112,11 @@ internal fun AmllWordLine(
     isBackground: Boolean = false,
 ) {
     val hasDynamicTiming = wordAnimationEnabled && hasAmllTimedWords(line)
+    val gradientEnabled = shouldUseAmllGradientRenderMode(
+        hasDynamicTiming = hasDynamicTiming,
+        active = active,
+        effectReleaseProgress = effectReleaseProgress,
+    )
     val textAlign = if (line.isDuet) TextAlign.End else TextAlign.Start
     val inactiveAlpha = amllInactiveMainLineAlpha(readingMode)
     val targetDarkAlpha = if (active) 0.4f else inactiveAlpha
@@ -159,21 +175,37 @@ internal fun AmllWordLine(
     val maskWordMeasurements = remember(chunks) {
         mutableStateMapOf<Int, AmllMaskWordMeasurement>()
     }
-    val continuousMaskProgresses = maskWords.indices
-        .mapNotNull(maskWordMeasurements::get)
-        .takeIf { it.size == maskWords.size }
-        ?.let { measurements ->
-            amllContinuousWordMaskProgresses(
-                words = maskWords,
-                widthsPx = measurements.map { it.size.width.toFloat() },
-                heightsPx = measurements.map { it.size.height.toFloat() },
-                positionMs = positionMs,
-                horizontalPaddingsPx = measurements.map {
-                    it.horizontalHeadroomPx.toFloat()
-                },
-            )
+    val maskGeometry by remember(maskWords, maskWordMeasurements) {
+        derivedStateOf {
+            maskWords.indices
+                .mapNotNull(maskWordMeasurements::get)
+                .takeIf { it.size == maskWords.size }
+                ?.let { measurements ->
+                    AmllMaskGeometry(
+                        widthsPx = measurements.map { it.size.width.toFloat() },
+                        heightsPx = measurements.map { it.size.height.toFloat() },
+                        horizontalPaddingsPx = measurements.map {
+                            it.horizontalHeadroomPx.toFloat()
+                        },
+                    )
+                }
         }
-        .orEmpty()
+    }
+    val continuousMaskProgresses = if (gradientEnabled) {
+        maskGeometry
+            ?.let { geometry ->
+                amllContinuousWordMaskProgresses(
+                    words = maskWords,
+                    widthsPx = geometry.widthsPx,
+                    heightsPx = geometry.heightsPx,
+                    positionMs = positionMs,
+                    horizontalPaddingsPx = geometry.horizontalPaddingsPx,
+                )
+            }
+            .orEmpty()
+    } else {
+        emptyList()
+    }
     val hasRomanWords = line.words.any { it.romanText.isNotBlank() }
     val hasRubyWords = line.words.any { it.ruby.isNotEmpty() }
     val density = LocalDensity.current
@@ -219,6 +251,7 @@ internal fun AmllWordLine(
                 fontWeight = fontWeight,
                 darkAlpha = baseAlpha,
                 brightAlpha = brightAlpha,
+                gradientEnabled = gradientEnabled,
                 isBackground = isBackground,
                 maskWordIndexOffset = chunkMaskWordOffsets[chunkIndex],
                 continuousMaskProgresses = continuousMaskProgresses,

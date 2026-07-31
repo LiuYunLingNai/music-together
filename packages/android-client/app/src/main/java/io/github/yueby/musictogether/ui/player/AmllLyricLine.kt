@@ -9,9 +9,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
@@ -46,15 +44,8 @@ internal fun AmllLineGroup(
     onClick: (() -> Unit)?,
     onMainLyricGeometryChanged: ((AmllPrimaryTextGeometry) -> Unit)?,
     onGroupBoundsInRootChanged: ((Rect) -> Unit)?,
-    mainFontSize: Float,
-    translationFontSize: Float,
-    romanFontSize: Float,
-    backgroundFontSize: Float,
-    horizontalContentPadding: Dp,
-    duetInset: Dp,
-    backgroundGap: Dp,
-    positionSpringStiffness: Float,
-    positionSpringDampingRatio: Float,
+    typography: AmllLineTypography,
+    motion: AmllLineMotion,
 ) {
     val line = group.main
     var retainedPositionMs by remember(line) {
@@ -99,8 +90,8 @@ internal fun AmllLineGroup(
     val backgroundSlideProgress by animateFloatAsState(
         targetValue = if (backgroundRevealed) 1f else 0f,
         animationSpec = spring(
-            dampingRatio = positionSpringDampingRatio,
-            stiffness = positionSpringStiffness,
+            dampingRatio = motion.positionSpringDampingRatio,
+            stiffness = motion.positionSpringStiffness,
         ),
         label = "amllBackgroundSlide",
     )
@@ -125,14 +116,15 @@ internal fun AmllLineGroup(
         label = "amllGroupAlpha",
     )
     val (startInsetFraction, endInsetFraction) = amllDuetInsetFractions(
-        hasDuetLines = duetInset > 0.dp,
+        hasDuetLines = typography.duetInset > 0.dp,
         isDuet = line.isDuet,
     )
-
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .graphicsLayer { alpha = groupAlpha }
+            .graphicsLayer {
+                alpha = groupAlpha
+            }
             .then(
                 if (onClick != null) {
                     Modifier.clickable(
@@ -149,10 +141,12 @@ internal fun AmllLineGroup(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(
-                    start = horizontalContentPadding +
-                        duetInset * (startInsetFraction / AmllDuetInsetFraction),
-                    end = horizontalContentPadding +
-                        duetInset * (endInsetFraction / AmllDuetInsetFraction),
+                    start = typography.horizontalContentPadding +
+                        typography.duetInset *
+                        (startInsetFraction / AmllDuetInsetFraction),
+                    end = typography.horizontalContentPadding +
+                        typography.duetInset *
+                        (endInsetFraction / AmllDuetInsetFraction),
                 ),
         ) {
             Box(
@@ -169,7 +163,7 @@ internal fun AmllLineGroup(
                 AmllMainAndBackgroundLayout(
                     backgroundFirst = backgroundFirst,
                     backgroundRevealProgress = backgroundSlideProgress,
-                    backgroundGap = backgroundGap,
+                    backgroundGap = typography.backgroundGap,
                     main = {
                         AmllMainLine(
                             line = line,
@@ -180,9 +174,9 @@ internal fun AmllLineGroup(
                             wordAnimationEnabled = wordAnimationEnabled,
                             readingMode = readingMode,
                             lineScale = scale,
-                            mainFontSize = mainFontSize,
-                            translationFontSize = translationFontSize,
-                            romanFontSize = romanFontSize,
+                            mainFontSize = typography.mainFontSize,
+                            translationFontSize = typography.translationFontSize,
+                            romanFontSize = typography.romanFontSize,
                         )
                     },
                     background = background?.let { backgroundLine ->
@@ -198,7 +192,7 @@ internal fun AmllLineGroup(
                                 wordAnimationEnabled = wordAnimationEnabled,
                                 readingMode = readingMode,
                                 placeBeforeMain = backgroundFirst,
-                                fontSize = backgroundFontSize,
+                                fontSize = typography.backgroundFontSize,
                             )
                         }
                     },

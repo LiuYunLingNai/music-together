@@ -52,7 +52,9 @@ internal data class AmllLineSpringParameters(
         get() = stiffness / AmllLinePositionMass
 
     val dampingRatio: Float
-        get() = damping / (2f * sqrt(stiffness * AmllLinePositionMass))
+        get() = (
+            damping / (2f * sqrt(stiffness * AmllLinePositionMass))
+            ).coerceAtMost(1f)
 }
 
 internal const val AmllLinePositionMass = 0.9f

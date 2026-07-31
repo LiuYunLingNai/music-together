@@ -29,8 +29,6 @@ import io.github.yueby.musictogether.lyrics.amllReleasedEffectProgress
 import kotlin.math.PI
 import kotlin.math.sin
 
-private val AmllWordFloatEasing = CubicBezierEasing(0f, 0f, 0.58f, 1f)
-
 @Composable
 internal fun AmllAnimatedWordLayer(
     text: String,

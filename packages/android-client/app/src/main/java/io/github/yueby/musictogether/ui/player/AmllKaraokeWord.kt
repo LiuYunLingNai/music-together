@@ -46,6 +46,7 @@ internal fun AmllKaraokeWord(
     fontWeight: FontWeight,
     darkAlpha: Float,
     brightAlpha: Float,
+    gradientEnabled: Boolean,
     emphasize: Boolean,
     isBackground: Boolean,
     chunkStartTimeMs: Long,
@@ -98,84 +99,83 @@ internal fun AmllKaraokeWord(
                 effectReleaseProgress = effectReleaseProgress,
                 modifier = Modifier.padding(horizontal = effectHeadroom),
             )
-            AmllKaraokeWordLayer(
-                word = word,
-                graphemes = graphemes,
-                positionMs = positionMs,
-                reserveRomanSpace = reserveRomanSpace,
-                reserveRubySpace = reserveRubySpace,
-                fontSize = fontSize,
-                fontWeight = fontWeight,
-                color = Color.White.copy(
-                    alpha = (brightAlpha - darkAlpha).coerceAtLeast(0f),
-                ),
-                emphasize = emphasize,
-                isBackground = isBackground,
-                chunkStartTimeMs = chunkStartTimeMs,
-                profile = profile,
-                glyphIndexOffset = glyphIndexOffset,
-                glyphCount = glyphCount,
-                drawGlow = true,
-                effectReleaseProgress = effectReleaseProgress,
-                modifier = Modifier
-                    .graphicsLayer {
-                        // Bright/dark mask alpha owns the line transition.
-                        // This layer only needs offscreen compositing; multiplying
-                        // it by effectReleaseProgress would fade the same mask twice.
-                        compositingStrategy = CompositingStrategy.Offscreen
-                    }
-                    .drawWithContent {
-                        when {
-                            highlightProgress <= 0f -> Unit
-                            highlightProgress >= 1f -> drawContent()
-                            else -> {
-                                drawContent()
-                                val canvasWidth = size.width
-                                val canvasHeight = size.height
-                                val boundaries = amllMaskBoundaries(
-                                    progress = highlightProgress,
-                                    width = canvasWidth,
-                                    height = canvasHeight,
-                                )
-                                val stops = buildList {
-                                    add(
-                                        0f to Color.Black.copy(
-                                            alpha = amllMaskAlphaAt(
-                                                progress = highlightProgress,
-                                                xFraction = 0f,
-                                                width = canvasWidth,
-                                                height = canvasHeight,
-                                            ),
-                                        ),
+            if (gradientEnabled) {
+                AmllKaraokeWordLayer(
+                    word = word,
+                    graphemes = graphemes,
+                    positionMs = positionMs,
+                    reserveRomanSpace = reserveRomanSpace,
+                    reserveRubySpace = reserveRubySpace,
+                    fontSize = fontSize,
+                    fontWeight = fontWeight,
+                    color = Color.White.copy(
+                        alpha = (brightAlpha - darkAlpha).coerceAtLeast(0f),
+                    ),
+                    emphasize = emphasize,
+                    isBackground = isBackground,
+                    chunkStartTimeMs = chunkStartTimeMs,
+                    profile = profile,
+                    glyphIndexOffset = glyphIndexOffset,
+                    glyphCount = glyphCount,
+                    drawGlow = true,
+                    effectReleaseProgress = effectReleaseProgress,
+                    modifier = Modifier
+                        .graphicsLayer {
+                            compositingStrategy = CompositingStrategy.Offscreen
+                        }
+                        .drawWithContent {
+                            when {
+                                highlightProgress <= 0f -> Unit
+                                highlightProgress >= 1f -> drawContent()
+                                else -> {
+                                    drawContent()
+                                    val canvasWidth = size.width
+                                    val canvasHeight = size.height
+                                    val boundaries = amllMaskBoundaries(
+                                        progress = highlightProgress,
+                                        width = canvasWidth,
+                                        height = canvasHeight,
                                     )
-                                    if (boundaries.brightEndFraction in 0f..1f) {
-                                        add(boundaries.brightEndFraction to Color.Black)
-                                    }
-                                    if (boundaries.fadeEndFraction in 0f..1f) {
-                                        add(boundaries.fadeEndFraction to Color.Transparent)
-                                    }
-                                    add(
-                                        1f to Color.Black.copy(
-                                            alpha = amllMaskAlphaAt(
-                                                progress = highlightProgress,
-                                                xFraction = 1f,
-                                                width = canvasWidth,
-                                                height = canvasHeight,
+                                    val stops = buildList {
+                                        add(
+                                            0f to Color.Black.copy(
+                                                alpha = amllMaskAlphaAt(
+                                                    progress = highlightProgress,
+                                                    xFraction = 0f,
+                                                    width = canvasWidth,
+                                                    height = canvasHeight,
+                                                ),
                                             ),
+                                        )
+                                        if (boundaries.brightEndFraction in 0f..1f) {
+                                            add(boundaries.brightEndFraction to Color.Black)
+                                        }
+                                        if (boundaries.fadeEndFraction in 0f..1f) {
+                                            add(boundaries.fadeEndFraction to Color.Transparent)
+                                        }
+                                        add(
+                                            1f to Color.Black.copy(
+                                                alpha = amllMaskAlphaAt(
+                                                    progress = highlightProgress,
+                                                    xFraction = 1f,
+                                                    width = canvasWidth,
+                                                    height = canvasHeight,
+                                                ),
+                                            ),
+                                        )
+                                    }
+                                    drawRect(
+                                        brush = Brush.horizontalGradient(
+                                            *stops.toTypedArray(),
                                         ),
+                                        blendMode = BlendMode.DstIn,
                                     )
                                 }
-                                drawRect(
-                                    brush = Brush.horizontalGradient(
-                                        *stops.toTypedArray(),
-                                    ),
-                                    blendMode = BlendMode.DstIn,
-                                )
                             }
                         }
-                    }
-                    .padding(horizontal = effectHeadroom),
-            )
+                        .padding(horizontal = effectHeadroom),
+                )
+            }
         },
     ) { measurables, constraints ->
         val expandedConstraints = constraints

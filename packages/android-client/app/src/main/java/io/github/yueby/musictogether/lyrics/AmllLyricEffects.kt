@@ -199,34 +199,31 @@ internal fun amllContinuousWordMaskProgresses(
         return emptyList()
     }
 
-    val wordProgresses = words.map { word ->
-        amllWordProgress(word, positionMs)
-    }
-    val widthsBeforeWord = buildList(words.size) {
-        var prefix = 0f
-        widthsPx.forEach { width ->
-            add(prefix)
-            prefix += width
-        }
-    }
-    val timedWidthTravelPx = words.indices.fold(0f) { total, wordIndex ->
-        total + widthsPx[wordIndex] * wordProgresses[wordIndex]
+    val wordProgresses = FloatArray(words.size)
+    var timedWidthTravelPx = 0f
+    words.indices.forEach { wordIndex ->
+        val progress = amllWordProgress(words[wordIndex], positionMs)
+        wordProgresses[wordIndex] = progress
+        timedWidthTravelPx += widthsPx[wordIndex] * progress
     }
     val edgeFadeTravel =
         wordProgresses.first() * 1.5f + wordProgresses.last() * 0.5f
 
-    return words.indices.map { targetIndex ->
+    var widthBeforeWord = 0f
+    return List(words.size) { targetIndex ->
         val fadeWidthPx = heightsPx[targetIndex] * 0.5f
         val horizontalPaddingPx = horizontalPaddingsPx[targetIndex]
         val travelledPx =
             timedWidthTravelPx + fadeWidthPx * edgeFadeTravel
         val localFadeEndPx =
             travelledPx -
-                widthsBeforeWord[targetIndex] +
+                widthBeforeWord +
                 horizontalPaddingPx -
                 fadeWidthPx
         val localTravelPx =
             widthsPx[targetIndex] + horizontalPaddingPx * 2f + fadeWidthPx
-        (localFadeEndPx / localTravelPx).coerceIn(0f, 1f)
+        (localFadeEndPx / localTravelPx).coerceIn(0f, 1f).also {
+            widthBeforeWord += widthsPx[targetIndex]
+        }
     }
 }

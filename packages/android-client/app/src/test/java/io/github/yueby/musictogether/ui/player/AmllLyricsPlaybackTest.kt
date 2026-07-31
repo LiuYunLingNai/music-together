@@ -280,33 +280,36 @@ class AmllLyricsPlaybackTest {
         val items = buildAmllListItems(
             trackId = "track",
             groups = groups,
-            interlude = null,
         )
 
         assertEquals(2, items.size)
-        assertTrue(items.all { it is AmllListItem.Line })
+        assertEquals(listOf(0, 1), items.map { it.groupIndex })
     }
 
     @Test
-    fun activeInterludeOnlyOccupiesSpaceAtItsCurrentAnchor() {
+    fun activeInterludeDoesNotChangeLyricListStructure() {
         val groups = listOf(group(1_000, 2_000), group(7_000, 8_000))
-        val interlude = AmllInterlude(
-            startTimeMs = 2_000,
-            endTimeMs = 6_750,
-            anchorGroupIndex = 0,
-            isNextDuet = false,
-        )
 
         val items = buildAmllListItems(
             trackId = "track",
             groups = groups,
-            interlude = interlude,
         )
 
-        assertEquals(3, items.size)
-        assertTrue(items[0] is AmllListItem.Line)
-        assertTrue(items[1] is AmllListItem.Interlude)
-        assertTrue(items[2] is AmllListItem.Line)
+        assertEquals(2, items.size)
+        assertEquals(listOf(0, 1), items.map { it.groupIndex })
+    }
+
+    @Test
+    fun seekingIntoInterludeRestartsItsEntranceAtSeekPosition() {
+        val frame = advanceAmllTimelineFrame(
+            previous = AmllTimelineFrame(),
+            groups = listOf(group(1_000, 2_000), group(9_000, 10_000)),
+            positionMs = 5_000,
+            seeking = true,
+        )
+
+        assertEquals(5_000L, frame.interlude?.startTimeMs)
+        assertEquals(8_750L, frame.interlude?.endTimeMs)
     }
 
     @Test
@@ -432,7 +435,6 @@ class AmllLyricsPlaybackTest {
         assertTrue(shouldUseAmllWordAnimation("ttml"))
         assertTrue(shouldUseAmllWordAnimation("wordByWord"))
         assertTrue(shouldUseAmllWordAnimation("yrc"))
-        assertEquals(30, AmllPlaybackRelayoutFrameCount)
     }
 
     @Test
@@ -450,7 +452,7 @@ class AmllLyricsPlaybackTest {
             powerSaveMode = false,
         )
 
-        assertEquals(0L, normal.minimumFrameIntervalNanos)
+        assertEquals(AmllNormalFrameIntervalNanos, normal.minimumFrameIntervalNanos)
         assertTrue(normal.expensiveEffectsEnabled)
         assertEquals(AmllPowerSavingFrameIntervalNanos, powerSaving.minimumFrameIntervalNanos)
         assertEquals(false, powerSaving.expensiveEffectsEnabled)
@@ -459,6 +461,55 @@ class AmllLyricsPlaybackTest {
             animationsDisabled.minimumFrameIntervalNanos,
         )
         assertEquals(false, animationsDisabled.expensiveEffectsEnabled)
+    }
+
+    @Test
+    fun inactiveDynamicLinesReturnToSolidRenderingAfterRelease() {
+        assertTrue(
+            shouldUseAmllGradientRenderMode(
+                hasDynamicTiming = true,
+                active = true,
+                effectReleaseProgress = 1f,
+            ),
+        )
+        assertTrue(
+            shouldUseAmllGradientRenderMode(
+                hasDynamicTiming = true,
+                active = false,
+                effectReleaseProgress = 0.5f,
+            ),
+        )
+        assertEquals(
+            false,
+            shouldUseAmllGradientRenderMode(
+                hasDynamicTiming = true,
+                active = false,
+                effectReleaseProgress = 0f,
+            ),
+        )
+    }
+
+    @Test
+    fun interludeReservesDotHeightAndLineGap() {
+        assertEquals(30.6f, amllInterludeReservedHeight(30f), 0.001f)
+    }
+
+    @Test
+    fun interludeCanvasMatchesAmllEntranceAndExitPhases() {
+        val interlude = AmllInterlude(
+            startTimeMs = 1_000,
+            endTimeMs = 6_000,
+            anchorGroupIndex = 0,
+            isNextDuet = false,
+        )
+        val entrance = amllInterludeVisualState(interlude, 1_000f)
+        val visible = amllInterludeVisualState(interlude, 2_500f)
+        val exit = amllInterludeVisualState(interlude, 6_000f)
+
+        assertEquals(0f, entrance.scale, 0.001f)
+        assertTrue(visible.scale > 0f)
+        assertTrue(visible.dotAlphas.first() > 0f)
+        assertEquals(0f, exit.dotAlphas.max(), 0.001f)
     }
 
     @Test

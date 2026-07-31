@@ -1,6 +1,5 @@
 package io.github.yueby.musictogether.ui.player
 
-import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
@@ -25,8 +24,6 @@ import io.github.yueby.musictogether.lyrics.isAmllCjk
 import io.github.yueby.musictogether.lyrics.shouldAmllEmphasize
 import io.github.yueby.musictogether.lyrics.splitAmllGraphemes
 import io.github.yueby.musictogether.model.LyricWord
-
-private val AmllWordFloatEasing = CubicBezierEasing(0f, 0f, 0.58f, 1f)
 
 internal data class AmllFlowLine(
     val itemIndices: MutableList<Int> = mutableListOf(),
@@ -167,6 +164,7 @@ internal fun AmllKaraokeChunk(
     fontWeight: FontWeight,
     darkAlpha: Float,
     brightAlpha: Float,
+    gradientEnabled: Boolean,
     isBackground: Boolean,
     maskWordIndexOffset: Int,
     continuousMaskProgresses: List<Float>,
@@ -217,6 +215,7 @@ internal fun AmllKaraokeChunk(
                 fontWeight = fontWeight,
                 darkAlpha = darkAlpha,
                 brightAlpha = brightAlpha,
+                gradientEnabled = gradientEnabled,
                 emphasize = emphasize,
                 isBackground = isBackground,
                 chunkStartTimeMs = chunk.startTimeMs,

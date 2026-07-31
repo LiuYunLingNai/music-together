@@ -70,7 +70,14 @@ internal fun advanceAmllTimelineFrame(
 
     val timelineIndex = hot.lastOrNull()
         ?: groups.indexOfLast { positionMs >= it.startTimeMs }
-    val interlude = findAmllInterlude(groups, positionMs, timelineIndex)
+    val detectedInterlude = findAmllInterlude(groups, positionMs, timelineIndex)
+    val interlude = if (seeking && detectedInterlude != null) {
+        detectedInterlude.copy(
+            startTimeMs = maxOf(detectedInterlude.startTimeMs, positionMs),
+        )
+    } else {
+        detectedInterlude
+    }
     val focused = when {
         interlude != null ->
             (interlude.anchorGroupIndex + 1).coerceIn(groups.indices)
