@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
@@ -50,7 +51,6 @@ import io.github.yueby.musictogether.lyrics.findActiveAmllInterlude
 import io.github.yueby.musictogether.lyrics.prepareAmllLyricGroups
 import io.github.yueby.musictogether.model.LyricsState
 import kotlin.math.abs
-import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import java.util.Locale
@@ -64,12 +64,14 @@ internal const val AmllTranslationFontScale = 0.75f
 internal const val AmllRomanFontScale = 0.75f
 internal const val AmllBackgroundFontScale = 0.7f
 internal const val AmllInactiveScale = 0.97f
+internal const val AmllDuetInsetFraction = 0.15f
+internal const val AmllSubLineAlpha = 0.3f
 internal const val AmllPositionDampingRatio = 0.83f
 internal const val AmllScaleDampingRatio = 0.88f
 internal const val AmllSpringStiffness = 100f
 
 
-private sealed interface AmllListItem {
+internal sealed interface AmllListItem {
     val stableKey: String
 
     data class Line(
@@ -87,6 +89,30 @@ private sealed interface AmllListItem {
     ) : AmllListItem {
         override val stableKey =
             "interlude:$trackId:${value.startTimeMs}:${value.anchorGroupIndex}"
+    }
+}
+
+internal fun buildAmllListItems(
+    trackId: String?,
+    groups: List<AmllLyricGroup>,
+    interlude: AmllInterlude?,
+): List<AmllListItem> = buildList {
+    groups.forEachIndexed { index, group ->
+        if (interlude?.anchorGroupIndex == index - 1) {
+            add(
+                AmllListItem.Interlude(
+                    trackId = trackId,
+                    value = interlude,
+                ),
+            )
+        }
+        add(
+            AmllListItem.Line(
+                trackId = trackId,
+                groupIndex = index,
+                group = group,
+            ),
+        )
     }
 }
 
@@ -195,8 +221,14 @@ internal fun amllLineBlurRadiusDp(
     return (0.35f + distance * 0.58f).coerceAtMost(2.7f)
 }
 
-internal fun amllSubLineHighlight(progress: Float): Float =
-    1f - (1f - progress.coerceIn(0f, 1f)).pow(3)
+internal fun amllDuetInsetFractions(
+    hasDuetLines: Boolean,
+    isDuet: Boolean,
+): Pair<Float, Float> = when {
+    !hasDuetLines -> 0f to 0f
+    isDuet -> AmllDuetInsetFraction to 0f
+    else -> 0f to AmllDuetInsetFraction
+}
 
 @Composable
 internal fun LyricsPanel(
@@ -209,11 +241,13 @@ internal fun LyricsPanel(
 ) {
     val rawPositionMs = (positionSeconds * 1_000.0 - lyricOffsetMs).toFloat().coerceAtLeast(0f)
     val groups = remember(lyrics.lines) { prepareAmllLyricGroups(lyrics.lines) }
+    val motionPolicy = rememberAmllMotionPolicy()
     val playbackTimeline = rememberAmllPlaybackTimeline(
         groups = groups,
         rawPositionMs = rawPositionMs,
         isPlaying = isPlaying,
         resetKey = lyrics.trackId to lyricOffsetMs,
+        minimumFrameIntervalNanos = motionPolicy.minimumFrameIntervalNanos,
     )
     val timelineFrame by playbackTimeline.frame
     val smoothPositionMs = playbackTimeline.positionMs
@@ -255,30 +289,30 @@ internal fun LyricsPanel(
     val interlude = currentInterlude.takeUnless {
         currentInterludeKey != null && currentInterludeKey == dismissedInterludeKey
     }
+    var renderedInterlude by remember(lyrics.trackId, groups) {
+        mutableStateOf<AmllInterlude?>(null)
+    }
+    LaunchedEffect(interlude) {
+        if (interlude != null) {
+            renderedInterlude = interlude
+        } else if (renderedInterlude != null) {
+            // AMLL only lets the currently active waiting indicator affect
+            // lyric positions. Retain it just long enough to finish the exit
+            // shrink, then remove it from the list so ordinary lines never
+            // inherit a permanent extra Arrangement gap.
+            delay(AmllInterludeTransitionDurationMs)
+            renderedInterlude = null
+        }
+    }
     val mainLyricCenterByGroup = remember(lyrics.trackId, groups) {
         mutableStateMapOf<Int, Float>()
     }
-    val listItems = remember(lyrics.trackId, groups, interludeSlots) {
-        val interludeByAnchor = interludeSlots.associateBy(AmllInterlude::anchorGroupIndex)
-        buildList {
-            groups.forEachIndexed { index, group ->
-                interludeByAnchor[index - 1]?.let { interludeSlot ->
-                    add(
-                        AmllListItem.Interlude(
-                            trackId = lyrics.trackId,
-                            value = interludeSlot,
-                        ),
-                    )
-                }
-                add(
-                    AmllListItem.Line(
-                        trackId = lyrics.trackId,
-                        groupIndex = index,
-                        group = group,
-                    ),
-                )
-            }
-        }
+    val listItems = remember(lyrics.trackId, groups, renderedInterlude) {
+        buildAmllListItems(
+            trackId = lyrics.trackId,
+            groups = groups,
+            interlude = renderedInterlude,
+        )
     }
     val focusedGroupIndex = timelineFrame.focusedGroupIndex
     val focusedListIndex = listItems.indexOfFirst { item ->
@@ -313,6 +347,14 @@ internal fun LyricsPanel(
             val translationFontSize = mainFontSize * AmllTranslationFontScale
             val romanFontSize = mainFontSize * AmllRomanFontScale
             val backgroundFontSize = mainFontSize * AmllBackgroundFontScale
+            val hasDuetLines = remember(groups) {
+                groups.any { group -> group.main.isDuet }
+            }
+            val duetInset = if (hasDuetLines) {
+                maxWidth * AmllDuetInsetFraction
+            } else {
+                0.dp
+            }
             val density = LocalDensity.current
             val lineGap = with(density) { (mainFontSize * 0.4f).sp.toDp() }
             val edgePadding = maxOf(8.dp, lineGap)
@@ -473,79 +515,87 @@ internal fun LyricsPanel(
                 }
             }
 
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        compositingStrategy = CompositingStrategy.Offscreen
-                    }
-                    .drawWithContent {
-                        drawContent()
-                        drawRect(
-                            brush = Brush.verticalGradient(
-                                0f to Color.Transparent,
-                                AmllTopFadeEnd to Color.Black,
-                                AmllBottomFadeStart to Color.Black,
-                                1f to Color.Transparent,
-                            ),
-                            blendMode = BlendMode.DstIn,
-                        )
-                    },
-                state = listState,
-                contentPadding = PaddingValues(
-                    start = 20.dp,
-                    top = firstLineInset,
-                    end = 20.dp,
-                    bottom = lastLineInset,
-                ),
-                verticalArrangement = Arrangement.spacedBy(lineGap),
+            CompositionLocalProvider(
+                LocalAmllExpensiveEffectsEnabled provides
+                    motionPolicy.expensiveEffectsEnabled,
             ) {
-                itemsIndexed(
-                    items = listItems,
-                    key = { _, item -> item.stableKey },
-                ) { _, item ->
-                    Box(
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        when (item) {
-                            is AmllListItem.Line -> AmllLineGroup(
-                                group = item.group,
-                                positionMs = smoothPositionMs,
-                                active = item.groupIndex in activeGroupIndices && interlude == null,
-                                previewed =
-                                    manualBrowseActive &&
-                                        item.groupIndex == previewGroupIndex,
-                                isPlaying = isPlaying,
-                                isDynamic = isDynamic,
-                                groupIndex = item.groupIndex,
-                                focusedGroupIndex = focusedGroupIndex,
-                                userScrolling = manualBrowseActive,
-                                onClick = onSeek?.let { seek ->
-                                    {
-                                        dismissedInterludeKey = currentInterludeKey
-                                        manualBrowseActive = false
-                                        seek(item.group.main.startTimeMs / 1_000.0)
-                                    }
-                                },
-                                onMainLyricCenterInRootChanged = { centerY ->
-                                    val previous = mainLyricCenterByGroup[item.groupIndex]
-                                    if (previous == null || abs(previous - centerY) >= 0.5f) {
-                                        mainLyricCenterByGroup[item.groupIndex] = centerY
-                                    }
-                                },
-                                mainFontSize = mainFontSize,
-                                translationFontSize = translationFontSize,
-                                romanFontSize = romanFontSize,
-                                backgroundFontSize = backgroundFontSize,
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            compositingStrategy = CompositingStrategy.Offscreen
+                        }
+                        .drawWithContent {
+                            drawContent()
+                            drawRect(
+                                brush = Brush.verticalGradient(
+                                    0f to Color.Transparent,
+                                    AmllTopFadeEnd to Color.Black,
+                                    AmllBottomFadeStart to Color.Black,
+                                    1f to Color.Transparent,
+                                ),
+                                blendMode = BlendMode.DstIn,
                             )
+                        },
+                    state = listState,
+                    contentPadding = PaddingValues(
+                        start = 20.dp,
+                        top = firstLineInset,
+                        end = 20.dp,
+                        bottom = lastLineInset,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(lineGap),
+                ) {
+                    itemsIndexed(
+                        items = listItems,
+                        key = { _, item -> item.stableKey },
+                    ) { _, item ->
+                        Box(
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            when (item) {
+                                is AmllListItem.Line -> AmllLineGroup(
+                                    group = item.group,
+                                    positionMs = smoothPositionMs,
+                                    active =
+                                        item.groupIndex in activeGroupIndices &&
+                                            interlude == null,
+                                    previewed =
+                                        manualBrowseActive &&
+                                            item.groupIndex == previewGroupIndex,
+                                    isPlaying = isPlaying,
+                                    isDynamic = isDynamic,
+                                    groupIndex = item.groupIndex,
+                                    focusedGroupIndex = focusedGroupIndex,
+                                    userScrolling = manualBrowseActive,
+                                    onClick = onSeek?.let { seek ->
+                                        {
+                                            dismissedInterludeKey = currentInterludeKey
+                                            manualBrowseActive = false
+                                            seek(item.group.main.startTimeMs / 1_000.0)
+                                        }
+                                    },
+                                    onMainLyricCenterInRootChanged = { centerY ->
+                                        val previous = mainLyricCenterByGroup[item.groupIndex]
+                                        if (previous == null || abs(previous - centerY) >= 0.5f) {
+                                            mainLyricCenterByGroup[item.groupIndex] = centerY
+                                        }
+                                    },
+                                    mainFontSize = mainFontSize,
+                                    translationFontSize = translationFontSize,
+                                    romanFontSize = romanFontSize,
+                                    backgroundFontSize = backgroundFontSize,
+                                    duetInset = duetInset,
+                                )
 
-                            is AmllListItem.Interlude -> AmllInterludeSlot(
-                                interlude = item.value,
-                                positionMs = smoothPositionMs,
-                                active = item.value == interlude,
-                                fontSize = mainFontSize,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
+                                is AmllListItem.Interlude -> AmllInterludeSlot(
+                                    interlude = item.value,
+                                    positionMs = smoothPositionMs,
+                                    active = item.value == interlude,
+                                    fontSize = mainFontSize,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
                         }
                     }
                 }

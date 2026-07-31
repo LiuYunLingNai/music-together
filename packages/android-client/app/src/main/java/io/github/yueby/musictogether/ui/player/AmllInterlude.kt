@@ -31,6 +31,8 @@ import kotlin.math.ceil
 import kotlin.math.pow
 import kotlin.math.sin
 
+internal const val AmllInterludeTransitionDurationMs = 250L
+
 @Composable
 internal fun AmllInterludeSlot(
     interlude: AmllInterlude,
@@ -42,15 +44,15 @@ internal fun AmllInterludeSlot(
     AnimatedVisibility(
         visible = active,
         modifier = modifier,
-        enter = fadeIn(tween(250)) +
+        enter = fadeIn(tween(AmllInterludeTransitionDurationMs.toInt())) +
             expandVertically(
-                animationSpec = tween(250),
+                animationSpec = tween(AmllInterludeTransitionDurationMs.toInt()),
                 expandFrom = Alignment.Top,
                 clip = false,
             ),
-        exit = fadeOut(tween(250)) +
+        exit = fadeOut(tween(AmllInterludeTransitionDurationMs.toInt())) +
             shrinkVertically(
-                animationSpec = tween(250),
+                animationSpec = tween(AmllInterludeTransitionDurationMs.toInt()),
                 shrinkTowards = Alignment.Top,
                 clip = false,
             ),

@@ -291,6 +291,8 @@ AMLL 纯算法按职责分布：
 
 `AmllKaraokeText.kt` 负责逐词行入口；平衡布局、词层与字素动画分别位于 `AmllKaraokeLayout.kt`、`AmllKaraokeWord.kt` 和 `AmllKaraokeGlyph.kt`。这些文件共享同一播放时间轴，不得各自创建独立时钟。
 
+等待点与 AMLL 一致，仅在当前间奏进入和退出期间参与歌词布局；普通播放时不保留零高度占位项，避免列表间距在无等待态时被重复计算。暂停播放时共享歌词时钟停止逐帧更新；省电模式或系统关闭动画时保留逐字遮罩和行定位，但将时间轴限制到约 30 帧并关闭距离模糊与强调光晕。含对唱行的曲目按 AMLL 为普通行右侧、对唱行左侧保留 15% 布局安全区，翻译与音译保持 0.3 固定透明度。
+
 竖屏播放器由 `PortraitPlayer.kt` 编排宽度和模式切换，`PortraitPlayerHeroes.kt` 管理封面与歌词视觉区，`PortraitPlayerControls.kt` 管理歌曲信息、进度和播放控制。横屏播放器继续由 `LandscapePlayer.kt` 编排，双方复用 `PlayerArtwork`、`PlayerBackdrop`、`PlayerChrome` 和 `PlayerProgressSlider`。
 
 竖屏播放器使用顶部焦点锚点，横屏播放器使用中心锚点。歌词偏移按曲目和歌词来源保存，B 站曲目还包含元数据来源。

@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,6 +30,7 @@ import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import io.github.yueby.musictogether.lyrics.AmllLyricGroup
 import io.github.yueby.musictogether.model.LyricLine
@@ -50,7 +52,9 @@ internal fun AmllLineGroup(
     translationFontSize: Float,
     romanFontSize: Float,
     backgroundFontSize: Float,
+    duetInset: Dp,
 ) {
+    val expensiveEffectsEnabled = LocalAmllExpensiveEffectsEnabled.current
     val line = group.main
     var retainedPositionMs by remember(line) {
         mutableFloatStateOf(line.startTimeMs.toFloat())
@@ -99,9 +103,13 @@ internal fun AmllLineGroup(
             focusedGroupIndex = focusedGroupIndex,
             active = active,
             userScrolling = userScrolling,
-        ),
+        ).takeIf { expensiveEffectsEnabled } ?: 0f,
         animationSpec = tween(durationMillis = 400),
         label = "amllLineBlur",
+    )
+    val (startInsetFraction, endInsetFraction) = amllDuetInsetFractions(
+        hasDuetLines = duetInset > 0.dp,
+        isDuet = line.isDuet,
     )
 
     Box(
@@ -121,6 +129,10 @@ internal fun AmllLineGroup(
                 } else {
                     Modifier
                 },
+            )
+            .padding(
+                start = duetInset * (startInsetFraction / AmllDuetInsetFraction),
+                end = duetInset * (endInsetFraction / AmllDuetInsetFraction),
             ),
     ) {
         AmllMainAndBackgroundLayout(
@@ -220,23 +232,6 @@ internal fun AmllMainLine(
     romanFontSize: Float,
 ) {
     val textAlign = if (line.isDuet) TextAlign.End else TextAlign.Start
-    val firstWordStart = line.words.firstOrNull()?.startTimeMs ?: line.startTimeMs
-    val lastWordEnd = line.words.lastOrNull()?.endTimeMs ?: line.endTimeMs
-    val lineProgress = when {
-        !active || positionMs <= firstWordStart -> 0f
-        positionMs >= lastWordEnd -> 1f
-        else -> (
-            (positionMs - firstWordStart) /
-                (lastWordEnd - firstWordStart).coerceAtLeast(1L)
-            ).coerceIn(0f, 1f)
-    }
-    val subLineTargetAlpha = when {
-        active && positionMs >= firstWordStart ->
-            0.38f + amllSubLineHighlight(lineProgress) * 0.30f
-        previewed -> 0.46f
-        else -> 0.30f
-    }
-    val subLineAlpha = rememberAmllMaskAlpha(subLineTargetAlpha).value
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -268,7 +263,7 @@ internal fun AmllMainLine(
                 textAlign = textAlign,
                 fontSize = translationFontSize.sp,
                 lineHeight = (translationFontSize * 1.5f).sp,
-                color = Color.White.copy(alpha = subLineAlpha),
+                color = Color.White.copy(alpha = AmllSubLineAlpha),
             )
         }
         line.romanLyric
@@ -282,7 +277,7 @@ internal fun AmllMainLine(
                     textAlign = textAlign,
                     fontSize = romanFontSize.sp,
                     lineHeight = (romanFontSize * 1.5f).sp,
-                    color = Color.White.copy(alpha = subLineAlpha),
+                    color = Color.White.copy(alpha = AmllSubLineAlpha),
                 )
             }
     }

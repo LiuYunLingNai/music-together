@@ -134,6 +134,7 @@ internal fun AmllAnimatedCharacter(
     effectReleaseProgress: Float,
     modifier: Modifier = Modifier,
 ) {
+    val expensiveEffectsEnabled = LocalAmllExpensiveEffectsEnabled.current
     val staggerMs = profile.durationMs.toFloat() / 2.5f / glyphCount
     val entryTimeMs = chunkStartTimeMs + staggerMs * glyphIndex
     val emphasisProgress =
@@ -180,9 +181,19 @@ internal fun AmllAnimatedCharacter(
                 style = TextStyle(
                     shadow = Shadow(
                         color = Color.White.copy(
-                            alpha = if (drawGlow) glowLevel else 0f,
+                            alpha =
+                                if (drawGlow && expensiveEffectsEnabled) {
+                                    glowLevel
+                                } else {
+                                    0f
+                                },
                         ),
-                        blurRadius = if (drawGlow) glowRadius else 0f,
+                        blurRadius =
+                            if (drawGlow && expensiveEffectsEnabled) {
+                                glowRadius
+                            } else {
+                                0f
+                            },
                     ),
                 ),
             )

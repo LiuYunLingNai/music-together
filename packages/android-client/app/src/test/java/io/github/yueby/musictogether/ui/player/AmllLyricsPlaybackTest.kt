@@ -1,6 +1,7 @@
 package io.github.yueby.musictogether.ui.player
 
 import io.github.yueby.musictogether.lyrics.AmllLyricGroup
+import io.github.yueby.musictogether.lyrics.AmllInterlude
 import io.github.yueby.musictogether.lyrics.amllWordProgress
 import io.github.yueby.musictogether.lyrics.findAmllInterlude
 import io.github.yueby.musictogether.model.LyricLine
@@ -222,6 +223,42 @@ class AmllLyricsPlaybackTest {
     }
 
     @Test
+    fun inactiveInterludesNeverAddPermanentLyricListSpacing() {
+        val groups = listOf(group(1_000, 2_000), group(7_000, 8_000))
+
+        val items = buildAmllListItems(
+            trackId = "track",
+            groups = groups,
+            interlude = null,
+        )
+
+        assertEquals(2, items.size)
+        assertTrue(items.all { it is AmllListItem.Line })
+    }
+
+    @Test
+    fun activeInterludeOnlyOccupiesSpaceAtItsCurrentAnchor() {
+        val groups = listOf(group(1_000, 2_000), group(7_000, 8_000))
+        val interlude = AmllInterlude(
+            startTimeMs = 2_000,
+            endTimeMs = 6_750,
+            anchorGroupIndex = 0,
+            isNextDuet = false,
+        )
+
+        val items = buildAmllListItems(
+            trackId = "track",
+            groups = groups,
+            interlude = interlude,
+        )
+
+        assertEquals(3, items.size)
+        assertTrue(items[0] is AmllListItem.Line)
+        assertTrue(items[1] is AmllListItem.Interlude)
+        assertTrue(items[2] is AmllListItem.Line)
+    }
+
+    @Test
     fun expiredInterludeForcesTimelineReevaluationWithoutScheduledBoundary() {
         val groups = listOf(group(1_000, 2_000), group(7_000, 8_000))
         val activeFrame = advanceAmllTimelineFrame(
@@ -325,10 +362,71 @@ class AmllLyricsPlaybackTest {
     }
 
     @Test
-    fun translatedLineHighlightAttacksQuicklyAndStaysBounded() {
-        assertEquals(0f, amllSubLineHighlight(0f), 0.001f)
-        assertTrue(amllSubLineHighlight(0.25f) > 0.5f)
-        assertEquals(1f, amllSubLineHighlight(1f), 0.001f)
+    fun lowPowerPolicyKeepsTimingButDropsExpensiveEffects() {
+        val normal = amllMotionPolicy(
+            animatorsEnabled = true,
+            powerSaveMode = false,
+        )
+        val powerSaving = amllMotionPolicy(
+            animatorsEnabled = true,
+            powerSaveMode = true,
+        )
+        val animationsDisabled = amllMotionPolicy(
+            animatorsEnabled = false,
+            powerSaveMode = false,
+        )
+
+        assertEquals(0L, normal.minimumFrameIntervalNanos)
+        assertTrue(normal.expensiveEffectsEnabled)
+        assertEquals(AmllPowerSavingFrameIntervalNanos, powerSaving.minimumFrameIntervalNanos)
+        assertEquals(false, powerSaving.expensiveEffectsEnabled)
+        assertEquals(
+            AmllPowerSavingFrameIntervalNanos,
+            animationsDisabled.minimumFrameIntervalNanos,
+        )
+        assertEquals(false, animationsDisabled.expensiveEffectsEnabled)
+    }
+
+    @Test
+    fun throttledClockStillProcessesFreshPlayerSamplesImmediately() {
+        assertEquals(
+            false,
+            shouldAdvanceAmllClockFrame(
+                elapsedNanos = 16_000_000L,
+                minimumFrameIntervalNanos = AmllPowerSavingFrameIntervalNanos,
+                rawPositionChanged = false,
+                playbackChanged = false,
+            ),
+        )
+        assertTrue(
+            shouldAdvanceAmllClockFrame(
+                elapsedNanos = 34_000_000L,
+                minimumFrameIntervalNanos = AmllPowerSavingFrameIntervalNanos,
+                rawPositionChanged = false,
+                playbackChanged = false,
+            ),
+        )
+        assertTrue(
+            shouldAdvanceAmllClockFrame(
+                elapsedNanos = 1_000_000L,
+                minimumFrameIntervalNanos = AmllPowerSavingFrameIntervalNanos,
+                rawPositionChanged = true,
+                playbackChanged = false,
+            ),
+        )
+    }
+
+    @Test
+    fun duetTracksReserveTheOppositeSideWithoutChangingSoloLyrics() {
+        assertEquals(0f to 0f, amllDuetInsetFractions(hasDuetLines = false, isDuet = false))
+        assertEquals(
+            0f to AmllDuetInsetFraction,
+            amllDuetInsetFractions(hasDuetLines = true, isDuet = false),
+        )
+        assertEquals(
+            AmllDuetInsetFraction to 0f,
+            amllDuetInsetFractions(hasDuetLines = true, isDuet = true),
+        )
     }
 
     private fun group(start: Long, end: Long) = AmllLyricGroup(

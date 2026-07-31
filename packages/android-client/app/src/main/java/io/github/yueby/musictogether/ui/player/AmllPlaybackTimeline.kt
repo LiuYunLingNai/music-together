@@ -152,6 +152,17 @@ internal fun shouldReevaluateAmllTimeline(
         positionMs >= nextTimelineBoundaryMs
 }
 
+internal fun shouldAdvanceAmllClockFrame(
+    elapsedNanos: Long,
+    minimumFrameIntervalNanos: Long,
+    rawPositionChanged: Boolean,
+    playbackChanged: Boolean,
+): Boolean =
+    rawPositionChanged ||
+        playbackChanged ||
+        minimumFrameIntervalNanos <= 0L ||
+        elapsedNanos >= minimumFrameIntervalNanos
+
 internal fun nextAmllTimelineBoundaryMs(
     groups: List<AmllLyricGroup>,
     positionMs: Long,
@@ -177,8 +188,10 @@ internal fun rememberAmllPlaybackTimeline(
     rawPositionMs: Float,
     isPlaying: Boolean,
     resetKey: Any?,
+    minimumFrameIntervalNanos: Long = 0L,
 ): AmllPlaybackTimeline {
     val position = remember(resetKey) { mutableFloatStateOf(rawPositionMs) }
+    val lastRawSample = remember(resetKey) { mutableFloatStateOf(rawPositionMs) }
     val frame = remember(resetKey, groups) {
         mutableStateOf(
             advanceAmllTimelineFrame(
@@ -192,11 +205,30 @@ internal fun rememberAmllPlaybackTimeline(
     val latestRawPosition by rememberUpdatedState(rawPositionMs)
     val latestPlaying by rememberUpdatedState(isPlaying)
     val latestGroups by rememberUpdatedState(groups)
+    val latestMinimumFrameIntervalNanos by rememberUpdatedState(minimumFrameIntervalNanos)
+    val pausedPositionKey = if (isPlaying) null else rawPositionMs
 
-    LaunchedEffect(resetKey, groups) {
+    LaunchedEffect(resetKey, groups, isPlaying, pausedPositionKey) {
+        if (!isPlaying) {
+            // Stopping playback can leave the extrapolated clock a few
+            // milliseconds ahead of the latest Media3 sample; that is not a
+            // Seek. Once already paused, a changed raw sample is a real jump.
+            val seeking = rawPositionMs != lastRawSample.floatValue
+            lastRawSample.floatValue = rawPositionMs
+            position.floatValue = rawPositionMs
+            val pausedFrame = advanceAmllTimelineFrame(
+                previous = frame.value,
+                groups = groups,
+                positionMs = rawPositionMs.toLong(),
+                seeking = seeking,
+            )
+            if (pausedFrame != frame.value) frame.value = pausedFrame
+            return@LaunchedEffect
+        }
+
         var lastFrameNanos = 0L
         var rawSampleNanos = 0L
-        var previousRawPosition = latestRawPosition
+        var previousRawPosition = lastRawSample.floatValue
         var previousPlaying = latestPlaying
         var nextTimelineBoundary = nextAmllTimelineBoundaryMs(
             groups = latestGroups,
@@ -212,6 +244,15 @@ internal fun rememberAmllPlaybackTimeline(
 
                 val rawChanged = latestRawPosition != previousRawPosition
                 val playbackChanged = latestPlaying != previousPlaying
+                if (!shouldAdvanceAmllClockFrame(
+                        elapsedNanos = (frameNanos - lastFrameNanos).coerceAtLeast(0L),
+                        minimumFrameIntervalNanos = latestMinimumFrameIntervalNanos,
+                        rawPositionChanged = rawChanged,
+                        playbackChanged = playbackChanged,
+                    )
+                ) {
+                    return@withFrameNanos
+                }
                 var seeking = false
                 if (rawChanged) {
                     val sampleIntervalMs =
@@ -224,6 +265,7 @@ internal fun rememberAmllPlaybackTimeline(
                     )
                     rawSampleNanos = frameNanos
                     previousRawPosition = latestRawPosition
+                    lastRawSample.floatValue = latestRawPosition
                     if (seeking) position.floatValue = latestRawPosition
                 }
                 if (playbackChanged) {
