@@ -24,13 +24,14 @@ interface VipLoginData {
     vip?: number
     svip?: number
     HugeVip?: number
+    LMFlag?: number
     level?: number
   }
 }
 
 export function formatTencentVipLabel(vipType: number, vipLevel?: number): string | undefined {
   if (vipType <= 0) return undefined
-  const tier = vipType >= 2 ? '豪华绿钻' : '绿钻'
+  const tier = vipType >= 2 ? '超级会员' : '绿钻VIP'
   return vipLevel ? `${tier}·Lv${vipLevel}` : tier
 }
 
@@ -41,9 +42,9 @@ export function parseTencentMembership(vipData: VipLoginData | undefined): {
 } {
   const identity = vipData?.identity
   const isEnabled = (...values: unknown[]) => values.some((value) => value === true || Number(value) > 0)
-  const isSvip = isEnabled(vipData?.svip, identity?.svip, identity?.HugeVip)
-  const isVip = isEnabled(vipData?.vip, identity?.vip)
-  const vipType = isSvip ? 2 : isVip ? 1 : 0
+  const isSuperVip = isEnabled(identity?.svip, identity?.HugeVip)
+  const isGreenDiamondVip = isEnabled(identity?.vip, identity?.LMFlag)
+  const vipType = isSuperVip ? 2 : isGreenDiamondVip ? 1 : 0
   const rawVipLevel = Number(identity?.level ?? 0)
   const vipLevel = vipType > 0 && Number.isInteger(rawVipLevel) && rawVipLevel > 0 ? rawVipLevel : undefined
   return { vipType, vipLabel: formatTencentVipLabel(vipType, vipLevel), vipLevel }
@@ -546,7 +547,15 @@ export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
         cookie,
         param: {},
       })
-      logger.debug('QQ 音乐 VIP 信息响应', { vipData })
+      logger.debug('QQ 音乐 VIP 信息响应', {
+        vip: vipData.vip,
+        svip: vipData.svip,
+        identityVip: vipData.identity?.vip,
+        identitySvip: vipData.identity?.svip,
+        hugeVip: vipData.identity?.HugeVip,
+        lmFlag: vipData.identity?.LMFlag,
+        level: vipData.identity?.level,
+      })
       membership = parseTencentMembership(vipData)
     } catch (err: unknown) {
       logger.error('QQ VIP Check failed:', err instanceof Error ? err.message : String(err))

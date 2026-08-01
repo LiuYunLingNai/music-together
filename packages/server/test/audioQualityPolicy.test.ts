@@ -47,6 +47,9 @@ test('normalizes legacy provider membership codes before applying highest qualit
 test('caps explicit and cross-platform master preferences at the account tier', () => {
   assert.equal(getEffectiveQuality('netease', 'netease_master', 1), 'netease_jyeffect')
   assert.equal(getEffectiveQuality('netease', 'tencent_master', 1), 'netease_jyeffect')
+  // 绿钻VIP只能取 FLAC；超级会员才可以取臻品母带。
+  assert.equal(getEffectiveQuality('tencent', 'tencent_master', 1), 'tencent_flac')
+  assert.equal(getEffectiveQuality('tencent', 'tencent_master', 2), 'tencent_master')
   assert.equal(getEffectiveQuality('tencent', 'netease_master', 1), 'tencent_flac')
 })
 

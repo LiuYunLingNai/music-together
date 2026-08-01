@@ -22,6 +22,7 @@ const PROVIDER_QUALITY_LADDERS: Record<MusicSource, AudioQuality[]> = {
 
 const MEMBERSHIP_QUALITY_CAP: Record<MusicSource, Record<MembershipTier, AudioQuality>> = {
   netease: { 0: 320, 1: 'netease_jyeffect', 2: 'netease_master' },
+  // QQ Music: 1 = 绿钻VIP (FLAC), 2 = 超级会员 (臻品母带).
   tencent: { 0: 320, 1: 'tencent_flac', 2: 'tencent_master' },
   kugou: { 0: 320, 1: 'kugou_hires', 2: 'kugou_master' },
   // The daily Concept Edition listening benefit is a non-paid business VIP.

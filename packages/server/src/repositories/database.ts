@@ -144,4 +144,17 @@ runMigrationOnce('20260729_revalidate_kugou_standard_membership', () => {
   ).run()
 })
 
+// Earlier builds treated top-level svip like identity.svip and therefore
+// misclassified some 绿钻VIP accounts as 超级会员. Queue every persisted QQ
+// membership for an authoritative refresh instead of blindly changing tiers.
+runMigrationOnce('20260801_revalidate_tencent_identity_membership', () => {
+  db.prepare(
+    `
+    UPDATE platform_auth
+    SET vip_label = NULL
+    WHERE platform = 'tencent' AND vip_type > 0
+  `,
+  ).run()
+})
+
 export const databasePath = dbPath

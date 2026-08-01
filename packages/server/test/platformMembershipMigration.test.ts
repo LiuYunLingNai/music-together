@@ -71,5 +71,6 @@ test('startup migration queues generic QQ/Kugou labels for refresh and normalize
     { id: '20260729_normalize_platform_membership' },
     { id: '20260729_reclassify_kugou_concept_listening_vip' },
     { id: '20260729_revalidate_kugou_standard_membership' },
+    { id: '20260801_revalidate_tencent_identity_membership' },
   ])
 })
