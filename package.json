@@ -22,7 +22,7 @@
     "pnpm": ">=10"
   },
   "devDependencies": {
-    "concurrently": "^9.2.4",
+    "concurrently": "^10.0.4",
     "kill-port": "^2.0.1",
     "prettier": "^3.9.6",
     "vitest": "^4.1.10"
