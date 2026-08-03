@@ -1,5 +1,5 @@
 # ---- 阶段 1: 安装依赖 ----
-FROM node:22-alpine AS deps
+FROM node:26-alpine AS deps
 RUN corepack enable && corepack prepare pnpm@10.29.2 --activate
 WORKDIR /app
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
@@ -18,7 +18,7 @@ RUN pnpm --filter @music-together/server run build
 RUN pnpm --filter @music-together/client run build
 
 # ---- 阶段 3: 生产镜像 ----
-FROM node:22-alpine AS production
+FROM node:26-alpine AS production
 RUN corepack enable && corepack prepare pnpm@10.29.2 --activate
 WORKDIR /app
 
