@@ -212,11 +212,11 @@ importers:
         specifier: ^1.0.3
         version: 1.0.3
       express:
-        specifier: ^4.22.2
-        version: 4.22.2
+        specifier: ^5.2.1
+        version: 5.2.1
       express-rate-limit:
         specifier: ^8.6.1
-        version: 8.6.1(express@4.22.2)
+        version: 8.6.1(express@5.2.1)
       lru-cache:
         specifier: ^11.5.2
         version: 11.5.2
@@ -7524,14 +7524,6 @@ snapshots:
   express-fileupload@1.5.2:
     dependencies:
       busboy: 1.6.0
-
-  express-rate-limit@8.6.1(express@4.22.2):
-    dependencies:
-      debug: 4.4.3
-      express: 4.22.2
-      ip-address: 10.3.1
-    transitivePeerDependencies:
-      - supports-color
 
   express-rate-limit@8.6.1(express@5.2.1):
     dependencies:
