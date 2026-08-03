@@ -15,7 +15,7 @@ import { useRoomStore } from '@/stores/roomStore'
 import { useChatStore } from '@/stores/chatStore'
 import { useVersionCheck } from '@/hooks/useVersionCheck'
 import { EVENTS, ERROR_CODE, type RoomListItem, type RoomState } from '@music-together/shared'
-import { Github, Headphones } from 'lucide-react'
+import { GitFork, Headphones } from 'lucide-react'
 import { motion } from 'motion/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
@@ -293,7 +293,7 @@ export default function HomePage() {
             rel="noopener noreferrer"
             className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
           >
-            <Github className="h-3.5 w-3.5" />
+            <GitFork className="h-3.5 w-3.5" />
             GitHub
           </a>
         </div>
