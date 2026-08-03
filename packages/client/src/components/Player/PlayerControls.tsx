@@ -2,7 +2,7 @@ import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { formatTime } from '@/lib/format'
-import { AbilityContext } from '@/providers/AbilityProvider'
+import { useAppAbility } from '@/providers/AbilityProvider'
 import { useSocketContext } from '@/providers/SocketProvider'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
@@ -10,7 +10,7 @@ import type { PlayMode, VoteAction } from '@music-together/shared'
 import { EVENTS, TIMING } from '@music-together/shared'
 import { ArrowRightToLine, ListMusic, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import { memo, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 /** Design-time width (px) at which the controls are laid out — CSS zoom scales from this baseline */
 const DESIGN_WIDTH = 300
@@ -50,7 +50,7 @@ export const PlayerControls = memo(function PlayerControls({
   const currentTrack = usePlayerStore((s) => s.currentTrack)
   const queueLength = useRoomStore((s) => s.room?.queue?.length ?? 0)
   const playMode = useRoomStore((s) => s.room?.playMode ?? 'sequential')
-  const ability = useContext(AbilityContext)
+  const ability = useAppAbility()
   const canSeek = ability.can('seek', 'Player')
   const canPlay = ability.can('play', 'Player')
   const canSetMode = ability.can('set-mode', 'Player')
