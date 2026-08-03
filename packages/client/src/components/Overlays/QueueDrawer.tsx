@@ -10,9 +10,9 @@ import type { Track } from '@music-together/shared'
 import { EVENTS } from '@music-together/shared'
 import { useHasHover } from '@/hooks/useHasHover'
 import { useIsMobile } from '@/hooks/useIsMobile'
-import { useCallback, useContext, useEffect, useRef, useState, type MouseEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { AbilityContext } from '@/providers/AbilityProvider'
+import { useAppAbility } from '@/providers/AbilityProvider'
 import { ArrowUpToLine, ChevronDown, ChevronUp, ListX, Music, Play, Trash2, User, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { MarqueeText } from '@/components/ui/marquee-text'
@@ -41,7 +41,7 @@ export function QueueDrawer({ open, onOpenChange, onRemoveFromQueue, onReorderQu
   const isMobile = useIsMobile() // layout: Drawer direction, height
   const hasHover = useHasHover() // interaction: hover vs touch
   const isTouch = !hasHover
-  const ability = useContext(AbilityContext)
+  const ability = useAppAbility()
   const canRemove = ability.can('remove', 'Queue')
   const canReorder = ability.can('reorder', 'Queue')
   const canPlay = ability.can('play', 'Player')

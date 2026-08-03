@@ -37,8 +37,8 @@ importers:
         specifier: ^0.5.2
         version: 0.5.2(@pixi/app@7.4.3(@pixi/core@7.4.3)(@pixi/display@7.4.3(@pixi/core@7.4.3)))(@pixi/core@7.4.3)(@pixi/display@7.4.3(@pixi/core@7.4.3))(@pixi/filter-blur@7.4.3(@pixi/core@7.4.3))(@pixi/filter-bulge-pinch@5.1.1(@pixi/core@7.4.3))(@pixi/filter-color-matrix@7.4.3(@pixi/core@7.4.3))(@pixi/sprite@7.4.3(@pixi/core@7.4.3)(@pixi/display@7.4.3(@pixi/core@7.4.3)))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@casl/react':
-        specifier: ^5.0.1
-        version: 5.0.1(@casl/ability@6.8.1)(react@19.2.8)
+        specifier: ^7.0.1
+        version: 7.0.1(@casl/ability@6.8.1)(react@19.2.8)
       '@music-together/shared':
         specifier: workspace:*
         version: link:../shared
@@ -481,11 +481,11 @@ packages:
   '@casl/ability@6.8.1':
     resolution: {integrity: sha512-VX5DD1JbSP/DdewZnNwXXaCzve+0pLe14mcUj2l93CdOFAQUT/ylAptNqxf3Wc/jlsuSanAgXza4Z1Iq23dzpQ==}
 
-  '@casl/react@5.0.1':
-    resolution: {integrity: sha512-8E3GkvwlxEW+bkxWTdvjn6SALNJZa9khNk591xTpU27nPK/nzgfqsVfEvrFjYIQ2LODrxXsWLmw7iHPEI0/TaQ==}
+  '@casl/react@7.0.1':
+    resolution: {integrity: sha512-HFfBxQD5wFUIyd9gAPa5LDqMbB7CIOqRcocxzwMC589d8vLMzaz/OAdFLglGiBz9pAcumC0ULp5QLFiYZ46mUw==}
     peerDependencies:
-      '@casl/ability': ^4.0.0 || ^5.1.0 || ^6.0.0
-      react: ^17.0.0 || ^18.0.0 || ^19.0.0
+      '@casl/ability': ^4.0.0 || ^5.1.0 || ^6.0.0 || ^7.0.0
+      react: ^18.0.0 || ^19.0.0
 
   '@csstools/color-helpers@6.1.0':
     resolution: {integrity: sha512-064IFJdjTfUqnjpCVpMOdbr8FLQBhinbZj6yRv2An2E41O/pLEXqfFRWqGq/SxlE5PEUYTlvWsG2r8MswAVvkg==}
@@ -5174,7 +5174,7 @@ snapshots:
     dependencies:
       '@ucast/mongo2js': 1.4.1
 
-  '@casl/react@5.0.1(@casl/ability@6.8.1)(react@19.2.8)':
+  '@casl/react@7.0.1(@casl/ability@6.8.1)(react@19.2.8)':
     dependencies:
       '@casl/ability': 6.8.1
       react: 19.2.8
