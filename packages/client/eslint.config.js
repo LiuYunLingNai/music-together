@@ -19,5 +19,15 @@ export default defineConfig([
       ecmaVersion: 'latest',
       globals: globals.browser,
     },
+    rules: {
+      // Existing UI primitives intentionally export CVA variants alongside components.
+      'react-refresh/only-export-components': 'off',
+      // React Compiler diagnostics are advisory and currently flag established
+      // integration patterns (Radix/TanStack refs and state synchronization effects).
+      'react-hooks/set-state-in-effect': 'off',
+      'react-hooks/refs': 'off',
+      'react-hooks/preserve-manual-memoization': 'off',
+      'react-hooks/incompatible-library': 'off',
+    },
   },
 ])

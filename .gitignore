@@ -11,3 +11,6 @@ Thumbs.db
 .omc
 .trae
 /.sanshu-memory
+.pi-subagents/
+*.tsbuildinfo
+/.pi-subagents

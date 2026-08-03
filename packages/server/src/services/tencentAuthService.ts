@@ -132,6 +132,7 @@ interface TencentApiConfig {
   param?: Record<string, unknown>
   cookie?: string
   commExtras?: Record<string, unknown>
+  comm?: Record<string, unknown>
 }
 
 /**
@@ -139,7 +140,7 @@ interface TencentApiConfig {
  */
 async function tencentApiRequest<T = Record<string, unknown>>(reqConfig: TencentApiConfig): Promise<T> {
   const data = {
-    comm: {
+    comm: reqConfig.comm ?? {
       cv: 4747474,
       ct: 24,
       format: 'json',
@@ -188,12 +189,31 @@ async function tencentApiRequest<T = Record<string, unknown>>(reqConfig: Tencent
   return (reqRes?.data || body) as T
 }
 
+/**
+ * Send a signed Tencent API request with a caller-provided platform comm block.
+ * Search currently requires the desktop profile (ct=19/cv=2201); the web
+ * profile is filtered by Tencent and returns an empty result set.
+ */
+export async function requestSignedApi<T = Record<string, unknown>>(
+  reqConfig: Omit<TencentApiConfig, 'cookie' | 'commExtras'> & { comm: Record<string, unknown> },
+): Promise<T> {
+  return tencentApiRequest<T>(reqConfig)
+}
+
 // ---------------------------------------------------------------------------
 // QR Code 登录
 // ---------------------------------------------------------------------------
 
-/** 服务端缓存 qrsig → 完整 cookie 的映射 */
-const qrSessionMap = new Map<string, string>()
+/** 服务端缓存 qrsig → 完整 cookie 与创建时间的映射 */
+const qrSessionMap = new Map<string, { cookie: string; createdAt: number }>()
+const QR_SESSION_TTL_MS = 5 * 60 * 1000
+
+function pruneQrSessions(): void {
+  const threshold = Date.now() - QR_SESSION_TTL_MS
+  for (const [key, session] of qrSessionMap) {
+    if (session.createdAt < threshold) qrSessionMap.delete(key)
+  }
+}
 /** 正在处理登录的 qrsig 集合（防止重复轮询覆盖 803 状态） */
 const qrProcessingSet = new Set<string>()
 
@@ -203,6 +223,7 @@ const qrProcessingSet = new Set<string>()
  */
 export async function generateQrCode(): Promise<{ key: string; qrimg: string } | null> {
   try {
+    pruneQrSessions()
     const params = new URLSearchParams({
       appid: APPID,
       e: '2',
@@ -268,7 +289,7 @@ export async function generateQrCode(): Promise<{ key: string; qrimg: string } |
 
     // 缓存完整 cookie 字符串（供 checkQrStatus 使用）
     const fullCookie = cookieParts.join('; ')
-    qrSessionMap.set(qrsig, fullCookie)
+    qrSessionMap.set(qrsig, { cookie: fullCookie, createdAt: Date.now() })
     logger.info(`QQ QR: session cookies cached (${cookieParts.length} parts)`)
 
     // 将二维码图片转为 base64
@@ -312,7 +333,8 @@ export async function checkQrStatus(qrsig: string): Promise<{
     const ptqrtoken = hash33(qrsig)
 
     // 恢复完整 session cookie
-    const sessionCookie = qrSessionMap.get(qrsig) ?? `qrsig=${qrsig}`
+    pruneQrSessions()
+    const sessionCookie = qrSessionMap.get(qrsig)?.cookie ?? `qrsig=${qrsig}`
 
     const action = `0-0-${Date.now()}`
 
@@ -490,9 +512,14 @@ export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
       },
       signal: AbortSignal.timeout(10_000),
     })
+    if (!response.ok) throw new Error(`QQ profile HTTP ${response.status}`)
 
-    const body = (await response.json()) as { data?: ProfileData }
-    const creator = body?.data?.creator || {}
+    const body = (await response.json()) as { code?: number; data?: ProfileData }
+    if (body.code !== undefined && body.code !== 0) {
+      throw new Error(`QQ profile response code ${body.code}`)
+    }
+    const creator = body?.data?.creator
+    if (!creator) return { ok: false, reason: 'expired' }
 
     // 尝试提取昵称，因为 QQ 返回的可能是 Base64 编码的昵称
     let rawNick = creator.nick || creator.name || `QQ用户${uin}`

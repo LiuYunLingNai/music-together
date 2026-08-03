@@ -1,77 +1,67 @@
 # 第三方库依赖
 
+> 版本以当前各包 `package.json` 为准；本页记录核心依赖和职责。
+
 ## Client 核心依赖
 
-| 分类         | 库                                                         | 版本     | 用途                                    |
-| ------------ | ---------------------------------------------------------- | -------- | --------------------------------------- |
-| **UI 框架**  | react, react-dom                                           | ^19.2.0  | UI 基础                                 |
-|              | shadcn/ui (new-york)                                       | —        | 组件库（基于 Radix UI）                 |
-|              | radix-ui                                                   | ^1.4.3   | 无障碍 UI 原语                          |
-|              | tailwindcss                                                | ^4.1.18  | 原子化 CSS                              |
-|              | class-variance-authority                                   | ^0.7.1   | 组件变体样式                            |
-|              | tailwind-merge                                             | ^3.4.0   | class 合并去重                          |
-|              | clsx                                                       | ^2.1.1   | 条件 class 拼接                         |
-| **权限**     | @casl/react                                                | ^5.0.1   | RBAC 权限（配合 @casl/ability）         |
-| **错误边界** | react-error-boundary                                       | ^6.1.0   | React Error Boundary                    |
-| **状态管理** | zustand                                                    | ^5.0.11  | 轻量全局状态                            |
-| **路由**     | react-router-dom                                           | ^7.13.0  | 客户端路由                              |
-| **实时通信** | socket.io-client                                           | ^4.8.3   | WebSocket 客户端                        |
-| **音频**     | howler                                                     | ^2.2.4   | 音频播放引擎                            |
-|              | @applemusic-like-lyrics/core                               | ^0.2.0   | 歌词解析核心                            |
-|              | @applemusic-like-lyrics/react                              | ^0.2.0   | 歌词 React 组件                         |
-| **动画**     | motion                                                     | ^12.34.0 | Framer Motion 动画                      |
-|              | tw-animate-css                                             | ^1.4.0   | Tailwind 动画预设                       |
-| **图形渲染** | @pixi/app, core, display, sprite                           | ^7.4.3   | PixiJS（歌词背景渲染）                  |
-|              | @pixi/filter-blur, filter-bulge-pinch, filter-color-matrix | —        | PixiJS 滤镜                             |
-| **弹窗**     | vaul                                                       | ^1.x     | 移动端 Drawer（底部抽屉，支持拖拽关闭） |
-| **虚拟列表** | @tanstack/react-virtual                                    | ^3.13.18 | 虚拟滚动（歌单详情大列表）              |
-| **工具**     | dayjs                                                      | ^1.11.19 | 日期格式化                              |
-|              | nanoid                                                     | ^5.1.6   | ID 生成                                 |
-|              | sonner                                                     | ^2.0.7   | Toast 通知                              |
-|              | lucide-react                                               | ^0.563.0 | 图标库                                  |
-|              | jss, jss-preset-default                                    | ^10.10.0 | CSS-in-JS（AMLL 依赖）                  |
+| 分类 | 库 | 版本 | 用途 |
+| --- | --- | --- | --- |
+| UI | react / react-dom | ^19.2.8 | UI 基础 |
+| UI | radix-ui / shadcn/ui | ^1.6.7 / — | 无障碍 UI 原语与项目组件 |
+| 样式 | tailwindcss / @tailwindcss/vite | ^4.3.3 | 原子化 CSS 与 Vite 集成 |
+| 状态 | zustand | ^5.0.14 | 客户端状态管理 |
+| 路由 | react-router | ^8.3.0 | 客户端路由（v8 ESM，要求 Node >=22.22.0） |
+| 实时通信 | socket.io-client | ^4.8.3 | Socket.IO 客户端 |
+| 音频 | howler | ^2.2.4 | 音频播放引擎 |
+| 歌词 | @applemusic-like-lyrics/core / react / lyric | ^0.5.2 / ^0.5.2 / ^1.0.2 | AMLL 歌词解析、逐词动画与动态背景 |
+| 动画 | motion | ^12.42.2 | React 动画 |
+| 虚拟列表 | @tanstack/react-virtual | ^3.14.8 | 搜索和歌单大列表 |
+| 图形 | @pixi/* | 7.x | 歌词背景渲染与滤镜 |
+| 工具 | dayjs / nanoid / sonner / lucide-react | 当前锁定版本 | 日期、ID、通知、图标 |
 
 ## Server 核心依赖
 
-| 库                                | 版本    | 用途                                                                |
-| --------------------------------- | ------- | ------------------------------------------------------------------- |
-| express                           | ^4.21.0 | HTTP 框架                                                           |
-| socket.io                         | ^4.8.3  | WebSocket 服务端                                                    |
-| @meting/core                      | ^1.6.0  | 多音源音乐数据聚合                                                  |
-| @s4p/kugou-lrc                    | ^0.2.0  | 酷狗 KRC 逐字歌词获取与解析                                         |
-| nanoid                            | ^5.0.9  | 房间 ID 生成                                                        |
-| cors                              | ^2.8.5  | 跨域                                                                |
-| dotenv                            | ^16.4.5 | 环境变量                                                            |
-| zod                               | ^4.3.6  | 请求数据验证（配合 shared schemas）                                 |
-| pino                              | ^10.3.1 | 结构化日志                                                          |
-| rate-limiter-flexible             | ^9.1.1  | 聊天限流                                                            |
-| @neteasecloudmusicapienhanced/api | ^4.30.1 | 网易云 QR 登录 / Cookie 验证 / 用户信息                             |
-| qrcode                            | ^1.5.4  | QR 码生成（酷狗扫码登录，API 仅返回 URL 需服务端转 base64 DataURL） |
-| escape-html                       | ^1.0.3  | HTML 转义（防注入）                                                 |
-| p-limit                           | ^7.3.0  | 并发控制（封面批量解析）                                            |
-| lru-cache                         | ^11.2.6 | LRU 缓存（musicProvider 外部 API 结果缓存）                         |
+| 库 | 版本 | 用途 |
+| --- | --- | --- |
+| express | ^4.22.2 | HTTP API 和静态文件托管 |
+| socket.io | ^4.8.3 | 实时房间通信 |
+| @meting/core | ^1.6.1 | 多音源基础数据聚合 |
+| @neteasecloudmusicapienhanced/api | ^4.39.0 | 网易云登录、用户和歌单 API |
+| zod | ^4.4.3 | 运行时输入验证 |
+| pino | ^10.3.1 | 结构化日志 |
+| rate-limiter-flexible | ^9.1.1 | Socket/聊天限流 |
+| express-rate-limit | ^8.6.1 | 音乐 REST 与封面代理 HTTP 限流 |
+| lru-cache | ^11.5.2 | 搜索、曲目和资源缓存 |
+| p-limit | ^7.3.1 | 外部请求并发控制 |
+| qrcode | ^1.5.4 | 酷狗登录二维码编码 |
+| escape-html | ^1.0.3 | 聊天内容转义 |
+
+酷狗 KRC 获取、解密和逐词解析由 `packages/server/src/services/kugouLyricService.ts` 内置实现，不再依赖已停止维护的 `request` 生态。
+
+QQ 音乐搜索使用腾讯 `zzc` 签名访问 `musics.fcg`，避免未签名 `musicu.fcg` 返回业务码 `2001` 和空列表。
 
 ## Shared 核心依赖
 
-| 库            | 版本   | 用途                        |
-| ------------- | ------ | --------------------------- |
-| @casl/ability | ^6.8.0 | RBAC 权限定义（前后端共用） |
-| zod           | ^4.3.6 | 数据验证 Schema             |
+| 库 | 版本 | 用途 |
+| --- | --- | --- |
+| @casl/ability | ^6.8.1 | 前后端共享 RBAC 能力定义 |
+| zod | ^4.4.3 | 前后端共享 Schema |
 
-## 开发工具
+## 开发与测试工具
 
-| 库                          | 版本    | 包     | 用途                    |
-| --------------------------- | ------- | ------ | ----------------------- |
-| vite                        | ^7.3.1  | client | 前端构建                |
-| @vitejs/plugin-react        | ^5.1.1  | client | Vite React 插件         |
-| @tailwindcss/vite           | ^4.1.18 | client | Vite Tailwind 插件      |
-| typescript                  | ~5.9.3  | all    | 类型系统                |
-| tsx                         | ^4.19.0 | server | 服务端 TS 运行/热重载   |
-| pino-pretty                 | ^13.1.3 | server | 开发环境日志美化        |
-| eslint                      | ^9.39.1 | client | 代码检查                |
-| eslint-plugin-react-hooks   | ^7.0.1  | client | React Hooks 规则        |
-| eslint-plugin-react-refresh | ^0.4.24 | client | React Fast Refresh 规则 |
-| concurrently                | ^9.2.1  | root   | 并行运行前后端          |
-| kill-port                   | ^2.0.1  | root   | 端口清理                |
+| 库 | 位置 | 用途 |
+| --- | --- | --- |
+| TypeScript ~5.9.3 | all | 类型系统和构建 |
+| Vite ^7.3.6 | client | 前端构建 |
+| ESLint ^10.8.0 | client | 代码检查 |
+| Vitest ^4.1.10 | root | Node/jsdom 单元与组件测试 |
+| Testing Library | client | React 组件行为测试 |
+| jsdom ^29.1.1 | client | 浏览器 DOM 测试环境 |
+| tsx ^4.23.1 | server | 服务端开发热重载 |
+| shadcn ^4.16.0 | client | shadcn/ui 组件生成 CLI |
+| Prettier ^3.9.6 | root | 代码格式化 |
+| concurrently ^9.2.4 | root | 并行启动前后端 |
 
----
+大版本升级（Express 5、Vite 8、TypeScript 7、CASL 7）需要单独迁移和验证，不进行自动批量升级。
+
+根 `pnpm-workspace.yaml` 对 shadcn CLI 的传递依赖锁定安全版本：`@modelcontextprotocol/sdk@1.30.0` 和 `@hono/node-server@2.0.12`。

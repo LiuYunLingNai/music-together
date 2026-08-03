@@ -84,7 +84,7 @@ export interface ClientToServerEvents {
   [EVENTS.PLAYER_SEEK]: (data: { currentTime: number }) => void
   [EVENTS.PLAYER_NEXT]: () => void
   [EVENTS.PLAYER_PREV]: () => void
-  [EVENTS.PLAYER_SYNC]: (data: { currentTime: number; hostServerTime?: number }) => void
+  [EVENTS.PLAYER_SYNC]: (data: { currentTime: number; hostServerTime?: number; revision: number; trackId: string }) => void
   [EVENTS.PLAYER_SYNC_REQUEST]: () => void
   [EVENTS.PLAYER_SET_MODE]: (data: { mode: PlayMode }) => void
 

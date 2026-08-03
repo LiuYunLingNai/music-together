@@ -9,16 +9,23 @@
     "dev:client": "pnpm --filter @music-together/client dev",
     "dev:server": "pnpm --filter @music-together/server dev",
     "build": "pnpm -r run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "format": "prettier --write \"packages/*/src/**/*.{ts,tsx}\" \"packages/shared/src/**/*.ts\""
   },
   "keywords": [],
   "author": "",
   "license": "AGPL-3.0",
   "packageManager": "pnpm@10.29.2",
+  "engines": {
+    "node": ">=22.22.0",
+    "pnpm": ">=10"
+  },
   "devDependencies": {
-    "concurrently": "^9.2.1",
+    "concurrently": "^9.2.4",
     "kill-port": "^2.0.1",
-    "prettier": "^3.8.1"
+    "prettier": "^3.9.6",
+    "vitest": "^4.1.10"
   },
   "workspaces": [
     "packages/*"

@@ -11,6 +11,7 @@ import { musicProvider } from '../services/musicProvider.js'
 import * as authService from '../services/authService.js'
 import { roomRepo } from '../repositories/roomRepository.js'
 import { logger } from '../utils/logger.js'
+import { coverProxyRateLimit } from '../middleware/httpRateLimiter.js'
 
 const router: RouterType = Router()
 
@@ -120,7 +121,9 @@ const ALLOWED_COVER_HOSTS = [
   'imgessl.kugou.com',
 ]
 
-router.get('/cover-proxy', async (req: Request, res: Response) => {
+const MAX_COVER_BYTES = 10 * 1024 * 1024
+
+router.get('/cover-proxy', coverProxyRateLimit, async (req: Request, res: Response) => {
   const imageUrl = req.query.url as string | undefined
   if (!imageUrl) {
     res.status(400).json({ error: 'Missing url parameter' })
@@ -144,14 +147,21 @@ router.get('/cover-proxy', async (req: Request, res: Response) => {
       return
     }
 
-    // 这里不要直接 pipe web stream。
-    // 上游 CDN 超时/中断时，Readable 的异步 error 可能逃出当前 try/catch，导致 Node 进程崩溃。
-    // 封面图体积小，直接读成 buffer 更稳，失败也会在当前 await 中被 catch。
+    const contentType = response.headers.get('content-type') || ''
+    const contentLength = Number(response.headers.get('content-length') ?? 0)
+    if (!contentType.startsWith('image/') || contentLength > MAX_COVER_BYTES) {
+      res.status(413).json({ error: 'Invalid or oversized image' })
+      return
+    }
+
     const arrayBuffer = await response.arrayBuffer()
+    if (arrayBuffer.byteLength > MAX_COVER_BYTES) {
+      res.status(413).json({ error: 'Image too large' })
+      return
+    }
     const buffer = Buffer.from(arrayBuffer)
 
     // 透传 content-type，设置缓存（封面图不会频繁变化）
-    const contentType = response.headers.get('content-type') || 'image/jpeg'
     res.setHeader('Content-Type', contentType)
     res.setHeader('Content-Length', String(buffer.length))
     res.setHeader('Cache-Control', 'public, max-age=86400') // 24h 缓存

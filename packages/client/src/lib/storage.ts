@@ -68,20 +68,30 @@ function safeEnum<T extends string>(key: string, allowed: readonly T[], fallback
 }
 
 const LYRIC_ANCHORS = ['top', 'center', 'bottom'] as const
+const LYRIC_MASK_MODES = ['', 'full-mask', 'partial-mask'] as const
+const BG_RENDERERS = ['pixi', 'mesh'] as const
 
 /** 所有持久化设置项的默认值 — 供 store 层的 resettable 工厂使用 */
 export const SETTING_DEFAULTS = {
   ttmlEnabled: true,
   ttmlDbUrl: 'https://amlldb.bikonoo.com/ncm-lyrics/%s.ttml',
   lyricAlignAnchor: 'center' as 'top' | 'center' | 'bottom',
-  lyricAlignPosition: 0.4,
+  lyricAlignPosition: 0.5,
   lyricEnableSpring: true,
   lyricEnableBlur: false,
   lyricEnableScale: true,
+  lyricHidePassedLines: false,
+  lyricShowBottomLine: true,
+  lyricMaskObsceneWordsMode: '' as '' | 'full-mask' | 'partial-mask',
+  lyricMaskObsceneWordChar: '*',
+  lyricWordFadeWidth: 0.5,
   lyricFontWeight: 600,
   lyricFontSize: 90,
   lyricTranslationFontSize: 75,
   lyricRomanFontSize: 75,
+  bgRenderer: 'pixi' as 'pixi' | 'mesh',
+  bgStaticMode: false,
+  bgReactToLowFreq: false,
   bgFps: 30,
   bgFlowSpeed: 2,
   bgRenderScale: 0.5,
@@ -123,6 +133,25 @@ export const storage = {
   getLyricEnableScale: () => safeGet('lyricEnableScale') !== 'false',
   setLyricEnableScale: (v: boolean) => safeSet('lyricEnableScale', String(v)),
 
+  getLyricHidePassedLines: () => safeGet('lyricHidePassedLines') === 'true',
+  setLyricHidePassedLines: (v: boolean) => safeSet('lyricHidePassedLines', String(v)),
+
+  getLyricShowBottomLine: () => safeGet('lyricShowBottomLine') !== 'false',
+  setLyricShowBottomLine: (v: boolean) => safeSet('lyricShowBottomLine', String(v)),
+
+  getLyricMaskObsceneWordsMode: () =>
+    safeEnum('lyricMaskObsceneWordsMode', LYRIC_MASK_MODES, SETTING_DEFAULTS.lyricMaskObsceneWordsMode),
+  setLyricMaskObsceneWordsMode: (v: (typeof LYRIC_MASK_MODES)[number]) => safeSet('lyricMaskObsceneWordsMode', v),
+
+  getLyricMaskObsceneWordChar: () => safeGet('lyricMaskObsceneWordChar')?.slice(0, 1) || SETTING_DEFAULTS.lyricMaskObsceneWordChar,
+  setLyricMaskObsceneWordChar: (v: string) => safeSet('lyricMaskObsceneWordChar', v.slice(0, 1) || SETTING_DEFAULTS.lyricMaskObsceneWordChar),
+
+  getLyricWordFadeWidth: () => {
+    const width = safeFloat('lyricWordFadeWidth', SETTING_DEFAULTS.lyricWordFadeWidth)
+    return Math.max(0.05, Math.min(2, width))
+  },
+  setLyricWordFadeWidth: (v: number) => safeSet('lyricWordFadeWidth', String(v)),
+
   getLyricFontWeight: () => {
     const w = safeInt('lyricFontWeight', SETTING_DEFAULTS.lyricFontWeight)
     return Math.max(100, Math.min(900, w))
@@ -155,6 +184,15 @@ export const storage = {
   setTtmlDbUrl: (v: string) => safeSet('ttmlDbUrl', v),
 
   // Background settings
+  getBgRenderer: () => safeEnum('bgRenderer', BG_RENDERERS, SETTING_DEFAULTS.bgRenderer),
+  setBgRenderer: (v: (typeof BG_RENDERERS)[number]) => safeSet('bgRenderer', v),
+
+  getBgStaticMode: () => safeGet('bgStaticMode') === 'true',
+  setBgStaticMode: (v: boolean) => safeSet('bgStaticMode', String(v)),
+
+  getBgReactToLowFreq: () => safeGet('bgReactToLowFreq') === 'true',
+  setBgReactToLowFreq: (v: boolean) => safeSet('bgReactToLowFreq', String(v)),
+
   getBgFps: () => {
     const fps = safeInt('bgFps', SETTING_DEFAULTS.bgFps)
     return [15, 30, 60].includes(fps) ? fps : SETTING_DEFAULTS.bgFps

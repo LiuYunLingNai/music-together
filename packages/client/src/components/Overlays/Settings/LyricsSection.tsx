@@ -107,6 +107,90 @@ export function LyricsSection() {
         >
           <Switch checked={s.lyricEnableScale} onCheckedChange={s.setLyricEnableScale} />
         </SettingRow>
+
+        <SettingRow
+          label="逐词渐变宽度"
+          description={`当前: ${s.lyricWordFadeWidth.toFixed(2)} 倍字号`}
+          onReset={s.lyricWordFadeWidth !== s.lyricWordFadeWidthDefault ? s.resetLyricWordFadeWidth : undefined}
+        >
+          <Slider
+            value={[s.lyricWordFadeWidth * 100]}
+            min={5}
+            max={200}
+            step={5}
+            onValueChange={(v) => s.setLyricWordFadeWidth(v[0] / 100)}
+            className="w-32"
+          />
+        </SettingRow>
+
+      </div>
+
+      {/* ---- 歌词交互 ---- */}
+      <div>
+        <h3 className="text-base font-semibold">歌词交互</h3>
+        <Separator className="mt-2 mb-4" />
+
+        <SettingRow
+          label="隐藏已播放歌词"
+          description="逐渐隐藏当前进度之前的歌词行"
+          onReset={s.lyricHidePassedLines !== s.lyricHidePassedLinesDefault ? s.resetLyricHidePassedLines : undefined}
+        >
+          <Switch checked={s.lyricHidePassedLines} onCheckedChange={s.setLyricHidePassedLines} />
+        </SettingRow>
+
+        <SettingRow
+          label="显示歌词底栏"
+          description="在歌词末尾显示歌曲名和歌手"
+          onReset={s.lyricShowBottomLine !== s.lyricShowBottomLineDefault ? s.resetLyricShowBottomLine : undefined}
+        >
+          <Switch checked={s.lyricShowBottomLine} onCheckedChange={s.setLyricShowBottomLine} />
+        </SettingRow>
+
+        <SettingRow
+          label="敏感词遮罩"
+          description="仅对歌词数据中已标记的敏感词生效"
+          onReset={
+            s.lyricMaskObsceneWordsMode !== s.lyricMaskObsceneWordsModeDefault
+              ? s.resetLyricMaskObsceneWordsMode
+              : undefined
+          }
+        >
+          <Select
+            value={s.lyricMaskObsceneWordsMode || 'disabled'}
+            onValueChange={(v) =>
+              s.setLyricMaskObsceneWordsMode(v === 'disabled' ? '' : (v as 'full-mask' | 'partial-mask'))
+            }
+          >
+            <SelectTrigger className="w-28">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="disabled">关闭</SelectItem>
+              <SelectItem value="full-mask">全部遮罩</SelectItem>
+              <SelectItem value="partial-mask">首尾保留</SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingRow>
+
+        {s.lyricMaskObsceneWordsMode && (
+          <SettingRow
+            label="遮罩字符"
+            description="用于替换敏感词的单个字符"
+            onReset={
+              s.lyricMaskObsceneWordChar !== s.lyricMaskObsceneWordCharDefault
+                ? s.resetLyricMaskObsceneWordChar
+                : undefined
+            }
+          >
+            <Input
+              value={s.lyricMaskObsceneWordChar}
+              maxLength={1}
+              onChange={(event) => s.setLyricMaskObsceneWordChar(event.target.value)}
+              className="w-16 text-center"
+              aria-label="敏感词遮罩字符"
+            />
+          </SettingRow>
+        )}
       </div>
 
       {/* ---- 歌词字体 ---- */}

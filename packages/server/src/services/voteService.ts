@@ -18,11 +18,11 @@ interface Vote {
   payload?: Record<string, unknown>
 }
 
-interface CastResult {
+export interface VoteDecision {
   vote: Vote
   decided: boolean
   passed: boolean
-  reason?: string
+  reason?: 'host_veto' | 'rejected'
 }
 
 /** Active vote per room (at most one at a time) */
@@ -68,7 +68,26 @@ export function createVote(
  * Cast a vote. Returns the result or null if no active vote.
  * Conductor veto: if conductor (hostId) votes reject, immediately decided as failed.
  */
-export function castVote(roomId: string, userId: string, approve: boolean): CastResult | null {
+function evaluateVote(vote: Vote): VoteDecision {
+  if (vote.votes[vote.hostId] === false) {
+    return { vote, decided: true, passed: false, reason: 'host_veto' }
+  }
+
+  const approveCount = Object.values(vote.votes).filter(Boolean).length
+  const rejectCount = Object.values(vote.votes).filter((value) => !value).length
+
+  if (approveCount >= vote.requiredVotes) {
+    return { vote, decided: true, passed: true }
+  }
+
+  if (rejectCount > vote.totalUsers - vote.requiredVotes) {
+    return { vote, decided: true, passed: false, reason: 'rejected' }
+  }
+
+  return { vote, decided: false, passed: false }
+}
+
+export function castVote(roomId: string, userId: string, approve: boolean): VoteDecision | null {
   const vote = activeVotes.get(roomId)
   if (!vote) return null
 
@@ -77,61 +96,60 @@ export function castVote(roomId: string, userId: string, approve: boolean): Cast
 
   vote.votes[userId] = approve
 
-  // Conductor veto check
+  // The current room host can veto an active vote.
   if (userId === vote.hostId && !approve) {
     return { vote, decided: true, passed: false, reason: 'host_veto' }
   }
 
-  const approveCount = Object.values(vote.votes).filter(Boolean).length
-  const rejectCount = Object.values(vote.votes).filter((v) => !v).length
-
-  // Passed: enough approvals
-  if (approveCount >= vote.requiredVotes) {
-    return { vote, decided: true, passed: true }
-  }
-
-  // Mathematically impossible to pass
-  if (rejectCount > vote.totalUsers - vote.requiredVotes) {
-    return { vote, decided: true, passed: false, reason: 'rejected' }
-  }
-
-  // Not decided yet
-  return { vote, decided: false, passed: false }
+  return evaluateVote(vote)
 }
 
 /**
- * Update the vote threshold when users leave during an active vote.
- * Recalculates requiredVotes based on current user count and removes
- * the departing user's vote if they had cast one.
- *
- * Returns true if the vote state was modified (caller should broadcast updated state).
+ * Reconcile an active vote against the room's current online membership and host.
+ * Votes from departed users are removed; newly joined users increase the majority
+ * threshold and may vote normally after receiving the active vote state.
  */
-export function updateVoteThreshold(roomId: string, currentUserCount: number, departedUserId?: string): boolean {
+export function reconcileVote(
+  roomId: string,
+  currentUserIds: readonly string[],
+  currentHostId: string,
+): VoteDecision | null {
   const vote = activeVotes.get(roomId)
-  if (!vote) return false
+  if (!vote) return null
 
-  // Remove departed user's vote if they had cast one
-  if (departedUserId && departedUserId in vote.votes) {
-    delete vote.votes[departedUserId]
+  const onlineUsers = new Set(currentUserIds)
+  for (const userId of Object.keys(vote.votes)) {
+    if (!onlineUsers.has(userId)) delete vote.votes[userId]
   }
 
-  const newRequired = Math.floor(currentUserCount / 2) + 1
-  vote.requiredVotes = newRequired
-  vote.totalUsers = currentUserCount
-  logger.info(`Vote threshold updated: ${newRequired} required (${currentUserCount} users)`, { roomId })
-  return true
+  vote.totalUsers = currentUserIds.length
+  vote.requiredVotes = Math.floor(vote.totalUsers / 2) + 1
+  vote.hostId = currentHostId
+  logger.info(`Vote reconciled: ${vote.requiredVotes} required (${vote.totalUsers} users)`, { roomId })
+  return evaluateVote(vote)
 }
 
 export function getActiveVote(roomId: string): Vote | null {
   return activeVotes.get(roomId) ?? null
 }
 
-export function cancelVote(roomId: string): void {
+/**
+ * Atomically remove a decided vote before its asynchronous side effect runs.
+ * Only the caller that successfully claims the exact vote ID may execute it.
+ */
+export function claimVote(roomId: string, voteId: string): Vote | null {
   const vote = activeVotes.get(roomId)
-  if (vote) {
-    clearTimeout(vote.timeoutHandle)
-    activeVotes.delete(roomId)
-  }
+  if (!vote || vote.id !== voteId) return null
+  activeVotes.delete(roomId)
+  clearTimeout(vote.timeoutHandle)
+  return vote
+}
+
+export function cancelVote(roomId: string, voteId?: string): void {
+  const vote = activeVotes.get(roomId)
+  if (!vote || (voteId !== undefined && vote.id !== voteId)) return
+  clearTimeout(vote.timeoutHandle)
+  activeVotes.delete(roomId)
 }
 
 export function cleanupRoom(roomId: string): void {

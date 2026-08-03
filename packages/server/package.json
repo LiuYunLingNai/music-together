@@ -11,29 +11,29 @@
   "dependencies": {
     "@meting/core": "^1.6.1",
     "@music-together/shared": "workspace:*",
-    "@neteasecloudmusicapienhanced/api": "^4.30.1",
-    "@s4p/kugou-lrc": "^0.2.0",
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
+    "@neteasecloudmusicapienhanced/api": "^4.39.0",
+    "cors": "^2.8.6",
+    "dotenv": "^16.6.1",
     "escape-html": "^1.0.3",
-    "express": "^4.21.0",
-    "lru-cache": "^11.2.6",
-    "nanoid": "^5.0.9",
-    "p-limit": "^7.3.0",
+    "express": "^4.22.2",
+    "express-rate-limit": "^8.6.1",
+    "lru-cache": "^11.5.2",
+    "nanoid": "^5.1.16",
+    "p-limit": "^7.3.1",
     "pino": "^10.3.1",
     "qrcode": "^1.5.4",
     "rate-limiter-flexible": "^9.1.1",
     "socket.io": "^4.8.3",
-    "zod": "^4.3.6"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/cors": "^2.8.17",
+    "@types/cors": "^2.8.19",
     "@types/escape-html": "^1.0.4",
-    "@types/express": "^5.0.0",
-    "@types/node": "^22.10.0",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.20.1",
     "@types/qrcode": "^1.5.6",
     "pino-pretty": "^13.1.3",
-    "tsx": "^4.19.0",
+    "tsx": "^4.23.1",
     "typescript": "~5.9.3"
   }
 }

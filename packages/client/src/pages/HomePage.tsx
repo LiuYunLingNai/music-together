@@ -18,7 +18,7 @@ import { EVENTS, ERROR_CODE, type RoomListItem, type RoomState } from '@music-to
 import { Github, Headphones } from 'lucide-react'
 import { motion } from 'motion/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { toast } from 'sonner'
 
 export default function HomePage() {

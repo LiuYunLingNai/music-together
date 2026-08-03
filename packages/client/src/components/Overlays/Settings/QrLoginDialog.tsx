@@ -4,7 +4,7 @@ import { PLATFORM_LABELS } from '@/lib/platform'
 import type { MusicSource } from '@music-together/shared'
 import { QR_STATUS, QR_TIMING } from '@music-together/shared'
 import { Loader2, RefreshCw, CheckCircle2, AlertCircle, Smartphone } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { useEffect, useEffectEvent, useRef } from 'react'
 
 interface QrLoginDialogProps {
   open: boolean
@@ -30,10 +30,12 @@ export function QrLoginDialog({
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const label = PLATFORM_LABELS[platform] ?? platform
   const scanApp = platform === 'tencent' ? '手机QQ' : `${label} App`
+  const checkQrStatus = useEffectEvent((key: string) => onCheckStatus(key))
 
   // Auto-poll QR status every 2 seconds when dialog is open and QR is generated
   useEffect(() => {
-    if (!open || !qrData?.key) {
+    const key = qrData?.key
+    if (!open || !key) {
       if (pollRef.current) {
         clearInterval(pollRef.current)
         pollRef.current = null
@@ -41,8 +43,10 @@ export function QrLoginDialog({
       return
     }
 
+    // Check immediately, then continue polling at the shared interval.
+    checkQrStatus(key)
     pollRef.current = setInterval(() => {
-      onCheckStatus(qrData.key)
+      checkQrStatus(key)
     }, QR_TIMING.POLL_INTERVAL_MS)
 
     return () => {
@@ -51,7 +55,7 @@ export function QrLoginDialog({
         pollRef.current = null
       }
     }
-  }, [open, qrData?.key, onCheckStatus])
+  }, [open, qrData?.key])
 
   // On success or expiry: stop polling immediately + auto-close on success
   useEffect(() => {

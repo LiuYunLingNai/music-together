@@ -1,96 +1,25 @@
+import { lyricPlayerBridge } from '@/lib/lyricPlayerBridge'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
-import type { LyricLine as AMLLLyricLine } from '@applemusic-like-lyrics/core'
+import type { LyricLine } from '@applemusic-like-lyrics/core'
 import '@applemusic-like-lyrics/core/style.css'
-import { LyricPlayer } from '@applemusic-like-lyrics/react'
-import { useMemo } from 'react'
+import { parseLrc } from '@applemusic-like-lyrics/lyric'
+import { LyricPlayer, type LyricPlayerRef } from '@applemusic-like-lyrics/react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 const FULL_SIZE_STYLE = { width: '100%', height: '100%' } as const
 
-interface LyricLine {
-  time: number
-  text: string
-  translation?: string
-}
+function mergeTranslatedLyrics(lines: LyricLine[], translatedLrc: string): LyricLine[] {
+  if (!translatedLrc) return lines
 
-function parseLRC(lrc: string): { time: number; text: string }[] {
-  const lines: { time: number; text: string }[] = []
-  // Supports [mm:ss], [mm:ss.x], [mm:ss.xx], [mm:ss.xxx]
-  const regex = /\[(\d{2}):(\d{2})(?:\.(\d{1,3}))?\](.*)/g
-  let match
+  const translations = parseLrc(translatedLrc)
+  return lines.map((line) => {
+    const translation = translations.find((candidate) => Math.abs(candidate.startTime - line.startTime) <= 500)
+    if (!translation) return line
 
-  while ((match = regex.exec(lrc)) !== null) {
-    const minutes = parseInt(match[1], 10)
-    const seconds = parseInt(match[2], 10)
-    const ms = match[3] ? parseInt(match[3].padEnd(3, '0'), 10) : 0
-    const time = minutes * 60 + seconds + ms / 1000
-    const text = match[4].trim()
-    if (text) {
-      lines.push({ time, text })
-    }
-  }
-
-  return lines.sort((a, b) => a.time - b.time)
-}
-
-function mergeLyrics(original: string, translated: string): LyricLine[] {
-  const origLines = parseLRC(original)
-  if (origLines.length === 0) return []
-
-  const result: LyricLine[] = origLines.map((l) => ({ ...l }))
-
-  if (!translated) return result
-
-  const transLines = parseLRC(translated)
-  if (transLines.length === 0) return result
-
-  const transMap = new Map<number, string>()
-  for (const tl of transLines) {
-    transMap.set(Math.round(tl.time * 10) / 10, tl.text)
-  }
-
-  for (const line of result) {
-    const key = Math.round(line.time * 10) / 10
-    const exact = transMap.get(key)
-    if (exact) {
-      line.translation = exact
-      continue
-    }
-    for (let offset = 1; offset <= 5; offset++) {
-      const near =
-        transMap.get(Math.round((line.time + offset * 0.1) * 10) / 10) ??
-        transMap.get(Math.round((line.time - offset * 0.1) * 10) / 10)
-      if (near) {
-        line.translation = near
-        break
-      }
-    }
-  }
-
-  return result
-}
-
-/** 将自有 LRC 解析结果转为 AMLL LyricLine 格式 */
-function toAMLLLines(lines: LyricLine[]): AMLLLyricLine[] {
-  return lines.map((line, i, arr) => {
-    const startMs = Math.round(line.time * 1000)
-    const endMs = Math.round((arr[i + 1]?.time ?? line.time + 5) * 1000)
     return {
-      words: [
-        {
-          word: line.text,
-          startTime: startMs,
-          endTime: endMs,
-          romanWord: '',
-          obscene: false,
-        },
-      ],
-      translatedLyric: line.translation ?? '',
-      romanLyric: '',
-      startTime: startMs,
-      endTime: endMs,
-      isBG: false,
-      isDuet: false,
+      ...line,
+      translatedLyric: translation.words.map((word) => word.word).join(''),
     }
   })
 }
@@ -108,18 +37,45 @@ export function LyricDisplay() {
   const enableSpring = useSettingsStore((s) => s.lyricEnableSpring)
   const enableBlur = useSettingsStore((s) => s.lyricEnableBlur)
   const enableScale = useSettingsStore((s) => s.lyricEnableScale)
+  const hidePassedLines = useSettingsStore((s) => s.lyricHidePassedLines)
+  const showBottomLine = useSettingsStore((s) => s.lyricShowBottomLine)
+  const maskObsceneWordsMode = useSettingsStore((s) => s.lyricMaskObsceneWordsMode)
+  const maskObsceneWordChar = useSettingsStore((s) => s.lyricMaskObsceneWordChar)
+  const wordFadeWidth = useSettingsStore((s) => s.lyricWordFadeWidth)
+  const currentTrack = usePlayerStore((s) => s.currentTrack)
   const fontWeight = useSettingsStore((s) => s.lyricFontWeight)
   const fontSize = useSettingsStore((s) => s.lyricFontSize)
   const translationFontSize = useSettingsStore((s) => s.lyricTranslationFontSize)
   const romanFontSize = useSettingsStore((s) => s.lyricRomanFontSize)
 
-  // LRC 解析（仅在没有 TTML 时使用）
-  const lrcLines = useMemo(() => mergeLyrics(lyric, tlyric), [lyric, tlyric])
-  const lrcAmllLines = useMemo(() => toAMLLLines(lrcLines), [lrcLines])
+  // 使用 AMLL 最新 parser 解析 LRC，并合并平台翻译歌词。
+  const lrcLines = useMemo(() => mergeTranslatedLyrics(parseLrc(lyric), tlyric), [lyric, tlyric])
 
-  // TTML 优先，LRC 回退
-  const amllLines = ttmlLines ?? lrcAmllLines
-  const hasLyrics = ttmlLines ? ttmlLines.length > 0 : lrcLines.length > 0
+  // TTML / YRC / KRC 优先，LRC 回退
+  const amllLines = ttmlLines ?? lrcLines
+  const hasLyrics = amllLines.length > 0
+  const playerRef = useRef<LyricPlayerRef>(null)
+  const [player, setPlayer] = useState<LyricPlayerRef['lyricPlayer']>()
+
+  useEffect(() => {
+    const frameId = requestAnimationFrame(() => setPlayer(playerRef.current?.lyricPlayer))
+    return () => cancelAnimationFrame(frameId)
+  }, [hasLyrics])
+
+  useEffect(() => {
+    if (!player) return
+    return lyricPlayerBridge.attach(player)
+  }, [player])
+
+  const bottomLine = useMemo(
+    () =>
+      showBottomLine && currentTrack ? (
+        <div className="pb-8 text-sm text-white/45">
+          {currentTrack.title} · {currentTrack.artist.join(' / ')}
+        </div>
+      ) : undefined,
+    [currentTrack, showBottomLine],
+  )
 
   if (!hasLyrics) {
     return (
@@ -142,6 +98,7 @@ export function LyricDisplay() {
       }
     >
       <LyricPlayer
+        ref={playerRef}
         lyricLines={amllLines}
         currentTime={Math.round(currentTime * 1000)}
         playing={isPlaying}
@@ -150,6 +107,11 @@ export function LyricDisplay() {
         enableSpring={enableSpring}
         enableBlur={enableBlur}
         enableScale={enableScale}
+        hidePassedLines={hidePassedLines}
+        maskObsceneWordsMode={maskObsceneWordsMode}
+        maskObsceneWordChar={maskObsceneWordChar}
+        wordFadeWidth={wordFadeWidth}
+        bottomLine={bottomLine}
         style={FULL_SIZE_STYLE}
       />
     </div>

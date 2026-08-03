@@ -5,18 +5,28 @@ export interface RoomData {
   id: string
   name: string
   password: string | null
-  /** 房间创建者 ID（永久不变，创建者为 owner，加入时自动成为 conductor） */
+  /** 原始房间创建者 ID（永久不变；重新上线后恢复 owner 和当前房主身份） */
   creatorId: string
+  /** 当前在线主持人身份，同时承担自动下一首和投票否决职责 */
   hostId: string
+  /** 唯一允许提交播放进度的 Socket；同一身份多标签页时只有一个写入者 */
+  conductorSocketId: string | null
   /** 持久化 admin 用户 ID 集合（离开/回来自动恢复 admin） */
   adminUserIds: Set<string>
-  /** 临时管理员 ID：仅当房间内没有在线 owner / 持久 admin 时授予，不持久化 */
+  /** 无永久控制者在线时临时接管房间的用户；授予 admin 能力，不持久化 */
   temporaryAdminUserId: string | null
   audioQuality: AudioQuality
   users: User[]
   queue: Track[]
   currentTrack: Track | null
   playState: PlayState
+  /** Latest scheduled action, kept separate until its execution time. */
+  pendingPlayback?: {
+    type: 'play' | 'pause' | 'resume' | 'seek' | 'stop'
+    track: Track | null
+    playState: PlayState & { serverTimeToExecute: number }
+    timer: ReturnType<typeof setTimeout>
+  } | null
   playMode: PlayMode
 }
 

@@ -80,14 +80,14 @@ export const VirtualTrackList = forwardRef<VirtualTrackListRef, VirtualTrackList
 
   // Infinite scroll: trigger onLoadMore when approaching the bottom
   const virtualItems = virtualizer.getVirtualItems()
-  const lastItem = virtualItems.at(-1)
+  const lastItemIndex = virtualItems.at(-1)?.index
 
   useEffect(() => {
-    if (!lastItem) return
-    if (lastItem.index >= tracks.length - LOAD_MORE_THRESHOLD && hasMore && !loadingMore) {
+    if (lastItemIndex === undefined) return
+    if (lastItemIndex >= tracks.length - LOAD_MORE_THRESHOLD && hasMore && !loadingMore) {
       onLoadMore()
     }
-  }, [lastItem?.index, tracks.length, hasMore, loadingMore, onLoadMore])
+  }, [lastItemIndex, tracks.length, hasMore, loadingMore, onLoadMore])
 
   // Loading skeleton
   if (loading) {

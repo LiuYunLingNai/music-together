@@ -16,6 +16,8 @@ import {
   HARD_SEEK_CONFIRM_COUNT,
 } from '@/lib/constants'
 import { storage } from '@/lib/storage'
+import { lyricPlayerBridge } from '@/lib/lyricPlayerBridge'
+import { cancelScheduledPlay } from '@/lib/scheduledPlayback'
 import { useSocketContext } from '@/providers/SocketProvider'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
@@ -63,7 +65,11 @@ function clamp(value: number, limit: number): number {
  * If a browser speed plugin (e.g. Global Speed) overrides the rate,
  * rate correction is automatically disabled and only hard seek is used.
  */
-export function usePlayerSync(howlRef: RefObject<Howl | null>, soundIdRef: RefObject<number | undefined>) {
+export function usePlayerSync(
+  howlRef: RefObject<Howl | null>,
+  soundIdRef: RefObject<number | undefined>,
+  setDesiredPlayback: (shouldPlay: boolean) => void,
+) {
   const { socket } = useSocketContext()
   const setCurrentTime = usePlayerStore((s) => s.setCurrentTime)
 
@@ -88,6 +94,9 @@ export function usePlayerSync(howlRef: RefObject<Howl | null>, soundIdRef: RefOb
   // Consecutive hard-seek triggers — require HARD_SEEK_CONFIRM_COUNT before actually seeking
   const hardSeekCountRef = useRef(0)
 
+  const isStaleAction = (playState: ScheduledPlayState) =>
+    playState.revision < (useRoomStore.getState().room?.playState.revision ?? -1)
+
   const clearScheduled = () => {
     if (scheduledTimerRef.current) {
       clearTimeout(scheduledTimerRef.current)
@@ -101,6 +110,9 @@ export function usePlayerSync(howlRef: RefObject<Howl | null>, soundIdRef: RefOb
   useEffect(() => {
     // -- SEEK ---------------------------------------------------------------
     const onSeek = (data: { playState: ScheduledPlayState }) => {
+      if (isStaleAction(data.playState)) return
+      setDesiredPlayback(data.playState.isPlaying)
+      cancelScheduledPlay()
       clearScheduled()
       const id = ++actionIdRef.current
       const delay = scheduleDelay(data.playState.serverTimeToExecute)
@@ -110,8 +122,19 @@ export function usePlayerSync(howlRef: RefObject<Howl | null>, soundIdRef: RefOb
         if (howlRef.current) {
           howlRef.current.seek(data.playState.currentTime)
           if (howlRef.current.rate() !== 1) howlRef.current.rate(1)
+          if (data.playState.isPlaying) {
+            if (!howlRef.current.playing()) {
+              soundIdRef.current =
+                soundIdRef.current !== undefined
+                  ? howlRef.current.play(soundIdRef.current)
+                  : howlRef.current.play()
+            }
+          } else if (howlRef.current.playing()) {
+            howlRef.current.pause(soundIdRef.current)
+          }
         }
         setCurrentTime(data.playState.currentTime)
+        lyricPlayerBridge.seek(data.playState.currentTime)
         smoothedDriftRef.current = 0
         emaColdStartRef.current = true
         // Keep roomStore.playState in sync for recovery effect
@@ -120,6 +143,7 @@ export function usePlayerSync(howlRef: RefObject<Howl | null>, soundIdRef: RefOb
             isPlaying: data.playState.isPlaying,
             currentTime: data.playState.currentTime,
             serverTimestamp: data.playState.serverTimestamp,
+            revision: data.playState.revision,
           },
         })
       }, delay)
@@ -127,6 +151,9 @@ export function usePlayerSync(howlRef: RefObject<Howl | null>, soundIdRef: RefOb
 
     // -- PAUSE --------------------------------------------------------------
     const onPause = (data: { playState: ScheduledPlayState }) => {
+      if (isStaleAction(data.playState)) return
+      setDesiredPlayback(false)
+      cancelScheduledPlay()
       clearScheduled()
       const id = ++actionIdRef.current
       const delay = scheduleDelay(data.playState.serverTimeToExecute)
@@ -139,6 +166,7 @@ export function usePlayerSync(howlRef: RefObject<Howl | null>, soundIdRef: RefOb
           howlRef.current.seek(data.playState.currentTime)
           if (howlRef.current.rate() !== 1) howlRef.current.rate(1)
           setCurrentTime(data.playState.currentTime)
+          lyricPlayerBridge.seek(data.playState.currentTime)
         }
         // Reset drift state — paused means no drift
         smoothedDriftRef.current = 0
@@ -150,6 +178,7 @@ export function usePlayerSync(howlRef: RefObject<Howl | null>, soundIdRef: RefOb
             isPlaying: data.playState.isPlaying,
             currentTime: data.playState.currentTime,
             serverTimestamp: data.playState.serverTimestamp,
+            revision: data.playState.revision,
           },
         })
       }, delay)
@@ -157,6 +186,9 @@ export function usePlayerSync(howlRef: RefObject<Howl | null>, soundIdRef: RefOb
 
     // -- RESUME -------------------------------------------------------------
     const onResume = (data: { playState: ScheduledPlayState }) => {
+      if (isStaleAction(data.playState)) return
+      setDesiredPlayback(true)
+      cancelScheduledPlay()
       clearScheduled()
       const id = ++actionIdRef.current
       const delay = scheduleDelay(data.playState.serverTimeToExecute)
@@ -168,6 +200,7 @@ export function usePlayerSync(howlRef: RefObject<Howl | null>, soundIdRef: RefOb
         if (data.playState.currentTime > 0) {
           howlRef.current.seek(data.playState.currentTime)
           setCurrentTime(data.playState.currentTime)
+          lyricPlayerBridge.seek(data.playState.currentTime)
         }
         if (howlRef.current.rate() !== 1) howlRef.current.rate(1)
         smoothedDriftRef.current = 0
@@ -183,6 +216,7 @@ export function usePlayerSync(howlRef: RefObject<Howl | null>, soundIdRef: RefOb
             isPlaying: data.playState.isPlaying,
             currentTime: data.playState.currentTime,
             serverTimestamp: data.playState.serverTimestamp,
+            revision: data.playState.revision,
           },
         })
       }, delay)
@@ -193,6 +227,7 @@ export function usePlayerSync(howlRef: RefObject<Howl | null>, soundIdRef: RefOb
     // so it doesn't accidentally seek/pause/resume the new Howl instance.
     // Also reset rate-disabled flag to give the new track a fresh chance.
     const onPlay = () => {
+      cancelScheduledPlay()
       clearScheduled()
       ++actionIdRef.current // invalidate any pending stale callbacks
       rateDisabledRef.current = false
@@ -323,7 +358,7 @@ export function usePlayerSync(howlRef: RefObject<Howl | null>, soundIdRef: RefOb
       socket.off(EVENTS.PLAYER_PLAY, onPlay)
       socket.off(EVENTS.PLAYER_SYNC_RESPONSE, onSyncResponse)
     }
-  }, [socket, howlRef, soundIdRef, setCurrentTime])
+  }, [socket, howlRef, soundIdRef, setCurrentTime, setDesiredPlayback])
 
   // -----------------------------------------------------------------------
   // Periodic sync request (client-initiated drift correction).
@@ -352,10 +387,12 @@ export function usePlayerSync(howlRef: RefObject<Howl | null>, soundIdRef: RefOb
     const report = () => {
       const { room } = useRoomStore.getState()
       const myId = storage.getUserId()
-      if (room?.hostId === myId && howlRef.current?.playing()) {
+      if (room?.hostId === myId && room.currentTrack && howlRef.current?.playing()) {
         socket.emit(EVENTS.PLAYER_SYNC, {
           currentTime: howlRef.current.seek() as number,
           hostServerTime: getServerTime(),
+          revision: room.playState.revision,
+          trackId: room.currentTrack.id,
         })
       }
       // Schedule next report — fast if within the initial window, slow otherwise
@@ -371,10 +408,12 @@ export function usePlayerSync(howlRef: RefObject<Howl | null>, soundIdRef: RefOb
       if (document.visibilityState !== 'visible') return
       const { room: r } = useRoomStore.getState()
       const myId = storage.getUserId()
-      if (r?.hostId === myId && howlRef.current?.playing()) {
+      if (r?.hostId === myId && r.currentTrack && howlRef.current?.playing()) {
         socket.emit(EVENTS.PLAYER_SYNC, {
           currentTime: howlRef.current.seek() as number,
           hostServerTime: getServerTime(),
+          revision: r.playState.revision,
+          trackId: r.currentTrack.id,
         })
       }
     }

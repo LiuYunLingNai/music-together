@@ -2,63 +2,80 @@
 
 ## 架构
 
-采用**纯 Node.js 单镜像**方案：Express 同时托管前端 SPA 静态文件和后端 API/WebSocket，无需 Nginx。
+采用纯 Node.js 单镜像：Express 同时托管前端 SPA、REST API 和 Socket.IO。
 
-```
+```text
 Docker 容器 (:3001)
-├── / 静态文件        → client/dist（Vite 产物）
-├── /api/*           → REST API
-└── /socket.io/*     → WebSocket
+├── /                 client/dist
+├── /api/*            REST API
+└── /socket.io/*      Socket.IO
 ```
 
-## CI/CD 流程
+## CI/CD
 
-1. **push 到 main** → GitHub Actions 构建 Docker 镜像 → 推送到 GHCR（`ghcr.io`）
-2. **服务器上** Watchtower 每 5 分钟检查镜像更新 → 自动拉取并重启容器
+GitHub Actions 分为两个阶段：
 
-零人工干预，GitHub 零额外 Secrets（使用自带的 `GITHUB_TOKEN`）。
+1. Pull Request 和 main push 都执行依赖安装、Vitest、前端 typecheck/lint、workspace build 和生产依赖 critical 审计。
+2. 只有非 PR 且验证通过后，才构建并推送 `latest` 和 commit SHA 两个 GHCR 标签。
+
+Dependabot 每周检查 pnpm 依赖，并按月检查 GitHub Actions 和 Docker 基础镜像。
+
+## 必需的生产配置
+
+生产环境必须设置至少 32 字符的随机 `IDENTITY_SECRET`：
+
+```bash
+openssl rand -base64 48
+```
+
+然后通过容器环境变量传入。未设置时服务会拒绝启动。
+
+其他变量详见根目录 `.env.example`：
+
+```text
+PORT
+CLIENT_URL
+CORS_ORIGINS
+IDENTITY_SECRET
+IDENTITY_TTL_DAYS
+REJOIN_TTL_MS
+IDENTITY_COOKIE_SECURE
+AUTO_FALLBACK_ENABLED
+```
 
 ## Docker 多阶段构建
 
-- **阶段 1（deps）**：`pnpm install --frozen-lockfile` 安装全部依赖
-- **阶段 2（build）**：分别构建 shared、server（tsc）、client（vite build）
-- **阶段 3（production）**：仅安装 server 生产依赖（`--filter @music-together/server...`），复制构建产物
+- `deps`：锁定 pnpm 10.29.2 并执行 frozen install。
+- `build`：构建 shared、server 和 client。
+- `production`：只安装服务端生产依赖链，复制构建产物。
+- 运行时使用非 root `node` 用户。
+- 容器通过 `/api/health` 执行 Docker `HEALTHCHECK`。
 
-## CORS 策略
+## CORS 与 Cookie
 
-- `CLIENT_URL` 未设置 → 自动模式，允许所有来源访问（适用于单镜像同域部署、局域网、公网反代）
-- `CLIENT_URL` 显式设置 → 严格白名单模式（适用于前后端分离跨域部署）
+- `CLIENT_URL` / `CORS_ORIGINS` 未设置：自动来源模式，适合同域镜像和局域网部署。
+- 显式设置来源：严格白名单模式，适合前后端分离。
+- `IDENTITY_COOKIE_SECURE` 未设置时，根据生产环境和当前请求协议自动判断。
+- HTTPS 反向代理必须透传 `X-Forwarded-Proto`。
 
-## Identity Cookie 策略
-
-- 未显式设置 `IDENTITY_COOKIE_SECURE` 时，服务端会根据当前请求协议自动决定是否添加 `Secure`
-- 局域网 HTTP 访问会下发非 Secure cookie
-- 公网 HTTPS / 反代 HTTPS 访问会下发 Secure cookie
-- 自动判断 HTTPS 依赖代理正确透传 `X-Forwarded-Proto`
-- 仅在需要强制行为时才手动设置 `IDENTITY_COOKIE_SECURE`
-
-## 前端同域适配
-
-`SERVER_URL` 默认使用 `window.location.origin`，同域部署时自动指向当前页面的 origin，无需配置。
-
-## 静态文件托管
-
-`packages/server/src/index.ts` 在启动时检测 `client/dist/index.html` 是否存在：
-
-- **存在**（生产环境）：挂载 `express.static` + SPA fallback
-- **不存在**（本地开发）：跳过，零影响
-
-## 服务器部署命令
+## 部署示例
 
 ```bash
-# 启动应用容器
-docker run -d --name music-together --restart unless-stopped -p 3001:3001 ghcr.io/<owner>/music-together:latest
-
-# 启动 Watchtower 自动更新
-docker run -d --name watchtower --restart unless-stopped \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -e WATCHTOWER_CLEANUP=true \
-  containrrr/watchtower --interval 300 music-together
+docker run -d \
+  --name music-together \
+  --restart unless-stopped \
+  -p 3001:3001 \
+  -e IDENTITY_SECRET='<至少32字符的随机密钥>' \
+  ghcr.io/yueby/music-together:latest
 ```
 
-如使用 1Panel，创建反向代理网站指向 `127.0.0.1:3001`，启用 WebSocket 和 HTTPS。
+检查健康状态：
+
+```bash
+docker inspect --format '{{json .State.Health}}' music-together
+curl http://127.0.0.1:3001/api/health
+```
+
+如使用 1Panel、Nginx 或 Caddy，反向代理到 `127.0.0.1:3001`，启用 WebSocket，并正确传递来源协议头。
+
+Watchtower 可用于自动更新镜像，但其 Docker Socket 权限较高；使用前应理解其安全边界，并限制为指定容器。

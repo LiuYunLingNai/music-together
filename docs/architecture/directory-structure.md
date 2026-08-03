@@ -4,16 +4,21 @@
 
 ```
 music-together/
+├── .agents/skills/      # 项目 Agent Skills（每个技能目录包含 SKILL.md）
+├── .github/             # CI、Dependabot、PR/Issue 模板
 ├── packages/
 │   ├── client/          # React 前端
 │   ├── server/          # Node.js 后端
-│   └── shared/          # 共享类型与常量
-├── docs/                # 项目文档（含本文件 PROJECT_ARCHITECTURE.md）
+│   └── shared/          # 共享类型、事件、Schema 与权限
+├── docs/                # 架构与开发文档
+├── AGENTS.md            # 项目级 AI/Agent 工作约束
+├── CONTRIBUTING.md      # 贡献指南
+├── SECURITY.md          # 安全报告策略
+├── vitest.config.ts     # Monorepo 测试配置
 ├── package.json         # 根 package（工作区编排）
 ├── pnpm-workspace.yaml  # pnpm 工作区定义
 ├── pnpm-lock.yaml
-├── README.md
-└── .gitignore
+└── README.md
 ```
 
 ## packages/client/src/ — 前端源码
@@ -167,7 +172,7 @@ src/
 ├── services/                   # 服务层：业务逻辑
 │   ├── roomService.ts          #   房间 CRUD + 角色管理 + 加入校验（validateJoinRequest）
 │   ├── roomLifecycleService.ts #   房间生命周期定时器（空置删除）+ 防抖广播
-│   ├── playerService.ts        #   播放状态管理 + 流 URL 解析 + 切歌防抖 + 加入播放同步
+│   ├── playerService.ts        #   已提交/待执行播放状态 + revision 边界 + 流 URL 解析 + 切歌防抖 + 加入播放同步
 │   ├── queueService.ts         #   队列操作（reorder 保留未包含曲目防丢歌，getNextTrack 支持 4 种播放模式，clearQueue 清空，addBatchTracks 批量添加）
 │   ├── chatService.ts          #   聊天消息处理 + HTML 转义（含系统消息）
 │   ├── syncService.ts          #   播放位置估算工具（estimateCurrentTime）
@@ -176,8 +181,10 @@ src/
 │   ├── authProvider.ts         #   统一认证接口（AuthProvider 接口定义 + GetUserInfoResult/UserInfoData 共享类型 + AUTH_PROVIDERS 策略映射表）
 │   ├── neteaseAuthService.ts   #   网易云 API 认证（QR / Cookie 验证 / 用户信息 / 用户歌单列表；getUserInfo 返回 { ok, data? } | { ok: false, reason: 'expired' | 'error' } 区分过期与临时故障）
 │   ├── kugouAuthService.ts    #   酷狗 API 认证（QR 扫码登录 + VIP 检查 + 用户昵称(RSA) + 用户歌单列表 + 歌单歌曲获取；kugouRequest 含 HTTP 状态检查与 JSON 安全解析；自包含签名实现，状态码归一化为 800-803 与网易云统一）
-│   ├── tencentAuthService.ts  #   QQ 音乐认证（5 步 OAuth QR 扫码登录：ptqrshow/ptqrlogin/check_sig/authorize/QQLogin 换取 musickey；zzc 签名防风控；getUserInfo 获取昵称 + VIP 状态；getUserPlaylists 获取自建 + 收藏歌单；getPlaylistTracks 分页获取歌单歌曲）
-│   └── voteService.ts          #   投票状态管理
+│   ├── tencentAuthService.ts  #   QQ 音乐认证与通用 zzc 签名请求
+│   ├── kugouLyricService.ts   #   酷狗 KRC 搜索、下载、XOR/压缩解密与逐词解析
+│   ├── voteActionService.ts    #   已通过投票的播放器/队列动作统一执行
+│   └── voteService.ts          #   投票状态、在线成员阈值与当前房主否决权管理
 │
 ├── repositories/               # 数据仓库：内存存储
 │   ├── types.ts                #   接口定义（RoomRepository, ChatRepository）
@@ -188,7 +195,8 @@ src/
 │   ├── types.ts                #   TypedServer, TypedSocket, HandlerContext
 │   ├── withRoom.ts             #   房间成员身份校验
 │   ├── withControl.ts          #   操作权限校验（包装 withRoom）
-│   └── socketRateLimiter.ts    #   Socket 事件速率限制（per-socket，10次/5秒）+ 断连清理（cleanupSocketRateLimit）
+│   ├── socketRateLimiter.ts    #   Socket 事件按 identity 限流 + 多连接安全清理
+│   └── httpRateLimiter.ts      #   音乐 REST / 封面代理的 identity/IP 限流
 │
 ├── routes/                     # Express REST 路由
 │   ├── music.ts                #   GET /api/music/search|url|lyric|cover|playlist|ttml（统一 validated() 路由包装器消除重复 try/catch + Zod 模式）
@@ -214,5 +222,17 @@ src/
 ├── schemas.ts         # Zod 验证 schema
 └── abilities.ts       # CASL 权限定义（Actions incl. set-mode, Subjects, defineAbilityFor）
 ```
+
+## 测试文件
+
+Vitest 测试与源码就近放置：
+
+```text
+packages/shared/src/*.test.ts
+packages/server/src/**/*.test.ts
+packages/client/src/**/*.test.tsx
+```
+
+默认测试使用 Node 或 jsdom 环境，并 mock 外部音乐服务。
 
 ---
