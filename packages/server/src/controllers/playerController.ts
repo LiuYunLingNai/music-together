@@ -111,14 +111,19 @@ export function registerPlayerController(io: TypedServer, socket: TypedSocket) {
     try {
       const parsed = playerSyncSchema.safeParse(raw)
       if (!parsed.success) return
-      const { currentTime } = parsed.data
-
       const mapping = roomRepo.getSocketMapping(socket.id)
       if (!mapping) return
       const room = roomRepo.get(mapping.roomId)
-      if (!room) return
-      // Only accept reports from the conductor
-      if (room.hostId !== mapping.userId) return
+      if (!room?.currentTrack || room.pendingPlayback) return
+      // Only the elected conductor socket may write playback progress. A user
+      // can have multiple tabs, but only the most recently elected socket owns
+      // the authoritative clock.
+      if (room.hostId !== mapping.userId || room.conductorSocketId !== socket.id) return
+
+      if (parsed.data.revision !== room.playState.revision || parsed.data.trackId !== room.currentTrack.id) return
+
+      const duration = room.currentTrack.duration
+      const currentTime = duration > 0 ? Math.min(parsed.data.currentTime, duration) : parsed.data.currentTime
 
       // Reject stale reports from a sleeping conductor: if the reported position is
       // far behind the server's estimate, the conductor likely just woke from sleep

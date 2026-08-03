@@ -12,8 +12,15 @@ export function toPublicRoomState(data: RoomData): RoomState {
     audioQuality: data.audioQuality,
     users: data.users,
     queue: data.queue,
-    currentTrack: data.currentTrack,
-    playState: data.playState,
+    currentTrack: data.pendingPlayback ? data.pendingPlayback.track : data.currentTrack,
+    playState: data.pendingPlayback
+      ? {
+          isPlaying: data.pendingPlayback.playState.isPlaying,
+          currentTime: data.pendingPlayback.playState.currentTime,
+          serverTimestamp: data.pendingPlayback.playState.serverTimestamp,
+          revision: data.pendingPlayback.playState.revision,
+        }
+      : data.playState,
     playMode: data.playMode,
   }
 }

@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 
-import { BackgroundRender } from '@applemusic-like-lyrics/react'
+import { BackgroundRender, MeshGradientRenderer, PixiRenderer } from '@applemusic-like-lyrics/react'
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react'
 import { useCallback, useMemo, useState } from 'react'
 import { VoteBanner } from '../Vote/VoteBanner'
@@ -69,6 +69,12 @@ export function AudioPlayer({
 }: AudioPlayerProps) {
   const currentTrack = usePlayerStore((s) => s.currentTrack)
   const { activeVote, castVote, startVote } = useVote()
+  const isPlaying = usePlayerStore((s) => s.isPlaying)
+  const hasLyrics = usePlayerStore((s) => Boolean(s.ttmlLines?.length || s.lyric))
+  const lowFreqVolume = usePlayerStore((s) => s.lowFreqVolume)
+  const bgRenderer = useSettingsStore((s) => s.bgRenderer)
+  const bgStaticMode = useSettingsStore((s) => s.bgStaticMode)
+  const bgReactToLowFreq = useSettingsStore((s) => s.bgReactToLowFreq)
   const bgFps = useSettingsStore((s) => s.bgFps)
   const bgFlowSpeed = useSettingsStore((s) => s.bgFlowSpeed)
   const bgRenderScale = useSettingsStore((s) => s.bgRenderScale)
@@ -114,7 +120,11 @@ export function AudioPlayer({
         <div className="pointer-events-none absolute inset-0 z-0 opacity-80 saturate-[1.3]">
           <BackgroundRender
             album={proxiedCover}
-            playing
+            renderer={bgRenderer === 'mesh' ? MeshGradientRenderer : PixiRenderer}
+            playing={isPlaying}
+            hasLyric={hasLyrics}
+            lowFreqVolume={bgReactToLowFreq ? lowFreqVolume : 1}
+            staticMode={bgStaticMode}
             fps={bgFps}
             flowSpeed={bgFlowSpeed}
             renderScale={bgRenderScale}

@@ -10,6 +10,8 @@ import {
   MAX_LOAD_COMPENSATION_S,
 } from '@/lib/constants'
 import { toast } from 'sonner'
+import { lyricPlayerBridge } from '@/lib/lyricPlayerBridge'
+import { registerActivePlaybackStop } from '@/lib/audioPlaybackLifecycle'
 
 /** Max wait (ms) for Howler `unlock` event before giving up and skipping */
 const PLAY_ERROR_TIMEOUT_MS = 3000
@@ -34,6 +36,11 @@ export function useHowl(onTrackEnd: () => void) {
   const stalledRef = useRef<{ lastSeek: number; since: number }>({ lastSeek: -1, since: 0 })
   const trackTitleRef = useRef<string>('')
   const retryRef = useRef(false)
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const frequencyDataRef = useRef<Uint8Array<ArrayBuffer> | null>(null)
+  const lowFreqUpdateRef = useRef(0)
+  const desiredPlaybackRef = useRef<{ howl: Howl; autoPlay: boolean } | null>(null)
 
   // Use selectors for the one reactive value we need (volume sync effect)
   const volume = usePlayerStore((s) => s.volume)
@@ -45,10 +52,24 @@ export function useHowl(onTrackEnd: () => void) {
     const update = () => {
       if (howlRef.current && howlRef.current.playing()) {
         const now = performance.now()
+        const seekVal = howlRef.current.seek() as number
+        lyricPlayerBridge.setCurrentTime(seekVal)
+
         if (now - lastTimeUpdateRef.current >= CURRENT_TIME_THROTTLE_MS) {
           lastTimeUpdateRef.current = now
-          const seekVal = howlRef.current.seek() as number
           usePlayerStore.getState().setCurrentTime(seekVal)
+
+          if (analyserRef.current && frequencyDataRef.current && now - lowFreqUpdateRef.current >= 100) {
+            lowFreqUpdateRef.current = now
+            analyserRef.current.getByteFrequencyData(frequencyDataRef.current)
+            const binSize = analyserRef.current.context.sampleRate / analyserRef.current.fftSize
+            const startBin = Math.max(0, Math.floor(80 / binSize))
+            const endBin = Math.min(frequencyDataRef.current.length - 1, Math.ceil(120 / binSize))
+            let total = 0
+            for (let bin = startBin; bin <= endBin; bin++) total += frequencyDataRef.current[bin]
+            const sampleCount = Math.max(1, endBin - startBin + 1)
+            usePlayerStore.getState().setLowFreqVolume(total / sampleCount / 255)
+          }
 
           // Stalled detection: if currentTime hasn't moved for STALLED_TIMEOUT_MS
           // while playing() is true, the stream likely broke mid-playback.
@@ -103,6 +124,12 @@ export function useHowl(onTrackEnd: () => void) {
 
       syncReadyRef.current = false
       soundIdRef.current = undefined
+      analyserRef.current?.disconnect()
+      void audioContextRef.current?.close()
+      analyserRef.current = null
+      audioContextRef.current = null
+      frequencyDataRef.current = null
+      usePlayerStore.getState().setLowFreqVolume(1)
       trackTitleRef.current = track.title
       retryRef.current = false
 
@@ -111,6 +138,7 @@ export function useHowl(onTrackEnd: () => void) {
       const loadStartTime = Date.now()
       const currentVolume = usePlayerStore.getState().volume
 
+      const desiredPlayback = { howl: null as unknown as Howl, autoPlay }
       const howl = new Howl({
         src: [track.streamUrl],
         html5: true,
@@ -122,7 +150,39 @@ export function useHowl(onTrackEnd: () => void) {
           if (Number.isFinite(d) && d > 0) {
             usePlayerStore.getState().setDuration(d)
           }
-          if (autoPlay) {
+          // MediaElementAudioSource 会将未提供 CORS 许可的跨域音频强制静音。
+          // 因此只对同源流启用分析器；第三方 CDN 音频保持 Howler 原始播放链路。
+          const isSameOriginStream = (() => {
+            try {
+              return new URL(track.streamUrl!, window.location.href).origin === window.location.origin
+            } catch {
+              return false
+            }
+          })()
+
+          if (isSameOriginStream) {
+            const sound = (howl as unknown as { _sounds?: Array<{ _node?: HTMLAudioElement }> })._sounds?.[0]
+            const audioElement = sound?._node
+            if (audioElement && typeof AudioContext !== 'undefined') {
+              try {
+                const context = new AudioContext()
+                const analyser = context.createAnalyser()
+                analyser.fftSize = 2048
+                analyser.smoothingTimeConstant = 0.8
+                const source = context.createMediaElementSource(audioElement)
+                source.connect(analyser)
+                analyser.connect(context.destination)
+                analyserRef.current = analyser
+                audioContextRef.current = context
+                frequencyDataRef.current = new Uint8Array(analyser.frequencyBinCount)
+              } catch {
+                // 分析器不可用时不影响播放，背景使用 AMLL 默认低频值。
+              }
+            }
+          }
+
+          if (desiredPlaybackRef.current?.howl !== howl) return
+          if (desiredPlaybackRef.current.autoPlay) {
             if (seekTo && seekTo > 0) {
               // Update store immediately so AMLL lyrics jump to correct position
               usePlayerStore.getState().setCurrentTime(seekTo)
@@ -209,11 +269,37 @@ export function useHowl(onTrackEnd: () => void) {
         },
       })
 
+      desiredPlayback.howl = howl
+      desiredPlaybackRef.current = desiredPlayback
       howlRef.current = howl
       usePlayerStore.getState().setCurrentTrack(track)
     },
     [onTrackEnd, startTimeUpdate, stopTimeUpdate],
   )
+
+  const setDesiredPlayback = useCallback((shouldPlay: boolean) => {
+    if (desiredPlaybackRef.current) desiredPlaybackRef.current.autoPlay = shouldPlay
+  }, [])
+
+  const stopAndUnload = useCallback(() => {
+    if (unmuteTimerRef.current) clearTimeout(unmuteTimerRef.current)
+    unmuteTimerRef.current = null
+    if (playErrorTimerRef.current) clearTimeout(playErrorTimerRef.current)
+    playErrorTimerRef.current = null
+    desiredPlaybackRef.current = null
+    soundIdRef.current = undefined
+    if (howlRef.current) {
+      try {
+        howlRef.current.unload()
+      } catch {
+        /* ignore */
+      }
+      howlRef.current = null
+    }
+    stopTimeUpdate()
+  }, [stopTimeUpdate])
+
+  useEffect(() => registerActivePlaybackStop(stopAndUnload), [stopAndUnload])
 
   // Volume sync
   useEffect(() => {
@@ -225,25 +311,15 @@ export function useHowl(onTrackEnd: () => void) {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (unmuteTimerRef.current) {
-        clearTimeout(unmuteTimerRef.current)
-        unmuteTimerRef.current = null
-      }
-      if (playErrorTimerRef.current) {
-        clearTimeout(playErrorTimerRef.current)
-        playErrorTimerRef.current = null
-      }
-      if (howlRef.current) {
-        try {
-          howlRef.current.unload()
-        } catch {
-          /* ignore */
-        }
-        howlRef.current = null
-      }
-      stopTimeUpdate()
+      stopAndUnload()
+      analyserRef.current?.disconnect()
+      void audioContextRef.current?.close()
+      analyserRef.current = null
+      audioContextRef.current = null
+      frequencyDataRef.current = null
+      usePlayerStore.getState().setLowFreqVolume(1)
     }
-  }, [stopTimeUpdate])
+  }, [stopAndUnload])
 
-  return { howlRef, soundIdRef, loadTrack }
+  return { howlRef, soundIdRef, loadTrack, setDesiredPlayback, stopAndUnload }
 }

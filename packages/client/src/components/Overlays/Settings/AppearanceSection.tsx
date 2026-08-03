@@ -1,6 +1,7 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Slider } from '@/components/ui/slider'
+import { Switch } from '@/components/ui/switch'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { SettingRow } from './SettingRow'
 
@@ -13,6 +14,38 @@ export function AppearanceSection() {
       <div>
         <h3 className="text-base font-semibold">背景渲染</h3>
         <Separator className="mt-2 mb-4" />
+
+        <SettingRow
+          label="背景样式"
+          description="Pixi 流体或新版网格渐变渲染"
+          onReset={s.bgRenderer !== s.bgRendererDefault ? s.resetBgRenderer : undefined}
+        >
+          <Select value={s.bgRenderer} onValueChange={(v) => s.setBgRenderer(v as 'pixi' | 'mesh')}>
+            <SelectTrigger className="w-28">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="pixi">流体背景</SelectItem>
+              <SelectItem value="mesh">网格渐变</SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingRow>
+
+        <SettingRow
+          label="静态模式"
+          description="更换封面后停止背景动画，显著降低 GPU 占用"
+          onReset={s.bgStaticMode !== s.bgStaticModeDefault ? s.resetBgStaticMode : undefined}
+        >
+          <Switch checked={s.bgStaticMode} onCheckedChange={s.setBgStaticMode} />
+        </SettingRow>
+
+        <SettingRow
+          label="低频律动"
+          description="分析同源音频的 80–120Hz 低频；跨域音乐源会自动回退，避免 CORS 静音"
+          onReset={s.bgReactToLowFreq !== s.bgReactToLowFreqDefault ? s.resetBgReactToLowFreq : undefined}
+        >
+          <Switch checked={s.bgReactToLowFreq} onCheckedChange={s.setBgReactToLowFreq} />
+        </SettingRow>
 
         <SettingRow
           label="帧率"

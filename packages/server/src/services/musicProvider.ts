@@ -1,12 +1,11 @@
 import Meting from '@meting/core'
-import { get as kugouLrcGet, Format } from '@s4p/kugou-lrc'
-import type { KrcInfo } from '@s4p/kugou-lrc'
 import type { MusicSource, Track } from '@music-together/shared'
 import { LRUCache } from 'lru-cache'
 import { nanoid } from 'nanoid'
 import pLimit from 'p-limit'
 import ncmApi from '@neteasecloudmusicapienhanced/api'
 import * as kugouAuth from './kugouAuthService.js'
+import { getKrcByHash, type KrcInfo } from './kugouLyricService.js'
 import * as tencentAuth from './tencentAuthService.js'
 import { logger } from '../utils/logger.js'
 
@@ -77,23 +76,17 @@ interface NcmApiResponse {
 }
 
 /** Tencent 新版搜索 API 响应结构 */
-interface TencentSearchResponse {
-  code: number
-  'music.search.SearchCgiService.DoSearchForQQMusicDesktop': {
-    code: number
-    data: {
-      body: {
-        song: {
-          list: TencentSearchSong[]
-        }
-      }
-      meta: {
-        curpage: number
-        perpage: number
-        sum: number
-        nextpage: number
-      }
+interface TencentSearchData {
+  body: {
+    song: {
+      list: TencentSearchSong[]
     }
+  }
+  meta: {
+    curpage: number
+    perpage: number
+    sum: number
+    nextpage: number
   }
 }
 
@@ -131,16 +124,27 @@ interface TencentSearchSong {
 /** External API timeout (ms) */
 const API_TIMEOUT_MS = 15_000
 
-/** Race a promise against a timeout. Returns null on timeout. */
-async function withTimeout<T>(promise: Promise<T>, ms = API_TIMEOUT_MS): Promise<T | null> {
+/** Run fetch factories with an abort signal; legacy SDK promises still use a bounded wait. */
+async function withTimeout<T>(work: Promise<T> | ((signal: AbortSignal) => Promise<T>), ms = API_TIMEOUT_MS): Promise<T | null> {
+  if (typeof work === 'function') {
+    try {
+      return await work(AbortSignal.timeout(ms))
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'TimeoutError') return null
+      throw error
+    }
+  }
+
   let timer: ReturnType<typeof setTimeout> | undefined
-  const timeout = new Promise<null>((resolve) => {
-    timer = setTimeout(() => resolve(null), ms)
-  })
   try {
-    return await Promise.race([promise, timeout])
+    return await Promise.race([
+      work,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), ms)
+      }),
+    ])
   } finally {
-    if (timer !== undefined) clearTimeout(timer)
+    if (timer) clearTimeout(timer)
   }
 }
 
@@ -289,16 +293,14 @@ class MusicProvider {
     if (!keyword.trim()) return []
 
     try {
-      const url = 'https://u.y.qq.com/cgi-bin/musicu.fcg'
-      const payload = {
-        comm: {
-          ct: '6',
-          cv: '80600',
-          tmeAppID: 'qqmusic',
-        },
-        'music.search.SearchCgiService.DoSearchForQQMusicDesktop': {
+      const response = await withTimeout(
+        tencentAuth.requestSignedApi<TencentSearchData>({
           module: 'music.search.SearchCgiService',
           method: 'DoSearchForQQMusicDesktop',
+          comm: {
+            ct: 19,
+            cv: 2201,
+          },
           param: {
             num_per_page: limit,
             page_num: page,
@@ -306,19 +308,7 @@ class MusicProvider {
             query: keyword,
             grp: 1,
           },
-        },
-      }
-
-      const response = await withTimeout(
-        fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Referer: 'https://y.qq.com',
-            'User-Agent': 'QQ%E9%9F%B3%E4%B9%90/73222',
-          },
-          body: JSON.stringify(payload),
-        }).then((res) => res.json() as Promise<TencentSearchResponse>),
+        }),
       )
 
       // Fail Fast: timeout or null response
@@ -327,14 +317,11 @@ class MusicProvider {
         return []
       }
 
-      const result = response['music.search.SearchCgiService.DoSearchForQQMusicDesktop']
-      // Fail Fast: invalid response code or missing data
-      if (result?.code !== 0 || !result?.data?.body?.song?.list) {
-        logger.warn(`Tencent search failed: code ${result?.code}`)
+      const songList = response.body?.song?.list
+      if (!Array.isArray(songList)) {
+        logger.warn(`Tencent search returned an invalid song list for "${keyword}"`)
         return []
       }
-
-      const songList = result.data.body.song.list
 
       // Transform to Track format (Atomic Predictability: pure transformation)
       const tracks: Track[] = songList.map((song) => ({
@@ -387,7 +374,7 @@ class MusicProvider {
           },
         }
 
-        const response = await withTimeout(
+        const response = await withTimeout((signal) =>
           fetch(url, {
             method: 'POST',
             headers: {
@@ -396,7 +383,8 @@ class MusicProvider {
               'User-Agent': 'QQ%E9%9F%B3%E4%B9%90/73222',
             },
             body: JSON.stringify(payload),
-          }).then((res) => res.json())
+            signal,
+          }).then((res) => res.json()),
         )
 
         if (!response) return []
@@ -416,7 +404,7 @@ class MusicProvider {
 
       if (source === 'kugou') {
         const url = `http://mobilecdn.kugou.com/api/v3/search/album?api_ver=1&area_code=1&correct=1&pagesize=${limit}&plat=2&tag=1&sver=5&showtype=10&page=${page}&keyword=${encodeURIComponent(keyword)}&version=8990`
-        const response = await withTimeout(fetch(url).then(res => res.json()))
+        const response = await withTimeout((signal) => fetch(url, { signal }).then(res => res.json()))
         
         if (!response || response.errcode !== 0 || !response.data?.info) return []
         
@@ -481,7 +469,7 @@ class MusicProvider {
           },
         }
 
-        const response = await withTimeout(
+        const response = await withTimeout((signal) =>
           fetch(url, {
             method: 'POST',
             headers: {
@@ -490,7 +478,8 @@ class MusicProvider {
               'User-Agent': 'QQ%E9%9F%B3%E4%B9%90/73222',
             },
             body: JSON.stringify(payload),
-          }).then((res) => res.json())
+            signal,
+          }).then((res) => res.json()),
         )
 
         if (!response) return []
@@ -511,7 +500,7 @@ class MusicProvider {
 
       if (source === 'kugou') {
         const url = `http://mobilecdn.kugou.com/api/v3/search/special?api_ver=1&area_code=1&correct=1&pagesize=${limit}&plat=2&tag=1&sver=5&showtype=10&page=${page}&keyword=${encodeURIComponent(keyword)}&version=8990`
-        const response = await withTimeout(fetch(url).then(res => res.json()))
+        const response = await withTimeout((signal) => fetch(url, { signal }).then(res => res.json()))
         
         if (!response || response.errcode !== 0 || !response.data?.info) return []
         
@@ -747,7 +736,7 @@ class MusicProvider {
         }
         // 尝试获取 KRC 逐字歌词
         try {
-          const krcInfo = await withTimeout(kugouLrcGet({ hash: lyricId, fmt: Format.krc }))
+          const krcInfo = await withTimeout(getKrcByHash(lyricId))
           if (krcInfo?.items?.length) {
             result.wordByWord = krcToAmllLines(krcInfo)
             logger.info(`KRC lyric found for kugou:${lyricId}`)

@@ -14,6 +14,7 @@ interface PlayerStore {
   ttmlLines: AMLLLyricLine[] | null
   lyricLoading: boolean
   syncDrift: number
+  lowFreqVolume: number
 
   setCurrentTrack: (track: Track | null) => void
   setIsPlaying: (playing: boolean) => void
@@ -24,6 +25,7 @@ interface PlayerStore {
   setTtmlLines: (lines: AMLLLyricLine[] | null) => void
   setLyricLoading: (loading: boolean) => void
   setSyncDrift: (drift: number) => void
+  setLowFreqVolume: (volume: number) => void
   reset: () => void
 }
 
@@ -38,6 +40,7 @@ export const usePlayerStore = create<PlayerStore>((set) => ({
   ttmlLines: null,
   lyricLoading: false,
   syncDrift: 0,
+  lowFreqVolume: 1,
 
   setCurrentTrack: (track) => set({ currentTrack: track }),
   setIsPlaying: (playing) => set({ isPlaying: playing }),
@@ -51,6 +54,7 @@ export const usePlayerStore = create<PlayerStore>((set) => ({
   setTtmlLines: (lines) => set({ ttmlLines: lines }),
   setLyricLoading: (loading) => set({ lyricLoading: loading }),
   setSyncDrift: (drift) => set({ syncDrift: drift }),
+  setLowFreqVolume: (lowFreqVolume) => set({ lowFreqVolume }),
   reset: () =>
     set({
       currentTrack: null,
@@ -62,5 +66,6 @@ export const usePlayerStore = create<PlayerStore>((set) => ({
       ttmlLines: null,
       lyricLoading: false,
       syncDrift: 0,
+      lowFreqVolume: 1,
     }),
 }))

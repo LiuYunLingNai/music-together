@@ -7,6 +7,7 @@ import {
   setRoleSchema,
 } from '@music-together/shared'
 import type { TypedServer, TypedSocket } from '../middleware/types.js'
+import type { RoomData } from '../repositories/types.js'
 import { createWithOwnerOnly } from '../middleware/withControl.js'
 import { cleanupSocketRateLimit } from '../middleware/socketRateLimiter.js'
 import { roomRepo } from '../repositories/roomRepository.js'
@@ -15,7 +16,33 @@ import * as playerService from '../services/playerService.js'
 import { issueRejoinTicket, revokeRejoinTickets } from '../services/rejoinTicketService.js'
 import * as roomService from '../services/roomService.js'
 import * as voteService from '../services/voteService.js'
+import { executeVoteAction } from '../services/voteActionService.js'
 import { logger } from '../utils/logger.js'
+
+async function reconcileAndBroadcastVote(io: TypedServer, roomId: string, room: RoomData): Promise<void> {
+  const result = voteService.reconcileVote(
+    roomId,
+    room.users.map((user) => user.id),
+    room.hostId,
+  )
+  if (!result) return
+
+  if (!result.decided) {
+    io.to(roomId).emit(EVENTS.VOTE_STARTED, voteService.toVoteState(result.vote))
+    return
+  }
+
+  const claimedVote = voteService.claimVote(roomId, result.vote.id)
+  if (!claimedVote) return
+  const executed = result.passed
+    ? await executeVoteAction(io, roomId, claimedVote.action, claimedVote.payload)
+    : false
+  io.to(roomId).emit(EVENTS.VOTE_RESULT, {
+    passed: result.passed && executed,
+    action: claimedVote.action,
+    reason: result.passed && !executed ? 'action_failed' : result.reason,
+  })
+}
 
 export function registerRoomController(io: TypedServer, socket: TypedSocket) {
   const withOwnerOnly = createWithOwnerOnly(io)
@@ -70,7 +97,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
   })
 
   // ---- Join room (含密码校验) ----
-  socket.on(EVENTS.ROOM_JOIN, (raw) => {
+  socket.on(EVENTS.ROOM_JOIN, async (raw) => {
     try {
       const parsed = roomJoinSchema.safeParse(raw)
       if (!parsed.success) {
@@ -137,11 +164,8 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         logger.error('syncPlaybackToSocket failed', err, { roomId })
       })
 
-      // Send active vote state if one is in progress
-      const activeVote = voteService.getActiveVote(roomId)
-      if (activeVote) {
-        socket.emit(EVENTS.VOTE_STARTED, voteService.toVoteState(activeVote))
-      }
+      // Reconcile an active vote with the current online membership and host.
+      await reconcileAndBroadcastVote(io, roomId, updatedRoom)
 
       // Notify others (skip for rejoin — they already know the user is in the room)
       if (!validation.isRejoin) {
@@ -215,7 +239,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
   // ---- Set user role (仅房主) ----
   socket.on(
     EVENTS.ROOM_SET_ROLE,
-    withOwnerOnly((ctx, raw) => {
+    withOwnerOnly(async (ctx, raw) => {
       const parsed = setRoleSchema.safeParse(raw)
       if (!parsed.success) {
         ctx.socket.emit(EVENTS.ROOM_ERROR, {
@@ -238,6 +262,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         // (including temporary admins) only receive the public state.
         ctx.socket.emit(EVENTS.ROOM_STATE, roomService.toPublicRoomStateForOwner(ctx.room))
         ctx.socket.to(ctx.roomId).emit(EVENTS.ROOM_STATE, roomService.toPublicRoomState(ctx.room))
+        await reconcileAndBroadcastVote(io, ctx.roomId, ctx.room)
       }
       logger.info(`Role changed: ${userId} -> ${role} in room ${ctx.roomId}`, { roomId: ctx.roomId })
     }),
@@ -271,7 +296,7 @@ function handleLeave(io: TypedServer, socket: TypedSocket, reason?: string, revo
   const result = roomService.leaveRoom(socket.id, io)
   if (!result) return
 
-  const { roomId, user, room, hostChanged, roleChanged, voteUpdated, staleSocketOnly } = result
+  const { roomId, user, room, hostChanged, roleChanged, staleSocketOnly } = result
   if (revokeTicket) {
     revokeRejoinTickets(roomId, user.id)
   }
@@ -303,12 +328,11 @@ function handleLeave(io: TypedServer, socket: TypedSocket, reason?: string, revo
     }
   }
 
-  // Broadcast updated vote state after threshold recalculation
-  if (voteUpdated) {
-    const activeVote = voteService.getActiveVote(roomId)
-    if (activeVote) {
-      io.to(roomId).emit(EVENTS.VOTE_STARTED, voteService.toVoteState(activeVote))
-    }
+  // Membership and host changes can immediately pass or reject an active vote.
+  if (room && room.users.length > 0) {
+    void reconcileAndBroadcastVote(io, roomId, room).catch((err) => {
+      logger.error('Vote reconciliation after leave failed', err, { roomId })
+    })
   }
 
   // 更新大厅房间列表

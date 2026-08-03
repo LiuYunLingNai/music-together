@@ -85,6 +85,8 @@ export interface PlayState {
   isPlaying: boolean
   currentTime: number
   serverTimestamp: number
+  /** Monotonic room playback generation; rejects reports from an older track/action. */
+  revision: number
 }
 
 /**

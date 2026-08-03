@@ -3,6 +3,22 @@ import type { Playlist } from '@music-together/shared'
 import type { GetUserInfoResult } from './authProvider.js'
 import { logger } from '../utils/logger.js'
 
+const NETEASE_TIMEOUT_MS = 15_000
+
+async function withTimeout<T>(promise: Promise<T>): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), NETEASE_TIMEOUT_MS)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 /**
  * 网易云音乐认证服务
  * 封装 @neteasecloudmusicapienhanced/api 实现 QR 登录和 Cookie 验证
@@ -18,14 +34,14 @@ import { logger } from '../utils/logger.js'
  */
 export async function generateQrCode(): Promise<{ key: string; qrimg: string } | null> {
   try {
-    const keyRes = await ncmApi.login_qr_key({ timestamp: Date.now() })
+    const keyRes = await withTimeout(ncmApi.login_qr_key({ timestamp: Date.now() }))
     const key = keyRes?.body?.data?.unikey
     if (!key) {
       logger.error('Netease QR: failed to get unikey', keyRes?.body)
       return null
     }
 
-    const qrRes = await ncmApi.login_qr_create({ key, qrimg: true, timestamp: Date.now() })
+    const qrRes = await withTimeout(ncmApi.login_qr_create({ key, qrimg: true, timestamp: Date.now() }))
     const qrimg = qrRes?.body?.data?.qrimg
     if (!qrimg) {
       logger.error('Netease QR: failed to generate QR image', qrRes?.body)
@@ -50,7 +66,7 @@ export async function checkQrStatus(key: string): Promise<{
   cookie?: string
 }> {
   try {
-    const res = await ncmApi.login_qr_check({ key, timestamp: Date.now() })
+    const res = await withTimeout(ncmApi.login_qr_check({ key, timestamp: Date.now() }))
     const code = res?.body?.code ?? 800
     const cookie = res?.body?.cookie
 
@@ -82,7 +98,7 @@ export async function checkQrStatus(key: string): Promise<{
  */
 export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
   try {
-    const res = await ncmApi.login_status({ cookie, timestamp: Date.now() })
+    const res = await withTimeout(ncmApi.login_status({ cookie, timestamp: Date.now() }))
     const profile = res?.body?.data?.profile
 
     if (!profile) {
@@ -124,13 +140,13 @@ export async function getUserPlaylists(cookie: string): Promise<Playlist[]> {
 
     const userInfo = result.data
 
-    const res = await ncmApi.user_playlist({
+    const res = await withTimeout(ncmApi.user_playlist({
       uid: userInfo.userId,
       limit: 50,
       offset: 0,
       cookie,
       timestamp: Date.now(),
-    })
+    }))
 
     const playlists = res?.body?.playlist
     if (!Array.isArray(playlists)) {

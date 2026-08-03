@@ -48,6 +48,28 @@ export function removeTrack(roomId: string, trackId: string): void {
   }
 }
 
+/** Resolve the track that should follow a removed current item, using the queue before removal. */
+export function getSuccessorAfterRemoval(roomId: string, trackId: string, playMode: PlayMode): Track | null {
+  const room = roomRepo.get(roomId)
+  if (!room || room.queue.length === 0) return null
+  const removedIndex = room.queue.findIndex((track) => track.id === trackId)
+  if (removedIndex < 0) return null
+
+  const remaining = room.queue.filter((track) => track.id !== trackId)
+  if (remaining.length === 0) return null
+
+  switch (playMode) {
+    case 'shuffle':
+      return remaining[Math.floor(Math.random() * remaining.length)] ?? null
+    case 'loop-all':
+    case 'loop-one':
+      return remaining[removedIndex] ?? remaining[0]
+    case 'sequential':
+    default:
+      return remaining[removedIndex] ?? null
+  }
+}
+
 export function clearQueue(roomId: string): void {
   const room = roomRepo.get(roomId)
   if (room) {

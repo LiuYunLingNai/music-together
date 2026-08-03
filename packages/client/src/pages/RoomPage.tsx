@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router'
 import { EVENTS, ERROR_CODE } from '@music-together/shared'
 import { motion } from 'motion/react'
 import { toast } from 'sonner'

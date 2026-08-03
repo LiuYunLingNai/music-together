@@ -55,7 +55,7 @@ export const PlayerControls = memo(function PlayerControls({
   const canPlay = ability.can('play', 'Player')
   const canSetMode = ability.can('set-mode', 'Player')
   const canVote = ability.can('vote', 'Player')
-  const [skipCooldown, setSkipCooldown] = useState(false)
+  const [skipCooldown, setSkipCooldown] = useState<'next' | 'prev' | null>(null)
   const [playCooldown, setPlayCooldown] = useState(false)
   const [isSeeking, setIsSeeking] = useState(false)
   const [seekTime, setSeekTime] = useState(0)
@@ -89,21 +89,22 @@ export const PlayerControls = memo(function PlayerControls({
   }, [])
 
   const handleSkip = (action: () => void, voteAction: 'next' | 'prev') => {
-    if (skipCooldown) return
+    if (skipCooldown === voteAction) return
     if (ability.can(voteAction, 'Player')) {
       action()
     } else if (canVote) {
       onStartVote(voteAction)
     }
-    setSkipCooldown(true)
+    setSkipCooldown(voteAction)
     if (cooldownTimer.current) clearTimeout(cooldownTimer.current)
-    cooldownTimer.current = setTimeout(() => setSkipCooldown(false), TIMING.PLAYER_NEXT_DEBOUNCE_MS)
+    cooldownTimer.current = setTimeout(() => setSkipCooldown(null), TIMING.PLAYER_NEXT_DEBOUNCE_MS)
   }
 
   const handlePlayPause = () => {
     if (playCooldown) return
     if (canPlay) {
-      isPlaying ? onPause() : onPlay()
+      if (isPlaying) onPause()
+      else onPlay()
     } else if (canVote) {
       onStartVote(isPlaying ? 'pause' : 'resume')
     }
@@ -197,7 +198,7 @@ export const PlayerControls = memo(function PlayerControls({
                     variant="ghost"
                     size="icon"
                     className="h-9 w-9 text-white/70 hover:bg-white/10"
-                    disabled={disabled || skipCooldown}
+                    disabled={disabled || skipCooldown === 'prev'}
                     onClick={() => handleSkip(onPrev, 'prev')}
                     aria-label="上一首"
                   >
@@ -237,7 +238,7 @@ export const PlayerControls = memo(function PlayerControls({
                     variant="ghost"
                     size="icon"
                     className="h-9 w-9 text-white/70 hover:bg-white/10"
-                    disabled={disabled || skipCooldown}
+                    disabled={disabled || skipCooldown === 'next'}
                     onClick={() => handleSkip(onNext, 'next')}
                     aria-label="下一首"
                   >

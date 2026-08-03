@@ -65,8 +65,10 @@
 
 ### 环境要求
 
-- Node.js >= 22
+- Node.js >= 22.22.0
 - pnpm >= 10
+
+生产部署必须设置至少 32 字符的随机 `IDENTITY_SECRET`；本地开发可使用默认开发配置。
 
 ### 安装与开发
 
@@ -75,6 +77,15 @@ git clone https://github.com/Yueby/music-together.git
 cd music-together
 pnpm install
 pnpm dev
+```
+
+提交代码前可运行：
+
+```bash
+pnpm test
+pnpm --filter @music-together/client typecheck
+pnpm --filter @music-together/client lint
+pnpm build
 ```
 
 前端: http://localhost:5173 | 后端: http://localhost:3001
@@ -86,6 +97,7 @@ Docker 单镜像部署：
 ```bash
 docker run -d --name music-together --restart unless-stopped \
   -p 3001:3001 \
+  -e IDENTITY_SECRET='<至少32字符的随机密钥>' \
   ghcr.io/yueby/music-together:latest
 ```
 
@@ -98,6 +110,7 @@ docker run -d --name music-together --restart unless-stopped \
 ```bash
 docker run -d --name music-together --restart unless-stopped \
   -p 3001:3001 \
+  -e IDENTITY_SECRET='<至少32字符的随机密钥>' \
   -e CLIENT_URL=https://music.example.com \
   ghcr.io/yueby/music-together:latest
 ```

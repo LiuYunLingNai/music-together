@@ -1,6 +1,8 @@
 import { getServerTime, isCalibrated } from '@/lib/clockSync'
 import { PLAYER_PLAY_DEDUP_MS } from '@/lib/constants'
 import { storage } from '@/lib/storage'
+import { lyricPlayerBridge } from '@/lib/lyricPlayerBridge'
+import { registerPendingPlayCancel } from '@/lib/scheduledPlayback'
 import { useSocketContext } from '@/providers/SocketProvider'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
@@ -28,7 +30,7 @@ export function usePlayer() {
   // Set by recovery effect to signal onPlayerPlay that this track was already
   // loaded by reconnect recovery — the subsequent PLAYER_PLAY from
   // syncPlaybackToSocket should be skipped to avoid a double-load.
-  const recoveredTrackIdRef = useRef<string | null>(null)
+  const recoveredTrackIdRef = useRef<{ trackId: string; autoPlay: boolean } | null>(null)
 
   const next = useCallback(() => socket.emit(EVENTS.PLAYER_NEXT), [socket])
 
@@ -43,11 +45,11 @@ export function usePlayer() {
     }
   }, [socket])
 
-  const { howlRef, soundIdRef, loadTrack } = useHowl(autoNext)
+  const { howlRef, soundIdRef, loadTrack, setDesiredPlayback } = useHowl(autoNext)
   const { fetchLyric } = useLyric()
 
   // Connect sync (handles SEEK, PAUSE, RESUME + conductor reporting)
-  usePlayerSync(howlRef, soundIdRef)
+  usePlayerSync(howlRef, soundIdRef, setDesiredPlayback)
 
   // Reset dedup ref on disconnect so reconnect PLAYER_PLAY is never blocked
   useEffect(() => {
@@ -65,7 +67,19 @@ export function usePlayer() {
   const playTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
+    const unregister = registerPendingPlayCancel(() => {
+      if (playTimerRef.current) {
+        clearTimeout(playTimerRef.current)
+        playTimerRef.current = null
+      }
+    })
+    return unregister
+  }, [])
+
+  useEffect(() => {
     const onPlayerPlay = (data: { track: Track; playState: ScheduledPlayState }) => {
+      const currentRevision = useRoomStore.getState().room?.playState.revision ?? -1
+      if (data.playState.revision < currentRevision) return
       // Deduplicate: ignore if the same track with the same serverTimestamp
       // was requested within the dedup window.  Comparing serverTimestamp
       // ensures that a legitimate replay of the same track (e.g. loop mode)
@@ -83,7 +97,8 @@ export function usePlayer() {
       // differs (syncPlaybackToSocket computes a new scheduleTime) so the normal
       // dedup above doesn't catch it.  Skip the redundant load but update
       // roomStore with the authoritative scheduled playState.
-      if (recoveredTrackIdRef.current === data.track.id) {
+      if (recoveredTrackIdRef.current?.trackId === data.track.id) {
+        const recovery = recoveredTrackIdRef.current
         recoveredTrackIdRef.current = null
         loadingRef.current = { trackId: data.track.id, ts: now, serverTimestamp: data.playState.serverTimestamp }
         useRoomStore.getState().updateRoom({
@@ -92,8 +107,26 @@ export function usePlayer() {
             isPlaying: data.playState.isPlaying,
             currentTime: data.playState.currentTime,
             serverTimestamp: data.playState.serverTimestamp,
+            revision: data.playState.revision,
           },
         })
+        // Recovery may have preloaded this track paused. Apply the authoritative
+        // scheduled transition instead of discarding it solely by track ID.
+        const delay = Math.max(0, data.playState.serverTimeToExecute - (isCalibrated() ? getServerTime() : Date.now()))
+        if (playTimerRef.current) clearTimeout(playTimerRef.current)
+        playTimerRef.current = setTimeout(() => {
+          playTimerRef.current = null
+          if (!howlRef.current) return
+          howlRef.current.seek(data.playState.currentTime)
+          if (data.playState.isPlaying && !recovery.autoPlay) {
+            soundIdRef.current =
+              soundIdRef.current !== undefined
+                ? howlRef.current.play(soundIdRef.current)
+                : howlRef.current.play()
+          } else if (!data.playState.isPlaying && howlRef.current.playing()) {
+            howlRef.current.pause(soundIdRef.current)
+          }
+        }, delay)
         return
       }
       loadingRef.current = { trackId: data.track.id, ts: now, serverTimestamp: data.playState.serverTimestamp }
@@ -105,6 +138,7 @@ export function usePlayer() {
           isPlaying: data.playState.isPlaying,
           currentTime: data.playState.currentTime,
           serverTimestamp: data.playState.serverTimestamp,
+          revision: data.playState.revision,
         },
       })
 
@@ -159,7 +193,7 @@ export function usePlayer() {
         playTimerRef.current = null
       }
     }
-  }, [socket, loadTrack, fetchLyric])
+  }, [socket, loadTrack, fetchLyric, howlRef, soundIdRef])
 
   // Recovery: auto-sync player state from room state when desync is detected
   // (e.g. after HMR resets stores, or reconnection where PLAYER_PLAY was missed)
@@ -213,9 +247,10 @@ export function usePlayer() {
           playTimerRef.current = null
         }
         const ps = room.playState
-        const elapsed = ps.isPlaying ? (getServerTime() - ps.serverTimestamp) / 1000 : 0
-        recoveredTrackIdRef.current = roomTrack.id
-        loadTrack(roomTrack, ps.currentTime + Math.max(0, elapsed), ps.isPlaying)
+        const isFuturePlayback = ps.isPlaying && ps.serverTimestamp > getServerTime()
+        const elapsed = ps.isPlaying && !isFuturePlayback ? (getServerTime() - ps.serverTimestamp) / 1000 : 0
+        recoveredTrackIdRef.current = { trackId: roomTrack.id, autoPlay: ps.isPlaying && !isFuturePlayback }
+        loadTrack(roomTrack, ps.currentTime + Math.max(0, elapsed), ps.isPlaying && !isFuturePlayback)
         fetchLyric(roomTrack)
       }
     }
@@ -246,6 +281,7 @@ export function usePlayer() {
     (time: number) => {
       // Optimistic local update for the progress bar UI
       usePlayerStore.getState().setCurrentTime(time)
+      lyricPlayerBridge.seek(time)
       socket.emit(EVENTS.PLAYER_SEEK, { currentTime: time })
     },
     [socket],

@@ -13,7 +13,7 @@ export const roomCreateSchema = z.object({
 
 export const roomJoinSchema = z.object({
   roomId: z.string().min(1, '房间号不能为空'),
-  nickname: z.string().min(1, '昵称不能为空'),
+  nickname: z.string().min(1, '昵称不能为空').max(LIMITS.NICKNAME_MAX_LENGTH, '昵称过长'),
   password: z.string().max(LIMITS.ROOM_PASSWORD_MAX_LENGTH).optional(),
   rejoinToken: z.string().min(1).max(500).optional(),
 })
@@ -56,6 +56,8 @@ export const playerSeekSchema = z.object({
 export const playerSyncSchema = z.object({
   currentTime: z.number().finite().nonnegative(),
   hostServerTime: z.number().finite().positive().optional(),
+  revision: z.number().int().nonnegative(),
+  trackId: z.string().min(1).max(200),
 })
 
 export const playerSetModeSchema = z.object({
@@ -122,19 +124,19 @@ export const searchQuerySchema = z.object({
 
 export const urlQuerySchema = z.object({
   source: musicSourceSchema,
-  urlId: z.string().min(1),
-  bitrate: z.coerce.number().int().positive().default(320),
+  urlId: z.string().min(1).max(200),
+  bitrate: z.coerce.number().int().min(64).max(2000).default(320),
 })
 
 export const lyricQuerySchema = z.object({
   source: musicSourceSchema,
-  lyricId: z.string().min(1),
+  lyricId: z.string().min(1).max(200),
 })
 
 export const coverQuerySchema = z.object({
   source: musicSourceSchema,
-  picId: z.string().min(1),
-  size: z.coerce.number().int().positive().default(300),
+  picId: z.string().min(1).max(200),
+  size: z.coerce.number().int().min(16).max(2000).default(300),
 })
 
 export const playlistQuerySchema = z.object({
@@ -151,10 +153,17 @@ export const playlistQuerySchema = z.object({
 // Voting
 // ---------------------------------------------------------------------------
 
-export const voteStartSchema = z.object({
-  action: z.enum(['pause', 'resume', 'next', 'prev', 'set-mode', 'play-track', 'remove-track']),
-  payload: z.record(z.string(), z.unknown()).optional(),
+const voteWithoutPayloadSchema = z.object({
+  action: z.enum(['pause', 'resume', 'next', 'prev']),
+  payload: z.undefined().optional(),
 })
+
+export const voteStartSchema = z.discriminatedUnion('action', [
+  voteWithoutPayloadSchema,
+  z.object({ action: z.literal('set-mode'), payload: playerSetModeSchema }),
+  z.object({ action: z.literal('play-track'), payload: z.object({ trackId: z.string().min(1).max(200) }) }),
+  z.object({ action: z.literal('remove-track'), payload: z.object({ trackId: z.string().min(1).max(200) }) }),
+])
 
 export const voteCastSchema = z.object({
   approve: z.boolean(),

@@ -5,9 +5,8 @@ import type { RoomData } from '../repositories/types.js'
 import { roomRepo } from '../repositories/roomRepository.js'
 import { chatRepo } from '../repositories/chatRepository.js'
 import { scheduleDeletion, cancelDeletionTimer } from './roomLifecycleService.js'
-import { consumeRejoinTicket } from './rejoinTicketService.js'
+import { consumeRejoinTicket, revokeRejoinTickets } from './rejoinTicketService.js'
 import { estimateCurrentTime } from './syncService.js'
-import { updateVoteThreshold } from './voteService.js'
 import { logger } from '../utils/logger.js'
 import type { TypedServer } from '../middleware/types.js'
 
@@ -79,16 +78,26 @@ function reconcileRoomRoles(room: RoomData): boolean {
 }
 
 /**
- * 从在线用户中选出最高优先级的 conductor（播放主持）。
- * 优先级：owner > admin(含临时 admin) > member（按加入顺序）。
- * 若 conductor 变更且正在播放，刷新 playState 时间戳以确保
+ * 从在线用户中选出当前房主（同时承担播放同步 conductor 职责）。
+ * 优先级：owner > admin（含临时接管者）> member（按加入顺序）。
+ * 若当前房主变更且正在播放，刷新 playState 时间戳以确保
  * 新 conductor 的首次 report 不被 validateConductorReport 拒绝。
  */
-function electConductor(room: RoomData): boolean {
+function electConductor(room: RoomData, preferredSocketId?: string): boolean {
   const prev = room.hostId
   const candidate =
     room.users.find((u) => u.role === 'owner') ?? room.users.find((u) => u.role === 'admin') ?? room.users[0]
   room.hostId = candidate?.id ?? room.hostId
+
+  const preferredMapping = preferredSocketId ? roomRepo.getSocketMapping(preferredSocketId) : undefined
+  if (preferredMapping?.roomId === room.id && preferredMapping.userId === room.hostId) {
+    room.conductorSocketId = preferredSocketId!
+  } else {
+    const conductorMapping = room.conductorSocketId ? roomRepo.getSocketMapping(room.conductorSocketId) : undefined
+    if (conductorMapping?.roomId !== room.id || conductorMapping.userId !== room.hostId) {
+      room.conductorSocketId = roomRepo.getSocketIdForUser(room.id, room.hostId)
+    }
+  }
 
   if (room.hostId !== prev) {
     if (room.playState.isPlaying) {
@@ -96,6 +105,7 @@ function electConductor(room: RoomData): boolean {
         ...room.playState,
         currentTime: estimateCurrentTime(room.id),
         serverTimestamp: Date.now(),
+        revision: room.playState.revision + 1,
       }
     }
     return true
@@ -125,6 +135,7 @@ export function createRoom(
     password: password || null,
     creatorId: userId,
     hostId: userId,
+    conductorSocketId: socketId,
     adminUserIds: new Set(),
     temporaryAdminUserId: null,
     audioQuality: 320,
@@ -135,6 +146,7 @@ export function createRoom(
       isPlaying: false,
       currentTime: 0,
       serverTimestamp: Date.now(),
+      revision: 0,
     },
     playMode: 'loop-all',
   }
@@ -176,7 +188,7 @@ export function joinRoom(
     existing.role = resolveRole()
     roomRepo.setSocketMapping(socketId, roomId, userId)
     const roleChanged = reconcileRoomRoles(room)
-    const hostChanged = electConductor(room)
+    const hostChanged = electConductor(room, socketId)
     return { room, user: existing, hostChanged, roleChanged }
   }
 
@@ -189,7 +201,7 @@ export function joinRoom(
   // Reconcile roles first so owner/admin returning clears any temporary admin.
   const roleChanged = reconcileRoomRoles(room)
   // Re-elect conductor (owner joining takes priority over current conductor)
-  const hostChanged = electConductor(room)
+  const hostChanged = electConductor(room, socketId)
 
   logger.info(`User ${nickname} joined room ${roomId} as ${role}`, { roomId })
   return { room, user, hostChanged, roleChanged }
@@ -204,7 +216,6 @@ export function leaveRoom(
   room: RoomData | null
   hostChanged: boolean
   roleChanged: boolean
-  voteUpdated: boolean
   staleSocketOnly: boolean
 } | null {
   const mapping = roomRepo.getSocketMapping(socketId)
@@ -222,8 +233,11 @@ export function leaveRoom(
   // only clean up the stale mapping without removing the user from the room.
   if (roomRepo.hasOtherSocketForUser(roomId, userId, socketId)) {
     roomRepo.deleteSocketMapping(socketId)
+    if (room.conductorSocketId === socketId) {
+      room.conductorSocketId = roomRepo.getSocketIdForUser(roomId, userId)
+    }
     logger.info(`Stale disconnect for user ${userId} in room ${roomId} — newer socket exists`, { roomId })
-    return { roomId, user, room, hostChanged: false, roleChanged: false, voteUpdated: false, staleSocketOnly: true }
+    return { roomId, user, room, hostChanged: false, roleChanged: false, staleSocketOnly: true }
   }
 
   room.users = room.users.filter((u) => u.id !== userId)
@@ -233,7 +247,7 @@ export function leaveRoom(
   if (room.users.length === 0) {
     reconcileRoomRoles(room)
     scheduleDeletion(roomId, io)
-    return { roomId, user, room, hostChanged: false, roleChanged: false, voteUpdated: false, staleSocketOnly: false }
+    return { roomId, user, room, hostChanged: false, roleChanged: false, staleSocketOnly: false }
   }
 
   // Keep at least one online admin-capable user before electing conductor.
@@ -241,11 +255,8 @@ export function leaveRoom(
   // Re-elect conductor immediately — no grace period
   const hostChanged = electConductor(room)
 
-  // Update active vote threshold so it doesn't become impossible to pass
-  const voteUpdated = updateVoteThreshold(roomId, room.users.length, user.id)
-
   logger.info(`User ${user.nickname} left room ${roomId}`, { roomId })
-  return { roomId, user, room, hostChanged, roleChanged, voteUpdated, staleSocketOnly: false }
+  return { roomId, user, room, hostChanged, roleChanged, staleSocketOnly: false }
 }
 
 // ---------------------------------------------------------------------------
@@ -289,7 +300,13 @@ export function setUserRole(
   const room = roomRepo.get(roomId)
   if (!room) return { success: false, roleChanged: false, hostChanged: false }
   const user = room.users.find((u) => u.id === targetUserId)
-  if (!user) return { success: false, roleChanged: false, hostChanged: false }
+  if (!user) {
+    if (role !== 'member' || !room.adminUserIds.delete(targetUserId)) {
+      return { success: false, roleChanged: false, hostChanged: false }
+    }
+    revokeRejoinTickets(roomId, targetUserId)
+    return { success: true, roleChanged: true, hostChanged: false }
+  }
   // Cannot change owner's role
   if (user.role === 'owner') return { success: false, roleChanged: false, hostChanged: false }
 
@@ -299,6 +316,7 @@ export function setUserRole(
     room.adminUserIds.add(targetUserId)
   } else {
     room.adminUserIds.delete(targetUserId)
+    revokeRejoinTickets(roomId, targetUserId)
   }
   const reconciledRoleChanged = reconcileRoomRoles(room)
   // Re-elect conductor (admin promotion/demotion may change priority)

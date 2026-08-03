@@ -1,7 +1,7 @@
 import { Button } from '@/components/ui/button'
 import { Home, Music } from 'lucide-react'
 import { motion } from 'motion/react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 
 export default function NotFoundPage() {
   const navigate = useNavigate()
