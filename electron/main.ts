@@ -78,7 +78,7 @@ async function latestWindowsRelease(): Promise<WindowsRelease | null> {
     .filter((release) => !release.draft && !release.prerelease && release.tag_name.startsWith('windows-v'))
     .map((release) => {
       const version = release.tag_name.slice('windows-v'.length)
-      const installer = release.assets.find((asset) => /^Music Together Setup .+\.exe$/i.test(asset.name))
+      const installer = release.assets.find((asset) => /^(?:Music Together Setup |Music\.Together\.Setup\.).+\.exe$/i.test(asset.name))
       const checksum = installer && release.assets.find((asset) => asset.name === `${installer.name}.sha256`)
       return installer && checksum && versionParts(version) ? { version, installerUrl: installer.browser_download_url, checksumUrl: checksum.browser_download_url } : null
     })
