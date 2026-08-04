@@ -179,7 +179,7 @@ jobs:
         env:
           VERSION: ${{ needs.release_info.outputs.version }}
         run: |
-          $installer = Get-ChildItem release -File | Where-Object { $_.Name -match '^Music\.Together\.Setup\..+\.exe$' } | Select-Object -First 1
+          $installer = Get-ChildItem release -File | Where-Object { $_.Name -match '^(?:Music Together Setup |Music\.Together\.Setup\.).+\.exe$' } | Select-Object -First 1
           if ($null -eq $installer) { throw 'Unable to find the NSIS installer.' }
           $targetName = "Music Together Setup $env:VERSION.exe"
           if ($installer.Name -eq $targetName) { exit 0 }
