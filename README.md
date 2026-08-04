@@ -29,7 +29,7 @@ npm run dist:linux
 
 `npm run dist:win:release` 生成正式包。正式包不显示日志导出入口，主进程也会拒绝导出请求。
 
-GitHub Actions 的 `build-windows.yml` 使用测试包命令，`release-windows.yml` 使用正式包命令。
+GitHub Actions 的 `build-windows.yml` 与 Android 工作流一致：每次代码推送都会上传 Debug 测试包；仅版本号变化时才额外构建、上传并发布正式包。手动运行可选择 `debug` 或 `release`，并决定是否发布 GitHub Release。
 
 输出位于 `release/`。Windows 目标包括 NSIS 安装包和 Portable，Linux 目标包括 AppImage 和 deb。
 
