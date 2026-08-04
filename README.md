@@ -5,159 +5,157 @@
 <h1 align="center">Music Together</h1>
 
 <p align="center">
-  在线多人同步听歌平台 -- 创建房间，邀请朋友，一起实时听同一首歌。
+  多人实时同步听歌平台：部署一个服务端，在 Web、Android 与 Windows 桌面端进入同一批房间、队列和播放状态。
 </p>
 
 <p align="center">
   <a href="README.en.md">English</a>
 </p>
 
-<p align="center">
-  <a href="https://github.com/Yueby/music-together/stargazers"><img src="https://img.shields.io/github/stars/Yueby/music-together?style=flat&logo=github" alt="Stars"></a>
-  <a href="https://github.com/Yueby/music-together/network/members"><img src="https://img.shields.io/github/forks/Yueby/music-together?style=flat&logo=github" alt="Forks"></a>
-  <a href="https://github.com/Yueby/music-together/issues"><img src="https://img.shields.io/github/issues/Yueby/music-together?style=flat&logo=github" alt="Issues"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/Yueby/music-together?style=flat" alt="License"></a>
-</p>
+## 项目概览
 
-<p align="center">
-  <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" alt="React">
-  <img src="https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white" alt="Vite">
-  <img src="https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?logo=tailwindcss&logoColor=white" alt="Tailwind CSS">
-  <img src="https://img.shields.io/badge/Socket.IO-4-010101?logo=socketdotio&logoColor=white" alt="Socket.IO">
-  <img src="https://img.shields.io/badge/Express-4-000000?logo=express&logoColor=white" alt="Express">
-  <img src="https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white" alt="Docker">
-</p>
+Music Together 由一个 Node.js 服务端和多个客户端组成。房间、身份、队列、投票、聊天与播放时钟均由服务端协调；客户端负责展示、音频播放和本机系统集成。所有客户端使用同一套 HTTP 与 WebSocket 协议，因此可以跨设备加入同一房间并保持同步。
 
-## 截图
+| 平台 | 实现 | 当前状态 | 适用场景 |
+| --- | --- | --- | --- |
+| Web | React + Vite | `main` 分支 | 浏览器、移动浏览器与快速部署 |
+| Android | Kotlin + Jetpack Compose + Media3 | `codex/android-native-client` 分支，v2.2.5 | 原生后台播放、系统媒体卡片和多服务器大厅 |
+| Windows 桌面端 | Electron + React + TypeScript | `codex/windows-native-client` 分支 | 桌面应用、独立窗口与本地安装包 |
 
-### 桌面端
+> Android 与桌面客户端目前各自独立维护，不包含服务端。先部署或启动 `main` 分支的服务端，再在客户端中填写服务端地址。
 
-|            首页            |            搜索            |            播放            |            聊天            |
-| :------------------------: | :------------------------: | :------------------------: | :------------------------: |
-| ![首页](screenshots/1.png) | ![搜索](screenshots/2.png) | ![播放](screenshots/3.png) | ![聊天](screenshots/4.png) |
+## 核心能力
 
-### 移动端
+- 实时房间同步：时钟校正、计划执行、进度上报与漂移修正
+- 多音乐来源：网易云音乐、QQ 音乐、酷狗音乐、酷狗概念版和 Bilibili
+- 平台账号与歌单：扫码或 Cookie 登录、收藏/歌单读取，以及按账号能力选择音质
+- 房间协作：创建与密码房间、邀请链接、队列、聊天、成员角色、投票和隐藏房间
+- 播放体验：顺序、单曲循环、列表循环和随机播放；逐词、翻译、音译、Ruby 等歌词能力
+- 跨端接入：浏览器、Android 原生播放器和 Windows 桌面客户端可以进入同一服务端房间
 
-|             首页             |             搜索             |             播放             |             聊天             |
-| :--------------------------: | :--------------------------: | :--------------------------: | :--------------------------: |
-| ![首页](screenshots/1_m.png) | ![搜索](screenshots/2_m.png) | ![播放](screenshots/3_m.png) | ![聊天](screenshots/4_m.png) |
+## 架构
 
-### 歌词展示对比
-
-|            桌面端歌词            |         竖屏默认（封面）         |           竖屏歌词模式            |
-| :------------------------------: | :------------------------------: | :-------------------------------: |
-| ![桌面端歌词](screenshots/3.png) | ![竖屏默认](screenshots/3_m.png) | ![竖屏歌词](screenshots/3_m1.png) |
-
-## 功能特性
-
-- **实时同步播放** -- 基于 NTP 时钟同步 + 定时执行，延迟极低
-- **多平台音源** -- 支持网易云音乐、QQ 音乐、酷狗音乐搜索与播放
-- **Apple Music 风格歌词** -- 逐词高亮动画歌词，桌面端/移动端自适应
-- **VIP 歌曲支持** -- 平台账号登录贡献 Cookie，解锁 VIP 曲目（房间级作用域）
-- **权限管理 (RBAC)** -- 房主 > 管理员 > 普通成员，细粒度权限控制
-- **临时管理员转移** -- 非空房间始终保留至少一个具备管理能力的在线用户
-- **投票系统** -- 普通成员通过投票控制切歌、暂停等操作
-- **播放模式** -- 顺序播放、单曲循环、列表循环、随机播放
-- **实时聊天** -- 房间内文字聊天，支持系统消息
-- **隐藏房间** -- 可从大厅隐藏房间，同时保留房间号和邀请链接直连
-- **移动端适配** -- 响应式设计，横竖屏自动切换布局
-
-## 演示站点
-
-```bash
-https://sharemusic.lyln114514.com
+```text
+Web 客户端 / Android 客户端 / Windows 桌面客户端
+                    │ HTTP + WebSocket
+                    ▼
+          Music Together Node.js 服务端
+                    │
+     房间状态、时钟同步、鉴权、音乐与歌词代理
 ```
 
-## 快速开始
+服务端保存房间数据和服务端账号配置。音乐平台 Cookie 仅提交给连接的 Music Together 服务端；Bilibili 和需要代理的音频由服务端转发，避免把平台凭据暴露给其他房间成员。
+
+## Web 与服务端开发
 
 ### 环境要求
 
-- Node.js >= 22
-- pnpm >= 10
+- Node.js 22 或更高版本
+- pnpm 10 或更高版本
 
-### 安装与开发
+### 启动
 
-```bash
+```powershell
 git clone https://github.com/LiuYunLingNai/music-together.git
 cd music-together
-pnpm install
+pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-前端: http://localhost:5173 | 后端: http://localhost:3001
+- Web 客户端：`http://localhost:5173`
+- 服务端：`http://localhost:3001`
 
-## 部署
+Web 客户端在默认自动模式下会连接当前访问来源对应的服务端。分离部署或需要限制来源时，配置服务端的 `CLIENT_URL`。
 
-Docker 单镜像部署：
+## Android 客户端
+
+Android 客户端不是 WebView 套壳，使用 Kotlin、Jetpack Compose、OkHttp WebSocket 和 Media3 ExoPlayer 实现。它支持多服务器房间大厅、后台播放、系统媒体控制、聊天、队列、搜索点歌、账号与歌单、投票以及逐词歌词。
+
+### 构建调试 APK
+
+需要 JDK 17-21（推荐 Android Studio 内置 JBR）和 Android SDK 36：
+
+```powershell
+git clone --branch codex/android-native-client --single-branch https://github.com/LiuYunLingNai/music-together.git
+cd music-together/packages/android-client
+.\gradlew.bat testStandardDebugUnitTest assembleStandardDebug
+```
+
+输出 APK：`app/build/outputs/apk/standard/debug/app-standard-debug.apk`。
+
+- Android 模拟器访问本机服务端：`http://10.0.2.2:3001`
+- 真机访问局域网服务端：填写电脑的局域网 IP，例如 `http://192.168.1.8:3001`
+- 公网服务端建议使用 HTTPS；应用支持多个服务端地址并在大厅聚合房间。
+
+Android 分支提供 `standard` 与 `vivo` 两个构建变体，GitHub Actions 会构建 Debug/Release APK 与标准版 AAB。
+
+## Windows 桌面客户端
+
+桌面客户端使用 Electron、React 和 TypeScript 构建独立界面，不加载现有网页地址。当前分支可构建 Windows 安装包与便携版，也保留 AppImage、deb 等 Linux 打包目标。
+
+客户端包含服务端连接设置、房间发现与重连、NTP 校时、房间/密码房、搜索点歌、队列、聊天、播放控制和 Apple Music 风格歌词显示。
+
+### 开发与打包
+
+需要 Node.js 22 或更高版本：
+
+```powershell
+git clone --branch codex/windows-native-client --single-branch https://github.com/LiuYunLingNai/music-together.git
+cd music-together
+npm ci
+npm run dev
+```
+
+常用验证与打包命令：
+
+```powershell
+npm run typecheck
+npm test
+npm run build
+npm run dist:win
+```
+
+产物位于 `release/`。Windows 打包目标为 NSIS 安装包和 Portable；Linux 可使用 `npm run dist:linux` 构建 AppImage 与 deb。
+
+## Docker 部署服务端
 
 ```bash
 docker run -d --name music-together --restart unless-stopped \
   -p 3001:3001 \
-  -e SERVER_ADMIN_IDS=服务器管理员ID(多个用英文逗号分隔) \
-  -e QQ_MUSIC_API_KEY='你的 QQ_MUSIC_API_KEY' \
-  -e QQ_MUSIC_API_URL='API url' \
-  -v 填入本地存放数据路径:/app/data \
+  -v /path/to/music-together-data:/app/data \
   ghcr.io/LiuYunLingNai/music-together:latest
 ```
 
-如果您所在地区网络不是很好，请使用：
+将 `/path/to/music-together-data` 替换为主机上的持久化目录。该目录保存服务端数据库和账号相关数据；不挂载时，重建容器会丢失这些数据。
 
-```bash
-docker run -d --name music-together --restart unless-stopped \
-  -p 3001:3001 \
-  -e SERVER_ADMIN_IDS=服务器管理员ID(多个用英文逗号分隔) \
-  -e QQ_MUSIC_API_KEY='你的 QQ_MUSIC_API_KEY' \
-  -e QQ_MUSIC_API_URL='API url' \
-  -v 填入本地存放数据路径:/app/data \
-  ghcr.nju.edu.cn/LiuYunLingNai/music-together:latest
-```
-
-> 本地数据存放路径主要用于存放账号等内容，如果未映射路径则容器重启后数据会丢失
-
-> `QQ_MUSIC_API_URL` 为QQ音乐搜索功能的API，如果未填写则使用原生搜索方式(可能会存在风控可能)
-
-> 如果宿主机 `3001` 端口已被占用，修改 `-p 宿主机端口:容器端口` 左侧端口即可，例如 `-p 8080:3001`。
-
-默认自动模式下，前端会按当前访问地址自动连接后端；服务端默认开放所有来源访问，并根据当前请求协议自动决定 cookie 是否带 `Secure`。
-
-**需要显式限制来源时，再配置 `CLIENT_URL`：**
-
-```bash
-docker run -d --name music-together --restart unless-stopped \
-  -p 3001:3001 \
-  -e CLIENT_URL=https://music.example.com \
-  ghcr.io/yueby/music-together:latest
-```
-
-> `CLIENT_URL` 现在主要用于显式白名单模式或前后端分离部署；默认自动模式下通常不再需要手动设置。
->
-> 如果你通过 Nginx / Caddy / 1Panel / Lucky 等反向代理暴露 HTTPS，请确保代理正确透传 `X-Forwarded-Proto`，否则服务端无法自动判断应该下发 Secure cookie。
-
-push 到 main 后 GitHub Actions 自动构建镜像。详见 [架构文档](docs/PROJECT_ARCHITECTURE.md)。
+若通过 Nginx、Caddy、1Panel 或其他反向代理提供 HTTPS，请透传 `X-Forwarded-Proto`，以便服务端正确设置安全 Cookie。客户端连接公网服务端时应填写代理后的 HTTPS 地址。
 
 ## 项目结构
 
-```
+`main` 分支：
+
+```text
 packages/
-  android-client   -- 安卓端服务
-  client/   -- 前端 React 应用
-  server/   -- 后端 Node.js 服务
-  shared/   -- 共享类型、常量与权限定义
+  client/   Web React 应用
+  server/   Node.js 服务端
+  shared/   共享类型、常量与权限定义
 ```
 
-## 致谢
+原生客户端分支：
 
-| 库                                                                                            | 说明               |
-| --------------------------------------------------------------------------------------------- | ------------------ |
-| [Howler.js](https://github.com/goldfire/howler.js)                                            | Web 音频播放       |
-| [Apple Music-like Lyrics](https://github.com/Steve-xmh/applemusic-like-lyrics)                | 歌词组件 (GPL-3.0) |
-| [Meting](https://github.com/metowolf/Meting)                                                  | 多平台音乐 API     |
-| [NeteaseCloudMusicApi Enhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced) | 网易云音乐 API     |
-| [CASL](https://github.com/stalniy/casl)                                                       | 权限管理           |
-| [Zustand](https://github.com/pmndrs/zustand)                                                  | 状态管理           |
-| [shadcn/ui](https://github.com/shadcn-ui/ui)                                                  | UI 组件库          |
-| [Motion](https://github.com/motiondivision/motion)                                            | 动画库             |
-| [qq-music-download](https://github.com/tooplick/qq-music-download)                            | QQ 音乐登录参考    |
+```text
+codex/android-native-client
+  packages/android-client/   Kotlin/Compose Android 应用
+
+codex/windows-native-client
+  electron/ + src/           Electron 桌面应用
+```
+
+## 相关文档
+
+- [服务端与 Web 架构文档](docs/PROJECT_ARCHITECTURE.md)
+- [Android 客户端 README](https://github.com/LiuYunLingNai/music-together/tree/codex/android-native-client/packages/android-client)
+- [Windows 桌面客户端 README](https://github.com/LiuYunLingNai/music-together/tree/codex/windows-native-client)
 
 ## 协议
 

@@ -5,131 +5,157 @@
 <h1 align="center">Music Together</h1>
 
 <p align="center">
-  A real-time collaborative music listening platform — create a room, invite friends, and listen to the same song perfectly synchronized.
+  A real-time collaborative listening platform. Run one server, then join the same rooms, queue, and synchronized playback from the web, Android, or Windows desktop client.
 </p>
 
 <p align="center">
-  <a href="README.md">简体中文</a>
+  <a href="README.md">Simplified Chinese</a>
 </p>
 
-<p align="center">
-  <a href="https://github.com/Yueby/music-together/stargazers"><img src="https://img.shields.io/github/stars/Yueby/music-together?style=flat&logo=github" alt="Stars"></a>
-  <a href="https://github.com/Yueby/music-together/network/members"><img src="https://img.shields.io/github/forks/Yueby/music-together?style=flat&logo=github" alt="Forks"></a>
-  <a href="https://github.com/Yueby/music-together/issues"><img src="https://img.shields.io/github/issues/Yueby/music-together?style=flat&logo=github" alt="Issues"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/Yueby/music-together?style=flat" alt="License"></a>
-</p>
+## Overview
 
-<p align="center">
-  <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" alt="React">
-  <img src="https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white" alt="Vite">
-  <img src="https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?logo=tailwindcss&logoColor=white" alt="Tailwind CSS">
-  <img src="https://img.shields.io/badge/Socket.IO-4-010101?logo=socketdotio&logoColor=white" alt="Socket.IO">
-  <img src="https://img.shields.io/badge/Express-4-000000?logo=express&logoColor=white" alt="Express">
-  <img src="https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white" alt="Docker">
-</p>
+Music Together consists of a Node.js server and several clients. The server coordinates rooms, identities, queues, voting, chat, and playback timing. Clients render the experience, play audio, and integrate with their host platform. All clients use the same HTTP and WebSocket protocol, so they can join the same room across devices.
 
-## Screenshots
+| Platform | Implementation | Current location | Best for |
+| --- | --- | --- | --- |
+| Web | React + Vite | `main` branch | Browsers, mobile browsers, and quick deployment |
+| Android | Kotlin + Jetpack Compose + Media3 | `codex/android-native-client`, v2.2.5 | Native background playback, system media controls, and multi-server lobby |
+| Windows desktop | Electron + React + TypeScript | `codex/windows-native-client` | Installed desktop experience and standalone windows |
 
-### Desktop
+> The Android and desktop clients are currently maintained in their own branches and do not include the server. Deploy or run the `main` branch server first, then configure its address in the client.
 
-|            Home            |            Search            |            Player            |            Chat            |
-| :------------------------: | :--------------------------: | :--------------------------: | :------------------------: |
-| ![Home](screenshots/1.png) | ![Search](screenshots/2.png) | ![Player](screenshots/3.png) | ![Chat](screenshots/4.png) |
+## Capabilities
 
-### Mobile
+- Real-time room synchronization with clock correction, scheduled actions, progress reporting, and drift correction
+- NetEase Cloud Music, QQ Music, Kugou, Kugou Concept, and Bilibili sources
+- Platform sign-in and playlists through QR/Cookie login, with quality selection based on account capability
+- Rooms, password rooms, invite links, queue management, chat, roles, votes, and hidden rooms
+- Sequential, single-loop, list-loop, and shuffle playback with word-by-word, translated, romanized, and Ruby lyrics
+- One shared room protocol across the web, Android native player, and Windows desktop client
 
-|             Home             |             Search             |             Player             |             Chat             |
-| :--------------------------: | :----------------------------: | :----------------------------: | :--------------------------: |
-| ![Home](screenshots/1_m.png) | ![Search](screenshots/2_m.png) | ![Player](screenshots/3_m.png) | ![Chat](screenshots/4_m.png) |
+## Architecture
 
-### Lyrics Display Comparison
+```text
+Web client / Android client / Windows desktop client
+                    │ HTTP + WebSocket
+                    ▼
+          Music Together Node.js server
+                    │
+     Rooms, clock sync, authentication, music and lyric proxy
+```
 
-|            Desktop Lyrics            |         Portrait Default (Cover)         |           Portrait Lyrics Mode           |
-| :----------------------------------: | :--------------------------------------: | :--------------------------------------: |
-| ![Desktop Lyrics](screenshots/3.png) | ![Portrait Default](screenshots/3_m.png) | ![Portrait Lyrics](screenshots/3_m1.png) |
+The server persists room data and server-side account configuration. Music-platform cookies are sent only to the connected Music Together server. Bilibili and proxy-required audio are routed through the server so platform credentials are not exposed to other room members.
 
-## Features
-
-- **Real-time sync** -- NTP clock synchronization + scheduled execution for minimal latency
-- **Multi-platform music sources** -- NetEase Cloud Music, QQ Music, Kugou
-- **Apple Music-style lyrics** -- Word-by-word animated lyrics, responsive on desktop and mobile
-- **VIP song support** -- Room-scoped cookie pool via platform account login
-- **RBAC permissions** -- Owner > Admin > Member with fine-grained access control
-- **Temporary admin handoff** -- Non-empty rooms always keep an admin-capable online user
-- **Voting system** -- Members vote to control playback actions
-- **Play modes** -- Sequential, single loop, list loop, shuffle
-- **Real-time chat** -- In-room text messaging with system messages
-- **Hidden rooms** -- Hide rooms from the lobby while keeping room IDs and invite links joinable
-- **Mobile responsive** -- Adaptive layout with orientation-based switching
-
-## Quick Start
+## Web and Server Development
 
 ### Prerequisites
 
-- Node.js >= 22
-- pnpm >= 10
+- Node.js 22+
+- pnpm 10+
 
-### Install & Develop
+### Start locally
 
-```bash
-git clone https://github.com/Yueby/music-together.git
+```powershell
+git clone https://github.com/LiuYunLingNai/music-together.git
 cd music-together
-pnpm install
+pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-Frontend: http://localhost:5173 | Backend: http://localhost:3001
+- Web client: `http://localhost:5173`
+- Server: `http://localhost:3001`
 
-## Deploy
+In default auto mode, the web client connects to the server at its current origin. Set `CLIENT_URL` when deploying frontend and backend separately or when an explicit origin allowlist is required.
 
-Single-image Docker deployment:
+## Android Client
+
+The Android app is native, not a WebView wrapper. It uses Kotlin, Jetpack Compose, OkHttp WebSocket, and Media3 ExoPlayer. It supports a multi-server lobby, background playback, system media controls, chat, queue management, search, platform accounts/playlists, votes, and word-by-word lyrics.
+
+### Build a debug APK
+
+Requires JDK 17-21 (the Android Studio bundled JBR is recommended) and Android SDK 36:
+
+```powershell
+git clone --branch codex/android-native-client --single-branch https://github.com/LiuYunLingNai/music-together.git
+cd music-together/packages/android-client
+.\gradlew.bat testStandardDebugUnitTest assembleStandardDebug
+```
+
+The APK is written to `app/build/outputs/apk/standard/debug/app-standard-debug.apk`.
+
+- Android emulator to a server on the development machine: `http://10.0.2.2:3001`
+- Physical device on a LAN: use the computer's LAN address, for example `http://192.168.1.8:3001`
+- Use HTTPS for public servers. The app can store multiple server addresses and aggregate their rooms in one lobby.
+
+The Android branch ships `standard` and `vivo` variants. Its GitHub Actions workflow builds Debug/Release APKs and a standard AAB.
+
+## Windows Desktop Client
+
+The desktop client is an Electron, React, and TypeScript application with its own interface rather than loading the web app URL. The current branch builds Windows installers and portable executables, while retaining AppImage and deb Linux targets.
+
+It includes server connection settings, room discovery and reconnecting, NTP clock sync, rooms/password rooms, search, queue, chat, transport controls, and Apple Music-style lyrics.
+
+### Develop and package
+
+Requires Node.js 22+:
+
+```powershell
+git clone --branch codex/windows-native-client --single-branch https://github.com/LiuYunLingNai/music-together.git
+cd music-together
+npm ci
+npm run dev
+```
+
+Useful verification and packaging commands:
+
+```powershell
+npm run typecheck
+npm test
+npm run build
+npm run dist:win
+```
+
+Artifacts are written to `release/`. Windows targets are NSIS and Portable. Run `npm run dist:linux` for AppImage and deb packages.
+
+## Deploy the Server with Docker
 
 ```bash
 docker run -d --name music-together --restart unless-stopped \
   -p 3001:3001 \
-  ghcr.io/yueby/music-together:latest
+  -v /path/to/music-together-data:/app/data \
+  ghcr.io/LiuYunLingNai/music-together:latest
 ```
 
-> If host port `3001` is already in use, change the left side of `-p <host-port>:<container-port>`, for example `-p 8080:3001`.
+Replace `/path/to/music-together-data` with a persistent host directory. It holds the server database and account-related data; recreating a container without the mount loses that data.
 
-In default auto mode, the frontend connects back to the current origin automatically; the server allows all origins and decides whether to set the cookie `Secure` flag based on the incoming request protocol.
+When serving HTTPS through Nginx, Caddy, 1Panel, or another reverse proxy, forward `X-Forwarded-Proto` so the server can set secure cookies correctly. Configure public clients with the proxied HTTPS address.
 
-**Set `CLIENT_URL` only when you need an explicit origin whitelist:**
+## Repository Layout
 
-```bash
-docker run -d --name music-together --restart unless-stopped \
-  -p 3001:3001 \
-  -e CLIENT_URL=https://music.example.com \
-  ghcr.io/yueby/music-together:latest
-```
+The `main` branch:
 
-> `CLIENT_URL` is mainly for explicit whitelist mode or separated frontend/backend deployments. In default auto mode, you usually do not need to set it manually.
->
-> If you expose HTTPS through Nginx / Caddy / 1Panel / Lucky, make sure the proxy forwards `X-Forwarded-Proto`, or the server cannot auto-detect whether it should issue Secure cookies.
-
-Push to main triggers GitHub Actions to build and push the image. See [Architecture Docs](docs/PROJECT_ARCHITECTURE.md) for details.
-
-## Project Structure
-
-```
+```text
 packages/
-  client/   -- Frontend React application
-  server/   -- Backend Node.js service
-  shared/   -- Shared types, constants, and permission definitions
+  client/   Web React app
+  server/   Node.js server
+  shared/   Shared types, constants, and permissions
 ```
 
-## Acknowledgements
+Native-client branches:
 
-| Library                                                                                       | Description                |
-| --------------------------------------------------------------------------------------------- | -------------------------- |
-| [Howler.js](https://github.com/goldfire/howler.js)                                            | Web audio playback         |
-| [Apple Music-like Lyrics](https://github.com/Steve-xmh/applemusic-like-lyrics)                | Lyrics component (GPL-3.0) |
-| [Meting](https://github.com/metowolf/Meting)                                                  | Multi-platform music API   |
-| [NeteaseCloudMusicApi Enhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced) | NetEase Cloud Music API    |
-| [CASL](https://github.com/stalniy/casl)                                                       | Permission management      |
-| [Zustand](https://github.com/pmndrs/zustand)                                                  | State management           |
-| [shadcn/ui](https://github.com/shadcn-ui/ui)                                                  | UI component library       |
-| [Motion](https://github.com/motiondivision/motion)                                            | Animation library          |
+```text
+codex/android-native-client
+  packages/android-client/   Kotlin/Compose Android app
+
+codex/windows-native-client
+  electron/ + src/           Electron desktop app
+```
+
+## Documentation
+
+- [Web and server architecture](docs/PROJECT_ARCHITECTURE.md)
+- [Android client README](https://github.com/LiuYunLingNai/music-together/tree/codex/android-native-client/packages/android-client)
+- [Windows desktop client README](https://github.com/LiuYunLingNai/music-together/tree/codex/windows-native-client)
 
 ## License
 
