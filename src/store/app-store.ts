@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AccountProfile, AudioProxyPolicy, ChatMessage, LyricGroup, LyricSettings, MusicSource, MyPlatformAuth, PlatformAuthStatus, Playlist, RoomListItem, RoomState, Track, VoteState } from '../domain/types'
+import type { AccountProfile, AppUpdateStatus, AudioProxyPolicy, ChatMessage, LyricGroup, LyricSettings, MusicSource, MyPlatformAuth, PlatformAuthStatus, Playlist, RoomListItem, RoomState, Track, VoteState } from '../domain/types'
 import { storage } from '../lib/storage'
 import type { ResolvedTheme, ThemePreference } from '../lib/theme'
 import { resolveTheme } from '../lib/theme'
@@ -43,6 +43,7 @@ interface AppState {
   authBusy: boolean
   playlists: Record<MusicSource, Playlist[]>
   audioProxyPolicy: AudioProxyPolicy
+  updateStatus: AppUpdateStatus
   syncDriftMs: number
   syncInterval: number
   lyricSettings: LyricSettings
@@ -85,6 +86,7 @@ export const useAppStore = create<AppState>((set) => ({
   authBusy: false,
   playlists: { netease: [], tencent: [], kugou: [], kugou_concept: [], bilibili: [] },
   audioProxyPolicy: { kugouForceProxy: true },
+  updateStatus: { state: 'idle', currentVersion: '未知' },
   syncDriftMs: 0,
   syncInterval: storage.getSyncInterval(),
   lyricSettings: storage.getLyricSettings(),

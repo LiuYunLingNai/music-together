@@ -7,12 +7,14 @@
 - 房间内保留“离开房间”操作，离开时会暂停播放并清理当前房间状态。
 - 右侧队列、聊天和成员栏支持收起与展开，收起后主播放区自动扩展。
 - 增加 Windows 独立发版流程，Windows 与 Android 可以分别发布，互不覆盖。
+- 支持检查 Windows 专属 Release、校验安装包并启动更新安装程序。
 
 ## 发布内容
 
 - Windows NSIS 安装包
 - Windows Portable 便携版
 - 安装包 blockmap 更新文件
+- SHA-256 校验文件
 
 ## 验证
 

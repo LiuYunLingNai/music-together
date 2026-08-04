@@ -23,6 +23,14 @@ npm run dist:win
 npm run dist:linux
 ```
 
+### Windows 测试包与正式包
+
+`npm run dist:win` 生成测试包。测试包会启用调试日志导出功能，方便收集测试问题；构建过程中会临时写入测试标记，并在结束后恢复工作区的 `package.json`。
+
+`npm run dist:win:release` 生成正式包。正式包不显示日志导出入口，主进程也会拒绝导出请求。
+
+GitHub Actions 的 `build-windows.yml` 使用测试包命令，`release-windows.yml` 使用正式包命令。
+
 输出位于 `release/`。Windows 目标包括 NSIS 安装包和 Portable，Linux 目标包括 AppImage 和 deb。
 
 ### 独立发版
@@ -39,5 +47,6 @@ Windows 与 Android 可以独立发布。Windows 工作流根据 `package.json` 
 - HTML 音频播放、B 站/酷狗服务端代理与房间播放控制
 - TTML、服务端逐词、YRC、LRC、翻译、音译、Ruby 和背景人声
 - Apple Music 风格逐词遮罩、强调、焦点滚动、手动浏览与歌词偏移
+- Windows 安装版自动检查 `windows-v*` Release，下载后校验 SHA-256 并启动安装更新；Portable 版需手动下载安装包
 
 架构细节见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。

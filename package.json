@@ -3,6 +3,7 @@
   "version": "2.2.5",
   "private": true,
   "description": "Native desktop client for Music Together",
+  "debugBuild": false,
   "desktopName": "music-together-desktop",
   "author": "Music Together Contributors",
   "license": "AGPL-3.0",
@@ -21,7 +22,8 @@
     "smoke:regressions": "node scripts/regression-smoke.mjs",
     "lint": "eslint .",
     "dist": "npm run build && electron-builder",
-    "dist:win": "npm run build && electron-builder --win",
+    "dist:win": "node scripts/build-windows.mjs --debug",
+    "dist:win:release": "node scripts/build-windows.mjs",
     "dist:linux": "npm run build && electron-builder --linux"
   },
   "dependencies": {

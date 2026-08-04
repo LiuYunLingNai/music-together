@@ -3,6 +3,15 @@ export type UserRole = 'owner' | 'admin' | 'member'
 export type PlayMode = 'sequential' | 'loop-all' | 'loop-one' | 'shuffle'
 export type VoteAction = 'pause' | 'resume' | 'next' | 'prev' | 'set-mode' | 'play-track' | 'remove-track'
 export type AudioQuality = 128 | 192 | 320 | 999 | 'highest' | 'netease_dolby' | 'netease_hires' | 'netease_jyeffect' | 'netease_master' | 'netease_spatial' | 'tencent_flac' | 'tencent_master' | 'kugou_hires' | 'kugou_master' | 'bilibili_64' | 'bilibili_132' | 'bilibili_192' | 'bilibili_hires'
+export type AppUpdateState = 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'not-available' | 'error' | 'unsupported'
+
+export interface AppUpdateStatus {
+  state: AppUpdateState
+  currentVersion: string
+  version?: string
+  percent?: number
+  message?: string
+}
 
 export interface IdentityBootstrapResult {
   userId: string
