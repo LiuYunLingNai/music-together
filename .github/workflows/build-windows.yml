@@ -80,7 +80,6 @@ jobs:
         run: |
           set -euo pipefail
           current_version="$(node -p "require('./package.json').version")"
-          release_installer="Music Together Setup ${current_version}.exe"
           should_build=false
           should_publish=false
 
@@ -95,11 +94,11 @@ jobs:
             if [ "$current_version" != "$previous_version" ]; then
               should_build=true
               should_publish=true
-            elif ! gh release view "windows-v${current_version}" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -Fx "$release_installer" >/dev/null; then
-              # Retry a version whose earlier release job did not produce the updater installer.
+            elif ! gh release view "windows-v${current_version}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              # Retry a version whose earlier release job did not complete successfully.
               should_build=true
               should_publish=true
-              echo "Windows release windows-v${current_version} is missing $release_installer; rebuilding it"
+              echo "Windows release windows-v${current_version} is missing; rebuilding it"
             fi
             echo "Windows version: ${previous_version:-none} -> $current_version"
           fi
