@@ -84,6 +84,7 @@
       "artifactName": "${productName}-${version}-${arch}.${ext}"
     },
     "nsis": {
+      "artifactName": "Music Together Setup ${version}.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     }
