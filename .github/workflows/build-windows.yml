@@ -75,6 +75,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           BEFORE_SHA: ${{ github.event.before }}
           PUBLISH_RELEASE: ${{ inputs.publish_release }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -93,6 +94,11 @@ jobs:
             if [ "$current_version" != "$previous_version" ]; then
               should_build=true
               should_publish=true
+            elif ! gh release view "windows-v${current_version}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              # Retry a version whose earlier release job did not complete successfully.
+              should_build=true
+              should_publish=true
+              echo "Windows release windows-v${current_version} is missing; rebuilding it"
             fi
             echo "Windows version: ${previous_version:-none} -> $current_version"
           fi
