@@ -119,16 +119,52 @@ npm run dist:win
 
 ## Docker 部署服务端
 
+Docker 单镜像部署：
+
 ```bash
 docker run -d --name music-together --restart unless-stopped \
   -p 3001:3001 \
-  -v /path/to/music-together-data:/app/data \
+  -e SERVER_ADMIN_IDS=服务器管理员ID(多个用英文逗号分隔) \
+  -e QQ_MUSIC_API_KEY='你的 QQ_MUSIC_API_KEY' \
+  -e QQ_MUSIC_API_URL='API url' \
+  -v 填入本地存放数据路径:/app/data \
   ghcr.io/LiuYunLingNai/music-together:latest
 ```
 
-将 `/path/to/music-together-data` 替换为主机上的持久化目录。该目录保存服务端数据库和账号相关数据；不挂载时，重建容器会丢失这些数据。
+如果您所在地区网络不是很好，请使用：
 
-若通过 Nginx、Caddy、1Panel 或其他反向代理提供 HTTPS，请透传 `X-Forwarded-Proto`，以便服务端正确设置安全 Cookie。客户端连接公网服务端时应填写代理后的 HTTPS 地址。
+```bash
+docker run -d --name music-together --restart unless-stopped \
+  -p 3001:3001 \
+  -e SERVER_ADMIN_IDS=服务器管理员ID(多个用英文逗号分隔) \
+  -e QQ_MUSIC_API_KEY='你的 QQ_MUSIC_API_KEY' \
+  -e QQ_MUSIC_API_URL='API url' \
+  -v 填入本地存放数据路径:/app/data \
+  ghcr.nju.edu.cn/LiuYunLingNai/music-together:latest
+```
+
+> 本地数据存放路径主要用于存放账号等内容，如果未映射路径则容器重启后数据会丢失
+
+> `QQ_MUSIC_API_URL` 为QQ音乐搜索功能的API，如果未填写则使用原生搜索方式(可能会存在风控可能)
+
+> 如果宿主机 `3001` 端口已被占用，修改 `-p 宿主机端口:容器端口` 左侧端口即可，例如 `-p 8080:3001`。
+
+默认自动模式下，前端会按当前访问地址自动连接后端；服务端默认开放所有来源访问，并根据当前请求协议自动决定 cookie 是否带 `Secure`。
+
+**需要显式限制来源时，再配置 `CLIENT_URL`：**
+
+```bash
+docker run -d --name music-together --restart unless-stopped \
+  -p 3001:3001 \
+  -e CLIENT_URL=https://music.example.com \
+  ghcr.io/liuyunlingnai/music-together:latest
+```
+
+> `CLIENT_URL` 现在主要用于显式白名单模式或前后端分离部署；默认自动模式下通常不再需要手动设置。
+>
+> 如果你通过 Nginx / Caddy / 1Panel / Lucky 等反向代理暴露 HTTPS，请确保代理正确透传 `X-Forwarded-Proto`，否则服务端无法自动判断应该下发 Secure cookie。
+
+push 到 main 后 GitHub Actions 自动构建镜像。详见 [架构文档](docs/PROJECT_ARCHITECTURE.md)。
 
 ## 项目结构
 
