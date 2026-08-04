@@ -24,6 +24,32 @@ Music Together consists of a Node.js server and several clients. The server coor
 
 > The Android and desktop clients are currently maintained in their own branches and do not include the server. Deploy or run the `main` branch server first, then configure its address in the client.
 
+## Screenshots
+
+### Web Desktop
+
+| 1 | 2 | 3 | 4 | 5 |
+| --- | --- | --- | --- | --- |
+| ![Web desktop screenshot 1](screenshots/1.png) | ![Web desktop screenshot 2](screenshots/2.png) | ![Web desktop screenshot 3](screenshots/3.png) | ![Web desktop screenshot 4](screenshots/4.png) | ![Web desktop screenshot 5](screenshots/5.png) |
+
+### Web Mobile
+
+| 1 | 2 | 3 | 4 | 5 |
+| --- | --- | --- | --- | --- |
+| ![Web mobile screenshot 1](screenshots/1_m.png) | ![Web mobile screenshot 2](screenshots/2_m.png) | ![Web mobile screenshot 3](screenshots/3_m.png) | ![Web mobile screenshot 4](screenshots/4_m.png) | ![Web mobile screenshot 5](screenshots/5_m.png) |
+
+### Native Android Client
+
+| Launch | 1 | 2 | 3 | 4 |
+| --- | --- | --- | --- | --- |
+| ![Android launch screen](screenshots/0_a.jpg) | ![Android screenshot 1](screenshots/1_a.jpg) | ![Android screenshot 2](screenshots/2_a.jpg) | ![Android screenshot 3](screenshots/3_a.jpg) | ![Android screenshot 4](screenshots/4_a.jpg) |
+
+### Windows Desktop Client
+
+| 1 | 2 | 3 | 4 | 5 |
+| --- | --- | --- | --- | --- |
+| ![Windows desktop screenshot 1](screenshots/1_w.png) | ![Windows desktop screenshot 2](screenshots/2_w.png) | ![Windows desktop screenshot 3](screenshots/3_w.png) | ![Windows desktop screenshot 4](screenshots/4_w.png) | ![Windows desktop screenshot 5](screenshots/5_w.png) |
+
 ## Capabilities
 
 - Real-time room synchronization with clock correction, scheduled actions, progress reporting, and drift correction

@@ -24,6 +24,32 @@ Music Together 由一个 Node.js 服务端和多个客户端组成。房间、�
 
 > Android 与桌面客户端目前各自独立维护，不包含服务端。先部署或启动 `main` 分支的服务端，再在客户端中填写服务端地址。
 
+## 截图
+
+### Web 桌面端
+
+| 1 | 2 | 3 | 4 | 5 |
+| --- | --- | --- | --- | --- |
+| ![Web 桌面端截图 1](screenshots/1.png) | ![Web 桌面端截图 2](screenshots/2.png) | ![Web 桌面端截图 3](screenshots/3.png) | ![Web 桌面端截图 4](screenshots/4.png) | ![Web 桌面端截图 5](screenshots/5.png) |
+
+### Web 移动端
+
+| 1 | 2 | 3 | 4 | 5 |
+| --- | --- | --- | --- | --- |
+| ![Web 移动端截图 1](screenshots/1_m.png) | ![Web 移动端截图 2](screenshots/2_m.png) | ![Web 移动端截图 3](screenshots/3_m.png) | ![Web 移动端截图 4](screenshots/4_m.png) | ![Web 移动端截图 5](screenshots/5_m.png) |
+
+### Android 原生客户端
+
+| 启动页 | 1 | 2 | 3 | 4 |
+| --- | --- | --- | --- | --- |
+| ![Android 启动页](screenshots/0_a.jpg) | ![Android 客户端截图 1](screenshots/1_a.jpg) | ![Android 客户端截图 2](screenshots/2_a.jpg) | ![Android 客户端截图 3](screenshots/3_a.jpg) | ![Android 客户端截图 4](screenshots/4_a.jpg) |
+
+### Windows 桌面客户端
+
+| 1 | 2 | 3 | 4 | 5 |
+| --- | --- | --- | --- | --- |
+| ![Windows 客户端截图 1](screenshots/1_w.png) | ![Windows 客户端截图 2](screenshots/2_w.png) | ![Windows 客户端截图 3](screenshots/3_w.png) | ![Windows 客户端截图 4](screenshots/4_w.png) | ![Windows 客户端截图 5](screenshots/5_w.png) |
+
 ## 核心能力
 
 - 实时房间同步：时钟校正、计划执行、进度上报与漂移修正
