@@ -1,5 +1,5 @@
 import { Download, LoaderCircle, RefreshCw, RotateCw, X } from 'lucide-react'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type { AppUpdateState } from '../domain/types'
 import { useAppStore } from '../store/app-store'
 
@@ -17,6 +17,7 @@ const STATUS_LABELS: Record<AppUpdateState, string> = {
 export function UpdateOverlay({ onClose }: { onClose: () => void }) {
   const updateStatus = useAppStore((state) => state.updateStatus)
   const desktop = window.desktop
+  const [downloadSource, setDownloadSource] = useState<'github' | 'ghfast'>('github')
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
@@ -25,7 +26,7 @@ export function UpdateOverlay({ onClose }: { onClose: () => void }) {
   }, [onClose])
 
   const action = updateStatus.state === 'available'
-    ? { label: '下载更新', icon: <Download size={16} />, run: () => desktop?.downloadUpdate() ?? Promise.resolve() }
+    ? { label: '下载更新', icon: <Download size={16} />, run: () => desktop?.downloadUpdate(downloadSource) ?? Promise.resolve() }
     : updateStatus.state === 'downloaded'
       ? { label: '重启并安装', icon: <RotateCw size={16} />, run: () => desktop?.installUpdate() ?? Promise.resolve() }
       : { label: updateStatus.state === 'error' ? '重新检查' : '检查更新', icon: <RefreshCw size={16} />, run: () => desktop?.checkForUpdate() ?? Promise.resolve() }
@@ -45,8 +46,10 @@ export function UpdateOverlay({ onClose }: { onClose: () => void }) {
         <div className="update-dialog__body">
           <div className="update-dialog__summary"><span className={`update-dialog__status update-state--${updateStatus.state}`}>{STATUS_LABELS[updateStatus.state]}</span><code>当前版本 v{updateStatus.currentVersion}</code></div>
           {updateStatus.version && <div className="update-dialog__version"><span>可用版本</span><strong>v{updateStatus.version}</strong></div>}
+          {updateStatus.state === 'available' && <div className="update-dialog__source"><span>下载源</span><div className="update-source-picker" role="group" aria-label="更新下载源"><button type="button" className={downloadSource === 'github' ? 'is-selected' : ''} aria-pressed={downloadSource === 'github'} onClick={() => setDownloadSource('github')}>GitHub 直连</button><button type="button" className={downloadSource === 'ghfast' ? 'is-selected' : ''} aria-pressed={downloadSource === 'ghfast'} onClick={() => setDownloadSource('ghfast')}>ghfast.top 代理</button></div></div>}
           {updateStatus.state === 'downloading' && <div className="update-progress" aria-label={`下载进度 ${updateStatus.percent ?? 0}%`}><span style={{ width: `${updateStatus.percent ?? 0}%` }} /></div>}
           <p className="update-dialog__detail">{detail || '检查并安装最新的 Windows 客户端版本。'}</p>
+          {updateStatus.releaseNotes && <section className="update-dialog__notes" aria-label="更新日志"><h3>更新日志</h3><p>{updateStatus.releaseNotes}</p></section>}
           {updateStatus.state === 'unsupported' && <p className="update-dialog__hint">仅安装版 Windows 客户端支持自动下载和安装。便携版请从 Windows Release 手动下载新版。</p>}
         </div>
         <footer className="update-dialog__actions">

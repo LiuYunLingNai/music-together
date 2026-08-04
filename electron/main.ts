@@ -20,10 +20,11 @@ const identityTokens = new Map<string, string>()
 const windowsReleaseApi = 'https://api.github.com/repos/LiuYunLingNai/music-together/releases?per_page=100'
 
 type AppUpdateState = 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'not-available' | 'error' | 'unsupported'
-type AppUpdateStatus = { state: AppUpdateState; currentVersion: string; version?: string; percent?: number; message?: string }
-type WindowsRelease = { version: string; installerUrl: string; checksumUrl: string }
+type UpdateDownloadSource = 'github' | 'ghfast'
+type AppUpdateStatus = { state: AppUpdateState; currentVersion: string; version?: string; percent?: number; message?: string; releaseNotes?: string }
+type WindowsRelease = { version: string; installerUrl: string; checksumUrl: string; releaseNotes: string }
 type GitHubAsset = { name: string; browser_download_url: string }
-type GitHubRelease = { tag_name: string; draft: boolean; prerelease: boolean; assets: GitHubAsset[] }
+type GitHubRelease = { tag_name: string; draft: boolean; prerelease: boolean; body?: string; assets: GitHubAsset[] }
 
 let appUpdateStatus: AppUpdateStatus = { state: 'idle', currentVersion: app.getVersion() }
 let availableWindowsRelease: WindowsRelease | null = null
@@ -70,6 +71,10 @@ function isNewerVersion(candidate: string, current: string): boolean {
   return compareVersions(candidate, current) > 0
 }
 
+function updateDownloadUrl(url: string, source: UpdateDownloadSource): string {
+  return source === 'ghfast' ? `https://ghfast.top/${url}` : url
+}
+
 async function latestWindowsRelease(): Promise<WindowsRelease | null> {
   const response = await fetch(windowsReleaseApi, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'music-together-desktop' } })
   if (!response.ok) throw new Error(`更新服务器请求失败 (${response.status})`)
@@ -80,7 +85,9 @@ async function latestWindowsRelease(): Promise<WindowsRelease | null> {
       const version = release.tag_name.slice('windows-v'.length)
       const installer = release.assets.find((asset) => /^(?:Music Together Setup |Music\.Together\.Setup\.).+\.exe$/i.test(asset.name))
       const checksum = installer && release.assets.find((asset) => asset.name === `${installer.name}.sha256`)
-      return installer && checksum && versionParts(version) ? { version, installerUrl: installer.browser_download_url, checksumUrl: checksum.browser_download_url } : null
+      return installer && checksum && versionParts(version)
+        ? { version, installerUrl: installer.browser_download_url, checksumUrl: checksum.browser_download_url, releaseNotes: release.body?.trim() ?? '' }
+        : null
     })
     .filter((release): release is WindowsRelease => release !== null)
     .sort((left, right) => compareVersions(right.version, left.version))[0] ?? null
@@ -111,13 +118,13 @@ async function checkForUpdate(): Promise<AppUpdateStatus> {
       return publishUpdateStatus({ state: 'not-available', message: '当前已是最新版本。' })
     }
     availableWindowsRelease = release
-    return publishUpdateStatus({ state: 'available', version: release.version, message: `发现 Windows ${release.version}。` })
+    return publishUpdateStatus({ state: 'available', version: release.version, releaseNotes: release.releaseNotes, message: `发现 Windows ${release.version}。` })
   } catch (error) {
     return publishUpdateStatus({ state: 'error', message: updateErrorMessage(error, '检查更新失败。') })
   }
 }
 
-async function downloadAvailableUpdate(): Promise<AppUpdateStatus> {
+async function downloadAvailableUpdate(source: UpdateDownloadSource = 'github'): Promise<AppUpdateStatus> {
   if (updateDownload) return updateDownload
   updateDownload = (async () => {
     if (!updatesSupported()) return publishUpdateStatus({ state: 'unsupported', message: '便携版暂不支持自动更新，请下载新版安装包。' })
@@ -125,11 +132,11 @@ async function downloadAvailableUpdate(): Promise<AppUpdateStatus> {
     if (!availableWindowsRelease) return appUpdateStatus
 
     const release = availableWindowsRelease
-    publishUpdateStatus({ state: 'downloading', version: release.version, percent: 0, message: '正在下载更新…' })
+    publishUpdateStatus({ state: 'downloading', version: release.version, percent: 0, releaseNotes: release.releaseNotes, message: '正在下载更新…' })
     try {
       const [checksum, response] = await Promise.all([
-        expectedUpdateChecksum(release.checksumUrl),
-        fetch(release.installerUrl, { headers: { 'User-Agent': 'music-together-desktop' } }),
+        expectedUpdateChecksum(updateDownloadUrl(release.checksumUrl, source)),
+        fetch(updateDownloadUrl(release.installerUrl, source), { headers: { 'User-Agent': 'music-together-desktop' } }),
       ])
       if (!response.ok || !response.body) throw new Error(`更新下载安装包失败 (${response.status})`)
       const total = Number(response.headers.get('content-length'))
@@ -148,7 +155,7 @@ async function downloadAvailableUpdate(): Promise<AppUpdateStatus> {
           hash.update(chunk.value)
           received += chunk.value.byteLength
           if (Number.isFinite(total) && total > 0) {
-            publishUpdateStatus({ state: 'downloading', version: release.version, percent: Math.min(99, Math.round(received / total * 100)), message: '正在下载更新…' })
+            publishUpdateStatus({ state: 'downloading', version: release.version, percent: Math.min(99, Math.round(received / total * 100)), releaseNotes: release.releaseNotes, message: '正在下载更新…' })
           }
         }
       } finally {
@@ -156,9 +163,9 @@ async function downloadAvailableUpdate(): Promise<AppUpdateStatus> {
       }
       if (hash.digest('hex') !== checksum) throw new Error('更新安装包校验失败')
       downloadedInstaller = destination
-      return publishUpdateStatus({ state: 'downloaded', version: release.version, percent: 100, message: '更新已下载，重启后安装。' })
+      return publishUpdateStatus({ state: 'downloaded', version: release.version, percent: 100, releaseNotes: release.releaseNotes, message: '更新已下载，重启后安装。' })
     } catch (error) {
-      return publishUpdateStatus({ state: 'error', version: release.version, message: updateErrorMessage(error, '下载更新失败。') })
+      return publishUpdateStatus({ state: 'error', version: release.version, releaseNotes: release.releaseNotes, message: updateErrorMessage(error, '下载更新失败。') })
     }
   })().finally(() => { updateDownload = null })
   return updateDownload
@@ -429,7 +436,7 @@ ipcMain.handle('debug:export-logs', async (event) => {
 })
 ipcMain.handle('app-update:get-status', () => appUpdateStatus)
 ipcMain.handle('app-update:check', () => checkForUpdate())
-ipcMain.handle('app-update:download', () => downloadAvailableUpdate())
+ipcMain.handle('app-update:download', (_event, source?: UpdateDownloadSource) => downloadAvailableUpdate(source === 'ghfast' ? 'ghfast' : 'github'))
 ipcMain.handle('app-update:install', async () => {
   try {
     await installDownloadedUpdate()

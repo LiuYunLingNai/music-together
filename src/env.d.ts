@@ -17,7 +17,7 @@ declare global {
       exportLogs: () => Promise<{ canceled: boolean; path?: string }>
       getUpdateStatus: () => Promise<AppUpdateStatus>
       checkForUpdate: () => Promise<AppUpdateStatus>
-      downloadUpdate: () => Promise<AppUpdateStatus>
+      downloadUpdate: (source?: 'github' | 'ghfast') => Promise<AppUpdateStatus>
       installUpdate: () => Promise<void>
       onUpdateStatus: (listener: (status: AppUpdateStatus) => void) => () => void
       bootstrapIdentity: (serverUrl: string) => Promise<IdentityBootstrapResult>

@@ -6,6 +6,7 @@ type AppUpdateStatus = {
   version?: string
   percent?: number
   message?: string
+  releaseNotes?: string
 }
 
 type ConsoleLevel = 'log' | 'info' | 'warn' | 'error' | 'debug'
@@ -60,7 +61,7 @@ contextBridge.exposeInMainWorld('desktop', {
   exportLogs: () => ipcRenderer.invoke('debug:export-logs') as Promise<{ canceled: boolean; path?: string }>,
   getUpdateStatus: () => ipcRenderer.invoke('app-update:get-status') as Promise<AppUpdateStatus>,
   checkForUpdate: () => ipcRenderer.invoke('app-update:check') as Promise<AppUpdateStatus>,
-  downloadUpdate: () => ipcRenderer.invoke('app-update:download') as Promise<AppUpdateStatus>,
+  downloadUpdate: (source: 'github' | 'ghfast' = 'github') => ipcRenderer.invoke('app-update:download', source) as Promise<AppUpdateStatus>,
   installUpdate: () => ipcRenderer.invoke('app-update:install') as Promise<void>,
   onUpdateStatus: (listener: (status: AppUpdateStatus) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, status: AppUpdateStatus) => listener(status)

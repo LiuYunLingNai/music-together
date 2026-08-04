@@ -11,6 +11,7 @@ export interface AppUpdateStatus {
   version?: string
   percent?: number
   message?: string
+  releaseNotes?: string
 }
 
 export interface IdentityBootstrapResult {
