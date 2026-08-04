@@ -93,7 +93,8 @@ jobs:
           VERSION: ${{ needs.release_info.outputs.version }}
         run: |
           set -euo pipefail
-          tag="v${VERSION}"
+          tag="windows-v${VERSION}"
+          notes_file=".github/changelogs/windows-v${VERSION}.md"
           shopt -s nullglob
           assets=(release/*.exe release/*.blockmap)
           if [ "${#assets[@]}" -eq 0 ]; then
@@ -102,16 +103,31 @@ jobs:
           fi
 
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release edit "$tag" \
-              --repo "$GITHUB_REPOSITORY" \
-              --title "Music Together v${VERSION}"
+            if [ -f "$notes_file" ]; then
+              gh release edit "$tag" \
+                --repo "$GITHUB_REPOSITORY" \
+                --title "Music Together Windows v${VERSION}" \
+                --notes-file "$notes_file"
+            else
+              gh release edit "$tag" \
+                --repo "$GITHUB_REPOSITORY" \
+                --title "Music Together Windows v${VERSION}"
+            fi
             gh release upload "$tag" "${assets[@]}" \
               --repo "$GITHUB_REPOSITORY" \
               --clobber
           else
-            gh release create "$tag" "${assets[@]}" \
-              --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" \
-              --title "Music Together v${VERSION}" \
-              --generate-notes
+            if [ -f "$notes_file" ]; then
+              gh release create "$tag" "${assets[@]}" \
+                --repo "$GITHUB_REPOSITORY" \
+                --target "$GITHUB_SHA" \
+                --title "Music Together Windows v${VERSION}" \
+                --notes-file "$notes_file"
+            else
+              gh release create "$tag" "${assets[@]}" \
+                --repo "$GITHUB_REPOSITORY" \
+                --target "$GITHUB_SHA" \
+                --title "Music Together Windows v${VERSION}" \
+                --generate-notes
+            fi
           fi
