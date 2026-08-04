@@ -1,4 +1,4 @@
-import { ChevronRight, DoorOpen, Headphones, LockKeyhole, LogOut, Plus, Radio, RefreshCw, Server, Users, X } from 'lucide-react'
+import { ChevronRight, DoorOpen, Headphones, LockKeyhole, LogOut, Plus, Radio, RefreshCw, Server, Settings, Users, X } from 'lucide-react'
 import { useState } from 'react'
 import { connectClient, createRoom, disconnectClient, joinRoom, leaveRoom } from '../services/runtime'
 import { useAppStore } from '../store/app-store'
@@ -36,6 +36,7 @@ export function Sidebar() {
           </button>
         )}
       </form>
+      {status === 'connected' && <button className="sidebar-account-button" type="button" onClick={() => set({ settingsOpen: true })}><Settings size={15} />账号与设置</button>}
       {connectionError && <p className="inline-error">{connectionError}</p>}
 
       <div className="sidebar__section-heading">

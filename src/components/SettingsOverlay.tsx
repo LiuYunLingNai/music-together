@@ -21,10 +21,11 @@ const QUALITY_OPTIONS: Array<{ value: AudioQuality; label: string }> = [
 
 export function SettingsOverlay() {
   const profile = useAppStore((state) => state.profile)
+  const room = useAppStore((state) => state.room)
   const set = useAppStore((state) => state.set)
-  const [section, setSection] = useState<Section>('room')
+  const [section, setSection] = useState<Section>(() => room ? 'room' : 'account')
   const items: Array<{ id: Section; label: string; icon: React.ReactNode; hidden?: boolean }> = [
-    { id: 'room', label: '房间与成员', icon: <Users size={16} /> },
+    { id: 'room', label: '房间与成员', icon: <Users size={16} />, hidden: !room },
     { id: 'sources', label: '音源账号', icon: <Music size={16} /> },
     { id: 'account', label: '用户账号', icon: <CircleUserRound size={16} /> },
     { id: 'appearance', label: '外观主题', icon: <SunMoon size={16} /> },
@@ -32,6 +33,9 @@ export function SettingsOverlay() {
     { id: 'lyrics', label: '歌词显示', icon: <ListMusic size={16} /> },
     { id: 'admin', label: '服务器管理', icon: <ShieldCheck size={16} />, hidden: profile?.role !== 'admin' },
   ]
+  useEffect(() => {
+    if (!room && section === 'room') setSection('account')
+  }, [room, section])
   useEffect(() => {
     const handler = (event: KeyboardEvent) => { if (event.key === 'Escape') set({ settingsOpen: false }) }
     window.addEventListener('keydown', handler)
@@ -47,7 +51,7 @@ export function SettingsOverlay() {
         </aside>
         <main className="settings-content">
           <button className="settings-close icon-button" title="关闭设置" onClick={() => set({ settingsOpen: false })}><X size={18} /></button>
-          {section === 'room' && <RoomSettings />}
+          {section === 'room' && room && <RoomSettings />}
           {section === 'sources' && <SourceAccounts />}
           {section === 'account' && <AccountSettings />}
           {section === 'appearance' && <AppearanceSettings />}

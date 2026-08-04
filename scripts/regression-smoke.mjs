@@ -144,12 +144,11 @@ async function main() {
     await cdp.send('Page.reload', { ignoreCache: true })
     await poll(cdp, `Boolean(document.querySelector("input[aria-label='服务器地址']"))`, 'guest reload')
     await connect(cdp, `Guest ${suffix}`)
-    await createRoom(cdp, `Regression ${suffix}`)
 
-    await cdp.evaluate(`document.querySelector("button[title='打开设置']").click()`)
-    await poll(cdp, `Boolean(document.querySelector('.settings-window'))`, 'settings')
-    await cdp.evaluate(`Array.from(document.querySelectorAll('.settings-nav nav button')).find((button) => button.textContent.includes('用户账号')).click()`)
+    await cdp.evaluate(`document.querySelector('.sidebar-account-button').click()`)
+    await poll(cdp, `Boolean(document.querySelector('.settings-window'))`, 'lobby account settings')
     await poll(cdp, `Boolean(document.querySelector("input[placeholder='账号 ID']"))`, 'account settings')
+    assert(!Array.from(document.querySelectorAll('.settings-nav nav button')).some((button) => button.textContent.includes('房间与成员')), 'room settings are available before joining a room')
     await cdp.evaluate(`(() => {
       const setValue = (element, value) => {
         const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
@@ -221,6 +220,10 @@ async function main() {
     await poll(cdp, `!document.querySelector('.settings-window')`, 'settings close')
     await poll(cdp, `Boolean(document.querySelector("button[title='创建房间']"))`, 'reconnected lobby')
     await createRoom(cdp, `Controls ${suffix}`)
+    await cdp.evaluate(`document.querySelector("button[title='收起右侧栏']").click()`)
+    await poll(cdp, `document.querySelector('.workspace--room-collapsed') && document.querySelector('.room-panel__expand')`, 'collapsed room panel')
+    await cdp.evaluate(`document.querySelector("button[title='展开右侧栏']").click()`)
+    await poll(cdp, `!document.querySelector('.workspace--room-collapsed') && document.querySelector("button[title='收起右侧栏']")`, 'expanded room panel')
     await cdp.evaluate(`document.querySelector(".now-playing__actions button[title='搜索并点歌']").click()`)
     await poll(cdp, `Boolean(document.querySelector('.search-dialog'))`, 'search')
     await cdp.evaluate(`(() => {

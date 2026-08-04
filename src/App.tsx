@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useAppStore } from './store/app-store'
 import { Titlebar } from './components/Titlebar'
 import { Sidebar } from './components/Sidebar'
@@ -18,6 +18,11 @@ export default function App() {
   const settingsOpen = useAppStore((state) => state.settingsOpen)
   const connectionStatus = useAppStore((state) => state.connectionStatus)
   const set = useAppStore((state) => state.set)
+  const [rightPanelOpen, setRightPanelOpen] = useState(true)
+
+  useEffect(() => {
+    if (!room) setRightPanelOpen(true)
+  }, [room])
 
   useEffect(() => {
     if (!notice) return
@@ -34,12 +39,12 @@ export default function App() {
   return (
     <div className="app-shell">
       <Titlebar />
-      <div className={`workspace ${room ? 'workspace--room' : 'workspace--lobby'}`}>
+      <div className={`workspace ${room ? `workspace--room${rightPanelOpen ? '' : ' workspace--room-collapsed'}` : 'workspace--lobby'}`}>
         <Sidebar />
         <main className="main-stage">
           {room ? <NowPlaying /> : <Lobby />}
         </main>
-        {room && <RoomPanel />}
+        {room && <RoomPanel collapsed={!rightPanelOpen} onToggle={() => setRightPanelOpen((open) => !open)} />}
       </div>
       {room && <TransportBar />}
       {room && <VoteBanner />}

@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Captions, Crown, ListMusic, MessageCircle, MoreHorizontal, Play, Search, Send, Shield, Trash2, UserRound, Users, X } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Captions, Crown, ListMusic, MessageCircle, MoreHorizontal, Play, Search, Send, Shield, Trash2, UserRound, Users, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { canDirectly } from '../domain/permissions'
 import type { MusicSource, Track } from '../domain/types'
@@ -9,7 +9,7 @@ import { useAppStore } from '../store/app-store'
 
 type PanelTab = 'queue' | 'chat' | 'members'
 
-export function RoomPanel() {
+export function RoomPanel({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   const [tab, setTab] = useState<PanelTab>('queue')
   const [metadataTrack, setMetadataTrack] = useState<Track | null>(null)
   const room = useAppStore((state) => state.room)!
@@ -37,12 +37,18 @@ export function RoomPanel() {
   }
 
   return (
-    <aside className="room-panel">
-      <div className="panel-tabs">
-        <button className={tab === 'queue' ? 'is-active' : ''} onClick={() => setTab('queue')}><ListMusic size={15} />队列 <span>{room.queue.length}</span></button>
-        <button className={tab === 'chat' ? 'is-active' : ''} onClick={() => setTab('chat')}><MessageCircle size={15} />聊天</button>
-        <button className={tab === 'members' ? 'is-active' : ''} onClick={() => setTab('members')}><Users size={15} /><span>{room.users.length}</span></button>
-      </div>
+    <aside className={`room-panel ${collapsed ? 'room-panel--collapsed' : ''}`}>
+      {collapsed ? (
+        <button className="room-panel__expand icon-button" title="展开右侧栏" aria-label="展开右侧栏" onClick={onToggle}><ArrowLeft size={16} /></button>
+      ) : <>
+        <div className="panel-tabs">
+          <button className={tab === 'queue' ? 'is-active' : ''} onClick={() => setTab('queue')}><ListMusic size={15} />队列 <span>{room.queue.length}</span></button>
+          <button className={tab === 'chat' ? 'is-active' : ''} onClick={() => setTab('chat')}><MessageCircle size={15} />聊天</button>
+          <button className={tab === 'members' ? 'is-active' : ''} onClick={() => setTab('members')}><Users size={15} /><span>{room.users.length}</span></button>
+          <button className="panel-tabs__collapse icon-button" title="收起右侧栏" aria-label="收起右侧栏" onClick={onToggle}><ArrowRight size={15} /></button>
+        </div>
+      </>}
+      {!collapsed && <>
       {tab === 'queue' && (
         <>
           <div className="panel-toolbar">
@@ -106,6 +112,7 @@ export function RoomPanel() {
       )}
       {tab === 'members' && <MembersPanel />}
       {metadataTrack && <MetadataDialog track={metadataTrack} onClose={() => setMetadataTrack(null)} />}
+      </>}
     </aside>
   )
 }

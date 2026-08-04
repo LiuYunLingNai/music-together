@@ -1,0 +1,117 @@
+name: Release Windows
+
+on:
+  push:
+    paths:
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/release-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-windows-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release_info:
+    name: Detect Windows version change
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      should_build: ${{ steps.version.outputs.should_build }}
+
+    steps:
+      - name: Check out release commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Detect version change
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          current_version="$(node -p "require('./package.json').version")"
+          should_build=false
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            should_build=true
+          else
+            previous_version=""
+            if [ -n "${BEFORE_SHA:-}" ] && ! printf '%s' "$BEFORE_SHA" | grep -Eq '^0+$'; then
+              previous_version="$(git show "$BEFORE_SHA:package.json" 2>/dev/null | node -e 'let input=""; process.stdin.on("data", chunk => input += chunk); process.stdin.on("end", () => { try { process.stdout.write(JSON.parse(input).version || "") } catch {} })' || true)"
+            fi
+            if [ "$current_version" != "$previous_version" ]; then
+              should_build=true
+            fi
+            echo "Windows version: ${previous_version:-none} -> $current_version"
+          fi
+
+          echo "version=$current_version" >> "$GITHUB_OUTPUT"
+          echo "should_build=$should_build" >> "$GITHUB_OUTPUT"
+
+  release:
+    name: Build and publish Windows release
+    needs: release_info
+    if: needs.release_info.outputs.should_build == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out release commit
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows packages
+        run: npm run dist:win -- --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.release_info.outputs.version }}
+        run: |
+          set -euo pipefail
+          tag="v${VERSION}"
+          shopt -s nullglob
+          assets=(release/*.exe release/*.blockmap)
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "No Windows release assets found"
+            exit 1
+          fi
+
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Music Together v${VERSION}"
+            gh release upload "$tag" "${assets[@]}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          else
+            gh release create "$tag" "${assets[@]}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "Music Together v${VERSION}" \
+              --generate-notes
+          fi

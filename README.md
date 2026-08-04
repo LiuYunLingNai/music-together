@@ -25,7 +25,11 @@ npm run dist:linux
 
 输出位于 `release/`。Windows 目标包括 NSIS 安装包和 Portable，Linux 目标包括 AppImage 和 deb。
 
-当前工作区同时包含已验证的便携归档：`portable/Music-Together-0.1.0-windows-x64.zip` 与 `portable/Music-Together-0.1.0-linux-x64.tar.gz`，校验值见 `portable/SHA256SUMS.txt`。
+### 统一发版
+
+Windows 与 Android 使用同一个 GitHub Release。发版时将 Windows 的 `package.json` `version` 与 Android 的 `app/build.gradle.kts` `versionName` 设置为相同版本（例如 `1.0.0`），分别推送对应分支；两个工作流会共同创建或更新 `v1.0.0`，把 Windows 安装包、Portable、Android APK 和 AAB 放在同一条 Release 中。无需手动重复创建 Release。
+
+当前工作区同时包含已验证的便携归档：`portable/Music-Together-1.0.0-windows-x64.zip` 与 `portable/Music-Together-1.0.0-linux-x64.tar.gz`，校验值见 `portable/SHA256SUMS.txt`。
 
 ## 主要能力
 
