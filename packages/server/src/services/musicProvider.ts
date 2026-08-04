@@ -1552,8 +1552,11 @@ class MusicProvider {
           source === 'kugou'
             ? await kugouAuth.getRecommendationSongs(cookie, limit)
             : await kugouAuth.getConceptRecommendationSongs(cookie, limit)
-        const recommendedSongs =
-          source === 'kugou' ? await this.getKugouRecommendedPlaylistSongs(cookie, limit - dailySongs.length) : []
+        // Kugou's legacy `guess_special_recommend` endpoint is no longer
+        // reliable (it returns business status 0 with its obsolete static
+        // client parameters). Keep the native daily feed as the source of
+        // truth instead of adding a noisy, best-effort request here.
+        const recommendedSongs: kugouAuth.KugouPlaylistTrack[] = []
         const sourceIds = new Set<string>()
         const allTracks = [...dailySongs, ...recommendedSongs].flatMap((song) => {
           const track = this.kugouSongToTrack(song, source)
@@ -1616,24 +1619,6 @@ class MusicProvider {
       return this.shuffle(results.flat()).slice(0, needed * 2)
     } catch (err) {
       logger.warn('Netease recommended playlists unavailable', { err })
-      return []
-    }
-  }
-
-  private async getKugouRecommendedPlaylistSongs(
-    cookie: string,
-    needed: number,
-  ): Promise<kugouAuth.KugouPlaylistTrack[]> {
-    if (needed <= 0) return []
-
-    try {
-      const playlistIds = this.shuffle(await kugouAuth.getRecommendationPlaylistIds(12)).slice(0, 4)
-      const playlists = await Promise.all(
-        playlistIds.map((playlistId) => kugouAuth.getPlaylistTracks(playlistId, 1, 10, cookie)),
-      )
-      return this.shuffle(playlists.flatMap((playlist) => playlist.songs)).slice(0, needed * 2)
-    } catch (err) {
-      logger.warn('Kugou recommendation playlists unavailable', { err })
       return []
     }
   }
