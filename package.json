@@ -1,6 +1,6 @@
 {
   "name": "music-together-desktop",
-  "version": "2.2.5",
+  "version": "2.2.6",
   "private": true,
   "description": "Native desktop client for Music Together",
   "debugBuild": false,
