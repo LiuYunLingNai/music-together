@@ -128,7 +128,7 @@ docker run -d --name music-together --restart unless-stopped \
   -e QQ_MUSIC_API_KEY='你的 QQ_MUSIC_API_KEY' \
   -e QQ_MUSIC_API_URL='API url' \
   -v 填入本地存放数据路径:/app/data \
-  ghcr.io/LiuYunLingNai/music-together:latest
+  ghcr.io/liuyunlingnai/music-together:latest
 ```
 
 如果您所在地区网络不是很好，请使用：
@@ -140,7 +140,7 @@ docker run -d --name music-together --restart unless-stopped \
   -e QQ_MUSIC_API_KEY='你的 QQ_MUSIC_API_KEY' \
   -e QQ_MUSIC_API_URL='API url' \
   -v 填入本地存放数据路径:/app/data \
-  ghcr.nju.edu.cn/LiuYunLingNai/music-together:latest
+  ghcr.nju.edu.cn/liuyunlingnai/music-together:latest
 ```
 
 > 本地数据存放路径主要用于存放账号等内容，如果未映射路径则容器重启后数据会丢失
