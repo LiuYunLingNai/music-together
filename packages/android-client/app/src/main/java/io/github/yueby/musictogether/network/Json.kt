@@ -5,6 +5,7 @@ import io.github.yueby.musictogether.model.PlayState
 import io.github.yueby.musictogether.model.Playlist
 import io.github.yueby.musictogether.model.PlatformAuthStatus
 import io.github.yueby.musictogether.model.MyPlatformAuth
+import io.github.yueby.musictogether.model.RoomMember
 import io.github.yueby.musictogether.model.RoomListItem
 import io.github.yueby.musictogether.model.RoomState
 import io.github.yueby.musictogether.model.Track
@@ -82,8 +83,29 @@ internal fun JSONObject.toPlayState(): PlayState = PlayState(
     serverTimeToExecute = if (has("serverTimeToExecute")) optLong("serverTimeToExecute") else null,
 )
 
+internal fun JSONObject.toUser(): User = User(
+    id = optString("id"),
+    nickname = optString("nickname"),
+    role = optString("role", "member"),
+    avatarUrl = stringOrNull("avatarUrl"),
+    isServerAdmin = optBoolean("isServerAdmin", false),
+)
+
+internal fun JSONObject.toRoomMember(): RoomMember = RoomMember(
+    id = optString("id"),
+    nickname = optString("nickname"),
+    role = optString("role", "member"),
+    avatarUrl = stringOrNull("avatarUrl"),
+    isServerAdmin = optBoolean("isServerAdmin", false),
+    isOnline = optBoolean("isOnline", false),
+    joinedAt = optLong("joinedAt", 0L),
+    lastSeenAt = if (has("lastSeenAt") && !isNull("lastSeenAt")) optLong("lastSeenAt") else null,
+)
+
 internal fun JSONObject.toRoomState(): RoomState {
     val usersJson = optJSONArray("users") ?: JSONArray()
+    val users = List(usersJson.length()) { i -> usersJson.getJSONObject(i).toUser() }
+    val membersJson = optJSONArray("members")
     val queueJson = optJSONArray("queue") ?: JSONArray()
     val current = optJSONObject("currentTrack")
     return RoomState(
@@ -95,14 +117,18 @@ internal fun JSONObject.toRoomState(): RoomState {
         hidden = optBoolean("hidden", false),
         permanent = optBoolean("permanent", false),
         audioQuality = audioQuality("audioQuality"),
-        users = List(usersJson.length()) { i ->
-            val item = usersJson.getJSONObject(i)
-            User(
-                id = item.optString("id"),
-                nickname = item.optString("nickname"),
-                role = item.optString("role", "member"),
-                avatarUrl = item.stringOrNull("avatarUrl"),
-                isServerAdmin = item.optBoolean("isServerAdmin", false),
+        users = users,
+        members = membersJson?.let { value ->
+            List(value.length()) { index -> value.getJSONObject(index).toRoomMember() }
+        } ?: users.map { user ->
+            RoomMember(
+                id = user.id,
+                nickname = user.nickname,
+                role = user.role,
+                avatarUrl = user.avatarUrl,
+                isServerAdmin = user.isServerAdmin,
+                isOnline = true,
+                joinedAt = 0L,
             )
         },
         queue = List(queueJson.length()) { queueJson.getJSONObject(it).toTrack() },

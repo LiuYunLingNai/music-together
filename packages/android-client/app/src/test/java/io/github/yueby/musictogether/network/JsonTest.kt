@@ -3,6 +3,7 @@ package io.github.yueby.musictogether.network
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -109,6 +110,46 @@ class JsonTest {
 
         assertEquals("member", user.role)
         assertTrue(user.isServerAdmin)
+    }
+
+    @Test
+    fun roomStatePreservesOfflineMembersAndPresence() {
+        val room = roomJson().put(
+            "members",
+            org.json.JSONArray().put(
+                JSONObject()
+                    .put("id", "offline-member")
+                    .put("nickname", "Offline")
+                    .put("role", "admin")
+                    .put("isOnline", false)
+                    .put("joinedAt", 1_000L)
+                    .put("lastSeenAt", JSONObject.NULL),
+            ),
+        ).toRoomState()
+
+        val member = room.members.single()
+        assertFalse(member.isOnline)
+        assertEquals(1_000L, member.joinedAt)
+        assertNull(member.lastSeenAt)
+        assertEquals("admin", member.role)
+    }
+
+    @Test
+    fun roomStateBuildsOnlineMembersForLegacyServers() {
+        val room = roomJson().put(
+            "users",
+            org.json.JSONArray().put(
+                JSONObject()
+                    .put("id", "legacy-member")
+                    .put("nickname", "Legacy")
+                    .put("role", "member"),
+            ),
+        ).toRoomState()
+
+        val member = room.members.single()
+        assertTrue(member.isOnline)
+        assertEquals(0L, member.joinedAt)
+        assertNull(member.lastSeenAt)
     }
 
     private fun roomJson() = JSONObject(

@@ -12,6 +12,18 @@ data class User(
 )
 
 @Immutable
+data class RoomMember(
+    val id: String,
+    val nickname: String,
+    val role: String,
+    val avatarUrl: String? = null,
+    val isServerAdmin: Boolean = false,
+    val isOnline: Boolean,
+    val joinedAt: Long,
+    val lastSeenAt: Long? = null,
+)
+
+@Immutable
 data class AccountProfile(
     val id: String,
     val nickname: String,
@@ -102,6 +114,7 @@ data class RoomState(
     val permanent: Boolean,
     val audioQuality: String,
     val users: List<User>,
+    val members: List<RoomMember> = emptyList(),
     val queue: List<Track>,
     val currentTrack: Track?,
     val playState: PlayState,

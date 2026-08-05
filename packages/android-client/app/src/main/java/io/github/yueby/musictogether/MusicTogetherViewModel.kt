@@ -21,10 +21,10 @@ import io.github.yueby.musictogether.model.PlatformHubState
 import io.github.yueby.musictogether.model.Playlist
 import io.github.yueby.musictogether.model.QrLoginState
 import io.github.yueby.musictogether.model.PlayState
+import io.github.yueby.musictogether.model.RoomMember
 import io.github.yueby.musictogether.model.ServerConnection
 import io.github.yueby.musictogether.model.Track
 import io.github.yueby.musictogether.model.UiNotice
-import io.github.yueby.musictogether.model.User
 import io.github.yueby.musictogether.model.UpdateDownloadSource
 import io.github.yueby.musictogether.model.queueIdentity
 import io.github.yueby.musictogether.network.AppUpdateService
@@ -50,6 +50,7 @@ import io.github.yueby.musictogether.network.toMyPlatformAuth
 import io.github.yueby.musictogether.network.toRoomList
 import io.github.yueby.musictogether.network.toRoomState
 import io.github.yueby.musictogether.network.toTrack
+import io.github.yueby.musictogether.network.toUser
 import io.github.yueby.musictogether.network.toVoteState
 import io.github.yueby.musictogether.network.toJson
 import io.github.yueby.musictogether.notifications.ChatNotificationManager
@@ -1142,23 +1143,68 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     )
                 }
             }
-            Events.ROOM_USER_JOINED -> updateUsers { users ->
-                val value = data as? JSONObject ?: return@updateUsers users
-                users.filterNot { it.id == value.optString("id") } + User(
-                    id = value.optString("id"),
-                    nickname = value.optString("nickname"),
-                    role = value.optString("role", "member"),
-                    avatarUrl = value.stringOrNull("avatarUrl"),
-                    isServerAdmin = value.optBoolean("isServerAdmin", false),
-                )
+            Events.ROOM_USER_JOINED -> {
+                val user = (data as? JSONObject)?.toUser() ?: return
+                val now = System.currentTimeMillis()
+                updateRoom { room ->
+                    val members = room.members
+                    val updatedMembers = if (members.any { it.id == user.id }) {
+                        members.map { member ->
+                            if (member.id == user.id) {
+                                member.copy(
+                                    nickname = user.nickname,
+                                    role = user.role,
+                                    avatarUrl = user.avatarUrl,
+                                    isServerAdmin = user.isServerAdmin,
+                                    isOnline = true,
+                                    lastSeenAt = now,
+                                )
+                            } else {
+                                member
+                            }
+                        }
+                    } else {
+                        members + RoomMember(
+                            id = user.id,
+                            nickname = user.nickname,
+                            role = user.role,
+                            avatarUrl = user.avatarUrl,
+                            isServerAdmin = user.isServerAdmin,
+                            isOnline = true,
+                            joinedAt = now,
+                            lastSeenAt = now,
+                        )
+                    }
+                    room.copy(
+                        users = room.users.filterNot { it.id == user.id } + user,
+                        members = updatedMembers,
+                    )
+                }
             }
-            Events.ROOM_USER_LEFT -> updateUsers { users ->
-                val id = (data as? JSONObject)?.optString("id")
-                users.filterNot { it.id == id }
+            Events.ROOM_USER_LEFT -> {
+                val userId = (data as? JSONObject)?.stringOrNull("id") ?: return
+                val now = System.currentTimeMillis()
+                updateRoom { room ->
+                    room.copy(
+                        users = room.users.filterNot { it.id == userId },
+                        members = room.members.map { member ->
+                            if (member.id == userId) member.copy(isOnline = false, lastSeenAt = now) else member
+                        },
+                    )
+                }
             }
-            Events.ROOM_ROLE_CHANGED -> updateUsers { users ->
-                val value = data as? JSONObject ?: return@updateUsers users
-                users.map { if (it.id == value.optString("userId")) it.copy(role = value.optString("role")) else it }
+            Events.ROOM_ROLE_CHANGED -> {
+                val value = data as? JSONObject ?: return
+                val userId = value.stringOrNull("userId") ?: return
+                val role = value.stringOrNull("role") ?: return
+                updateRoom { room ->
+                    room.copy(
+                        users = room.users.map { user -> if (user.id == userId) user.copy(role = role) else user },
+                        members = room.members.map { member ->
+                            if (member.id == userId) member.copy(role = role) else member
+                        },
+                    )
+                }
             }
             Events.ROOM_ERROR -> {
                 val wasJoining = waitingForJoinRoomState
@@ -1737,8 +1783,6 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         val room = _state.value.room ?: return
         _state.value = _state.value.copy(room = transform(room))
     }
-
-    private fun updateUsers(transform: (List<User>) -> List<User>) = updateRoom { it.copy(users = transform(it.users)) }
 
     private fun controlOrVote(event: String, voteAction: String) {
         if (canControl()) socket.emit(event) else startVote(voteAction)
