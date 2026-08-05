@@ -31,6 +31,13 @@ function setRoleIfChanged(user: User, role: UserRole): boolean {
   return true
 }
 
+function setMemberRoleIfChanged(room: RoomData, userId: string, role: UserRole): boolean {
+  const member = room.members.find((item) => item.id === userId)
+  if (!member || member.role === role) return false
+  member.role = role
+  return true
+}
+
 function upsertRoomMember(room: RoomData, user: User, role: UserRole): RoomMember {
   const now = Date.now()
   const existing = room.members.find((member) => member.id === user.id)
@@ -86,6 +93,7 @@ function reconcileRoomRoles(room: RoomData): boolean {
     for (const user of room.users) {
       const role: UserRole = user.id === room.creatorId ? 'owner' : room.adminUserIds.has(user.id) ? 'admin' : 'member'
       changed = setRoleIfChanged(user, role) || changed
+      changed = setMemberRoleIfChanged(room, user.id, role) || changed
     }
     return changed
   }
@@ -97,7 +105,9 @@ function reconcileRoomRoles(room: RoomData): boolean {
   }
 
   for (const user of room.users) {
-    changed = setRoleIfChanged(user, user.id === room.temporaryAdminUserId ? 'admin' : 'member') || changed
+    const role: UserRole = user.id === room.temporaryAdminUserId ? 'admin' : 'member'
+    changed = setRoleIfChanged(user, role) || changed
+    changed = setMemberRoleIfChanged(room, user.id, role) || changed
   }
 
   return changed

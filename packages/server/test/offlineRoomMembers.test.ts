@@ -55,3 +55,17 @@ test('keeps offline members in a permanent room roster after reload', () => {
 
   roomRepo.delete(room.id)
 })
+
+test('updates the roster role when an online member becomes temporary admin', () => {
+  const { room } = roomService.createRoom('owner-socket', 'Owner', 'Role sync room', null, 'owner-role-id')
+  const joined = roomService.joinRoom('member-socket', room.id, 'Member', 'member-role-id')
+  assert.ok(joined)
+
+  const left = roomService.leaveRoom('owner-socket')
+  assert.ok(left)
+  assert.equal(left.roleChanged, true)
+  assert.equal(room.users.find((user) => user.id === 'member-role-id')?.role, 'admin')
+  assert.equal(room.members.find((member) => member.id === 'member-role-id')?.role, 'admin')
+
+  roomRepo.delete(room.id)
+})
