@@ -220,6 +220,13 @@ data class Playlist(
 )
 
 @Immutable
+data class PlatformRecommendation(
+    val platform: String,
+    val tracks: List<Track>,
+    val unavailableReason: String? = null,
+)
+
+@Immutable
 data class QrLoginState(
     val open: Boolean = false,
     val platform: String = "netease",
@@ -297,6 +304,10 @@ data class AppState(
     val searchKeyword: String = "",
     val searchSource: String = "netease",
     val searchError: String? = null,
+    val recommendations: List<PlatformRecommendation> = emptyList(),
+    val recommendationsLoading: Boolean = false,
+    val recommendationsLoaded: Boolean = false,
+    val recommendationsError: String? = null,
     val bilibiliMetadataMatch: BilibiliMetadataMatchState = BilibiliMetadataMatchState(),
     val lyricOffsets: Map<String, Int> = emptyMap(),
     val activeVote: VoteState? = null,

@@ -181,6 +181,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private var syncJob: Job? = null
     private var lyricJob: Job? = null
     private var searchJob: Job? = null
+    private var recommendationsJob: Job? = null
     private var qrPollJob: Job? = null
     private var qrCloseJob: Job? = null
     private var playlistJob: Job? = null
@@ -534,6 +535,42 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             page = current.searchPage + 1,
             append = true,
         )
+    }
+
+    fun loadRecommendations() {
+        val room = _state.value.room ?: return
+        val server = activeServer ?: return
+        val roomId = room.id
+        recommendationsJob?.cancel()
+        _state.value = _state.value.copy(
+            recommendationsLoading = true,
+            recommendationsError = null,
+        )
+        AppLogger.info("Recommendations", "load room=$roomId")
+        recommendationsJob = viewModelScope.launch {
+            runCatching { api.recommendations(server, roomId) }
+                .onFailure { if (it is CancellationException) throw it }
+                .onSuccess { recommendations ->
+                    if (_state.value.room?.id != roomId) return@onSuccess
+                    _state.value = _state.value.copy(
+                        recommendations = recommendations,
+                        recommendationsLoading = false,
+                        recommendationsLoaded = true,
+                        recommendationsError = null,
+                    )
+                    AppLogger.info("Recommendations", "loaded room=$roomId platforms=${recommendations.size}")
+                }
+                .onFailure {
+                    if (_state.value.room?.id != roomId) return@onFailure
+                    AppLogger.error("Recommendations", "load failed room=$roomId", it)
+                    _state.value = _state.value.copy(
+                        recommendations = emptyList(),
+                        recommendationsLoading = false,
+                        recommendationsLoaded = true,
+                        recommendationsError = it.message ?: "推荐加载失败",
+                    )
+                }
+        }
     }
 
     fun addTrack(track: Track) {
@@ -1507,11 +1544,18 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         qrPollJob?.cancel()
         qrCloseJob?.cancel()
         playlistJob?.cancel()
+        recommendationsJob?.cancel()
         playlistContext = null
         restoredAuthRoomId = null
         autoRestoringPlatforms.clear()
         loadedPlaylistPlatforms.clear()
-        _state.value = _state.value.copy(platformHub = PlatformHubState())
+        _state.value = _state.value.copy(
+            platformHub = PlatformHubState(),
+            recommendations = emptyList(),
+            recommendationsLoading = false,
+            recommendationsLoaded = false,
+            recommendationsError = null,
+        )
     }
 
     private fun setNotice(message: String, isError: Boolean = false) {
@@ -1956,6 +2000,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         shouldReconnect = false
         lyricJob?.cancel()
         searchJob?.cancel()
+        recommendationsJob?.cancel()
         bilibiliMetadataSearchJob?.cancel()
         PlaybackCommandBridge.listener = null
         socket.disconnect()

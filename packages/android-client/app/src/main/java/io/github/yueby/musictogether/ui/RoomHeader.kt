@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Groups
@@ -189,6 +190,11 @@ internal fun RoomHeader(
             )
         }
         Spacer(Modifier.size(2.dp))
+        if (connected) {
+            IconButton(onClick = { onOpenOverlay(RoomOverlay.Recommendations) }) {
+                Icon(Icons.Default.AutoAwesome, "推荐点歌", Modifier.size(20.dp), tint = contentColor)
+            }
+        }
         IconButton(onClick = { onOpenOverlay(RoomOverlay.Search) }) {
             Icon(Icons.Default.Search, "搜索点歌", Modifier.size(20.dp), tint = contentColor)
         }

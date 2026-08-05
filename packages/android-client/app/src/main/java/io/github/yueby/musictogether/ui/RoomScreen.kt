@@ -43,7 +43,7 @@ import io.github.yueby.musictogether.ui.player.PlayerPane
 import kotlinx.coroutines.delay
 
 internal enum class RoomOverlay {
-    Queue, Search, Chat, Members, Accounts, AccountSettings, RoomSettings
+    Queue, Search, Recommendations, Chat, Members, Accounts, AccountSettings, RoomSettings
 }
 
 internal enum class RoomBackAction {
@@ -204,13 +204,14 @@ fun RoomScreen(
                                 when (overlay) {
                                     RoomOverlay.Queue, RoomOverlay.Chat, RoomOverlay.Members -> 0.70f
                                     RoomOverlay.Accounts, RoomOverlay.AccountSettings, RoomOverlay.RoomSettings -> 0.90f
-                                    RoomOverlay.Search -> 0.96f
+                                    RoomOverlay.Search, RoomOverlay.Recommendations -> 0.96f
                                 },
                             ),
                     ) {
                         when (overlay) {
                             RoomOverlay.Queue -> QueuePane(room, viewModel)
                             RoomOverlay.Search -> SearchPane(appState, viewModel)
+                            RoomOverlay.Recommendations -> RecommendationsPane(appState, viewModel)
                             RoomOverlay.Chat -> ChatPane(appState.messages, viewModel)
                             RoomOverlay.Members -> MembersPane(room, appState.userId)
                             RoomOverlay.Accounts -> PlatformPane(appState, viewModel)

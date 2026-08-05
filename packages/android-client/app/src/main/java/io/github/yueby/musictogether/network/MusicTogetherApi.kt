@@ -5,6 +5,7 @@ import io.github.yueby.musictogether.model.AccountProfile
 import io.github.yueby.musictogether.model.AdminRoom
 import io.github.yueby.musictogether.model.AdminUser
 import io.github.yueby.musictogether.model.AudioProxyPolicy
+import io.github.yueby.musictogether.model.PlatformRecommendation
 import io.github.yueby.musictogether.model.Track
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -220,6 +221,18 @@ class MusicTogetherApi(private val client: OkHttpClient) {
             )
         }
 
+    suspend fun recommendations(
+        server: ServerAddress,
+        roomId: String,
+        limit: Int = 50,
+    ): List<PlatformRecommendation> = withContext(Dispatchers.IO) {
+        val url = server.api("music", "recommendations").newBuilder()
+            .addQueryParameter("roomId", roomId)
+            .addQueryParameter("limit", limit.coerceIn(1, 50).toString())
+            .build()
+        parsePlatformRecommendations(executeJson(url, "recommendations"))
+    }
+
     suspend fun lyrics(server: ServerAddress, track: Track): JSONObject? = withContext(Dispatchers.IO) {
         val lyricId = track.lyricId?.takeIf { it.isNotBlank() } ?: return@withContext null
         val source = track.metadataSource ?: track.source
@@ -378,4 +391,17 @@ class MusicTogetherApi(private val client: OkHttpClient) {
     private companion object {
         val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     }
+}
+
+internal fun parsePlatformRecommendations(json: JSONObject): List<PlatformRecommendation> {
+    val recommendations = json.optJSONArray("recommendations") ?: JSONArray()
+    return List(recommendations.length()) { index ->
+        val recommendation = recommendations.getJSONObject(index)
+        val tracks = recommendation.optJSONArray("tracks") ?: JSONArray()
+        PlatformRecommendation(
+            platform = recommendation.optString("platform"),
+            tracks = List(tracks.length()) { trackIndex -> tracks.getJSONObject(trackIndex).toTrack() },
+            unavailableReason = recommendation.stringOrNull("unavailableReason"),
+        )
+    }.filter { it.platform.isNotBlank() }
 }

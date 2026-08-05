@@ -1,5 +1,6 @@
 package io.github.yueby.musictogether.ui.player
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.ExperimentalSharedTransitionApi
@@ -29,16 +30,18 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -135,7 +138,7 @@ internal fun MobileLyricsHero(
     sharedTransitionScope: SharedTransitionScope,
     animatedVisibilityScope: AnimatedVisibilityScope,
 ) {
-    var lyricOffsetDialogVisible by remember(track.id) { mutableStateOf(false) }
+    var lyricOffsetPanelVisible by remember(track.id) { mutableStateOf(false) }
     val coverInteraction = remember { MutableInteractionSource() }
     val coverPressed by coverInteraction.collectIsPressedAsState()
     val coverScale by animateFloatAsState(
@@ -219,10 +222,18 @@ internal fun MobileLyricsHero(
                 unreadCount = chatUnreadCount,
                 canAdjustLyricOffset = lyricOffsetKey(track) != null,
                 onOpenChat = onOpenChat,
-                onOpenLyricOffset = { lyricOffsetDialogVisible = true },
+                onOpenLyricOffset = { lyricOffsetPanelVisible = true },
             )
         }
-        Spacer(Modifier.height(6.dp))
+        AnimatedVisibility(visible = lyricOffsetPanelVisible) {
+            LyricOffsetPanel(
+                offsetMs = lyricOffsetMs,
+                onDismiss = { lyricOffsetPanelVisible = false },
+                onOffsetChange = onSetLyricOffset,
+                modifier = Modifier.padding(top = 12.dp),
+            )
+        }
+        Spacer(Modifier.height(if (lyricOffsetPanelVisible) 12.dp else 6.dp))
         Box(
             modifier = Modifier
                 .weight(1f)
@@ -237,13 +248,6 @@ internal fun MobileLyricsHero(
                 alignToTop = true,
             )
         }
-    }
-    if (lyricOffsetDialogVisible) {
-        LyricOffsetDialog(
-            offsetMs = lyricOffsetMs,
-            onDismiss = { lyricOffsetDialogVisible = false },
-            onOffsetChange = onSetLyricOffset,
-        )
     }
 }
 
@@ -311,40 +315,74 @@ internal fun LyricActionsMenu(
 }
 
 @Composable
-internal fun LyricOffsetDialog(
+internal fun LyricOffsetPanel(
     offsetMs: Int,
     onDismiss: () -> Unit,
     onOffsetChange: (Int) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var offsetSeconds by remember(offsetMs) { mutableStateOf(offsetMs / 1_000f) }
-    val description = when {
-        offsetMs > 0 -> "歌词延后 ${String.format(java.util.Locale.getDefault(), "%.1f", offsetMs / 1_000.0)} 秒"
-        offsetMs < 0 -> "歌词提前 ${String.format(java.util.Locale.getDefault(), "%.1f", -offsetMs / 1_000.0)} 秒"
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = Color.Black.copy(alpha = 0.24f),
+        contentColor = Color.White,
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = "歌词时间校正",
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    Text(
+                        text = lyricOffsetDescription(offsetMs),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White.copy(alpha = 0.72f),
+                    )
+                }
+                IconButton(
+                    onClick = { onOffsetChange(0) },
+                    enabled = offsetMs != 0,
+                ) {
+                    Icon(
+                        Icons.Default.RestartAlt,
+                        contentDescription = "重置歌词校正",
+                    )
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "关闭歌词校正",
+                    )
+                }
+            }
+            Slider(
+                value = offsetSeconds,
+                onValueChange = { value ->
+                    offsetSeconds = value
+                    onOffsetChange((value * 1_000).roundToInt())
+                },
+                valueRange = -10f..10f,
+                steps = 199,
+            )
+        }
+    }
+}
+
+private fun lyricOffsetDescription(offsetMs: Int): String =
+    when {
+        offsetMs > 0 ->
+            "歌词延后 ${String.format(java.util.Locale.getDefault(), "%.1f", offsetMs / 1_000.0)} 秒"
+
+        offsetMs < 0 ->
+            "歌词提前 ${String.format(java.util.Locale.getDefault(), "%.1f", -offsetMs / 1_000.0)} 秒"
+
         else -> "未校正"
     }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("歌词时间校正") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text(description)
-                Slider(
-                    value = offsetSeconds,
-                    onValueChange = { value ->
-                        offsetSeconds = value
-                        onOffsetChange((value * 1_000).roundToInt())
-                    },
-                    valueRange = -10f..10f,
-                    steps = 199,
-                )
-                Text(
-                    "调整仅保存在本机，范围为提前或延后 10 秒。",
-                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
-                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("完成") } },
-        dismissButton = { TextButton(onClick = { onOffsetChange(0) }) { Text("重置") } },
-    )
-}
