@@ -85,8 +85,11 @@ export function useRoomState() {
       const room = store.room
       if (!room) return
       const updatedUsers = room.users.map((u) => (u.id === data.userId ? { ...u, role: data.role } : u))
+      const updatedMembers = room.members.map((member) =>
+        member.id === data.userId ? { ...member, role: data.role } : member,
+      )
       // updateRoom with users automatically re-derives currentUser
-      store.updateRoom({ users: updatedUsers })
+      store.updateRoom({ users: updatedUsers, members: updatedMembers })
     }
 
     const sourceLabel = (source: MusicSource) => {

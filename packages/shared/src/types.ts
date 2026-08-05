@@ -127,6 +127,8 @@ export interface RoomState {
   password?: string | null
   audioQuality: AudioQuality
   users: User[]
+  /** Full room roster, including members who are currently offline. */
+  members: RoomMember[]
   queue: Track[]
   currentTrack: Track | null
   playState: PlayState
@@ -155,6 +157,13 @@ export interface User {
   /** Account-level server administrator status, independent of the room role. */
   isServerAdmin: boolean
   avatarUrl?: string | null
+}
+
+/** A room roster entry. Unlike User, this stays available while offline. */
+export interface RoomMember extends User {
+  isOnline: boolean
+  joinedAt: number
+  lastSeenAt: number | null
 }
 
 export interface ChatMessage {

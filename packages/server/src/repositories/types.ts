@@ -1,4 +1,13 @@
-import type { AudioQuality, ChatMessage, PlayMode, PlayState, RoomListItem, Track, User } from '@music-together/shared'
+import type {
+  AudioQuality,
+  ChatMessage,
+  PlayMode,
+  PlayState,
+  RoomListItem,
+  RoomMember,
+  Track,
+  User,
+} from '@music-together/shared'
 
 /** 服务端内部房间数据模型 -- 含密码（仅通过 owner 专用 RoomState 发送给客户端） */
 export interface RoomData {
@@ -17,6 +26,8 @@ export interface RoomData {
   /** Keep the room when empty and restore it after a server restart. */
   permanent: boolean
   audioQuality: AudioQuality
+  /** Full roster; users contains only the currently connected members. */
+  members: RoomMember[]
   users: User[]
   queue: Track[]
   currentTrack: Track | null

@@ -8,9 +8,14 @@ import * as authService from './authService.js'
 export function replaceActiveUserId(oldUserId: string, newUserId: string, io: TypedServer): void {
   for (const room of roomRepo.getAll().values()) {
     let changed = false
-    const member = room.users.find((user) => user.id === oldUserId)
-    if (member) {
-      member.id = newUserId
+    const onlineUser = room.users.find((user) => user.id === oldUserId)
+    if (onlineUser) {
+      onlineUser.id = newUserId
+      changed = true
+    }
+    const rosterMember = room.members.find((member) => member.id === oldUserId)
+    if (rosterMember) {
+      rosterMember.id = newUserId
       changed = true
     }
     if (room.creatorId === oldUserId) {

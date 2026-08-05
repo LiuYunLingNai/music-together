@@ -13,6 +13,7 @@ export function toPublicRoomState(data: RoomData): RoomState {
     permanent: data.permanent,
     audioQuality: data.audioQuality,
     users: data.users,
+    members: data.members,
     queue: data.queue,
     currentTrack: data.currentTrack,
     playState: data.playState,

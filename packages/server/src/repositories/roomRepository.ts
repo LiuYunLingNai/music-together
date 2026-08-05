@@ -1,4 +1,4 @@
-import { HIGHEST_AUDIO_QUALITY, LIMITS, type RoomListItem, type Track } from '@music-together/shared'
+import { HIGHEST_AUDIO_QUALITY, LIMITS, type RoomListItem, type RoomMember, type Track } from '@music-together/shared'
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto'
 import { config } from '../config.js'
 import { logger } from '../utils/logger.js'
@@ -8,6 +8,15 @@ import type { RoomData, RoomRepository, SocketMapping } from './types.js'
 interface PermanentRoomRow {
   id: string
   state_json: string
+}
+
+interface PermanentRoomMemberRow {
+  user_id: string
+  nickname: string
+  avatar_url: string | null
+  user_role: 'user' | 'admin'
+  joined_at: number
+  last_seen_at: number
 }
 
 interface PersistedRoomState {
@@ -106,6 +115,31 @@ export class InMemoryRoomRepository implements RoomRepository {
     SET state_json = @stateJson, updated_at = @updatedAt
     WHERE id = @id AND state_json = @previousStateJson
   `)
+  private selectPermanentRoomMembers = db.prepare<[string], PermanentRoomMemberRow>(`
+    SELECT
+      members.user_id,
+      users.nickname,
+      users.avatar_url,
+      users.role AS user_role,
+      members.joined_at,
+      members.last_seen_at
+    FROM permanent_room_members AS members
+    JOIN users ON users.id = members.user_id
+    WHERE members.room_id = ?
+    ORDER BY members.joined_at ASC
+  `)
+  private insertLegacyPermanentMember = db.prepare(`
+    INSERT INTO permanent_room_members (room_id, user_id, joined_at, last_seen_at)
+    SELECT @roomId, users.id, @now, @now
+    FROM users
+    WHERE users.id = @userId
+    ON CONFLICT(room_id, user_id) DO NOTHING
+  `)
+  private upsertPermanentMember = db.prepare(`
+    INSERT INTO permanent_room_members (room_id, user_id, joined_at, last_seen_at)
+    VALUES (@roomId, @userId, @joinedAt, @lastSeenAt)
+    ON CONFLICT(room_id, user_id) DO UPDATE SET last_seen_at = excluded.last_seen_at
+  `)
 
   constructor() {
     const rows = db.prepare<[], PermanentRoomRow>('SELECT id, state_json FROM permanent_rooms').all()
@@ -151,6 +185,13 @@ export class InMemoryRoomRepository implements RoomRepository {
             })
           }
         }
+        const memberIds = [state.creatorId, ...(state.adminUserIds ?? [])]
+        const now = Date.now()
+        for (const userId of memberIds) {
+          this.insertLegacyPermanentMember.run({ roomId: row.id, userId, now })
+        }
+
+        const members = this.loadPermanentMembers(row.id, state.creatorId, new Set(state.adminUserIds ?? []))
         this.rooms.set(row.id, {
           id: row.id,
           name: state.name,
@@ -163,6 +204,7 @@ export class InMemoryRoomRepository implements RoomRepository {
           hidden: state.hidden ?? false,
           permanent: true,
           audioQuality: state.audioQuality,
+          members,
           users: [],
           queue: (state.queue ?? []).slice(0, LIMITS.QUEUE_MAX_SIZE).map(withoutStreamUrl),
           currentTrack: null,
@@ -212,6 +254,27 @@ export class InMemoryRoomRepository implements RoomRepository {
       playMode: room.playMode,
     }
     this.upsertPermanentRoom.run({ id: roomId, stateJson: JSON.stringify(state), updatedAt: Date.now() })
+    for (const member of room.members) {
+      this.upsertPermanentMember.run({
+        roomId,
+        userId: member.id,
+        joinedAt: member.joinedAt,
+        lastSeenAt: member.lastSeenAt ?? member.joinedAt,
+      })
+    }
+  }
+
+  private loadPermanentMembers(roomId: string, creatorId: string, adminUserIds: Set<string>): RoomMember[] {
+    return this.selectPermanentRoomMembers.all(roomId).map((member) => ({
+      id: member.user_id,
+      nickname: member.nickname,
+      avatarUrl: member.avatar_url,
+      role: member.user_id === creatorId ? 'owner' : adminUserIds.has(member.user_id) ? 'admin' : 'member',
+      isServerAdmin: config.serverAdminIds.has(member.user_id) || member.user_role === 'admin',
+      isOnline: false,
+      joinedAt: member.joined_at,
+      lastSeenAt: member.last_seen_at,
+    }))
   }
 
   delete(roomId: string): void {

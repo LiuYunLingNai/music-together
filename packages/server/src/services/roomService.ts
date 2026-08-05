@@ -1,5 +1,5 @@
 import { timingSafeEqual } from 'node:crypto'
-import type { AudioQuality, RoomListItem, User, UserRole } from '@music-together/shared'
+import type { AudioQuality, RoomListItem, RoomMember, User, UserRole } from '@music-together/shared'
 import { nanoid } from 'nanoid'
 import type { RoomData } from '../repositories/types.js'
 import { roomRepo } from '../repositories/roomRepository.js'
@@ -29,6 +29,30 @@ function setRoleIfChanged(user: User, role: UserRole): boolean {
   if (user.role === role) return false
   user.role = role
   return true
+}
+
+function upsertRoomMember(room: RoomData, user: User, role: UserRole): RoomMember {
+  const now = Date.now()
+  const existing = room.members.find((member) => member.id === user.id)
+  if (existing) {
+    existing.nickname = user.nickname
+    existing.avatarUrl = user.avatarUrl
+    existing.isServerAdmin = user.isServerAdmin
+    existing.role = role
+    existing.isOnline = true
+    existing.lastSeenAt = now
+    return existing
+  }
+
+  const member: RoomMember = {
+    ...user,
+    role,
+    isOnline: true,
+    joinedAt: now,
+    lastSeenAt: now,
+  }
+  room.members.push(member)
+  return member
 }
 
 /**
@@ -129,6 +153,14 @@ export function createRoom(
     hidden: false,
     permanent: false,
     audioQuality: 320,
+    members: [
+      {
+        ...user,
+        isOnline: true,
+        joinedAt: Date.now(),
+        lastSeenAt: Date.now(),
+      },
+    ],
     users: [user],
     queue: [],
     currentTrack: null,
@@ -188,9 +220,11 @@ export function joinRoom(
     existing.avatarUrl = profile.avatarUrl
     existing.role = resolveRole()
     existing.isServerAdmin = userRepo.isServerAdmin(userId)
+    upsertRoomMember(room, existing, resolveRole())
     roomRepo.setSocketMapping(socketId, roomId, userId)
     const roleChanged = reconcileRoomRoles(room)
     const hostChanged = electConductor(room)
+    roomRepo.persist(roomId)
     return { room, user: existing, hostChanged, roleChanged }
   }
 
@@ -204,12 +238,14 @@ export function joinRoom(
     isServerAdmin: userRepo.isServerAdmin(userId),
   }
   room.users.push(user)
+  upsertRoomMember(room, user, role)
   roomRepo.setSocketMapping(socketId, roomId, userId)
 
   // Reconcile roles first so owner/admin returning clears any temporary admin.
   const roleChanged = reconcileRoomRoles(room)
   // Re-elect conductor (owner joining takes priority over current conductor)
   const hostChanged = electConductor(room)
+  roomRepo.persist(roomId)
 
   logger.info(`用户“${nickname}”加入房间 ${roomId}`, {
     event: 'room.user_joined',
@@ -255,6 +291,11 @@ export function leaveRoom(
   }
 
   room.users = room.users.filter((u) => u.id !== userId)
+  const member = room.members.find((item) => item.id === userId)
+  if (member) {
+    member.isOnline = false
+    member.lastSeenAt = Date.now()
+  }
   roomRepo.deleteSocketMapping(socketId)
 
   // An empty room has no conductor to advance the queue. Freeze the
@@ -277,6 +318,7 @@ export function leaveRoom(
         currentTime: room.playState.currentTime,
       })
     }
+    roomRepo.persist(roomId)
     scheduleDeletion(roomId, io)
     return { roomId, user, room, hostChanged: false, roleChanged: false, voteUpdated: false, staleSocketOnly: false }
   }
@@ -285,6 +327,7 @@ export function leaveRoom(
   const roleChanged = reconcileRoomRoles(room)
   // Re-elect conductor immediately — no grace period
   const hostChanged = electConductor(room)
+  roomRepo.persist(roomId)
 
   // Update active vote threshold so it doesn't become impossible to pass
   const voteUpdated = updateVoteThreshold(roomId, room.users.length, user.id)
@@ -361,12 +404,15 @@ export function setUserRole(
 ): { success: boolean; roleChanged: boolean; hostChanged: boolean } {
   const room = roomRepo.get(roomId)
   if (!room) return { success: false, roleChanged: false, hostChanged: false }
-  const user = room.users.find((u) => u.id === targetUserId)
-  if (!user) return { success: false, roleChanged: false, hostChanged: false }
+  const member = room.members.find((item) => item.id === targetUserId)
+  if (!member) return { success: false, roleChanged: false, hostChanged: false }
   // Cannot change owner's role
-  if (user.role === 'owner') return { success: false, roleChanged: false, hostChanged: false }
+  if (member.role === 'owner') return { success: false, roleChanged: false, hostChanged: false }
 
-  const directRoleChanged = setRoleIfChanged(user, role)
+  const directRoleChanged = member.role !== role
+  member.role = role
+  const onlineUser = room.users.find((user) => user.id === targetUserId)
+  if (onlineUser) setRoleIfChanged(onlineUser, role)
   // Sync persistent admin set
   if (role === 'admin') {
     room.adminUserIds.add(targetUserId)

@@ -46,6 +46,18 @@ db.exec(`
     updated_at INTEGER NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS permanent_room_members (
+    room_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    joined_at INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL,
+    PRIMARY KEY (room_id, user_id),
+    FOREIGN KEY (room_id) REFERENCES permanent_rooms(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_permanent_room_members_user ON permanent_room_members(user_id);
+
   CREATE TABLE IF NOT EXISTS server_settings (
     key TEXT PRIMARY KEY,
     value_json TEXT NOT NULL,

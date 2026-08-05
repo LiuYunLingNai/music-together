@@ -53,7 +53,13 @@ export const useRoomStore = create<RoomStore>((set) => ({
       const users = state.room.users.some((u) => u.id === user.id)
         ? state.room.users.map((u) => (u.id === user.id ? user : u))
         : [...state.room.users, user]
-      const room = { ...state.room, users }
+      const now = Date.now()
+      const members = state.room.members.some((member) => member.id === user.id)
+        ? state.room.members.map((member) =>
+            member.id === user.id ? { ...member, ...user, isOnline: true, lastSeenAt: now } : member,
+          )
+        : [...state.room.members, { ...user, isOnline: true, joinedAt: now, lastSeenAt: now }]
+      const room = { ...state.room, users, members }
       const myId = storage.getUserId()
       if (user.id === myId) {
         // The added user is us — derive our currentUser from the updated room
@@ -65,7 +71,13 @@ export const useRoomStore = create<RoomStore>((set) => ({
   removeUser: (userId) =>
     set((state) => {
       if (!state.room) return {}
-      const room = { ...state.room, users: state.room.users.filter((u) => u.id !== userId) }
+      const room = {
+        ...state.room,
+        users: state.room.users.filter((u) => u.id !== userId),
+        members: state.room.members.map((member) =>
+          member.id === userId ? { ...member, isOnline: false, lastSeenAt: Date.now() } : member,
+        ),
+      }
       const myId = storage.getUserId()
       if (userId === myId) {
         // We were removed — clear currentUser
@@ -81,11 +93,12 @@ export const useRoomStore = create<RoomStore>((set) => ({
       // display fields so account-level data cannot overwrite the authoritative
       // room role (`owner` / `admin` / `member`).
       const users = state.room.users.map((user) =>
-        user.id === userId
-          ? { ...user, nickname: profile.nickname, avatarUrl: profile.avatarUrl }
-          : user,
+        user.id === userId ? { ...user, nickname: profile.nickname, avatarUrl: profile.avatarUrl } : user,
       )
-      const room = { ...state.room, users }
+      const members = state.room.members.map((member) =>
+        member.id === userId ? { ...member, nickname: profile.nickname, avatarUrl: profile.avatarUrl } : member,
+      )
+      const room = { ...state.room, users, members }
       return { room, currentUser: deriveCurrentUser(room) }
     }),
 
