@@ -253,7 +253,7 @@ interface BilibiliCollectionEpisode {
     title?: unknown
     pic?: unknown
     duration?: unknown
-    author?: unknown
+    author?: string | { name?: unknown }
     owner?: { name?: unknown }
   }
   page?: {
@@ -848,7 +848,9 @@ class MusicProvider {
       seenBvids.add(bvid)
 
       const title = MusicProvider.stripBilibiliMarkup(episode.arc?.title ?? episode.title) || 'Unknown'
-      const author = MusicProvider.stripBilibiliMarkup(episode.arc?.owner?.name ?? episode.arc?.author) || view.author || 'Bilibili'
+      const episodeAuthor = episode.arc?.author
+      const authorName = typeof episodeAuthor === 'object' ? episodeAuthor?.name : episodeAuthor
+      const author = MusicProvider.stripBilibiliMarkup(episode.arc?.owner?.name ?? authorName) || view.author || 'Bilibili'
       const cover = normalizeBilibiliCoverUrl(episode.arc?.pic) || view.cover
       const duration = Math.max(0, Number(episode.page?.duration ?? episode.arc?.duration) || 0)
       tracks.push({
