@@ -56,6 +56,33 @@ test('keeps offline members in a permanent room roster after reload', () => {
   roomRepo.delete(room.id)
 })
 
+test('restores the permanent room track and saved playback position after reload', () => {
+  const { room } = roomService.createRoom('player-socket', 'Player', 'Playback room', null, 'player-id')
+  roomService.updateSettings(room.id, { permanent: true })
+  room.currentTrack = {
+    id: 'saved-track',
+    title: 'Saved song',
+    artist: ['Saved artist'],
+    album: 'Saved album',
+    duration: 240,
+    cover: '',
+    source: 'netease',
+    sourceId: '123',
+    urlId: '123',
+    streamUrl: 'https://expired.example.test/stream',
+  }
+  room.playState = { isPlaying: true, currentTime: 91.25, serverTimestamp: Date.now() - 1_000 }
+  roomRepo.persist(room.id)
+
+  const restoredRoom = new InMemoryRoomRepository().get(room.id)
+  const { streamUrl: _streamUrl, ...expectedTrack } = room.currentTrack
+  assert.deepEqual(restoredRoom?.currentTrack, expectedTrack)
+  assert.deepEqual(restoredRoom?.playState.isPlaying, false)
+  assert.equal(restoredRoom?.playState.currentTime, 91.25)
+
+  roomRepo.delete(room.id)
+})
+
 test('updates the roster role when an online member becomes temporary admin', () => {
   const { room } = roomService.createRoom('owner-socket', 'Owner', 'Role sync room', null, 'owner-role-id')
   const joined = roomService.joinRoom('member-socket', room.id, 'Member', 'member-role-id')

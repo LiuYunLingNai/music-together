@@ -17,6 +17,7 @@ import { createAccountRoutes } from './routes/account.js'
 import musicRoutes from './routes/music.js'
 import roomRoutes from './routes/rooms.js'
 import { clearAllTimers } from './services/roomLifecycleService.js'
+import * as playerService from './services/playerService.js'
 import { logger } from './utils/logger.js'
 import { databasePath } from './repositories/database.js'
 
@@ -92,6 +93,10 @@ if (fs.existsSync(indexHtml)) {
 attachSocketIdentity(io)
 initializeSocket(io)
 
+// Keep permanent-room playback position durable while a track is playing.
+const playbackPersistenceTimer = setInterval(() => playerService.persistPlaybackSnapshots(), 5_000)
+playbackPersistenceTimer.unref()
+
 httpServer.on('error', (err: NodeJS.ErrnoException) => {
   if (err.code === 'EADDRINUSE') {
     logger.error(`Port ${config.port} already in use`)
@@ -117,6 +122,8 @@ httpServer.listen(config.port, () => {
 // Graceful shutdown
 function shutdown(signal: string) {
   logger.info(`收到 ${signal} 信号，正在安全关闭服务器……`)
+  clearInterval(playbackPersistenceTimer)
+  playerService.persistPlaybackSnapshots()
   clearAllTimers()
   io.close(() => {
     httpServer.close(() => {

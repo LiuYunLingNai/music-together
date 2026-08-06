@@ -22,6 +22,19 @@ import { getEffectiveQuality, providerQualityRank, type MembershipTier } from '.
 const playMutexes = new Map<string, Promise<unknown>>()
 const lastStreamUrlRefreshAt = new Map<string, number>()
 
+/** Persist a recent position snapshot so a process restart can resume close to the last position. */
+export function persistPlaybackSnapshots(serverTime = Date.now()): void {
+  for (const room of roomRepo.getAll().values()) {
+    if (!room.permanent || !room.currentTrack || !room.playState.isPlaying) continue
+    room.playState = {
+      ...room.playState,
+      currentTime: estimateCurrentTimeAt(room.id, serverTime),
+      serverTimestamp: serverTime,
+    }
+    roomRepo.persist(room.id)
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Auto fallback cooldown (prevents repeated attempts / ping-pong)
 // ---------------------------------------------------------------------------

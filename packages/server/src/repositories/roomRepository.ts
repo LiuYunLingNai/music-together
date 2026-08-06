@@ -97,6 +97,18 @@ function withoutStreamUrl(track: Track): Track {
   return persistable
 }
 
+function restorePlayState(state: PersistedRoomState): RoomData['playState'] {
+  const persisted = state.playState
+  const currentTime = Number(persisted?.currentTime)
+  return {
+    // A server restart cannot keep an audio stream playing. Mark the room
+    // paused until the first member joins and the URL is refreshed.
+    isPlaying: false,
+    currentTime: Number.isFinite(currentTime) && currentTime >= 0 ? currentTime : 0,
+    serverTimestamp: Date.now(),
+  }
+}
+
 export class InMemoryRoomRepository implements RoomRepository {
   private rooms = new Map<string, RoomData>()
   private socketToRoom = new Map<string, SocketMapping>()
@@ -207,12 +219,8 @@ export class InMemoryRoomRepository implements RoomRepository {
           members,
           users: [],
           queue: (state.queue ?? []).slice(0, LIMITS.QUEUE_MAX_SIZE).map(withoutStreamUrl),
-          currentTrack: null,
-          playState: {
-            isPlaying: false,
-            currentTime: 0,
-            serverTimestamp: Date.now(),
-          },
+          currentTrack: state.currentTrack ? withoutStreamUrl(state.currentTrack) : null,
+          playState: restorePlayState(state),
           playMode: state.playMode ?? 'loop-all',
         })
       } catch (error) {
