@@ -113,9 +113,12 @@ internal fun JSONObject.toRoomState(): RoomState {
         name = optString("name", "Music Together"),
         creatorId = optString("creatorId"),
         hostId = optString("hostId"),
+        temporaryAdminUserId = stringOrNull("temporaryAdminUserId"),
         hasPassword = optBoolean("hasPassword", false),
         hidden = optBoolean("hidden", false),
         permanent = optBoolean("permanent", false),
+        allowTemporaryAdminTrackRemoval = optBoolean("allowTemporaryAdminTrackRemoval", false),
+        allowTemporaryAdminQueueClear = optBoolean("allowTemporaryAdminQueueClear", false),
         audioQuality = audioQuality("audioQuality"),
         users = users,
         members = membersJson?.let { value ->

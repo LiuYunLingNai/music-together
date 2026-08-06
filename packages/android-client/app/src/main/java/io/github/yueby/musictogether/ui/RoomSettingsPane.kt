@@ -283,6 +283,44 @@ fun RoomSettingsPane(state: AppState, viewModel: MusicTogetherViewModel) {
                 )
             }
         }
+        if (permissions.canManageAllSettings) {
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("临时管理员删除单曲", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "允许临时管理员从播放列表删除单首歌曲",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = room.allowTemporaryAdminTrackRemoval,
+                        onCheckedChange = viewModel::updateTemporaryAdminTrackRemoval,
+                    )
+                }
+            }
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("临时管理员清空歌单", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "允许临时管理员清空整个播放列表",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = room.allowTemporaryAdminQueueClear,
+                        onCheckedChange = viewModel::updateTemporaryAdminQueueClear,
+                    )
+                }
+            }
+        }
         item {
             Row(verticalAlignment = Alignment.Top) {
                 Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)

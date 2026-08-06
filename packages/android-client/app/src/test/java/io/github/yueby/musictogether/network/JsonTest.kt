@@ -40,6 +40,28 @@ class JsonTest {
     }
 
     @Test
+    fun roomStatePreservesGranularTemporaryAdminQueuePermissions() {
+        val room = roomJson()
+            .put("temporaryAdminUserId", "temporary-admin")
+            .put("allowTemporaryAdminTrackRemoval", true)
+            .put("allowTemporaryAdminQueueClear", false)
+            .toRoomState()
+
+        assertEquals("temporary-admin", room.temporaryAdminUserId)
+        assertTrue(room.allowTemporaryAdminTrackRemoval)
+        assertFalse(room.allowTemporaryAdminQueueClear)
+    }
+
+    @Test
+    fun roomStateDefaultsGranularTemporaryAdminQueuePermissionsForLegacyServers() {
+        val room = roomJson().toRoomState()
+
+        assertNull(room.temporaryAdminUserId)
+        assertFalse(room.allowTemporaryAdminTrackRemoval)
+        assertFalse(room.allowTemporaryAdminQueueClear)
+    }
+
+    @Test
     fun trackPreservesBilibiliMetadataFields() {
         val track = JSONObject(
             """{

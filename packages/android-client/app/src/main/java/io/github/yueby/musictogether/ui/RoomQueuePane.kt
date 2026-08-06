@@ -99,7 +99,7 @@ internal fun QueuePane(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
-                if (viewModel.canControl() && room.queue.isNotEmpty()) {
+                if (viewModel.canClearQueue() && room.queue.isNotEmpty()) {
                     TextButton(
                         onClick = {
                             if (confirmClear) {

@@ -259,6 +259,14 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         socket.emit(Events.ROOM_SETTINGS, JSONObject().put("permanent", permanent))
     }
 
+    fun updateTemporaryAdminTrackRemoval(enabled: Boolean) {
+        socket.emit(Events.ROOM_SETTINGS, JSONObject().put("allowTemporaryAdminTrackRemoval", enabled))
+    }
+
+    fun updateTemporaryAdminQueueClear(enabled: Boolean) {
+        socket.emit(Events.ROOM_SETTINGS, JSONObject().put("allowTemporaryAdminQueueClear", enabled))
+    }
+
     fun updatePlaybackTempoSync(enabled: Boolean) {
         appPreferences.setPlaybackTempoSync(enabled)
         _state.value = _state.value.copy(playbackTempoSyncEnabled = enabled)
@@ -849,7 +857,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun removeTrack(track: Track) {
-        if (canControl()) {
+        if (canRemoveQueueTrack()) {
             socket.emit(Events.QUEUE_REMOVE, JSONObject().put("trackId", track.id))
         } else {
             startVote(
@@ -860,7 +868,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun clearQueue() {
-        if (!canControl()) return
+        if (!canClearQueue()) return
         val sent = socket.emit(Events.QUEUE_CLEAR)
         if (sent) {
             queueActions.clear()
@@ -1008,6 +1016,26 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         return currentUser?.role in setOf("owner", "admin") ||
             currentUser?.isServerAdmin == true ||
             state.accountProfile?.role == "admin"
+    }
+
+    fun canRemoveQueueTrack(): Boolean {
+        val room = _state.value.room ?: return false
+        if (!canControl()) return false
+        return !isTemporaryAdmin(room) || room.allowTemporaryAdminTrackRemoval
+    }
+
+    fun canClearQueue(): Boolean {
+        val room = _state.value.room ?: return false
+        if (!canControl()) return false
+        return !isTemporaryAdmin(room) || room.allowTemporaryAdminQueueClear
+    }
+
+    private fun isTemporaryAdmin(room: io.github.yueby.musictogether.model.RoomState): Boolean {
+        val currentUser = room.users.firstOrNull { it.id == _state.value.userId } ?: return false
+        return room.temporaryAdminUserId == currentUser.id &&
+            currentUser.role == "admin" &&
+            !currentUser.isServerAdmin &&
+            _state.value.accountProfile?.role != "admin"
     }
 
     private fun updateServerConnection(url: String, transform: (ServerConnection) -> ServerConnection) {
@@ -1167,9 +1195,22 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 updateRoom {
                     it.copy(
                         name = value.optString("name", it.name),
+                        temporaryAdminUserId = if (value.has("temporaryAdminUserId")) {
+                            value.stringOrNull("temporaryAdminUserId")
+                        } else {
+                            it.temporaryAdminUserId
+                        },
                         hasPassword = value.optBoolean("hasPassword", it.hasPassword),
                         hidden = value.optBoolean("hidden", it.hidden),
                         permanent = value.optBoolean("permanent", it.permanent),
+                        allowTemporaryAdminTrackRemoval = value.optBoolean(
+                            "allowTemporaryAdminTrackRemoval",
+                            it.allowTemporaryAdminTrackRemoval,
+                        ),
+                        allowTemporaryAdminQueueClear = value.optBoolean(
+                            "allowTemporaryAdminQueueClear",
+                            it.allowTemporaryAdminQueueClear,
+                        ),
                         audioQuality = value.audioQuality("audioQuality", it.audioQuality),
                     )
                 }
