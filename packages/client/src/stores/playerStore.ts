@@ -13,6 +13,8 @@ interface PlayerStore {
   tlyric: string
   ttmlLines: AMLLLyricLine[] | null
   lyricLoading: boolean
+  /** Temporary lyric offset while the calibration slider is being dragged. */
+  lyricOffsetPreview: { key: string; offsetMs: number } | null
   syncDrift: number
 
   setCurrentTrack: (track: Track | null) => void
@@ -23,6 +25,7 @@ interface PlayerStore {
   setLyric: (lyric: string, tlyric?: string) => void
   setTtmlLines: (lines: AMLLLyricLine[] | null) => void
   setLyricLoading: (loading: boolean) => void
+  setLyricOffsetPreview: (preview: { key: string; offsetMs: number } | null) => void
   setSyncDrift: (drift: number) => void
   reset: () => void
 }
@@ -37,6 +40,7 @@ export const usePlayerStore = create<PlayerStore>((set) => ({
   tlyric: '',
   ttmlLines: null,
   lyricLoading: false,
+  lyricOffsetPreview: null,
   syncDrift: 0,
 
   setCurrentTrack: (track) => set({ currentTrack: track }),
@@ -50,6 +54,7 @@ export const usePlayerStore = create<PlayerStore>((set) => ({
   setLyric: (lyric, tlyric) => set({ lyric, tlyric: tlyric ?? '' }),
   setTtmlLines: (lines) => set({ ttmlLines: lines }),
   setLyricLoading: (loading) => set({ lyricLoading: loading }),
+  setLyricOffsetPreview: (preview) => set({ lyricOffsetPreview: preview }),
   setSyncDrift: (drift) => set({ syncDrift: drift }),
   reset: () =>
     set({
@@ -61,6 +66,7 @@ export const usePlayerStore = create<PlayerStore>((set) => ({
       tlyric: '',
       ttmlLines: null,
       lyricLoading: false,
+      lyricOffsetPreview: null,
       syncDrift: 0,
     }),
 }))

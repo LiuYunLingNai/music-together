@@ -104,6 +104,7 @@ export function LyricDisplay() {
   const currentTime = usePlayerStore((s) => s.currentTime)
   const isPlaying = usePlayerStore((s) => s.isPlaying)
   const currentTrack = usePlayerStore((s) => s.currentTrack)
+  const lyricOffsetPreview = usePlayerStore((s) => s.lyricOffsetPreview)
 
   const alignAnchor = useSettingsStore((s) => s.lyricAlignAnchor)
   const alignPosition = useSettingsStore((s) => s.lyricAlignPosition)
@@ -115,7 +116,10 @@ export function LyricDisplay() {
   const translationFontSize = useSettingsStore((s) => s.lyricTranslationFontSize)
   const romanFontSize = useSettingsStore((s) => s.lyricRomanFontSize)
   const lyricOffsets = useSettingsStore((s) => s.lyricOffsets)
-  const lyricOffsetMs = lyricOffsets[getLyricOffsetKey(currentTrack) ?? ''] ?? 0
+  const lyricOffsetKey = getLyricOffsetKey(currentTrack)
+  const savedLyricOffsetMs = lyricOffsets[lyricOffsetKey ?? ''] ?? 0
+  const isCalibrating = lyricOffsetPreview?.key === lyricOffsetKey
+  const lyricOffsetMs = isCalibrating ? lyricOffsetPreview.offsetMs : savedLyricOffsetMs
 
   // LRC 解析（仅在没有 TTML 时使用）
   const lrcLines = useMemo(() => mergeLyrics(lyric, tlyric), [lyric, tlyric])
@@ -149,9 +153,10 @@ export function LyricDisplay() {
         lyricLines={amllLines}
         currentTime={Math.max(0, Math.round(currentTime * 1000 - lyricOffsetMs))}
         playing={isPlaying}
+        isSeeking={isCalibrating}
         alignAnchor={alignAnchor}
         alignPosition={alignPosition}
-        enableSpring={enableSpring}
+        enableSpring={enableSpring && !isCalibrating}
         enableBlur={enableBlur}
         enableScale={enableScale}
         style={FULL_SIZE_STYLE}

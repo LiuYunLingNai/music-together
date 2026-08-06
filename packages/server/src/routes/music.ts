@@ -21,7 +21,7 @@ import {
   kugouAudioContentType,
 } from '../services/kugouEncryptedAudio.js'
 import { normalizeKugouAudioUrl } from '../services/kugouAudioUrl.js'
-import { BILIBILI_BVID_PATTERN } from '../services/bilibiliInput.js'
+import { BILIBILI_BVID_PATTERN, BILIBILI_STREAM_ID_PATTERN } from '../services/bilibiliInput.js'
 
 const router: RouterType = Router()
 
@@ -77,6 +77,22 @@ router.get(
     }
   }),
 )
+
+router.get('/bilibili-collection', async (req: Request, res: Response) => {
+  const bvid = typeof req.query.bvid === 'string' ? req.query.bvid.trim() : ''
+  if (!BILIBILI_BVID_PATTERN.test(bvid)) {
+    res.status(400).json({ error: 'Invalid Bilibili video id' })
+    return
+  }
+
+  try {
+    const collection = await musicProvider.getBilibiliCollection(bvid)
+    res.json(collection)
+  } catch (err) {
+    logger.error('Get Bilibili collection failed', err, { bvid })
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
 
 router.get(
   '/recommendations',
@@ -274,7 +290,7 @@ router.get('/bilibili-audio-proxy', async (req: Request, res: Response) => {
     room?.currentTrack?.source === 'bilibili' &&
     room.currentTrack.urlId === bvid &&
     room.currentTrack.streamUrl === audioUrl
-  if (!isAllowedBilibiliAudioUrl(audioUrl) || !BILIBILI_BVID_PATTERN.test(bvid) || !isCurrentTrack) {
+  if (!isAllowedBilibiliAudioUrl(audioUrl) || !BILIBILI_STREAM_ID_PATTERN.test(bvid) || !isCurrentTrack) {
     res.status(400).json({ error: 'Invalid Bilibili audio request' })
     return
   }

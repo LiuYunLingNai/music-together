@@ -25,6 +25,7 @@ import { motion } from 'motion/react'
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, useEffect } from 'react'
 import { toast } from 'sonner'
 import { PlaylistDetail } from './Settings/PlaylistDetail'
+import { BilibiliCollectionDialog } from './BilibiliCollectionDialog'
 import { BilibiliMetadataDialog } from './BilibiliMetadataDialog'
 
 const EMPTY_QUEUE: Track[] = []
@@ -50,6 +51,10 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
   const [source, setSource] = useState<MusicSource>('netease')
   const [searchType, setSearchType] = useState<SearchMode>('song')
   const [bilibiliMatch, setBilibiliMatch] = useState<{ track: Track; action: BilibiliQueueAction } | null>(null)
+  const [bilibiliCollectionMatch, setBilibiliCollectionMatch] = useState<{
+    track: Track
+    action: BilibiliQueueAction
+  } | null>(null)
   const [keyword, setKeyword] = useState('')
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set())
   const listRef = useRef<VirtualTrackListRef>(null)
@@ -203,6 +208,29 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
     setBilibiliMatch({ track, action })
   }, [])
 
+  const beginBilibiliCollectionMatch = useCallback((track: Track, action: BilibiliQueueAction) => {
+    setBilibiliCollectionMatch({ track, action })
+  }, [])
+
+  const handleBilibiliNotCollection = useCallback(() => {
+    if (!bilibiliCollectionMatch) return
+    const { track, action } = bilibiliCollectionMatch
+    setBilibiliCollectionMatch(null)
+    beginBilibiliMetadataMatch(track, action)
+  }, [bilibiliCollectionMatch, beginBilibiliMetadataMatch])
+
+  const handleBilibiliCollectionTrack = useCallback(
+    (track: Track) => {
+      if (!bilibiliCollectionMatch) return
+      // Close the picker before opening the metadata dialog. Both dialogs use
+      // the same portal z-index, so leaving it open would cover the matcher.
+      const { action } = bilibiliCollectionMatch
+      setBilibiliCollectionMatch(null)
+      beginBilibiliMetadataMatch(track, action)
+    },
+    [bilibiliCollectionMatch, beginBilibiliMetadataMatch],
+  )
+
   const applyBilibiliMetadataMatch = useCallback(
     (metadataTrack: Track, metadataSource: BilibiliMetadataSource) => {
       if (!bilibiliMatch) return
@@ -243,7 +271,7 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
         return
       }
       if (track.source === 'bilibili') {
-        beginBilibiliMetadataMatch(track, 'add')
+        beginBilibiliCollectionMatch(track, 'add')
         return
       }
       onAddToQueue(track)
@@ -251,7 +279,7 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
       // Removed duplicate toast.success since onAddToQueue (from useQueue) usually already handles it
       // or the UI handles feedback.
     },
-    [onAddToQueue, queueKeys, addedIds, beginBilibiliMetadataMatch],
+    [onAddToQueue, queueKeys, addedIds, beginBilibiliCollectionMatch],
   )
 
   const handleInsertAfterCurrent = useCallback(
@@ -262,14 +290,14 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
         return
       }
       if (track.source === 'bilibili') {
-        beginBilibiliMetadataMatch(track, 'insert')
+        beginBilibiliCollectionMatch(track, 'insert')
         return
       }
       onInsertAfterCurrent(track)
       setAddedIds((prev) => new Set(prev).add(key))
       // Removed duplicate toast.success
     },
-    [onInsertAfterCurrent, queueKeys, addedIds, beginBilibiliMetadataMatch],
+    [onInsertAfterCurrent, queueKeys, addedIds, beginBilibiliCollectionMatch],
   )
 
   const handleAddBatch = useCallback(
@@ -564,6 +592,13 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
         onOpenChange={(isOpen) => !isOpen && setBilibiliMatch(null)}
         onSelect={applyBilibiliMetadataMatch}
         onSkip={skipBilibiliMetadataMatch}
+      />
+      <BilibiliCollectionDialog
+        track={bilibiliCollectionMatch?.track ?? null}
+        onOpenChange={(isOpen) => !isOpen && setBilibiliCollectionMatch(null)}
+        onSelectTrack={handleBilibiliCollectionTrack}
+        onNotCollection={handleBilibiliNotCollection}
+        isTrackAdded={isTrackAdded}
       />
     </ResponsiveDialog>
   )

@@ -1,4 +1,21 @@
 export const BILIBILI_BVID_PATTERN = /^BV[0-9A-Za-z]{10}$/
+export const BILIBILI_STREAM_ID_PATTERN = /^(BV[0-9A-Za-z]{10})(?:\?cid=([1-9]\d*))?$/
+
+/**
+ * A Bilibili queue item normally uses its BV id as `urlId`. Multi-part videos
+ * additionally carry the selected page CID so the stream resolver requests
+ * that page instead of always falling back to the first one.
+ */
+export function parseBilibiliStreamId(value: string): { bvid: string; cid?: number } | null {
+  const match = value.match(BILIBILI_STREAM_ID_PATTERN)
+  if (!match) return null
+  const cid = match[2] ? Number(match[2]) : undefined
+  return { bvid: match[1]!, ...(cid && Number.isSafeInteger(cid) ? { cid } : {}) }
+}
+
+export function createBilibiliStreamId(bvid: string, cid?: number): string {
+  return cid && Number.isSafeInteger(cid) && cid > 0 ? `${bvid}?cid=${cid}` : bvid
+}
 
 const BILIBILI_VIDEO_PATH_PATTERN = /\/video\/(BV[0-9A-Za-z]{10})(?:\/|$)/i
 const URL_IN_TEXT_PATTERN = /(?:https?:\/\/|www\.|b23\.tv\/)[^\s<>]+/gi

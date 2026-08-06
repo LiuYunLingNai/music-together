@@ -50,6 +50,8 @@ export const PlayerControls = memo(function PlayerControls({
   const currentTime = usePlayerStore((s) => s.currentTime)
   const duration = usePlayerStore((s) => s.duration)
   const currentTrack = usePlayerStore((s) => s.currentTrack)
+  const lyricOffsetPreview = usePlayerStore((s) => s.lyricOffsetPreview)
+  const setLyricOffsetPreview = usePlayerStore((s) => s.setLyricOffsetPreview)
   const lyricOffsets = useSettingsStore((s) => s.lyricOffsets)
   const setLyricOffset = useSettingsStore((s) => s.setLyricOffset)
   const clearLyricOffset = useSettingsStore((s) => s.clearLyricOffset)
@@ -72,7 +74,8 @@ export const PlayerControls = memo(function PlayerControls({
 
   const disabled = !currentTrack
   const lyricOffsetKey = getLyricOffsetKey(currentTrack)
-  const lyricOffsetMs = lyricOffsets[lyricOffsetKey ?? ''] ?? 0
+  const savedLyricOffsetMs = lyricOffsets[lyricOffsetKey ?? ''] ?? 0
+  const lyricOffsetMs = lyricOffsetPreview?.key === lyricOffsetKey ? lyricOffsetPreview.offsetMs : savedLyricOffsetMs
   const lyricOffsetLabel =
     lyricOffsetMs === 0
       ? '未校正'
@@ -85,6 +88,10 @@ export const PlayerControls = memo(function PlayerControls({
       if (playCooldownTimer.current) clearTimeout(playCooldownTimer.current)
     }
   }, [])
+
+  useEffect(() => {
+    setLyricOffsetPreview(null)
+  }, [lyricOffsetKey, setLyricOffsetPreview])
 
   // Scale entire controls area proportionally — like the cover image
   useLayoutEffect(() => {
@@ -160,7 +167,10 @@ export const PlayerControls = memo(function PlayerControls({
                       variant="ghost"
                       size="icon-xs"
                       className="text-white/70 hover:bg-white/10 hover:text-white"
-                      onClick={() => clearLyricOffset(lyricOffsetKey)}
+                      onClick={() => {
+                        setLyricOffsetPreview(null)
+                        clearLyricOffset(lyricOffsetKey)
+                      }}
                       aria-label="重置歌词校正"
                     >
                       <RotateCcw />
@@ -175,7 +185,11 @@ export const PlayerControls = memo(function PlayerControls({
                   min={-10}
                   max={10}
                   step={0.1}
-                  onValueChange={([value]) => setLyricOffset(lyricOffsetKey, value * 1000)}
+                  onValueChange={([value]) => setLyricOffsetPreview({ key: lyricOffsetKey, offsetMs: value * 1000 })}
+                  onValueCommit={([value]) => {
+                    setLyricOffset(lyricOffsetKey, value * 1000)
+                    setLyricOffsetPreview(null)
+                  }}
                 />
                 <span className="text-[10px] tabular-nums text-white/45">+10s</span>
               </div>
@@ -248,7 +262,10 @@ export const PlayerControls = memo(function PlayerControls({
                     variant="ghost"
                     size="icon"
                     className="h-9 w-9 text-white/70 hover:bg-white/10"
-                    onClick={() => setCalibrationOpen((open) => !open)}
+                    onClick={() => {
+                      if (calibrationOpen) setLyricOffsetPreview(null)
+                      setCalibrationOpen((open) => !open)
+                    }}
                     disabled={!lyricOffsetKey}
                     aria-label="歌词校正"
                   >

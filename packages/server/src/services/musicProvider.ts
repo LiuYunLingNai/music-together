@@ -11,7 +11,12 @@ import * as tencentAuth from './tencentAuthService.js'
 import * as bilibiliAuth from './bilibiliAuthService.js'
 import { getKugouQualityFallbacks } from './audioQualityPolicy.js'
 import { collectBilibiliAudioCandidates, selectBilibiliAudioCandidate } from './bilibiliAudioQuality.js'
-import { resolveBilibiliVideoId } from './bilibiliInput.js'
+import {
+  BILIBILI_BVID_PATTERN,
+  createBilibiliStreamId,
+  parseBilibiliStreamId,
+  resolveBilibiliVideoId,
+} from './bilibiliInput.js'
 import {
   collectKugouV6Goods,
   kugouProviderQualityToAudioQuality,
@@ -236,6 +241,32 @@ interface BilibiliViewData {
   author: string
   duration: number
   cover: string
+  collectionTitle: string
+  collectionEpisodes: BilibiliCollectionEpisode[]
+  pages: BilibiliPage[]
+}
+
+interface BilibiliCollectionEpisode {
+  bvid?: unknown
+  title?: unknown
+  arc?: {
+    title?: unknown
+    pic?: unknown
+    duration?: unknown
+    author?: unknown
+    owner?: { name?: unknown }
+  }
+  page?: {
+    duration?: unknown
+  }
+}
+
+interface BilibiliPage {
+  cid?: unknown
+  page?: unknown
+  part?: unknown
+  duration?: unknown
+  first_frame?: unknown
 }
 
 /** External API timeout (ms) */
@@ -687,18 +718,7 @@ class MusicProvider {
         if (page !== 1) return []
         const view = await this.getBilibiliView(directBvid)
         if (!view) return []
-        const track: Track = {
-          id: nanoid(),
-          source: 'bilibili',
-          sourceId: view.bvid,
-          urlId: view.bvid,
-          title: view.title || 'Unknown',
-          artist: [view.author || 'Bilibili'],
-          album: 'Bilibili',
-          duration: view.duration,
-          cover: view.cover,
-          bilibiliCover: view.cover,
-        }
+        const track = this.bilibiliViewToTrack(view)
         this.registerTracks([track])
         return [track]
       }
@@ -751,6 +771,14 @@ class MusicProvider {
     const cid = Number(response?.data?.cid)
     if (!Number.isFinite(aid) || aid <= 0 || !Number.isFinite(cid) || cid <= 0) return null
     const canonicalBvid = String(response?.data?.bvid ?? bvid).trim()
+    const ugcSeason = response?.data?.ugc_season as Record<string, unknown> | undefined
+    const collectionEpisodes = Array.isArray(ugcSeason?.sections)
+      ? ugcSeason.sections.flatMap((section) => {
+          const episodes = (section as Record<string, unknown> | null)?.episodes
+          return Array.isArray(episodes) ? (episodes as BilibiliCollectionEpisode[]) : []
+        })
+      : []
+    const pages = Array.isArray(response?.data?.pages) ? (response.data.pages as BilibiliPage[]) : []
     const value = {
       aid,
       cid,
@@ -759,24 +787,124 @@ class MusicProvider {
       author: MusicProvider.stripBilibiliMarkup(response?.data?.owner?.name),
       duration: Math.max(0, Number(response?.data?.duration) || 0),
       cover: normalizeBilibiliCoverUrl(response?.data?.pic),
+      collectionTitle: MusicProvider.stripBilibiliMarkup(ugcSeason?.title),
+      collectionEpisodes,
+      pages,
     }
     this.bilibiliViewCache.set(bvid, value)
     if (canonicalBvid !== bvid) this.bilibiliViewCache.set(canonicalBvid, value)
     return value
   }
 
+  private bilibiliViewToTrack(view: BilibiliViewData): Track {
+    return {
+      id: nanoid(),
+      source: 'bilibili',
+      sourceId: view.bvid,
+      urlId: view.bvid,
+      title: view.title || 'Unknown',
+      artist: [view.author || 'Bilibili'],
+      album: view.collectionTitle || 'Bilibili',
+      duration: view.duration,
+      cover: view.cover,
+      bilibiliCover: view.cover,
+    }
+  }
+
+  /** Convert the UGC collection attached to a Bilibili video into selectable tracks. */
+  private getBilibiliCollectionTracks(view: BilibiliViewData): Track[] {
+    // A normal Bilibili upload can contain many independent parts. Treat it
+    // exactly like a selectable collection, otherwise every part would play
+    // as the first page because all of them share one BV id.
+    if (view.pages.length > 1) {
+      return view.pages.flatMap((page, index) => {
+        const cid = Number(page.cid)
+        if (!Number.isSafeInteger(cid) || cid <= 0) return []
+        const part = MusicProvider.stripBilibiliMarkup(page.part) || `P${Number(page.page) || index + 1}`
+        const cover = normalizeBilibiliCoverUrl(page.first_frame) || view.cover
+        return [
+          {
+            id: nanoid(),
+            source: 'bilibili' as const,
+            sourceId: view.bvid,
+            urlId: createBilibiliStreamId(view.bvid, cid),
+            title: part,
+            artist: [view.author || 'Bilibili'],
+            album: view.title || 'Bilibili 分P',
+            duration: Math.max(0, Number(page.duration) || 0),
+            cover,
+            bilibiliCover: cover,
+          },
+        ]
+      })
+    }
+
+    const seenBvids = new Set<string>()
+    const tracks: Track[] = []
+
+    for (const episode of view.collectionEpisodes) {
+      const bvid = String(episode.bvid ?? '').trim()
+      if (!BILIBILI_BVID_PATTERN.test(bvid) || seenBvids.has(bvid)) continue
+      seenBvids.add(bvid)
+
+      const title = MusicProvider.stripBilibiliMarkup(episode.arc?.title ?? episode.title) || 'Unknown'
+      const author = MusicProvider.stripBilibiliMarkup(episode.arc?.owner?.name ?? episode.arc?.author) || view.author || 'Bilibili'
+      const cover = normalizeBilibiliCoverUrl(episode.arc?.pic) || view.cover
+      const duration = Math.max(0, Number(episode.page?.duration ?? episode.arc?.duration) || 0)
+      tracks.push({
+        id: nanoid(),
+        source: 'bilibili',
+        sourceId: bvid,
+        urlId: bvid,
+        title,
+        artist: [author],
+        album: view.collectionTitle || 'Bilibili 合集',
+        duration,
+        cover,
+        bilibiliCover: cover,
+      })
+    }
+
+    if (!seenBvids.has(view.bvid)) {
+      tracks.unshift(this.bilibiliViewToTrack(view))
+    }
+    return tracks
+  }
+
+  /** Return the selectable videos in a Bilibili UGC collection, if the video belongs to one. */
+  async getBilibiliCollection(bvid: string): Promise<{ title: string; tracks: Track[] }> {
+    const view = await this.getBilibiliView(bvid)
+    if (!view) return { title: '', tracks: [] }
+
+    const tracks = this.getBilibiliCollectionTracks(view)
+    if (tracks.length <= 1) return { title: '', tracks: [] }
+
+    this.registerTracks(tracks)
+    logger.info('Bilibili collection resolved', {
+      event: 'music.bilibili_collection_resolved',
+      bvid: view.bvid,
+      title: view.collectionTitle || view.title,
+      trackCount: tracks.length,
+    })
+    return { title: view.collectionTitle || view.title || 'Bilibili 合集', tracks }
+  }
+
   private async getBilibiliStreamUrl(
-    bvid: string,
+    urlId: string,
     quality: AudioQuality,
     cookie?: string,
   ): Promise<CachedStreamUrl | null> {
+    const streamId = parseBilibiliStreamId(urlId)
+    if (!streamId) return null
+    const { bvid } = streamId
     const view = await this.getBilibiliView(bvid)
     if (!view) return null
+    const cid = streamId.cid ?? view.cid
     const requestCookie = await this.withBilibiliDeviceCookie(cookie)
     const query = await this.signBilibiliWbiParams(
       {
         avid: String(view.aid),
-        cid: String(view.cid),
+        cid: String(cid),
         fnval: '4048',
         fnver: '0',
         fourk: '1',
@@ -829,7 +957,7 @@ class MusicProvider {
     if (response?.code !== 0 || candidates.length === 0) {
       const fallbackParams = new URLSearchParams({
         bvid,
-        cid: String(view.cid),
+        cid: String(cid),
         fnval: '16',
         fnver: '0',
         fourk: '1',
@@ -847,6 +975,7 @@ class MusicProvider {
       if (fallback?.code === 0 && fallbackCandidates.length > 0) {
         logger.info('Bilibili WBI playurl fell back to the compatibility endpoint', {
           bvid,
+          cid,
           wbiCode: response?.code,
           authenticated: Boolean(cookie),
           candidateCount: fallbackCandidates.length,
@@ -856,6 +985,7 @@ class MusicProvider {
       } else {
         logger.warn('Bilibili playurl returned no usable DASH audio', {
           bvid,
+          cid,
           wbiCode: response?.code,
           wbiCandidateCount: candidates.length,
           fallbackCode: fallback?.code,
@@ -873,6 +1003,7 @@ class MusicProvider {
     logger.info('Bilibili audio stream resolved', {
       event: 'music.bilibili_stream_resolved',
       bvid,
+      cid,
       requestedQuality: quality,
       actualQuality: audio.quality,
       providerFormat: audio.providerFormat,
@@ -2484,7 +2615,8 @@ class MusicProvider {
 
     try {
       if (source === 'bilibili') {
-        const view = await this.getBilibiliView(picId)
+        const streamId = parseBilibiliStreamId(picId)
+        const view = streamId ? await this.getBilibiliView(streamId.bvid) : null
         return view?.cover ?? ''
       }
       const meting = this.getInstance(source === 'kugou_concept' ? 'kugou' : source)

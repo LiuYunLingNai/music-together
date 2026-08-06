@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { parseBilibiliDirectInput, resolveBilibiliVideoId } from '../src/services/bilibiliInput.js'
+import {
+  createBilibiliStreamId,
+  parseBilibiliDirectInput,
+  parseBilibiliStreamId,
+  resolveBilibiliVideoId,
+} from '../src/services/bilibiliInput.js'
 
 test('recognizes a BV id and preserves its case-sensitive payload', () => {
   assert.deepEqual(parseBilibiliDirectInput('  BV1373n6rEcP  '), {
@@ -8,6 +13,16 @@ test('recognizes a BV id and preserves its case-sensitive payload', () => {
     bvid: 'BV1373n6rEcP',
   })
   assert.equal(parseBilibiliDirectInput('BV1373n6rEcP-extra'), null)
+})
+
+test('round-trips a Bilibili multi-part stream id with its CID', () => {
+  assert.equal(createBilibiliStreamId('BV1373n6rEcP', 39252201462), 'BV1373n6rEcP?cid=39252201462')
+  assert.deepEqual(parseBilibiliStreamId('BV1373n6rEcP?cid=39252201462'), {
+    bvid: 'BV1373n6rEcP',
+    cid: 39252201462,
+  })
+  assert.deepEqual(parseBilibiliStreamId('BV1373n6rEcP'), { bvid: 'BV1373n6rEcP' })
+  assert.equal(parseBilibiliStreamId('BV1373n6rEcP?cid=0'), null)
 })
 
 test('extracts BV ids only from trusted Bilibili video URLs', () => {
