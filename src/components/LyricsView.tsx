@@ -127,6 +127,7 @@ function KaraokeWord({ word, positionMs, active }: { word: LyricWord; positionMs
     <span className="karaoke-word" style={style}>
       {word.ruby?.length ? <ruby>{word.text}<rt>{word.ruby.map((part) => part.text).join('')}</rt></ruby> : word.text}
       <span className="karaoke-word__fill" aria-hidden="true">{word.ruby?.length ? <ruby>{word.text}<rt>{word.ruby.map((part) => part.text).join('')}</rt></ruby> : word.text}</span>
+      {word.romanText && <span className="karaoke-word__roman">{word.romanText}</span>}
     </span>
   )
 }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { bootstrapIdentity, logoutIdentity, recoverIdentity, requestJson, updateAccountId } from './api'
+import { bootstrapIdentity, fetchRecommendations, logoutIdentity, recoverIdentity, requestJson, updateAccountId } from './api'
 
 describe('bootstrapIdentity', () => {
   afterEach(() => {
@@ -68,5 +68,19 @@ describe('requestJson', () => {
     expect(logout).toHaveBeenCalledWith('https://music.example')
     expect(updateId).toHaveBeenCalledWith('https://music.example', 'renamed-account', undefined)
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('fetchRecommendations', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('returns an empty list when the server omits recommendations', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 200 })))
+    await expect(fetchRecommendations('https://music.example', 'room-1')).resolves.toEqual([])
+  })
+
+  it('surfaces recommendation endpoint failures', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('unavailable', { status: 503 })))
+    await expect(fetchRecommendations('https://music.example', 'room-1')).rejects.toThrow('unavailable')
   })
 })

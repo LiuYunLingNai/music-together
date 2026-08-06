@@ -7,6 +7,8 @@ describe('preference storage defaults', () => {
   it('uses readable UI and audible volume defaults when values are unset', () => {
     expect(storage.getUiScale()).toBe(1.15)
     expect(storage.getVolume()).toBe(0.78)
+    expect(storage.getPlaybackTempoSyncEnabled()).toBe(false)
+    expect(storage.getPlaybackHardSeekSyncEnabled()).toBe(false)
   })
 
   it('clamps a persisted UI scale to the supported range', () => {

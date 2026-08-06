@@ -3,9 +3,12 @@ import { useState } from 'react'
 import { useAppStore } from '../store/app-store'
 import { LyricsView } from './LyricsView'
 import { ArtworkView } from './ArtworkView'
+import { getProxiedCoverUrl } from '../lib/cover'
+import { BackgroundRender } from './BackgroundRender'
 
 export function NowPlaying() {
   const room = useAppStore((state) => state.room)!
+  const serverUrl = useAppStore((state) => state.serverUrl)
   const centerView = useAppStore((state) => state.centerView)
   const lyricSource = useAppStore((state) => state.lyricSource)
   const set = useAppStore((state) => state.set)
@@ -13,7 +16,7 @@ export function NowPlaying() {
 
   return (
     <section className="now-playing">
-      {room.currentTrack?.cover && <img className="now-playing__backdrop" src={room.currentTrack.cover} alt="" aria-hidden="true" />}
+      {room.currentTrack?.cover && <><img className="now-playing__backdrop" src={getProxiedCoverUrl(serverUrl, room.currentTrack.cover)} alt="" aria-hidden="true" /><BackgroundRender cover={room.currentTrack.cover} /></>}
       <header className="now-playing__header">
         <div>
           <span className="live-label"><span />正在播放</span>

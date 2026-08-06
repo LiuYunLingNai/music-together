@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { mkdir, open, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { roomIdFromLink } from './room-link.js'
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url))
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL)
@@ -31,6 +32,26 @@ let availableWindowsRelease: WindowsRelease | null = null
 let downloadedInstaller = ''
 let updateDownload: Promise<AppUpdateStatus> | null = null
 const diagnosticLogs: string[] = []
+let mainWindow: BrowserWindow | null = null
+let pendingRoomId: string | null = null
+
+function acceptRoomLink(input?: string): void {
+  const roomId = input ? roomIdFromLink(input) : null
+  if (!roomId) return
+  pendingRoomId = roomId
+  mainWindow?.webContents.send('room:open', roomId)
+  mainWindow?.show()
+  mainWindow?.focus()
+}
+
+const singleInstanceLock = app.requestSingleInstanceLock()
+if (!singleInstanceLock) {
+  app.quit()
+} else {
+  acceptRoomLink(process.argv.find((value) => roomIdFromLink(value) !== null))
+  app.on('second-instance', (_event, commandLine) => acceptRoomLink(commandLine.find((value) => roomIdFromLink(value) !== null)))
+  app.on('open-url', (event, url) => { event.preventDefault(); acceptRoomLink(url) })
+}
 
 function appendDiagnosticLog(level: string, message: string): void {
   diagnosticLogs.push(`${new Date().toISOString()} [${level.toUpperCase()}] ${message}`)
@@ -337,6 +358,7 @@ function createWindow(): BrowserWindow {
       webSecurity: true,
     },
   })
+  mainWindow = window
 
   window.once('ready-to-show', () => window.show())
   window.on('maximize', () => window.webContents.send('window:maximized', true))
@@ -352,6 +374,9 @@ function createWindow(): BrowserWindow {
   window.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
     appendDiagnosticLog('error', `page load failed; code=${errorCode} description=${errorDescription} url=${validatedURL}`)
   })
+  window.webContents.on('did-finish-load', () => {
+    if (pendingRoomId) window.webContents.send('room:open', pendingRoomId)
+  })
 
   if (isDevelopment) {
     void window.loadURL(process.env.VITE_DEV_SERVER_URL!)
@@ -363,8 +388,13 @@ function createWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
+  if (!singleInstanceLock) return
   nativeTheme.themeSource = 'system'
   registerIdentityRequestHeaders()
+  if (process.platform === 'win32') {
+    if (isDevelopment && process.argv[1]) app.setAsDefaultProtocolClient('musictogether', process.execPath, [path.resolve(process.argv[1])])
+    else app.setAsDefaultProtocolClient('musictogether')
+  }
   createWindow()
   if (!updatesSupported()) publishUpdateStatus({ state: 'unsupported', message: app.isPackaged ? '便携版暂不支持自动更新，请下载新版安装包。' : '开发环境不检查应用更新。' })
   else setTimeout(() => void checkForUpdate(), 8_000)
@@ -391,6 +421,7 @@ ipcMain.on('window:toggle-maximize', (event) => {
 })
 ipcMain.on('window:close', (event) => BrowserWindow.fromWebContents(event.sender)?.close())
 ipcMain.handle('window:is-maximized', (event) => BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false)
+ipcMain.handle('room:get-pending', () => pendingRoomId)
 ipcMain.handle('system:open-external', (_event, url: string) => {
   if (url.startsWith('https://') || url.startsWith('http://')) return shell.openExternal(url)
 })

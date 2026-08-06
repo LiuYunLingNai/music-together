@@ -20,6 +20,8 @@ declare global {
       downloadUpdate: (source?: 'github' | 'ghfast') => Promise<AppUpdateStatus>
       installUpdate: () => Promise<void>
       onUpdateStatus: (listener: (status: AppUpdateStatus) => void) => () => void
+      onRoomOpen: (listener: (roomId: string) => void) => () => void
+      getPendingRoomId: () => Promise<string | null>
       bootstrapIdentity: (serverUrl: string) => Promise<IdentityBootstrapResult>
       syncIdentityCookie: (serverUrl: string) => Promise<void>
       recoverIdentity: (serverUrl: string, accountId: string, password: string) => Promise<{ userId: string; expiresAt: number }>

@@ -2,6 +2,8 @@ export type MusicSource = 'netease' | 'tencent' | 'kugou' | 'kugou_concept' | 'b
 export type UserRole = 'owner' | 'admin' | 'member'
 export type PlayMode = 'sequential' | 'loop-all' | 'loop-one' | 'shuffle'
 export type VoteAction = 'pause' | 'resume' | 'next' | 'prev' | 'set-mode' | 'play-track' | 'remove-track'
+export type BilibiliMetadataSource = 'netease' | 'tencent' | 'kugou' | 'kugou_concept'
+export type RecommendationUnavailableReason = 'empty' | 'upstream_unavailable'
 export type AudioQuality = 128 | 192 | 320 | 999 | 'highest' | 'netease_dolby' | 'netease_hires' | 'netease_jyeffect' | 'netease_master' | 'netease_spatial' | 'tencent_flac' | 'tencent_master' | 'kugou_hires' | 'kugou_master' | 'bilibili_64' | 'bilibili_132' | 'bilibili_192' | 'bilibili_hires'
 export type AppUpdateState = 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'not-available' | 'error' | 'unsupported'
 
@@ -32,7 +34,7 @@ export interface Track {
   urlId: string
   lyricId?: string
   picId?: string
-  metadataSource?: 'netease' | 'tencent'
+  metadataSource?: BilibiliMetadataSource
   streamUrl?: string
   requiresServerProxy?: boolean
   streamFormat?: 'm4a' | 'flac'
@@ -48,6 +50,12 @@ export interface User {
   avatarUrl?: string | null
 }
 
+export interface RoomMember extends User {
+  isOnline: boolean
+  joinedAt: number
+  lastSeenAt: number | null
+}
+
 export interface PlayState {
   isPlaying: boolean
   currentTime: number
@@ -60,16 +68,26 @@ export interface RoomState {
   name: string
   creatorId: string
   hostId: string
+  temporaryAdminUserId: string | null
   hasPassword: boolean
   hidden: boolean
   permanent: boolean
+  allowTemporaryAdminTrackRemoval: boolean
+  allowTemporaryAdminQueueClear: boolean
   password?: string | null
   audioQuality: AudioQuality
   users: User[]
+  members: RoomMember[]
   queue: Track[]
   currentTrack: Track | null
   playState: PlayState
   playMode: PlayMode
+}
+
+export interface PlatformRecommendation {
+  platform: MusicSource
+  tracks: Track[]
+  unavailableReason?: RecommendationUnavailableReason
 }
 
 export interface RoomListItem {

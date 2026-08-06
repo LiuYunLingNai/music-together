@@ -1,5 +1,5 @@
-import { ChevronRight, DoorOpen, Headphones, LockKeyhole, LogOut, Plus, Radio, RefreshCw, Server, Settings, Users, X } from 'lucide-react'
-import { useState } from 'react'
+import { ChevronRight, DoorOpen, Headphones, Link2, LockKeyhole, LogOut, Plus, Radio, RefreshCw, Server, Settings, Users, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { connectClient, createRoom, disconnectClient, joinRoom, leaveRoom } from '../services/runtime'
 import { useAppStore } from '../store/app-store'
 
@@ -10,17 +10,26 @@ export function Sidebar() {
   const connectionError = useAppStore((state) => state.connectionError)
   const rooms = useAppStore((state) => state.rooms)
   const room = useAppStore((state) => state.room)
+  const passwordRetry = useAppStore((state) => state.passwordRetry)
   const set = useAppStore((state) => state.set)
   const [creating, setCreating] = useState(false)
   const [roomName, setRoomName] = useState('')
   const [newRoomPassword, setNewRoomPassword] = useState('')
   const [passwordRoom, setPasswordRoom] = useState<{ id: string; name: string } | null>(null)
   const [joinPassword, setJoinPassword] = useState('')
+  const [directJoin, setDirectJoin] = useState(false)
+  const [directRoomId, setDirectRoomId] = useState('')
 
   const submitConnection = (event: React.FormEvent) => {
     event.preventDefault()
     void connectClient(serverUrl, nickname)
   }
+
+  useEffect(() => {
+    if (!passwordRetry) return
+    setPasswordRoom({ id: passwordRetry.roomId, name: passwordRetry.message })
+    set({ passwordRetry: undefined })
+  }, [passwordRetry, set])
 
   return (
     <aside className="sidebar">
@@ -41,14 +50,15 @@ export function Sidebar() {
 
       <div className="sidebar__section-heading">
         <span className="sidebar__section-label"><Headphones size={13} />房间</span>
-        {status === 'connected' && <button className="icon-button" title="创建房间" onClick={() => setCreating((value) => !value)}><Plus size={15} /></button>}
+        {status === 'connected' && <><button className="icon-button" title="通过房间号加入" onClick={() => setDirectJoin((value) => !value)}><Link2 size={15} /></button><button className="icon-button" title="创建房间" onClick={() => setCreating((value) => !value)}><Plus size={15} /></button></>}
       </div>
+
+      {directJoin && status === 'connected' && <form className="create-room" onSubmit={(event) => { event.preventDefault(); if (!directRoomId.trim()) return; joinRoom(directRoomId.trim()); setDirectRoomId(''); setDirectJoin(false) }}><input autoFocus value={directRoomId} onChange={(event) => setDirectRoomId(event.target.value)} placeholder="房间号或房间链接" /><button className="icon-button" title="加入房间"><ChevronRight size={16} /></button></form>}
 
       {creating && (
         <form className="create-room" onSubmit={(event) => {
           event.preventDefault()
-          if (!roomName.trim()) return
-          createRoom(roomName.trim(), newRoomPassword || undefined)
+          createRoom(roomName.trim() || undefined, newRoomPassword || undefined)
           setCreating(false)
           setRoomName('')
           setNewRoomPassword('')

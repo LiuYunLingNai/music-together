@@ -1,10 +1,12 @@
-import { ArrowDownToLine, ChevronLeft, Clock3, Disc3, ListMusic, LoaderCircle, Plus, Search, X } from 'lucide-react'
+import { ArrowDownToLine, ChevronLeft, Clock3, Disc3, ListMusic, LoaderCircle, Plus, RefreshCw, Search, Sparkles, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { MusicSource, Playlist, Track } from '../domain/types'
 import { formatArtists, formatTime } from '../lib/format'
-import { addBatchToQueue, addToQueue, search } from '../services/runtime'
+import { addBatchToQueue, addToQueue, loadRecommendations, search } from '../services/runtime'
 import { fetchPlaylistTracks } from '../services/api'
 import { useAppStore } from '../store/app-store'
+import { BilibiliCollectionDialog } from './BilibiliCollectionDialog'
+import { BilibiliMetadataDialog } from './BilibiliMetadataDialog'
 
 const SOURCES: Array<{ value: MusicSource; label: string }> = [
   { value: 'netease', label: '网易云' },
@@ -14,7 +16,8 @@ const SOURCES: Array<{ value: MusicSource; label: string }> = [
   { value: 'bilibili', label: 'B 站' },
 ]
 
-type SearchType = 'song' | 'album' | 'playlist'
+type SearchType = 'song' | 'album' | 'playlist' | 'recommend'
+type BilibiliAction = 'add' | 'insert'
 
 function isTrack(item: Track | Playlist): item is Track {
   return 'title' in item
@@ -32,12 +35,23 @@ export function SearchOverlay() {
   const [collectionHasMore, setCollectionHasMore] = useState(false)
   const [collectionLoading, setCollectionLoading] = useState(false)
   const [collectionError, setCollectionError] = useState('')
+  const [bilibiliCollection, setBilibiliCollection] = useState<{ track: Track; action: BilibiliAction } | null>(null)
+  const [bilibiliMetadata, setBilibiliMetadata] = useState<{ track: Track; action: BilibiliAction } | null>(null)
   const results = useAppStore((state) => state.searchResults)
   const loading = useAppStore((state) => state.searchLoading)
   const error = useAppStore((state) => state.searchError)
+  const recommendations = useAppStore((state) => state.recommendations)
+  const recommendationsLoading = useAppStore((state) => state.recommendationsLoading)
+  const recommendationsLoaded = useAppStore((state) => state.recommendationsLoaded)
   const room = useAppStore((state) => state.room)!
   const set = useAppStore((state) => state.set)
   const queuedIds = useMemo(() => new Set([room.currentTrack?.id, ...room.queue.map((track) => track.id)]), [room])
+  const activeRecommendation = recommendations.find((item) => item.platform === source)
+  const visibleResults = type === 'recommend' ? (activeRecommendation?.tracks ?? []) : results
+  const visibleSources = type === 'recommend' && recommendationsLoaded
+    ? SOURCES.filter((item) => recommendations.some((recommendation) => recommendation.platform === item.value))
+    : SOURCES
+  const displayLoading = type === 'recommend' ? recommendationsLoading : loading
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') set({ searchOpen: false }) }
@@ -46,10 +60,19 @@ export function SearchOverlay() {
   }, [set])
 
   const runSearch = async (nextPage = 1, append = false) => {
+    if (type === 'recommend') { await loadRecommendations(); return }
     const more = await search(source, keyword, nextPage, type, append)
     setPage(nextPage)
     setHasMore(more)
   }
+
+  useEffect(() => {
+    if (type === 'recommend' && !recommendationsLoaded && !recommendationsLoading) void loadRecommendations()
+  }, [type, recommendationsLoaded, recommendationsLoading])
+
+  useEffect(() => {
+    if (type === 'recommend' && recommendationsLoaded && recommendations.length && !activeRecommendation) setSource(recommendations[0]!.platform)
+  }, [type, recommendationsLoaded, recommendations, activeRecommendation])
 
   const openCollection = async (item: Playlist) => {
     setCollection(item)
@@ -68,6 +91,29 @@ export function SearchOverlay() {
     }
   }
 
+  const queueTrack = (track: Track, action: BilibiliAction) => {
+    if (track.source === 'bilibili') setBilibiliCollection({ track, action })
+    else addToQueue(track, action === 'insert')
+  }
+
+  const selectCollectionTrack = (track: Track) => {
+    const action = bilibiliCollection?.action ?? 'add'
+    setBilibiliCollection(null)
+    setBilibiliMetadata({ track, action })
+  }
+
+  const applyMetadata = (metadataTrack: Track, metadataSource: import('../domain/types').BilibiliMetadataSource) => {
+    if (!bilibiliMetadata) return
+    addToQueue({ ...bilibiliMetadata.track, metadataSource, lyricId: metadataTrack.lyricId, picId: metadataTrack.picId, cover: metadataTrack.cover || bilibiliMetadata.track.cover }, bilibiliMetadata.action === 'insert')
+    setBilibiliMetadata(null)
+  }
+
+  const skipMetadata = () => {
+    if (!bilibiliMetadata) return
+    addToQueue(bilibiliMetadata.track, bilibiliMetadata.action === 'insert')
+    setBilibiliMetadata(null)
+  }
+
   const loadMoreCollection = async () => {
     if (!collection || collectionLoading) return
     setCollectionLoading(true)
@@ -84,7 +130,7 @@ export function SearchOverlay() {
 
   return (
     <div className="modal-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) set({ searchOpen: false }) }}>
-      <section className="search-dialog" role="dialog" aria-modal="true" aria-label="点歌台">
+      <section className={`search-dialog ${type === 'recommend' ? 'search-dialog--recommend' : ''}`} role="dialog" aria-modal="true" aria-label="点歌台">
         <header className="dialog-header">
           <div>
             {collection ? <button className="dialog-back" onClick={() => setCollection(null)}><ChevronLeft size={15} />返回搜索</button> : <span>点歌台</span>}
@@ -95,22 +141,24 @@ export function SearchOverlay() {
 
         {!collection ? (
           <>
-            <form className="search-form" onSubmit={(event) => { event.preventDefault(); void runSearch() }}>
+            {type !== 'recommend' && <form className="search-form" onSubmit={(event) => { event.preventDefault(); void runSearch() }}>
               <Search size={18} />
               <input autoFocus value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder={source === 'bilibili' ? '输入关键词或 B 站视频链接' : '歌曲、歌手、专辑或歌单'} />
               <button className="button button--primary" disabled={!keyword.trim() || loading}>{loading ? '搜索中' : '搜索'}</button>
-            </form>
+            </form>}
             <div className="search-filters">
-              <div className="source-switch">{SOURCES.map((item) => <button key={item.value} className={source === item.value ? 'is-active' : ''} onClick={() => { setSource(item.value); if (item.value === 'bilibili') setType('song') }}>{item.label}</button>)}</div>
+              <div className="source-switch">{visibleSources.map((item) => <button key={item.value} className={source === item.value ? 'is-active' : ''} onClick={() => { setSource(item.value); if (item.value === 'bilibili' && type !== 'recommend') setType('song') }}>{item.label}</button>)}</div>
               <div className="type-switch">
+                <button className={type === 'recommend' ? 'is-active' : ''} onClick={() => setType('recommend')}><Sparkles size={14} />推荐</button>
                 <button className={type === 'song' ? 'is-active' : ''} onClick={() => setType('song')}><Disc3 size={14} />歌曲</button>
                 {source !== 'bilibili' && <button className={type === 'album' ? 'is-active' : ''} onClick={() => setType('album')}><Disc3 size={14} />专辑</button>}
                 {source !== 'bilibili' && <button className={type === 'playlist' ? 'is-active' : ''} onClick={() => setType('playlist')}><ListMusic size={14} />歌单</button>}
               </div>
             </div>
             <div className="search-results">
-              {results.map((item) => isTrack(item) ? (
-                <TrackResult key={`${item.source}:${item.id}`} track={item} duplicate={queuedIds.has(item.id)} />
+              {type === 'recommend' && <div className="recommendation-toolbar"><span><Sparkles size={14} />已登录平台的原生推荐</span><button className="icon-button" title="刷新推荐" onClick={() => void loadRecommendations()} disabled={recommendationsLoading}><RefreshCw size={14} className={recommendationsLoading ? 'spin' : ''} /></button></div>}
+              {visibleResults.map((item) => isTrack(item) ? (
+                <TrackResult key={`${item.source}:${item.id}`} track={item} duplicate={queuedIds.has(item.id)} onAdd={(track) => queueTrack(track, 'add')} onInsert={(track) => queueTrack(track, 'insert')} />
               ) : (
                 <button className="collection-result" key={`${item.source}:${item.id}`} onClick={() => void openCollection(item)}>
                   <img src={item.cover} alt="" />
@@ -118,9 +166,9 @@ export function SearchOverlay() {
                   <ChevronLeft className="collection-chevron" size={17} />
                 </button>
               ))}
-              {!loading && !results.length && <div className="search-empty"><Search size={28} /><strong>{error || '输入关键词开始搜索'}</strong><span>歌曲可以加入队列，专辑与歌单支持批量点歌</span></div>}
-              {loading && <div className="search-loading"><LoaderCircle className="spin" size={22} />正在从 {SOURCES.find((item) => item.value === source)?.label} 获取结果</div>}
-              {hasMore && !loading && <button className="load-more" onClick={() => void runSearch(page + 1, true)}>加载更多</button>}
+              {!displayLoading && !visibleResults.length && <div className="search-empty">{type === 'recommend' ? <Sparkles size={28} /> : <Search size={28} />}<strong>{error || (type === 'recommend' ? activeRecommendation?.unavailableReason === 'upstream_unavailable' ? '平台推荐暂时不可用' : recommendations.length ? '平台暂时没有返回推荐内容' : '请先登录音乐平台' : '输入关键词开始搜索')}</strong><span>{type === 'recommend' ? '登录后的平台会显示各自的原生推荐' : '歌曲可以加入队列，专辑与歌单支持批量点歌'}</span></div>}
+              {displayLoading && <div className="search-loading"><LoaderCircle className="spin" size={22} />正在从 {SOURCES.find((item) => item.value === source)?.label} 获取结果</div>}
+              {type !== 'recommend' && hasMore && !loading && <button className="load-more" onClick={() => void runSearch(page + 1, true)}>加载更多</button>}
             </div>
           </>
         ) : (
@@ -131,7 +179,7 @@ export function SearchOverlay() {
               <button className="button button--primary" disabled={!collectionTracks.length} onClick={() => addBatchToQueue(collectionTracks.filter((track) => !queuedIds.has(track.id)), collection.name)}><Plus size={15} />批量加入</button>
             </div>
             <div className="search-results collection-tracks">
-              {collectionTracks.map((track) => <TrackResult key={`${track.source}:${track.id}`} track={track} duplicate={queuedIds.has(track.id)} />)}
+              {collectionTracks.map((track) => <TrackResult key={`${track.source}:${track.id}`} track={track} duplicate={queuedIds.has(track.id)} onAdd={(item) => queueTrack(item, 'add')} onInsert={(item) => queueTrack(item, 'insert')} />)}
               {collectionError && <div className="inline-error collection-error">{collectionError}</div>}
               {collectionLoading && <div className="search-loading"><LoaderCircle className="spin" size={20} />正在加载</div>}
               {collectionHasMore && !collectionLoading && <button className="load-more" onClick={() => void loadMoreCollection()}>加载更多</button>}
@@ -140,18 +188,20 @@ export function SearchOverlay() {
           </div>
         )}
       </section>
+      <BilibiliCollectionDialog track={bilibiliCollection?.track ?? null} onClose={() => setBilibiliCollection(null)} onSelect={selectCollectionTrack} onNotCollection={() => { const current = bilibiliCollection; setBilibiliCollection(null); if (current) setBilibiliMetadata(current) }} />
+      <BilibiliMetadataDialog track={bilibiliMetadata?.track ?? null} onClose={() => setBilibiliMetadata(null)} onSelect={applyMetadata} onSkip={skipMetadata} />
     </div>
   )
 }
 
-function TrackResult({ track, duplicate }: { track: Track; duplicate: boolean }) {
+function TrackResult({ track, duplicate, onAdd = (item) => addToQueue(item), onInsert = (item) => addToQueue(item, true) }: { track: Track; duplicate: boolean; onAdd?: (track: Track) => void; onInsert?: (track: Track) => void }) {
   return (
     <div className={`search-result ${duplicate ? 'is-duplicate' : ''}`}>
       <img src={track.cover || track.bilibiliCover} alt="" />
       <div><strong>{track.title}</strong><span>{formatArtists(track.artist)} · {track.album || track.source}{duplicate ? ' · 已在队列' : ''}</span></div>
       <span className="search-duration"><Clock3 size={12} />{formatTime(track.duration)}</span>
-      <button className="icon-button" title="下一首播放" disabled={duplicate} onClick={() => addToQueue(track, true)}><ArrowDownToLine size={16} /></button>
-      <button className="icon-button is-active" title="加入队列" disabled={duplicate} onClick={() => addToQueue(track)}><Plus size={17} /></button>
+      <button className="icon-button" title="下一首播放" disabled={duplicate} onClick={() => onInsert(track)}><ArrowDownToLine size={16} /></button>
+      <button className="icon-button is-active" title="加入队列" disabled={duplicate} onClick={() => onAdd(track)}><Plus size={17} /></button>
     </div>
   )
 }

@@ -11,6 +11,7 @@ import { VoteBanner } from './components/VoteBanner'
 import { SettingsOverlay } from './components/SettingsOverlay'
 import { UpdateOverlay } from './components/UpdateOverlay'
 import { syncSystemTheme } from './services/theme'
+import { joinRoom } from './services/runtime'
 
 export default function App() {
   const room = useAppStore((state) => state.room)
@@ -19,6 +20,7 @@ export default function App() {
   const settingsOpen = useAppStore((state) => state.settingsOpen)
   const connectionStatus = useAppStore((state) => state.connectionStatus)
   const set = useAppStore((state) => state.set)
+  const deepLinkRoomId = useAppStore((state) => state.deepLinkRoomId)
   const [rightPanelOpen, setRightPanelOpen] = useState(true)
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false)
 
@@ -58,6 +60,19 @@ export default function App() {
     void desktop.getUpdateStatus().then((updateStatus) => set({ updateStatus }))
     return unsubscribe
   }, [set])
+
+  useEffect(() => {
+    const desktop = window.desktop
+    if (!desktop) return
+    void desktop.getPendingRoomId().then((roomId) => { if (roomId) set({ deepLinkRoomId: roomId }) })
+    return desktop.onRoomOpen((roomId) => set({ deepLinkRoomId: roomId }))
+  }, [set])
+
+  useEffect(() => {
+    if (!deepLinkRoomId || connectionStatus !== 'connected' || room?.id === deepLinkRoomId) return
+    joinRoom(deepLinkRoomId)
+    set({ deepLinkRoomId: undefined })
+  }, [deepLinkRoomId, connectionStatus, room?.id, set])
 
   return (
     <div className="app-shell">

@@ -3,6 +3,7 @@ import { formatArtists, formatTime } from '../lib/format'
 import { nextTrack, previousTrack, seekPlayback, setPlayMode, setVolume, togglePlayback } from '../services/runtime'
 import { useAppStore } from '../store/app-store'
 import { canDirectly } from '../domain/permissions'
+import { getProxiedCoverUrl } from '../lib/cover'
 
 export function TransportBar() {
   const room = useAppStore((state) => state.room)!
@@ -16,6 +17,7 @@ export function TransportBar() {
   const currentUserId = useAppStore((state) => state.currentUserId)
   const profile = useAppStore((state) => state.profile)
   const track = room.currentTrack
+  const serverUrl = useAppStore((state) => state.serverUrl)
   const progress = duration ? currentTime / duration : 0
   const user = room.users.find((member) => member.id === currentUserId)
   const canSeek = canDirectly(user?.role, 'seek', profile?.role === 'admin' || user?.isServerAdmin)
@@ -29,7 +31,7 @@ export function TransportBar() {
   return (
     <footer className="transport">
       <div className="transport-track">
-        {track?.cover ? <img src={track.cover} alt="" /> : <span className="transport-placeholder"><Captions size={18} /></span>}
+        {track?.cover ? <img src={getProxiedCoverUrl(serverUrl, track.cover)} alt="" /> : <span className="transport-placeholder"><Captions size={18} /></span>}
         <div><strong>{track?.title ?? '尚未播放'}</strong><span>{track ? formatArtists(track.artist) : '等待房主点歌'}</span></div>
       </div>
       <div className="transport-center">

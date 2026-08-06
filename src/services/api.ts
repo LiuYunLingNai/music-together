@@ -1,4 +1,4 @@
-import type { AccountProfile, AdminRoom, AdminUser, AudioProxyPolicy, IdentityBootstrapResult, LyricLine, MusicSource, Playlist, Track } from '../domain/types'
+import type { AccountProfile, AdminRoom, AdminUser, AudioProxyPolicy, IdentityBootstrapResult, LyricLine, MusicSource, PlatformRecommendation, Playlist, Track } from '../domain/types'
 
 export async function requestJson<T>(serverUrl: string, path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)
@@ -48,6 +48,16 @@ export async function searchTracks(
   const params = new URLSearchParams({ source, keyword, limit: '30', page: String(page), type, roomId })
   const result = await requestJson<{ tracks: Array<Track | Playlist>; hasMore?: boolean }>(serverUrl, `/api/music/search?${params}`)
   return { items: result.tracks, hasMore: result.hasMore ?? result.tracks.length >= 30 }
+}
+
+export async function fetchRecommendations(serverUrl: string, roomId: string, limit = 50): Promise<PlatformRecommendation[]> {
+  const params = new URLSearchParams({ roomId, limit: String(limit), refresh: String(Date.now()) })
+  const result = await requestJson<{ recommendations?: PlatformRecommendation[] }>(serverUrl, `/api/music/recommendations?${params}`)
+  return result.recommendations ?? []
+}
+
+export async function fetchBilibiliCollection(serverUrl: string, bvid: string): Promise<{ title?: string; tracks: Track[] }> {
+  return requestJson(serverUrl, `/api/music/bilibili-collection?bvid=${encodeURIComponent(bvid)}`)
 }
 
 export interface ServerLyrics {

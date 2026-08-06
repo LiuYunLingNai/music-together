@@ -1,12 +1,14 @@
 import { EVENTS } from '../domain/events'
-import { canDirectly } from '../domain/permissions'
+import { canDirectly, canManageQueueAction } from '../domain/permissions'
+import { playbackSyncAdjustment } from '../domain/playback-sync'
+import { markMemberOffline, markMemberOnline, nextUnreadChatCount, normalizeRoomState, updateMemberRole, type RoomStatePayload } from '../domain/room-state'
 import { reduceVote } from '../domain/vote'
 import type { AudioProxyPolicy, AudioQuality, ChatMessage, MusicSource, MyPlatformAuth, PlatformAuthStatus, PlayState, Playlist, RoomAutoFallbackEvent, RoomListItem, RoomState, Track, User, UserRole, VoteAction, VoteState } from '../domain/types'
 import { prepareLyricGroups } from '../lyrics/engine'
 import { parseServerLyrics, parseTtml } from '../lyrics/parser'
 import { normalizeServerUrl, storage } from '../lib/storage'
 import { useAppStore } from '../store/app-store'
-import { bootstrapIdentity, fetchCurrentProfile, fetchServerLyrics, logoutIdentity, recoverIdentity, searchTracks, setInitialPassword, updateAccountId, updateCurrentProfile, uploadCurrentAvatar } from './api'
+import { bootstrapIdentity, fetchCurrentProfile, fetchRecommendations, fetchServerLyrics, logoutIdentity, recoverIdentity, searchTracks, setInitialPassword, updateAccountId, updateCurrentProfile, uploadCurrentAvatar } from './api'
 import { DesktopAudioPlayer } from './audio-player'
 import { shouldSendAutoNext } from './auto-next'
 import { MusicTogetherSocket } from './socket'
@@ -20,6 +22,7 @@ let syncIntervalTimer = 0
 let serverOffsetMs = 0
 let pendingQrPlatform: MusicSource = 'netease'
 let reconnectRoomId = ''
+let lastJoinRoomId = ''
 const pingStarts = new Map<number, number>()
 
 const audio = new DesktopAudioPlayer({
@@ -74,6 +77,7 @@ function registerSocketHandlers(nextSocket: MusicTogetherSocket): void {
     const started = pingStarts.get(clientPingId)
     if (started === undefined) return
     const elapsed = performance.now() - started
+    useAppStore.getState().set({ rttMs: Math.round(elapsed) })
     serverOffsetMs = serverTime - (Date.now() - elapsed / 2)
     pingStarts.delete(clientPingId)
   })
@@ -82,8 +86,9 @@ function registerSocketHandlers(nextSocket: MusicTogetherSocket): void {
     storage.setUserId(userId)
     useAppStore.getState().set({ currentUserId: userId })
   })
-  nextSocket.on<RoomState>(EVENTS.ROOM_STATE, (room) => {
+  nextSocket.on<RoomStatePayload>(EVENTS.ROOM_STATE, (payload) => {
     const state = useAppStore.getState()
+    const room = normalizeRoomState(payload)
     reconnectRoomId = room.id
     state.set({ room })
     activePlaybackKey = playbackKey(room.currentTrack, room.playState)
@@ -103,19 +108,26 @@ function registerSocketHandlers(nextSocket: MusicTogetherSocket): void {
   })
   nextSocket.on<User>(EVENTS.ROOM_USER_JOINED, (user) => {
     const room = useAppStore.getState().room
-    if (room && !room.users.some((candidate) => candidate.id === user.id)) useAppStore.getState().updateRoom({ users: [...room.users, user] })
+    if (!room) return
+    const now = Date.now()
+    const users = room.users.some((candidate) => candidate.id === user.id) ? room.users.map((candidate) => candidate.id === user.id ? user : candidate) : [...room.users, user]
+    const members = markMemberOnline(room.members, user, now)
+    useAppStore.getState().updateRoom({ users, members })
   })
   nextSocket.on<User>(EVENTS.ROOM_USER_LEFT, (user) => {
     const room = useAppStore.getState().room
-    if (room) useAppStore.getState().updateRoom({ users: room.users.filter((candidate) => candidate.id !== user.id) })
+    if (room) useAppStore.getState().updateRoom({ users: room.users.filter((candidate) => candidate.id !== user.id), members: markMemberOffline(room.members, user) })
   })
-  nextSocket.on<{ name: string; hasPassword: boolean; hidden: boolean; permanent: boolean; password?: string | null; audioQuality: AudioQuality }>(EVENTS.ROOM_SETTINGS, (settings) => {
+  nextSocket.on<{ name: string; hasPassword: boolean; hidden: boolean; permanent: boolean; allowTemporaryAdminTrackRemoval?: boolean; allowTemporaryAdminQueueClear?: boolean; password?: string | null; audioQuality: AudioQuality }>(EVENTS.ROOM_SETTINGS, (settings) => {
     useAppStore.getState().updateRoom(settings)
   })
   nextSocket.on<{ userId: string; role: UserRole }>(EVENTS.ROOM_ROLE_CHANGED, ({ userId, role }) => {
     const room = useAppStore.getState().room
     if (!room) return
-    useAppStore.getState().updateRoom({ users: room.users.map((user) => user.id === userId ? { ...user, role } : user) })
+    useAppStore.getState().updateRoom({
+      users: room.users.map((user) => user.id === userId ? { ...user, role } : user),
+      members: updateMemberRole(room.members, userId, role),
+    })
   })
   nextSocket.on<RoomAutoFallbackEvent>(EVENTS.ROOM_AUTO_FALLBACK, (event) => {
     const source = (value: MusicSource) => ({ netease: '网易云', tencent: 'QQ 音乐', kugou: '酷狗', kugou_concept: '酷狗概念版', bilibili: 'B 站' })[value]
@@ -126,10 +138,14 @@ function registerSocketHandlers(nextSocket: MusicTogetherSocket): void {
   nextSocket.on<{ queue: Track[] }>(EVENTS.QUEUE_UPDATED, ({ queue }) => useAppStore.getState().updateRoom({ queue }))
   nextSocket.on<ChatMessage[]>(EVENTS.CHAT_HISTORY, (messages) => useAppStore.getState().set({ messages }))
   nextSocket.on<ChatMessage>(EVENTS.CHAT_MESSAGE, (message) => {
-    const messages = useAppStore.getState().messages
-    useAppStore.getState().set({ messages: [...messages.slice(-199), message] })
+    const state = useAppStore.getState()
+    state.set({ messages: [...state.messages.slice(-199), message], unreadChatCount: nextUnreadChatCount(state.unreadChatCount, state.chatOpen) })
   })
-  nextSocket.on<{ code: string; message: string }>(EVENTS.ROOM_ERROR, ({ message }) => useAppStore.getState().notify(message, true))
+  nextSocket.on<{ code: string; message: string }>(EVENTS.ROOM_ERROR, ({ code, message }) => {
+    const state = useAppStore.getState()
+    if ((code === 'WRONG_PASSWORD' || /密码/.test(message)) && lastJoinRoomId) state.set({ passwordRetry: { roomId: lastJoinRoomId, message } })
+    state.notify(message, true)
+  })
   nextSocket.on<{ track: Track; playState: PlayState }>(EVENTS.PLAYER_PLAY, ({ track, playState }) => {
     const room = useAppStore.getState().room
     if (!room) return
@@ -155,7 +171,10 @@ function registerSocketHandlers(nextSocket: MusicTogetherSocket): void {
     const expected = response.currentTime + Math.max(0, (Date.now() + serverOffsetMs - response.serverTimestamp) / 1000)
     const drift = audio.currentTime - expected
     useAppStore.getState().set({ syncDriftMs: Math.round(drift * 1000) })
-    if (Math.abs(drift) > 0.8) audio.seek(expected)
+    const current = useAppStore.getState()
+    const adjustment = playbackSyncAdjustment(drift, current.playbackTempoSyncEnabled, current.playbackHardSeekSyncEnabled)
+    audio.setPlaybackRate(adjustment.playbackRate)
+    if (adjustment.shouldSeek) audio.seek(expected)
   })
   nextSocket.on<VoteState>(EVENTS.VOTE_STARTED, (vote) => {
     const state = useAppStore.getState()
@@ -207,6 +226,7 @@ function schedule(playState: PlayState, action: () => void): void {
   window.clearTimeout(scheduledTimer)
   const delay = Math.max(0, (playState.serverTimeToExecute ?? Date.now() + serverOffsetMs) - (Date.now() + serverOffsetMs))
   scheduledTimer = window.setTimeout(action, delay)
+  audio.setPlaybackRate(1)
   useAppStore.getState().updateRoom({ playState })
 }
 
@@ -219,6 +239,7 @@ function syncTrack(track: Track | null, playState: PlayState, roomId: string, fo
   if (!track) return
   if (force || activeTrackId !== track.id) {
     activeTrackId = track.id
+    audio.setPlaybackRate(1)
     audio.load(track, useAppStore.getState().serverUrl, roomId, expectedPosition(playState), playState.isPlaying)
     if ('mediaSession' in navigator) {
       navigator.mediaSession.metadata = new MediaMetadata({
@@ -305,11 +326,14 @@ export function disconnectClient(): void {
 
 export function joinRoom(roomId: string, password?: string): void {
   const state = useAppStore.getState()
-  socket?.emit(EVENTS.ROOM_JOIN, { roomId, nickname: state.nickname, password, rejoinToken: storage.getRejoinToken(roomId) })
+  const normalized = roomId.trim().replace(/^.*\/room\//i, '').split(/[?#/]/)[0]
+  if (!normalized) return
+  lastJoinRoomId = normalized
+  socket?.emit(EVENTS.ROOM_JOIN, { roomId: normalized, nickname: state.nickname, password, rejoinToken: storage.getRejoinToken(normalized) })
 }
 
-export function createRoom(name: string, password?: string): void {
-  socket?.emit(EVENTS.ROOM_CREATE, { nickname: useAppStore.getState().nickname, roomName: name, password })
+export function createRoom(name?: string, password?: string): void {
+  socket?.emit(EVENTS.ROOM_CREATE, { nickname: useAppStore.getState().nickname, roomName: name?.trim() || undefined, password })
 }
 
 export function leaveRoom(): void {
@@ -330,6 +354,18 @@ function currentRoomUser(): User | undefined {
 function hasDirectPermission(action: Parameters<typeof canDirectly>[1]): boolean {
   const state = useAppStore.getState()
   return canDirectly(currentRoomUser()?.role, action, state.profile?.role === 'admin' || currentRoomUser()?.isServerAdmin)
+}
+
+function canManageQueue(action: 'remove-track' | 'clear-queue'): boolean {
+  const state = useAppStore.getState()
+  const user = currentRoomUser()
+  return canManageQueueAction(user?.role, action, {
+    userId: state.currentUserId,
+    temporaryAdminUserId: state.room?.temporaryAdminUserId,
+    allowTemporaryAdminTrackRemoval: state.room?.allowTemporaryAdminTrackRemoval,
+    allowTemporaryAdminQueueClear: state.room?.allowTemporaryAdminQueueClear,
+    isServerAdmin: state.profile?.role === 'admin' || user?.isServerAdmin,
+  })
 }
 
 function startVote(action: VoteAction, payload?: Record<string, unknown>): void {
@@ -369,12 +405,12 @@ export function addToQueue(track: Track, playNext = false): void { socket?.emit(
 export function addBatchToQueue(tracks: Track[], playlistName?: string): void {
   for (let offset = 0; offset < tracks.length; offset += 100) socket?.emit(EVENTS.QUEUE_ADD_BATCH, { tracks: tracks.slice(offset, offset + 100), playlistName })
 }
-export function removeFromQueue(trackId: string, title?: string): void { if (hasDirectPermission('remove')) socket?.emit(EVENTS.QUEUE_REMOVE, { trackId }); else startVote('remove-track', { trackId, trackTitle: title }) }
+export function removeFromQueue(trackId: string, title?: string): void { if (canManageQueue('remove-track')) socket?.emit(EVENTS.QUEUE_REMOVE, { trackId }); else startVote('remove-track', { trackId, trackTitle: title }) }
 export function playQueuedTrack(track: Track): void { if (hasDirectPermission('play')) socket?.emit(EVENTS.PLAYER_PLAY, { track }); else startVote('play-track', { trackId: track.id, trackTitle: track.title }) }
 export function reorderQueue(trackIds: string[]): void { if (hasDirectPermission('reorder')) socket?.emit(EVENTS.QUEUE_REORDER, { trackIds }); else useAppStore.getState().notify('只有房主或管理员可以调整队列顺序', true) }
-export function clearQueue(): void { if (hasDirectPermission('remove')) socket?.emit(EVENTS.QUEUE_CLEAR); else useAppStore.getState().notify('只有房主或管理员可以清空队列', true) }
-export function updateQueueMetadata(trackId: string, metadata: { metadataSource?: 'netease' | 'tencent'; lyricId?: string; picId?: string; cover?: string; clearMetadata?: boolean }): void { socket?.emit(EVENTS.QUEUE_UPDATE_METADATA, { trackId, ...metadata }) }
-export function updateRoomSettings(settings: { name?: string; password?: string | null; audioQuality?: AudioQuality; hidden?: boolean; permanent?: boolean }): void { socket?.emit(EVENTS.ROOM_SETTINGS, settings) }
+export function clearQueue(): void { if (canManageQueue('clear-queue')) socket?.emit(EVENTS.QUEUE_CLEAR); else useAppStore.getState().notify('当前房主未允许临时管理员清空队列', true) }
+export function updateQueueMetadata(trackId: string, metadata: { metadataSource?: 'netease' | 'tencent' | 'kugou' | 'kugou_concept'; lyricId?: string; picId?: string; cover?: string; clearMetadata?: boolean }): void { socket?.emit(EVENTS.QUEUE_UPDATE_METADATA, { trackId, ...metadata }) }
+export function updateRoomSettings(settings: { name?: string; password?: string | null; audioQuality?: AudioQuality; hidden?: boolean; permanent?: boolean; allowTemporaryAdminTrackRemoval?: boolean; allowTemporaryAdminQueueClear?: boolean }): void { socket?.emit(EVENTS.ROOM_SETTINGS, settings) }
 export function setRoomUserRole(userId: string, role: 'admin' | 'member'): void { if (hasDirectPermission('set-role')) socket?.emit(EVENTS.ROOM_SET_ROLE, { userId, role }); else useAppStore.getState().notify('只有房主可以设置成员角色', true) }
 export function castVote(approve: boolean): void { socket?.emit(EVENTS.VOTE_CAST, { approve }) }
 export function sendChat(content: string): void { if (content.trim()) socket?.emit(EVENTS.CHAT_MESSAGE, { content: content.trim() }) }
@@ -408,6 +444,36 @@ export async function search(source: MusicSource, keyword: string, page = 1, typ
     state.set({ searchLoading: false, searchError: error instanceof Error ? error.message : '搜索失败' })
     return false
   }
+}
+
+export async function loadRecommendations(): Promise<void> {
+  const state = useAppStore.getState()
+  if (!state.room) return
+  state.set({ recommendationsLoading: true, recommendationsLoaded: false, searchError: undefined })
+  try {
+    const recommendations = await fetchRecommendations(state.serverUrl, state.room.id)
+    state.set({ recommendations, recommendationsLoading: false, recommendationsLoaded: true })
+  } catch (error) {
+    state.set({ recommendations: [], recommendationsLoading: false, recommendationsLoaded: true, searchError: error instanceof Error ? error.message : '推荐加载失败' })
+  }
+}
+
+export function updatePlaybackSyncSettings(settings: { playbackTempoSyncEnabled?: boolean; playbackHardSeekSyncEnabled?: boolean }): void {
+  if (settings.playbackTempoSyncEnabled !== undefined) storage.setPlaybackTempoSyncEnabled(settings.playbackTempoSyncEnabled)
+  if (settings.playbackHardSeekSyncEnabled !== undefined) storage.setPlaybackHardSeekSyncEnabled(settings.playbackHardSeekSyncEnabled)
+  useAppStore.getState().set(settings)
+}
+
+export function updateBackgroundSettings(settings: { backgroundFps?: number; backgroundFlowSpeed?: number; backgroundRenderScale?: number }): void {
+  const next = {
+    ...(settings.backgroundFps === undefined ? {} : { backgroundFps: Math.min(60, Math.max(15, Math.round(settings.backgroundFps))) }),
+    ...(settings.backgroundFlowSpeed === undefined ? {} : { backgroundFlowSpeed: Math.min(2, Math.max(0.1, settings.backgroundFlowSpeed)) }),
+    ...(settings.backgroundRenderScale === undefined ? {} : { backgroundRenderScale: Math.min(1, Math.max(0.25, settings.backgroundRenderScale)) }),
+  }
+  if (next.backgroundFps !== undefined) storage.setBackgroundFps(next.backgroundFps)
+  if (next.backgroundFlowSpeed !== undefined) storage.setBackgroundFlowSpeed(next.backgroundFlowSpeed)
+  if (next.backgroundRenderScale !== undefined) storage.setBackgroundRenderScale(next.backgroundRenderScale)
+  useAppStore.getState().set(next)
 }
 
 export async function refreshProfile(): Promise<void> {
@@ -491,7 +557,7 @@ export function updateLyricSettings(settings: Partial<ReturnType<typeof storage.
 }
 
 export function updateSyncInterval(seconds: number): void {
-  const value = Math.min(60, Math.max(3, Math.round(seconds)))
+  const value = Math.min(60, Math.max(1, Math.round(seconds)))
   storage.setSyncInterval(value)
   useAppStore.getState().set({ syncInterval: value })
   window.clearInterval(syncIntervalTimer)

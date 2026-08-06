@@ -72,6 +72,10 @@ export class DesktopAudioPlayer {
     this.audio.volume = Math.min(1, Math.max(0, value))
   }
 
+  setPlaybackRate(value: number): void {
+    this.audio.playbackRate = Math.min(1.01, Math.max(0.99, value))
+  }
+
   get currentTime(): number {
     return Number.isFinite(this.audio.currentTime) ? this.audio.currentTime : this.pendingSeek
   }

@@ -19,3 +19,16 @@ export function voteActionFor(action: DirectAction, isPlaying = false): VoteActi
     default: return null
   }
 }
+
+/** Queue permissions for the elected temporary admin are room settings, not role-only permissions. */
+export function canManageQueueAction(
+  role: UserRole | undefined,
+  action: 'remove-track' | 'clear-queue',
+  options: { userId?: string; temporaryAdminUserId?: string | null; allowTemporaryAdminTrackRemoval?: boolean; allowTemporaryAdminQueueClear?: boolean; isServerAdmin?: boolean } = {},
+): boolean {
+  if (!canDirectly(role, 'remove', options.isServerAdmin)) return false
+  if (options.isServerAdmin || role !== 'admin' || options.temporaryAdminUserId !== options.userId) return true
+  return action === 'remove-track'
+    ? options.allowTemporaryAdminTrackRemoval === true
+    : options.allowTemporaryAdminQueueClear === true
+}

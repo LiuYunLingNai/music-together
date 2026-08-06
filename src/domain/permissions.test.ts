@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canDirectly, voteActionFor } from './permissions'
+import { canDirectly, canManageQueueAction, voteActionFor } from './permissions'
 
 describe('room permissions', () => {
   it('gives owners and server admins full direct control', () => {
@@ -19,5 +19,14 @@ describe('room permissions', () => {
     expect(canDirectly('member', 'pause')).toBe(false)
     expect(voteActionFor('pause')).toBe('pause')
     expect(voteActionFor('remove')).toBe('remove-track')
+  })
+
+  it('splits temporary admin queue permissions by room setting', () => {
+    const base = { userId: 'temp', temporaryAdminUserId: 'temp', isServerAdmin: false }
+    expect(canManageQueueAction('admin', 'remove-track', base)).toBe(false)
+    expect(canManageQueueAction('admin', 'clear-queue', base)).toBe(false)
+    expect(canManageQueueAction('admin', 'remove-track', { ...base, allowTemporaryAdminTrackRemoval: true })).toBe(true)
+    expect(canManageQueueAction('admin', 'clear-queue', { ...base, allowTemporaryAdminQueueClear: true })).toBe(true)
+    expect(canManageQueueAction('admin', 'clear-queue', { ...base, isServerAdmin: true })).toBe(true)
   })
 })

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AccountProfile, AppUpdateStatus, AudioProxyPolicy, ChatMessage, LyricGroup, LyricSettings, MusicSource, MyPlatformAuth, PlatformAuthStatus, Playlist, RoomListItem, RoomState, Track, VoteState } from '../domain/types'
+import type { AccountProfile, AppUpdateStatus, AudioProxyPolicy, ChatMessage, LyricGroup, LyricSettings, MusicSource, MyPlatformAuth, PlatformAuthStatus, PlatformRecommendation, Playlist, RoomListItem, RoomState, Track, VoteState } from '../domain/types'
 import { storage } from '../lib/storage'
 import type { ResolvedTheme, ThemePreference } from '../lib/theme'
 import { resolveTheme } from '../lib/theme'
@@ -34,7 +34,12 @@ interface AppState {
   searchLoading: boolean
   searchResults: Array<Track | Playlist>
   searchError?: string
+  recommendations: PlatformRecommendation[]
+  recommendationsLoading: boolean
+  recommendationsLoaded: boolean
   settingsOpen: boolean
+  chatOpen: boolean
+  unreadChatCount: number
   activeVote: VoteState | null
   platformStatus: PlatformAuthStatus[]
   myPlatformAuth: MyPlatformAuth[]
@@ -45,7 +50,15 @@ interface AppState {
   audioProxyPolicy: AudioProxyPolicy
   updateStatus: AppUpdateStatus
   syncDriftMs: number
+  rttMs: number
   syncInterval: number
+  playbackTempoSyncEnabled: boolean
+  playbackHardSeekSyncEnabled: boolean
+  backgroundFps: number
+  backgroundFlowSpeed: number
+  backgroundRenderScale: number
+  deepLinkRoomId?: string
+  passwordRetry?: { roomId: string; message: string }
   lyricSettings: LyricSettings
   notice?: { id: number; text: string; error?: boolean }
   set: (partial: Partial<Omit<AppState, 'set'>>) => void
@@ -77,7 +90,12 @@ export const useAppStore = create<AppState>((set) => ({
   searchOpen: false,
   searchLoading: false,
   searchResults: [],
+  recommendations: [],
+  recommendationsLoading: false,
+  recommendationsLoaded: false,
   settingsOpen: false,
+  chatOpen: false,
+  unreadChatCount: 0,
   activeVote: null,
   platformStatus: [],
   myPlatformAuth: [],
@@ -88,7 +106,13 @@ export const useAppStore = create<AppState>((set) => ({
   audioProxyPolicy: { kugouForceProxy: true },
   updateStatus: { state: 'idle', currentVersion: '未知' },
   syncDriftMs: 0,
+  rttMs: 0,
   syncInterval: storage.getSyncInterval(),
+  playbackTempoSyncEnabled: storage.getPlaybackTempoSyncEnabled(),
+  playbackHardSeekSyncEnabled: storage.getPlaybackHardSeekSyncEnabled(),
+  backgroundFps: storage.getBackgroundFps(),
+  backgroundFlowSpeed: storage.getBackgroundFlowSpeed(),
+  backgroundRenderScale: storage.getBackgroundRenderScale(),
   lyricSettings: storage.getLyricSettings(),
   set: (partial) => set(partial),
   updateRoom: (partial) => set((state) => state.room ? { room: { ...state.room, ...partial } } : {}),
@@ -105,6 +129,11 @@ export const useAppStore = create<AppState>((set) => ({
     duration: 0,
     isPlaying: false,
     activeVote: null,
+    recommendations: [],
+    recommendationsLoading: false,
+    recommendationsLoaded: false,
+    chatOpen: false,
+    unreadChatCount: 0,
     platformStatus: [],
     myPlatformAuth: [],
     qrData: null,

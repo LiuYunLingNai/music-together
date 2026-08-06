@@ -68,6 +68,12 @@ contextBridge.exposeInMainWorld('desktop', {
     ipcRenderer.on('app-update:status', handler)
     return () => ipcRenderer.removeListener('app-update:status', handler)
   },
+  onRoomOpen: (listener: (roomId: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, roomId: string) => listener(roomId)
+    ipcRenderer.on('room:open', handler)
+    return () => ipcRenderer.removeListener('room:open', handler)
+  },
+  getPendingRoomId: () => ipcRenderer.invoke('room:get-pending') as Promise<string | null>,
   bootstrapIdentity: (serverUrl: string) => ipcRenderer.invoke('server:bootstrap-identity', serverUrl) as Promise<{ userId: string; expiresAt?: number }>,
   syncIdentityCookie: (serverUrl: string) => ipcRenderer.invoke('server:sync-identity-cookie', serverUrl) as Promise<void>,
   recoverIdentity: (serverUrl: string, accountId: string, password: string) => ipcRenderer.invoke('server:recover-identity', serverUrl, accountId, password) as Promise<{ userId: string; expiresAt: number }>,

@@ -1,14 +1,16 @@
 import { Disc3, Users } from 'lucide-react'
 import { useAppStore } from '../store/app-store'
+import { getProxiedCoverUrl } from '../lib/cover'
 
 export function ArtworkView() {
   const room = useAppStore((state) => state.room)!
+  const serverUrl = useAppStore((state) => state.serverUrl)
   const track = room.currentTrack
   if (!track) return <div className="artwork-empty"><Disc3 size={38} /><strong>等待播放</strong></div>
   return (
     <div className="artwork-view">
       <div className="artwork-frame">
-        <img src={track.cover || track.bilibiliCover} alt={`${track.title} 封面`} />
+        <img src={getProxiedCoverUrl(serverUrl, track.cover || track.bilibiliCover || '')} alt={`${track.title} 封面`} />
       </div>
       <div className="artwork-copy">
         <p>{track.album || track.source}</p>
