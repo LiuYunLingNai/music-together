@@ -64,8 +64,10 @@ export function QueueDrawer({
   const ability = useContext(AbilityContext)
   const canRemove = ability.can('remove', 'Queue')
   const isTemporaryAdmin = room?.temporaryAdminUserId === currentUser?.id && !currentUser?.isServerAdmin
-  const canRemoveTrack = canRemove && (!isTemporaryAdmin || room.allowTemporaryAdminTrackRemoval)
-  const canClearQueue = canRemove && (!isTemporaryAdmin || room.allowTemporaryAdminQueueClear)
+  const allowTemporaryAdminTrackRemoval = room?.allowTemporaryAdminTrackRemoval ?? false
+  const allowTemporaryAdminQueueClear = room?.allowTemporaryAdminQueueClear ?? false
+  const canRemoveTrack = canRemove && (!isTemporaryAdmin || allowTemporaryAdminTrackRemoval)
+  const canClearQueue = canRemove && (!isTemporaryAdmin || allowTemporaryAdminQueueClear)
   const canAdd = ability.can('add', 'Queue')
   const canReorder = ability.can('reorder', 'Queue')
   const canPlay = ability.can('play', 'Player')
