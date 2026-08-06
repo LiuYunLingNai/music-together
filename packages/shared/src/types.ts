@@ -118,11 +118,17 @@ export interface RoomState {
   name: string
   creatorId: string
   hostId: string
+  /** The currently elected temporary admin, if there is one. */
+  temporaryAdminUserId: string | null
   hasPassword: boolean
   /** Hide the room from the public lobby while keeping direct joins available. */
   hidden: boolean
   /** Permanent rooms survive empty-room cleanup and server restarts. */
   permanent: boolean
+  /** Whether a temporary admin may remove individual tracks. */
+  allowTemporaryAdminTrackRemoval: boolean
+  /** Whether a temporary admin may clear the entire queue. */
+  allowTemporaryAdminQueueClear: boolean
   /** 密码明文（仅 owner 可见；普通成员和临时管理员只收到 hasPassword） */
   password?: string | null
   audioQuality: AudioQuality

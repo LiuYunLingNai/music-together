@@ -15,10 +15,16 @@ import { checkSocketRateLimit } from '../middleware/socketRateLimiter.js'
 import * as chatService from '../services/chatService.js'
 import * as playerService from '../services/playerService.js'
 import * as queueService from '../services/queueService.js'
+import { userRepo } from '../repositories/userRepository.js'
 import { logger } from '../utils/logger.js'
 
 export function registerQueueController(io: TypedServer, socket: TypedSocket) {
   const withPermission = createWithPermission(io)
+  const canManageQueue = (
+    userId: string,
+    room: { temporaryAdminUserId: string | null },
+    allowedForTemporaryAdmin: boolean,
+  ) => room.temporaryAdminUserId !== userId || allowedForTemporaryAdmin || userRepo.isServerAdmin(userId)
 
   socket.on(
     EVENTS.QUEUE_ADD,
@@ -145,6 +151,13 @@ export function registerQueueController(io: TypedServer, socket: TypedSocket) {
   socket.on(
     EVENTS.QUEUE_REMOVE,
     withPermission('remove', 'Queue', async (ctx, raw) => {
+      if (!canManageQueue(ctx.user.id, ctx.room, ctx.room.allowTemporaryAdminTrackRemoval)) {
+        ctx.socket.emit(EVENTS.ROOM_ERROR, {
+          code: ERROR_CODE.NO_PERMISSION,
+          message: '房主未允许临时管理员删除歌曲',
+        })
+        return
+      }
       const parsed = queueRemoveSchema.safeParse(raw)
       if (!parsed.success) {
         socket.emit(EVENTS.ROOM_ERROR, { code: ERROR_CODE.INVALID_DATA, message: '无效的移除请求' })
@@ -247,6 +260,13 @@ export function registerQueueController(io: TypedServer, socket: TypedSocket) {
   socket.on(
     EVENTS.QUEUE_CLEAR,
     withPermission('remove', 'Queue', async (ctx) => {
+      if (!canManageQueue(ctx.user.id, ctx.room, ctx.room.allowTemporaryAdminQueueClear)) {
+        ctx.socket.emit(EVENTS.ROOM_ERROR, {
+          code: ERROR_CODE.NO_PERMISSION,
+          message: '房主未允许临时管理员清空播放列表',
+        })
+        return
+      }
       queueService.clearQueue(ctx.roomId)
       io.to(ctx.roomId).emit(EVENTS.QUEUE_UPDATED, { queue: [] })
 

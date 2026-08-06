@@ -27,6 +27,10 @@ interface PersistedRoomState {
   creatorId: RoomData['creatorId']
   adminUserIds: string[]
   hidden?: boolean
+  /** Legacy combined setting, migrated to both granular permissions when read. */
+  allowTemporaryAdminQueueManagement?: boolean
+  allowTemporaryAdminTrackRemoval?: boolean
+  allowTemporaryAdminQueueClear?: boolean
   audioQuality: RoomData['audioQuality']
   queue: RoomData['queue']
   currentTrack: RoomData['currentTrack']
@@ -213,6 +217,10 @@ export class InMemoryRoomRepository implements RoomRepository {
           hostId: state.creatorId,
           adminUserIds: new Set(state.adminUserIds ?? []),
           temporaryAdminUserId: null,
+          allowTemporaryAdminTrackRemoval:
+            state.allowTemporaryAdminTrackRemoval ?? state.allowTemporaryAdminQueueManagement ?? false,
+          allowTemporaryAdminQueueClear:
+            state.allowTemporaryAdminQueueClear ?? state.allowTemporaryAdminQueueManagement ?? false,
           hidden: state.hidden ?? false,
           permanent: true,
           audioQuality: state.audioQuality,
@@ -255,6 +263,8 @@ export class InMemoryRoomRepository implements RoomRepository {
       creatorId: room.creatorId,
       adminUserIds: Array.from(room.adminUserIds),
       hidden: room.hidden,
+      allowTemporaryAdminTrackRemoval: room.allowTemporaryAdminTrackRemoval,
+      allowTemporaryAdminQueueClear: room.allowTemporaryAdminQueueClear,
       audioQuality: room.audioQuality,
       queue: room.queue.map(withoutStreamUrl),
       currentTrack: room.currentTrack ? withoutStreamUrl(room.currentTrack) : null,

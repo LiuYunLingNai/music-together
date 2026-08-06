@@ -230,6 +230,8 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         audioQuality: parsed.data.audioQuality,
         hidden: parsed.data.hidden,
         permanent: parsed.data.permanent,
+        allowTemporaryAdminTrackRemoval: parsed.data.allowTemporaryAdminTrackRemoval,
+        allowTemporaryAdminQueueClear: parsed.data.allowTemporaryAdminQueueClear,
       })
 
       const updatedRoom = roomRepo.get(ctx.roomId)
@@ -241,6 +243,8 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         hasPassword: updatedRoom.password !== null,
         hidden: updatedRoom.hidden,
         permanent: updatedRoom.permanent,
+        allowTemporaryAdminTrackRemoval: updatedRoom.allowTemporaryAdminTrackRemoval,
+        allowTemporaryAdminQueueClear: updatedRoom.allowTemporaryAdminQueueClear,
         audioQuality: updatedRoom.audioQuality,
       }
       if (canManageAllSettings) {
@@ -264,6 +268,8 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         passwordProtected: updatedRoom.password !== null,
         hidden: updatedRoom.hidden,
         permanent: updatedRoom.permanent,
+        allowTemporaryAdminTrackRemoval: updatedRoom.allowTemporaryAdminTrackRemoval,
+        allowTemporaryAdminQueueClear: updatedRoom.allowTemporaryAdminQueueClear,
         changedFields,
       })
 

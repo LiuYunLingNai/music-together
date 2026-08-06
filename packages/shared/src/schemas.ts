@@ -45,6 +45,8 @@ export const roomSettingsSchema = z.object({
   audioQuality: audioQualitySchema.optional(),
   hidden: z.boolean().optional(),
   permanent: z.boolean().optional(),
+  allowTemporaryAdminTrackRemoval: z.boolean().optional(),
+  allowTemporaryAdminQueueClear: z.boolean().optional(),
 })
 
 export const setRoleSchema = z.object({

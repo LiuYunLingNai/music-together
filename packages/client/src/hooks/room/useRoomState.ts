@@ -70,6 +70,8 @@ export function useRoomState() {
       hasPassword: boolean
       hidden: boolean
       permanent: boolean
+      allowTemporaryAdminTrackRemoval: boolean
+      allowTemporaryAdminQueueClear: boolean
       password?: string | null
       audioQuality: AudioQuality
     }) => {

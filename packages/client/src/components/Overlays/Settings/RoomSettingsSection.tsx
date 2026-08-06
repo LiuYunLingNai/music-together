@@ -26,6 +26,8 @@ interface RoomSettingsSectionProps {
     audioQuality?: AudioQuality
     hidden?: boolean
     permanent?: boolean
+    allowTemporaryAdminTrackRemoval?: boolean
+    allowTemporaryAdminQueueClear?: boolean
   }) => void
 }
 
@@ -287,6 +289,26 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
               onCheckedChange={(permanent) => {
                 onUpdateSettings({ permanent })
                 toast.success(permanent ? '已设为永久房间' : '已改为临时房间')
+              }}
+            />
+          </SettingRow>
+
+          <SettingRow label="临时管理员删除单曲" description="允许临时管理员从播放列表删除单首歌曲">
+            <Switch
+              checked={room?.allowTemporaryAdminTrackRemoval ?? false}
+              onCheckedChange={(allowTemporaryAdminTrackRemoval) => {
+                onUpdateSettings({ allowTemporaryAdminTrackRemoval })
+                toast.success(allowTemporaryAdminTrackRemoval ? '已允许临时管理员删除单曲' : '已限制临时管理员删除单曲')
+              }}
+            />
+          </SettingRow>
+
+          <SettingRow label="临时管理员清空歌单" description="允许临时管理员清空整个播放列表">
+            <Switch
+              checked={room?.allowTemporaryAdminQueueClear ?? false}
+              onCheckedChange={(allowTemporaryAdminQueueClear) => {
+                onUpdateSettings({ allowTemporaryAdminQueueClear })
+                toast.success(allowTemporaryAdminQueueClear ? '已允许临时管理员清空歌单' : '已限制临时管理员清空歌单')
               }}
             />
           </SettingRow>

@@ -160,6 +160,8 @@ export function createRoom(
     hostId: userId,
     adminUserIds: new Set(),
     temporaryAdminUserId: null,
+    allowTemporaryAdminTrackRemoval: false,
+    allowTemporaryAdminQueueClear: false,
     hidden: false,
     permanent: false,
     audioQuality: 320,
@@ -375,6 +377,8 @@ export function updateSettings(
     audioQuality?: AudioQuality
     hidden?: boolean
     permanent?: boolean
+    allowTemporaryAdminTrackRemoval?: boolean
+    allowTemporaryAdminQueueClear?: boolean
   },
 ): void {
   const room = roomRepo.get(roomId)
@@ -399,6 +403,14 @@ export function updateSettings(
 
   if (settings.permanent !== undefined) {
     room.permanent = settings.permanent
+  }
+
+  if (settings.allowTemporaryAdminTrackRemoval !== undefined) {
+    room.allowTemporaryAdminTrackRemoval = settings.allowTemporaryAdminTrackRemoval
+  }
+
+  if (settings.allowTemporaryAdminQueueClear !== undefined) {
+    room.allowTemporaryAdminQueueClear = settings.allowTemporaryAdminQueueClear
   }
 
   roomRepo.persist(roomId)

@@ -21,6 +21,10 @@ export interface RoomData {
   adminUserIds: Set<string>
   /** 临时管理员 ID：仅当房间内没有在线 owner / 持久 admin 时授予，不持久化 */
   temporaryAdminUserId: string | null
+  /** Whether a temporary admin may remove individual tracks. */
+  allowTemporaryAdminTrackRemoval: boolean
+  /** Whether a temporary admin may clear the entire queue. */
+  allowTemporaryAdminQueueClear: boolean
   /** Hide the room from the public lobby; direct joins remain available. */
   hidden: boolean
   /** Keep the room when empty and restore it after a server restart. */

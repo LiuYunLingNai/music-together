@@ -36,6 +36,8 @@ export interface ServerToClientEvents {
     hasPassword: boolean
     hidden: boolean
     permanent: boolean
+    allowTemporaryAdminTrackRemoval: boolean
+    allowTemporaryAdminQueueClear: boolean
     password?: string | null
     audioQuality: AudioQuality
   }) => void
@@ -90,6 +92,8 @@ export interface ClientToServerEvents {
     audioQuality?: AudioQuality
     hidden?: boolean
     permanent?: boolean
+    allowTemporaryAdminTrackRemoval?: boolean
+    allowTemporaryAdminQueueClear?: boolean
   }) => void
   [EVENTS.ROOM_SET_ROLE]: (data: { userId: string; role: 'admin' | 'member' }) => void
 

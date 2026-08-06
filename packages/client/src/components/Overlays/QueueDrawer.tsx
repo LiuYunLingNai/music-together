@@ -54,6 +54,8 @@ export function QueueDrawer({
 }: QueueDrawerProps) {
   const queue = useRoomStore((s) => s.room?.queue ?? EMPTY_QUEUE)
   const roomId = useRoomStore((s) => s.room?.id)
+  const room = useRoomStore((s) => s.room)
+  const currentUser = useRoomStore((s) => s.currentUser)
   const currentTrack = usePlayerStore((s) => s.currentTrack)
   const { socket } = useSocketContext()
   const isMobile = useIsMobile() // layout: Drawer direction, height
@@ -61,6 +63,9 @@ export function QueueDrawer({
   const isTouch = !hasHover
   const ability = useContext(AbilityContext)
   const canRemove = ability.can('remove', 'Queue')
+  const isTemporaryAdmin = room?.temporaryAdminUserId === currentUser?.id && !currentUser?.isServerAdmin
+  const canRemoveTrack = canRemove && (!isTemporaryAdmin || room.allowTemporaryAdminTrackRemoval)
+  const canClearQueue = canRemove && (!isTemporaryAdmin || room.allowTemporaryAdminQueueClear)
   const canAdd = ability.can('add', 'Queue')
   const canReorder = ability.can('reorder', 'Queue')
   const canPlay = ability.can('play', 'Player')
@@ -138,7 +143,7 @@ export function QueueDrawer({
   }
 
   const handleRemoveTrack = (track: Track) => {
-    if (canRemove) {
+    if (canRemoveTrack) {
       onRemoveFromQueue(track.id)
       toast.success(`已移除「${track.title}」`)
     } else if (canVote) {
@@ -197,7 +202,7 @@ export function QueueDrawer({
               播放列表 ({queue.length})
             </DrawerTitle>
             <div className="flex items-center gap-1">
-              {canRemove && queue.length > 0 && (
+              {canClearQueue && queue.length > 0 && (
                 <Tooltip delayDuration={300}>
                   <TooltipTrigger asChild>
                     <Button
@@ -423,7 +428,7 @@ export function QueueDrawer({
                           </>
                         )}
 
-                        {(canRemove || canVote) && (
+                        {(canRemoveTrack || canVote) && (
                           <Tooltip delayDuration={400}>
                             <TooltipTrigger asChild>
                               <Button
@@ -431,12 +436,12 @@ export function QueueDrawer({
                                 size="icon"
                                 className="h-6 w-6 min-h-9 min-w-9 sm:min-h-0 sm:min-w-0 text-destructive hover:text-destructive"
                                 onClick={() => handleRemoveTrack(track)}
-                                aria-label={canRemove ? `移除 ${track.title}` : `投票移除 ${track.title}`}
+                                aria-label={canRemoveTrack ? `移除 ${track.title}` : `投票移除 ${track.title}`}
                               >
                                 <Trash2 className="h-3 w-3" />
                               </Button>
                             </TooltipTrigger>
-                            <TooltipContent side="bottom">{canRemove ? '移除' : '投票移除'}</TooltipContent>
+                            <TooltipContent side="bottom">{canRemoveTrack ? '移除' : '投票移除'}</TooltipContent>
                           </Tooltip>
                         )}
                       </div>

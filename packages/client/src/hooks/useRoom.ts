@@ -40,6 +40,8 @@ export function useRoom() {
       audioQuality?: import('@music-together/shared').AudioQuality
       hidden?: boolean
       permanent?: boolean
+      allowTemporaryAdminTrackRemoval?: boolean
+      allowTemporaryAdminQueueClear?: boolean
     }) => {
       socket.emit(EVENTS.ROOM_SETTINGS, settings)
     },
