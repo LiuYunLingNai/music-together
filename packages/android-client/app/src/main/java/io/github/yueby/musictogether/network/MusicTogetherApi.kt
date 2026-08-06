@@ -25,6 +25,11 @@ data class SearchPage(
     val hasMore: Boolean,
 )
 
+data class BilibiliCollectionPage(
+    val title: String,
+    val tracks: List<Track>,
+)
+
 data class PlaylistPage(
     val tracks: List<Track>,
     val total: Int,
@@ -218,6 +223,21 @@ class MusicTogetherApi(private val client: OkHttpClient) {
                 tracks = tracks,
                 page = json.optInt("page", page),
                 hasMore = json.optBoolean("hasMore", tracks.size >= 20),
+            )
+        }
+
+    suspend fun bilibiliCollection(server: ServerAddress, bvid: String): BilibiliCollectionPage =
+        withContext(Dispatchers.IO) {
+            val url = server.api("music", "bilibili-collection").newBuilder()
+                .addQueryParameter("bvid", bvid.substringBefore('?'))
+                .build()
+            val json = executeJson(url, "bilibili collection")
+            val tracks = json.optJSONArray("tracks")?.let { array ->
+                List(array.length()) { array.getJSONObject(it).toTrack() }
+            }.orEmpty()
+            BilibiliCollectionPage(
+                title = json.optString("title"),
+                tracks = tracks,
             )
         }
 

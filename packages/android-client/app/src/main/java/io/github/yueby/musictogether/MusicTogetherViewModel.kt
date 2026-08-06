@@ -14,6 +14,7 @@ import io.github.yueby.musictogether.lyrics.lyricOffsetKey
 import io.github.yueby.musictogether.model.AppState
 import io.github.yueby.musictogether.model.AudioProxyPolicy
 import io.github.yueby.musictogether.model.BilibiliMetadataMatchState
+import io.github.yueby.musictogether.model.BilibiliCollectionState
 import io.github.yueby.musictogether.model.ConnectionStatus
 import io.github.yueby.musictogether.model.LyricsState
 import io.github.yueby.musictogether.model.nextChatUnreadCount
@@ -84,7 +85,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         const val QR_SUCCESS = 803
         const val MAX_QUEUE_SIZE = 1000
         const val MAX_QUEUE_BATCH_SIZE = 200
-        val BILIBILI_METADATA_SOURCES = setOf("netease", "tencent")
+        val BILIBILI_METADATA_SOURCES = setOf("netease", "tencent", "kugou", "kugou_concept")
         const val DEFAULT_SERVER_URL = "https://sharemusic.lyln114514.com"
         const val MAX_SERVERS = 10
         const val DEFAULT_SYNC_PACKET_INTERVAL_SECONDS = 3
@@ -179,6 +180,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private val reconnectBackoff = ReconnectBackoff()
     private var clockJob: Job? = null
     private var bilibiliMetadataSearchJob: Job? = null
+    private var bilibiliCollectionJob: Job? = null
     private var syncJob: Job? = null
     private var lyricJob: Job? = null
     private var searchJob: Job? = null
@@ -576,13 +578,13 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
 
     fun addTrack(track: Track) {
         if (rejectDuplicateQueueTrack(track)) return
-        if (track.source == "bilibili") beginBilibiliMetadataMatch(track, pinned = false)
+        if (track.source == "bilibili") beginBilibiliCollectionMatch(track, pinned = false)
         else emitSearchQueueAction(track, pinned = false)
     }
 
     fun insertAfterCurrent(track: Track) {
         if (rejectDuplicateQueueTrack(track)) return
-        if (track.source == "bilibili") beginBilibiliMetadataMatch(track, pinned = true)
+        if (track.source == "bilibili") beginBilibiliCollectionMatch(track, pinned = true)
         else emitSearchQueueAction(track, pinned = true)
     }
 
@@ -595,6 +597,35 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         val match = _state.value.bilibiliMetadataMatch
         if (match.track == null || source !in BILIBILI_METADATA_SOURCES || keyword.isBlank()) return
         requestBilibiliMetadataSearch(match.copy(source = source, keyword = keyword.trim().take(100)))
+    }
+
+    fun selectBilibiliCollection(track: Track) {
+        val match = _state.value.bilibiliCollection
+        val original = match.track ?: return
+        bilibiliCollectionJob?.cancel()
+        _state.value = _state.value.copy(bilibiliCollection = BilibiliCollectionState())
+        beginBilibiliMetadataMatch(
+            track = track.copy(
+                // Keep the queue action context while using the selected page's
+                // CID-bearing urlId and metadata from that page.
+                bilibiliCover = track.bilibiliCover ?: original.bilibiliCover,
+            ),
+            pinned = match.pinned,
+            queueTrackId = match.queueTrackId,
+        )
+    }
+
+    fun skipBilibiliCollection() {
+        val match = _state.value.bilibiliCollection
+        val track = match.track ?: return
+        bilibiliCollectionJob?.cancel()
+        _state.value = _state.value.copy(bilibiliCollection = BilibiliCollectionState())
+        beginBilibiliMetadataMatch(track, match.pinned, match.queueTrackId)
+    }
+
+    fun dismissBilibiliCollection() {
+        bilibiliCollectionJob?.cancel()
+        _state.value = _state.value.copy(bilibiliCollection = BilibiliCollectionState())
     }
 
     fun selectBilibiliMetadata(metadataTrack: Track) {
@@ -1673,6 +1704,51 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         }
     }
 
+    private fun beginBilibiliCollectionMatch(track: Track, pinned: Boolean, queueTrackId: String? = null) {
+        val server = activeServer
+        if (server == null || track.urlId.isBlank()) {
+            beginBilibiliMetadataMatch(track, pinned, queueTrackId)
+            return
+        }
+        bilibiliCollectionJob?.cancel()
+        val pending = BilibiliCollectionState(
+            track = track,
+            pinned = pinned,
+            queueTrackId = queueTrackId,
+            loading = true,
+        )
+        _state.value = _state.value.copy(bilibiliCollection = pending)
+        bilibiliCollectionJob = viewModelScope.launch {
+            runCatching { api.bilibiliCollection(server, track.urlId) }
+                .onFailure { if (it is CancellationException) throw it }
+                .onSuccess { result ->
+                    val current = _state.value.bilibiliCollection
+                    if (current.track?.id != track.id || current.pinned != pinned) return@onSuccess
+                    if (result.tracks.size <= 1) {
+                        _state.value = _state.value.copy(bilibiliCollection = BilibiliCollectionState())
+                        beginBilibiliMetadataMatch(track, pinned, queueTrackId)
+                    } else {
+                        _state.value = _state.value.copy(
+                            bilibiliCollection = pending.copy(
+                                title = result.title.ifBlank { "B 站合集" },
+                                tracks = result.tracks,
+                                loading = false,
+                            ),
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    val current = _state.value.bilibiliCollection
+                    if (current.track?.id != track.id || current.pinned != pinned) return@onFailure
+                    // Older servers do not expose the collection endpoint. Keep
+                    // the existing single-video flow as a compatible fallback.
+                    _state.value = _state.value.copy(bilibiliCollection = BilibiliCollectionState())
+                    AppLogger.warn("Bilibili", "collection lookup failed; treating as single video: ${error.message}")
+                    beginBilibiliMetadataMatch(track, pinned, queueTrackId)
+                }
+        }
+    }
+
     private fun beginBilibiliMetadataMatch(track: Track, pinned: Boolean, queueTrackId: String? = null) {
         requestBilibiliMetadataSearch(
             BilibiliMetadataMatchState(
@@ -2046,6 +2122,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         searchJob?.cancel()
         recommendationsJob?.cancel()
         bilibiliMetadataSearchJob?.cancel()
+        bilibiliCollectionJob?.cancel()
         PlaybackCommandBridge.listener = null
         socket.disconnect()
         socketServerUrl = null

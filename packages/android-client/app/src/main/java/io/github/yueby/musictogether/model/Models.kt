@@ -96,6 +96,17 @@ data class BilibiliMetadataMatchState(
 )
 
 @Immutable
+data class BilibiliCollectionState(
+    val track: Track? = null,
+    val pinned: Boolean = false,
+    val queueTrackId: String? = null,
+    val title: String = "",
+    val tracks: List<Track> = emptyList(),
+    val loading: Boolean = false,
+    val error: String? = null,
+)
+
+@Immutable
 data class PlayState(
     val isPlaying: Boolean = false,
     val currentTime: Double = 0.0,
@@ -322,6 +333,7 @@ data class AppState(
     val recommendationsLoaded: Boolean = false,
     val recommendationsError: String? = null,
     val bilibiliMetadataMatch: BilibiliMetadataMatchState = BilibiliMetadataMatchState(),
+    val bilibiliCollection: BilibiliCollectionState = BilibiliCollectionState(),
     val lyricOffsets: Map<String, Int> = emptyMap(),
     val activeVote: VoteState? = null,
     val lyrics: LyricsState = LyricsState(),

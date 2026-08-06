@@ -31,6 +31,21 @@ class PlaybackUrlTest {
     }
 
     @Test
+    fun `preserves a selected bilibili part cid in the proxy request`() {
+        val url = api.playbackUrl(
+            server,
+            track(
+                source = "bilibili",
+                urlId = "BV1234567890?cid=123456",
+                streamUrl = "https://cdn.bilivideo.com/audio.m4s",
+            ),
+            "ROOM01",
+        )!!
+
+        assertTrue(url.contains("bvid=BV1234567890%3Fcid%3D123456"))
+    }
+
+    @Test
     fun `routes both kugou editions through the server proxy`() {
         val streamUrl = "http://fs.youthandroid.kugou.com/audio.flac?token=abc"
 

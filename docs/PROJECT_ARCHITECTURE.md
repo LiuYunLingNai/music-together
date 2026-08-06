@@ -150,7 +150,7 @@ UI 操作
 | `RoomHeader.kt` | 房间标题、连接状态和横屏侧栏 |
 | `RoomMembersPane.kt` | 房间成员列表 |
 | `RoomQueuePane.kt` | 播放队列、固定操作栏和队列控制 |
-| `RoomSearchPane.kt` | 搜索、点歌和 B 站元数据选择 |
+| `RoomSearchPane.kt` | 搜索、点歌、B 站合集/分 P 选择和元数据匹配 |
 | `RecommendationsPane.kt` | 已登录音乐平台的原生推荐内容和快捷点歌 |
 | `RoomChatPane.kt` | 房间聊天 |
 | `RoomSettingsPane.kt` | 房间设置 |
@@ -177,7 +177,7 @@ UI 操作
 
 主服务端连接失败后最多自动重试 5 次，间隔依次为 2、4、8、15 和 30 秒。用户主动连接、切换服务端或连接成功时重置计数；达到阈值后停止后台重试，由用户在连接设置中手动发起新连接。
 
-`/api/music/search` 的普通音源关键词最多为 100 个字符。B 站搜索兼容关键词、BV 号、可信 B 站视频链接和 `b23.tv` 分享链接，输入最多为 2000 个字符；短链解析与目标域名校验由服务端完成。
+`/api/music/search` 的普通音源关键词最多为 100 个字符。B 站搜索兼容关键词、BV 号、可信 B 站视频链接和 `b23.tv` 分享链接，输入最多为 2000 个字符；短链解析与目标域名校验由服务端完成。点歌前客户端会通过 `/api/music/bilibili-collection` 读取合集或分 P，并将选中分 P 的 `cid` 保留在 `urlId`，使服务端解析并播放对应音频。B 站歌词和封面可从网易云、QQ、酷狗和酷狗概念版匹配；旧服务端缺少合集接口时按单视频流程回退。
 
 `/api/music/recommendations` 按当前身份和房间返回已登录平台的原生推荐内容。请求携带 `roomId` 和 1 至 50 的 `limit`；响应按平台提供曲目列表，并通过可选的 `unavailableReason` 区分空推荐与上游暂时不可用。旧服务端缺少该接口时，Android 显示可重试错误，不影响搜索和点歌流程。
 

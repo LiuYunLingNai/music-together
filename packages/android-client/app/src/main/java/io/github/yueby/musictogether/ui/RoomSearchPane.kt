@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.yueby.musictogether.MusicTogetherViewModel
 import io.github.yueby.musictogether.model.AppState
+import io.github.yueby.musictogether.model.BilibiliCollectionState
 import io.github.yueby.musictogether.model.BilibiliMetadataMatchState
 import io.github.yueby.musictogether.model.Track
 import io.github.yueby.musictogether.model.queueIdentity
@@ -181,6 +182,63 @@ internal fun SearchPane(state: AppState, viewModel: MusicTogetherViewModel) {
 }
 
 @Composable
+internal fun BilibiliCollectionDialog(
+    collection: BilibiliCollectionState,
+    viewModel: MusicTogetherViewModel,
+) {
+    if (collection.track == null) return
+    AlertDialog(
+        onDismissRequest = viewModel::dismissBilibiliCollection,
+        title = {
+            Text(
+                if (collection.loading) "正在读取视频分集" else "选择视频：${collection.title}",
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        text = {
+            when {
+                collection.loading -> Box(
+                    Modifier.fillMaxWidth().padding(28.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator()
+                }
+                collection.error != null -> Text(collection.error, color = MaterialTheme.colorScheme.error)
+                else -> LazyColumn(Modifier.fillMaxWidth().height(320.dp)) {
+                    items(collection.tracks, key = { it.id }) { part ->
+                        ListItem(
+                            headlineContent = {
+                                Text(part.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            },
+                            supportingContent = {
+                                Text(
+                                    listOf(part.artist.joinToString(" / "), part.album)
+                                        .filter { it.isNotBlank() }
+                                        .joinToString(" · "),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            },
+                            modifier = Modifier.clickable { viewModel.selectBilibiliCollection(part) },
+                        )
+                        HorizontalDivider()
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = viewModel::skipBilibiliCollection) {
+                Text("按当前视频播放")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = viewModel::dismissBilibiliCollection) { Text("取消") }
+        },
+    )
+}
+
+@Composable
 internal fun BilibiliMetadataDialog(
     match: BilibiliMetadataMatchState,
     viewModel: MusicTogetherViewModel,
@@ -192,8 +250,16 @@ internal fun BilibiliMetadataDialog(
         title = { Text("选择歌词和封面") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf("netease" to "网易云音乐", "tencent" to "QQ 音乐").forEach { (source, label) ->
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    listOf(
+                        "netease" to "网易云音乐",
+                        "tencent" to "QQ 音乐",
+                        "kugou" to "酷狗音乐",
+                        "kugou_concept" to "酷狗概念版",
+                    ).forEach { (source, label) ->
                         AssistChip(
                             onClick = { viewModel.searchBilibiliMetadata(keyword, source) },
                             label = { Text(label) },

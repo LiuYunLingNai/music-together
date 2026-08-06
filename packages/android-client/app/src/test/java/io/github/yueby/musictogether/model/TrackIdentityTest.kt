@@ -34,7 +34,20 @@ class TrackIdentityTest {
         assertEquals("tencent:legacy-id", track(id = "legacy-id", source = "tencent", sourceId = "").queueIdentity())
     }
 
-    private fun track(id: String, source: String, sourceId: String) = Track(
+    @Test
+    fun keepsBilibiliPartsWithDifferentCidsDistinct() {
+        val firstPart = track(
+            id = "first",
+            source = "bilibili",
+            sourceId = "BV1234567890",
+            urlId = "BV1234567890?cid=100",
+        )
+        val secondPart = firstPart.copy(id = "second", urlId = "BV1234567890?cid=200")
+
+        assertNotEquals(firstPart.queueIdentity(), secondPart.queueIdentity())
+    }
+
+    private fun track(id: String, source: String, sourceId: String, urlId: String = sourceId) = Track(
         id = id,
         title = "晴天",
         artist = listOf("周杰伦"),
@@ -43,6 +56,6 @@ class TrackIdentityTest {
         cover = "",
         source = source,
         sourceId = sourceId,
-        urlId = sourceId,
+        urlId = urlId,
     )
 }
