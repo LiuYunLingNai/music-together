@@ -48,12 +48,18 @@ export function BilibiliMetadataDialog({ track, roomId, onOpenChange, onSelect, 
         </ResponsiveDialogHeader>
         <ResponsiveDialogBody className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
           <Tabs value={source} onValueChange={(value) => setSource(value as BilibiliMetadataSource)}>
-            <TabsList className="w-full">
-              <TabsTrigger value="netease" className="flex-1 text-xs sm:text-sm">
+            <TabsList className="grid h-9 w-full grid-cols-4">
+              <TabsTrigger value="netease" className="w-full text-xs sm:text-sm">
                 网易云音乐
               </TabsTrigger>
-              <TabsTrigger value="tencent" className="flex-1 text-xs sm:text-sm">
+              <TabsTrigger value="tencent" className="w-full text-xs sm:text-sm">
                 QQ 音乐
+              </TabsTrigger>
+              <TabsTrigger value="kugou" className="w-full text-xs sm:text-sm">
+                酷狗音乐
+              </TabsTrigger>
+              <TabsTrigger value="kugou_concept" className="w-full text-xs sm:text-sm">
+                酷狗概念版
               </TabsTrigger>
             </TabsList>
           </Tabs>

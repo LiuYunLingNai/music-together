@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { EVENTS, LIMITS, type Track } from '@music-together/shared'
+import { EVENTS, LIMITS, type BilibiliMetadataSource, type Track } from '@music-together/shared'
 import { useSocketContext } from '@/providers/socket-context'
 
 export function useQueue() {
@@ -32,7 +32,7 @@ export function useQueue() {
     (
       trackId: string,
       metadata:
-        | { metadataSource: 'netease' | 'tencent'; lyricId?: string; picId?: string; cover: string }
+        | { metadataSource: BilibiliMetadataSource; lyricId?: string; picId?: string; cover: string }
         | { clearMetadata: true },
     ) => socket.emit(EVENTS.QUEUE_UPDATE_METADATA, { trackId, ...metadata }),
     [socket],

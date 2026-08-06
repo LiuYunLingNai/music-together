@@ -100,7 +100,7 @@ const trackSchema = z.object({
   urlId: z.string().max(200),
   lyricId: z.string().max(200).optional(),
   picId: z.string().max(200).optional(),
-  metadataSource: z.enum(['netease', 'tencent']).optional(),
+  metadataSource: z.enum(['netease', 'tencent', 'kugou', 'kugou_concept']).optional(),
   streamUrl: z.string().max(2000).optional(),
   requiresServerProxy: z.boolean().optional(),
   streamFormat: z.enum(['m4a', 'flac']).optional(),
@@ -124,7 +124,7 @@ export const queueReorderSchema = z.object({
 })
 export const queueUpdateMetadataSchema = z.object({
   trackId: z.string().max(200),
-  metadataSource: z.enum(['netease', 'tencent']).optional(),
+  metadataSource: z.enum(['netease', 'tencent', 'kugou', 'kugou_concept']).optional(),
   lyricId: z.string().max(200).optional(),
   picId: z.string().max(200).optional(),
   cover: z.string().max(2000).optional(),

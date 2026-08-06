@@ -6,9 +6,11 @@ import { AbilityContext } from '@/providers/ability-context'
 import { useSocketContext } from '@/providers/socket-context'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { getLyricOffsetKey } from '@/lib/lyricOffset'
 import type { PlayMode, VoteAction } from '@music-together/shared'
 import { EVENTS, TIMING } from '@music-together/shared'
-import { ArrowRightToLine, ListMusic, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward } from 'lucide-react'
+import { ArrowRightToLine, Clock3, ListMusic, Pause, Play, Repeat, Repeat1, RotateCcw, Shuffle, SkipBack, SkipForward } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { memo, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
@@ -48,6 +50,9 @@ export const PlayerControls = memo(function PlayerControls({
   const currentTime = usePlayerStore((s) => s.currentTime)
   const duration = usePlayerStore((s) => s.duration)
   const currentTrack = usePlayerStore((s) => s.currentTrack)
+  const lyricOffsets = useSettingsStore((s) => s.lyricOffsets)
+  const setLyricOffset = useSettingsStore((s) => s.setLyricOffset)
+  const clearLyricOffset = useSettingsStore((s) => s.clearLyricOffset)
   const queueLength = useRoomStore((s) => s.room?.queue?.length ?? 0)
   const playMode = useRoomStore((s) => s.room?.playMode ?? 'sequential')
   const ability = useContext(AbilityContext)
@@ -59,12 +64,19 @@ export const PlayerControls = memo(function PlayerControls({
   const [playCooldown, setPlayCooldown] = useState(false)
   const [isSeeking, setIsSeeking] = useState(false)
   const [seekTime, setSeekTime] = useState(0)
+  const [calibrationOpen, setCalibrationOpen] = useState(false)
   const cooldownTimer = useRef<ReturnType<typeof setTimeout>>(null)
   const playCooldownTimer = useRef<ReturnType<typeof setTimeout>>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
   const innerRef = useRef<HTMLDivElement>(null)
 
   const disabled = !currentTrack
+  const lyricOffsetKey = getLyricOffsetKey(currentTrack)
+  const lyricOffsetMs = lyricOffsets[lyricOffsetKey ?? ''] ?? 0
+  const lyricOffsetLabel =
+    lyricOffsetMs === 0
+      ? '未校正'
+      : `歌词${lyricOffsetMs > 0 ? '延后' : '提前'} ${Math.abs(lyricOffsetMs / 1000).toFixed(1)} 秒`
 
   // Clean up cooldown timers on unmount
   useEffect(() => {
@@ -129,6 +141,48 @@ export const PlayerControls = memo(function PlayerControls({
   return (
     <div ref={wrapperRef} className="w-full">
       <div ref={innerRef} className="flex flex-col gap-6" style={{ width: DESIGN_WIDTH }}>
+        <AnimatePresence initial={false}>
+          {calibrationOpen && lyricOffsetKey && (
+            <motion.div
+              initial={{ opacity: 0, height: 0, y: -6 }}
+              animate={{ opacity: 1, height: 'auto', y: 0 }}
+              exit={{ opacity: 0, height: 0, y: -6 }}
+              transition={{ duration: 0.18 }}
+              className="overflow-hidden rounded-lg border border-white/10 bg-black/15 px-3 py-2"
+            >
+              <div className="mb-2 flex items-center justify-between gap-2 text-xs">
+                <span className="font-medium text-white/80">歌词校正</span>
+                <div className="flex items-center gap-1">
+                  <span className="text-white/55">{lyricOffsetLabel}</span>
+                  {lyricOffsetMs !== 0 && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      className="text-white/70 hover:bg-white/10 hover:text-white"
+                      onClick={() => clearLyricOffset(lyricOffsetKey)}
+                      aria-label="重置歌词校正"
+                    >
+                      <RotateCcw />
+                    </Button>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] tabular-nums text-white/45">-10s</span>
+                <Slider
+                  value={[lyricOffsetMs / 1000]}
+                  min={-10}
+                  max={10}
+                  step={0.1}
+                  onValueChange={([value]) => setLyricOffset(lyricOffsetKey, value * 1000)}
+                />
+                <span className="text-[10px] tabular-nums text-white/45">+10s</span>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* 1. Progress bar */}
         <div className="flex w-full flex-col gap-1">
           <Slider
@@ -186,6 +240,23 @@ export const PlayerControls = memo(function PlayerControls({
                 </motion.div>
               </TooltipTrigger>
               <TooltipContent>{modeConfig.label}</TooltipContent>
+            </Tooltip>
+            <Tooltip delayDuration={300}>
+              <TooltipTrigger asChild>
+                <motion.div whileTap={{ scale: 0.9 }}>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9 text-white/70 hover:bg-white/10"
+                    onClick={() => setCalibrationOpen((open) => !open)}
+                    disabled={!lyricOffsetKey}
+                    aria-label="歌词校正"
+                  >
+                    <Clock3 className="size-5" />
+                  </Button>
+                </motion.div>
+              </TooltipTrigger>
+              <TooltipContent>歌词校正</TooltipContent>
             </Tooltip>
           </div>
 

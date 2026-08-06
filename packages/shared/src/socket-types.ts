@@ -2,6 +2,7 @@ import type { EVENTS } from './events.js'
 import type {
   AudioProxyPolicy,
   AudioQuality,
+  BilibiliMetadataSource,
   ChatMessage,
   MusicSource,
   MyPlatformAuth,
@@ -107,7 +108,7 @@ export interface ClientToServerEvents {
   [EVENTS.QUEUE_REORDER]: (data: { trackIds: string[] }) => void
   [EVENTS.QUEUE_UPDATE_METADATA]: (data: {
     trackId: string
-    metadataSource?: 'netease' | 'tencent'
+    metadataSource?: BilibiliMetadataSource
     lyricId?: string
     picId?: string
     cover?: string

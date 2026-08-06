@@ -28,7 +28,7 @@ export interface AudioProxyPolicy {
 }
 
 /** Music platforms that can supply lyrics and cover art for Bilibili videos. */
-export type BilibiliMetadataSource = 'netease' | 'tencent'
+export type BilibiliMetadataSource = 'netease' | 'tencent' | 'kugou' | 'kugou_concept'
 
 export type AutoFallbackStatus = 'trying' | 'success' | 'failed'
 

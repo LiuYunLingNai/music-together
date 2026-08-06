@@ -7,7 +7,7 @@ import { getProxiedCoverUrl } from '@/lib/cover'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
 import { useSocketContext } from '@/providers/socket-context'
-import type { Track } from '@music-together/shared'
+import type { BilibiliMetadataSource, Track } from '@music-together/shared'
 import { EVENTS } from '@music-together/shared'
 import { useHasHover } from '@/hooks/useHasHover'
 import { useIsMobile } from '@/hooks/useIsMobile'
@@ -38,7 +38,7 @@ interface QueueDrawerProps {
   onUpdateBilibiliMetadata: (
     trackId: string,
     metadata:
-      | { metadataSource: 'netease' | 'tencent'; lyricId?: string; picId?: string; cover: string }
+      | { metadataSource: BilibiliMetadataSource; lyricId?: string; picId?: string; cover: string }
       | { clearMetadata: true },
   ) => void
   onClearQueue: () => void
