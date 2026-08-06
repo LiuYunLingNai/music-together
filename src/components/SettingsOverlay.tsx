@@ -25,6 +25,7 @@ export function SettingsOverlay() {
   const room = useAppStore((state) => state.room)
   const set = useAppStore((state) => state.set)
   const [section, setSection] = useState<Section>(() => room ? 'room' : 'account')
+  const contentRef = useRef<HTMLElement | null>(null)
   const items: Array<{ id: Section; label: string; icon: React.ReactNode; hidden?: boolean }> = [
     { id: 'room', label: '房间与成员', icon: <Users size={16} />, hidden: !room },
     { id: 'sources', label: '音源账号', icon: <Music size={16} /> },
@@ -38,19 +39,28 @@ export function SettingsOverlay() {
     if (!room && section === 'room') setSection('account')
   }, [room, section])
   useEffect(() => {
+    contentRef.current?.scrollTo({ top: 0 })
+  }, [section])
+  useEffect(() => {
     const handler = (event: KeyboardEvent) => { if (event.key === 'Escape') set({ settingsOpen: false }) }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [set])
   return (
     <div className="modal-backdrop settings-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) set({ settingsOpen: false }) }}>
-      <section className="settings-window" role="dialog" aria-modal="true" aria-label="设置">
+      <section className="settings-window" role="dialog" aria-modal="true" aria-label="设置" onWheel={(event) => {
+        const target = event.target as HTMLElement
+        if (target.closest('.settings-content')) return
+        const nav = target.closest('.settings-nav nav')
+        if (nav && nav.scrollHeight > nav.clientHeight) return
+        contentRef.current?.scrollBy({ top: event.deltaY })
+      }}>
         <aside className="settings-nav">
           <header><strong>设置</strong><span>Windows / Linux</span></header>
           <nav>{items.filter((item) => !item.hidden).map((item) => <button key={item.id} className={section === item.id ? 'is-active' : ''} onClick={() => setSection(item.id)}>{item.icon}{item.label}</button>)}</nav>
           <div className="settings-identity"><code>{profile?.id ?? '访客身份'}</code><span>{profile?.nickname || '尚未设置昵称'}</span></div>
         </aside>
-        <main className="settings-content">
+        <main ref={contentRef} className="settings-content" tabIndex={0}>
           <button className="settings-close icon-button" title="关闭设置" onClick={() => set({ settingsOpen: false })}><X size={18} /></button>
           {section === 'room' && room && <RoomSettings />}
           {section === 'sources' && <SourceAccounts />}

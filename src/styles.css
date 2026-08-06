@@ -406,16 +406,16 @@ select { height: 34px; padding: 0 8px; font-size: 10px; }
 .collection-tracks { min-height: 0; }.collection-error { padding: 12px; }
 
 /* Desktop settings window */
-.settings-backdrop { padding: 28px; }
-.settings-window { width: min(1020px, 94vw); height: min(760px, 90vh); display: grid; grid-template-columns: 220px minmax(0,1fr); overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--dialog-bg); box-shadow: 0 36px 100px rgba(0,0,0,.4); }
+.settings-backdrop { padding: 16px; }
+.settings-window { width: min(1020px, calc(100vw * var(--ui-font-scale-inverse, 1) - 32px)); height: min(760px, calc(100dvh * var(--ui-font-scale-inverse, 1) - 32px)); min-width: 0; min-height: 0; display: grid; grid-template-columns: 220px minmax(0,1fr); overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--dialog-bg); box-shadow: 0 36px 100px rgba(0,0,0,.4); }
 .settings-nav { min-width: 0; display: grid; grid-template-rows: 76px 1fr auto; padding: 0 10px 12px; border-right: 1px solid var(--border); background: var(--panel); }
 .settings-nav > header { padding: 17px 10px; display: grid; align-content: center; gap: 3px; border-bottom: 1px solid var(--border); }.settings-nav header strong { font-size: 16px; }.settings-nav header span { color: var(--text-faint); font-size: 9px; }
-.settings-nav nav { padding-top: 10px; display: flex; flex-direction: column; gap: 3px; }
+.settings-nav nav { min-height: 0; padding-top: 10px; display: flex; flex-direction: column; gap: 3px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 .settings-nav nav button { width: 100%; height: 40px; padding: 0 10px; display: flex; align-items: center; gap: 9px; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); text-align: left; font-size: 12px; cursor: pointer; }.settings-nav nav button:hover { background: var(--surface); color: var(--text); }.settings-nav nav button.is-active { background: var(--surface); color: var(--text); }.settings-nav nav button.is-active svg { color: var(--accent); }
 .settings-identity { min-width: 0; display: grid; gap: 3px; padding: 10px; border-top: 1px solid var(--border); }.settings-identity code, .settings-identity span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.settings-identity code { color: var(--text-muted); font-size: 9px; }.settings-identity span { color: var(--text-faint); font-size: 9px; }
-.settings-content { min-width: 0; min-height: 0; position: relative; overflow-y: auto; scrollbar-width: thin; }
+.settings-content { min-width: 0; min-height: 0; position: relative; overflow-y: scroll; overscroll-behavior: contain; scrollbar-gutter: stable; scrollbar-width: thin; outline: none; }
 .settings-close { position: sticky; z-index: 4; top: 14px; float: right; margin-right: 14px; background: var(--surface); }
-.settings-section { width: min(100%, 760px); min-height: 100%; margin: 0 auto; padding: 38px 34px 56px; }
+.settings-section { width: min(100%, 760px); min-height: 0; margin: 0 auto; padding: 38px 34px 56px; }
 .settings-heading { margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }.settings-heading h2 { margin: 0 0 6px; font-size: 21px; }.settings-heading p { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
 .settings-group { margin-bottom: 18px; border: 1px solid var(--border); border-radius: 7px; background: var(--group-bg); overflow: hidden; }
 .settings-group > h3 { min-height: 42px; margin: 0; padding: 0 14px; display: flex; align-items: center; gap: 7px; border-bottom: 1px solid var(--border); font-size: 12px; }.settings-group > h3 span { margin-left: auto; color: var(--text-faint); font-weight: 500; }
@@ -463,6 +463,18 @@ select { height: 34px; padding: 0 8px; font-size: 10px; }
 .metadata-source-switch button { min-height: 28px; padding: 0 9px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface); color: var(--text-muted); font-size: 9px; cursor: pointer; }
 .metadata-source-switch button.is-active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 .drawer-track-actions { display: flex !important; gap: 2px; }
+@media (max-height: 720px) {
+  .settings-backdrop { padding: 8px; }
+  .settings-window { width: min(1020px, calc(100vw * var(--ui-font-scale-inverse, 1) - 16px)); height: calc(100dvh * var(--ui-font-scale-inverse, 1) - 16px); }
+  .settings-nav { grid-template-rows: 60px minmax(0,1fr) auto; padding-bottom: 8px; }
+  .settings-nav > header { padding: 10px; }
+  .settings-nav nav { padding-top: 6px; gap: 2px; }
+  .settings-nav nav button { height: 34px; }
+  .settings-identity { padding: 7px 10px; }
+  .settings-section { padding-top: 24px; padding-bottom: 34px; }
+  .settings-heading { margin-bottom: 16px; padding-bottom: 12px; }
+  .platform-card { padding: 10px 13px; }
+}
 @media (max-width: 1120px) {
   .settings-window { grid-template-columns: 190px minmax(0,1fr); }
   .settings-section { padding-left: 24px; padding-right: 24px; }

@@ -36,6 +36,7 @@ export function setUiScale(value: number): void {
 
 function applyUiScale(value: number): void {
   document.documentElement.style.setProperty('--ui-font-scale', String(value))
+  document.documentElement.style.setProperty('--ui-font-scale-inverse', String(1 / value))
 }
 
 export function syncSystemTheme(): void {
