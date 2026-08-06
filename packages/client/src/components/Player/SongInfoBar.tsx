@@ -35,7 +35,7 @@ function VolumeControl({
             <Button
               variant="ghost"
               size="icon"
-              className="h-9 w-9 text-white/70 hover:bg-white/10 active:scale-90 transition-transform"
+              className="h-9 w-9 text-primary/75 hover:bg-primary/10 hover:text-primary active:scale-90 transition-transform"
               aria-label={volume === 0 ? '取消静音' : '调节音量'}
             >
               {volume === 0 ? <VolumeX className="size-5" /> : <Volume2 className="size-5" />}
@@ -44,13 +44,11 @@ function VolumeControl({
         </TooltipTrigger>
         <TooltipContent>音量</TooltipContent>
         <PopoverContent side="top" align="center" className="flex w-44 items-center gap-2 rounded-xl px-3 py-2">
-          <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 text-white/70" onClick={toggleMute}>
+          <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 text-primary/75" onClick={toggleMute}>
             {volume === 0 ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
           </Button>
           <Slider min={0} max={100} value={[volume * 100]} onValueChange={([v]) => setVolume(v / 100)} />
-          <span className="w-8 shrink-0 text-right text-xs tabular-nums text-white/50">
-            {Math.round(volume * 100)}
-          </span>
+          <span className="w-8 shrink-0 text-right text-xs tabular-nums text-white/50">{Math.round(volume * 100)}</span>
         </PopoverContent>
       </Popover>
     </Tooltip>
@@ -102,14 +100,10 @@ export const SongInfoBar = memo(function SongInfoBar({ onOpenChat, chatUnreadCou
           transition={SONG_INFO_TRANSITION}
           className="min-w-0 flex-1 will-change-transform"
         >
-          <motion.div
-            className="text-xl font-bold leading-tight text-white/90"
-          >
+          <motion.div className="text-xl font-bold leading-tight text-white/90">
             <MarqueeText>{currentTrack?.title ?? '暂无歌曲'}</MarqueeText>
           </motion.div>
-          <motion.div
-            className="text-sm text-white/50"
-          >
+          <motion.div className="text-sm text-white/50">
             <MarqueeText>{currentTrack ? currentTrack.artist.join(' / ') : '点击搜索添加歌曲到队列'}</MarqueeText>
           </motion.div>
         </motion.div>
@@ -123,7 +117,7 @@ export const SongInfoBar = memo(function SongInfoBar({ onOpenChat, chatUnreadCou
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="relative h-9 w-9 text-white/70 hover:bg-white/10"
+                  className="relative h-9 w-9 text-primary/75 hover:bg-primary/10 hover:text-primary"
                   onClick={onOpenChat}
                   aria-label="聊天"
                 >

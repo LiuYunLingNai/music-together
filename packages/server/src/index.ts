@@ -16,6 +16,7 @@ import { createAdminRoutes } from './routes/admin.js'
 import { createAccountRoutes } from './routes/account.js'
 import musicRoutes from './routes/music.js'
 import roomRoutes from './routes/rooms.js'
+import settingsRoutes from './routes/settings.js'
 import { clearAllTimers } from './services/roomLifecycleService.js'
 import * as playerService from './services/playerService.js'
 import { logger } from './utils/logger.js'
@@ -34,14 +35,18 @@ app.use(
     credentials: true,
   }),
 )
-app.use(express.json({ limit: '7mb' }))
+// A 6MB image grows to roughly 8MB after the client encodes it as Base64.
+// Route-level validation still enforces the 6MB original-image limit.
+app.use(express.json({ limit: '9mb' }))
 app.use('/api', identityHttpMiddleware)
 app.use('/uploads/avatars', express.static(path.join(path.dirname(databasePath), 'avatars'), { maxAge: '1h' }))
+app.use('/uploads/backgrounds', express.static(path.join(path.dirname(databasePath), 'backgrounds'), { maxAge: '1h' }))
 
 // REST API routes
 app.use('/api/auth', authRoutes)
 app.use('/api/auth', createAccountRoutes(io))
 app.use('/api/admin', createAdminRoutes(io))
+app.use('/api/settings', settingsRoutes)
 app.use('/api/music', musicRoutes)
 app.use('/api/rooms', roomRoutes)
 

@@ -5,6 +5,7 @@ import { motion } from 'motion/react'
 import { toast } from 'sonner'
 import { Loader2 } from 'lucide-react'
 import { InteractionGate } from '@/components/InteractionGate'
+import { GlobalBackground } from '@/components/GlobalBackground'
 import { AudioPlayer } from '@/components/Player/AudioPlayer'
 import { ChatPanel } from '@/components/Chat/ChatPanel'
 import { RoomHeader } from '@/components/Room/RoomHeader'
@@ -287,6 +288,7 @@ export default function RoomPage() {
         exit={{ opacity: 0 }}
         transition={{ duration: 0.2 }}
       >
+        <GlobalBackground />
         <InteractionGate
           onStart={handleGateStart}
           roomName={roomInfo?.name}
@@ -305,8 +307,10 @@ export default function RoomPage() {
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: 0.2 }}
+        className="mt-page-surface"
       >
-        <div className="flex h-dvh flex-col bg-background">
+        <GlobalBackground />
+        <div className="flex h-dvh flex-col bg-transparent">
           <RoomHeader
             onOpenSearch={() => setSearchOpen(true)}
             onOpenSettings={() => setSettingsOpen(true)}
@@ -315,7 +319,7 @@ export default function RoomPage() {
           />
 
           <div className="flex min-h-0 flex-1 overflow-hidden p-2 md:p-3 lg:p-4">
-            <div className="min-w-0 flex-1 overflow-hidden rounded-2xl">
+            <div className="mt-player-stage min-w-0 flex-1">
               <AudioPlayer
                 onPlay={play}
                 onPause={pause}
@@ -335,7 +339,9 @@ export default function RoomPage() {
                 chatOpen ? 'w-[320px] pl-3' : 'w-0',
               )}
             >
-              <div className="flex h-full w-[320px] flex-col">{chatOpen && <ChatPanel />}</div>
+              <div className="mt-card flex h-full w-[320px] flex-col overflow-hidden rounded-2xl">
+                {chatOpen && <ChatPanel />}
+              </div>
             </div>
           </div>
 

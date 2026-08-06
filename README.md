@@ -12,6 +12,10 @@
   <a href="README.en.md">English</a>
 </p>
 
+## UI Reference
+
+本项目 Web 端 UI 的整体视觉风格、组件动效及部分交互细节参考了 [Madokamaes/music-together](https://github.com/Madokamaes/music-together)。感谢项目作者的设计与开源工作。
+
 ## 项目概览
 
 Music Together 由一个 Node.js 服务端和多个客户端组成。房间、身份、队列、投票、聊天与播放时钟均由服务端协调；客户端负责展示、音频播放和本机系统集成。所有客户端使用同一套 HTTP 与 WebSocket 协议，因此可以跨设备加入同一房间并保持同步。

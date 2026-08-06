@@ -1,13 +1,16 @@
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useSocketEvent } from '@/hooks/useSocketEvent'
 import { requestJson } from '@/lib/identityAuth'
 import { useAccountStore } from '@/stores/accountStore'
-import { EVENTS, type AudioProxyPolicy } from '@music-together/shared'
-import { DoorClosed, Loader2, Network, RefreshCw, Trash2, Users } from 'lucide-react'
+import { SERVER_URL } from '@/lib/config'
+import { EVENTS, type AudioProxyPolicy, type ColorPreset, type GlobalBackgroundSettings } from '@music-together/shared'
+import { DoorClosed, ImagePlus, Link2, Loader2, Network, RefreshCw, Trash2, Upload, Users, X } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { SettingRow } from './SettingRow'
@@ -41,22 +44,33 @@ export function AdminSection() {
   const [audioProxyPolicy, setAudioProxyPolicy] = useState<AudioProxyPolicy>({
     kugouForceProxy: true,
   })
+  const [globalBackground, setGlobalBackground] = useState<GlobalBackgroundSettings>({
+    backgroundUrl: null,
+    glassOverlay: false,
+    colorPreset: 'gold',
+    backgroundBrightness: 60,
+    autoTint: false,
+  })
   const [passwords, setPasswords] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [workingId, setWorkingId] = useState<string | null>(null)
   const [updatingProxyPolicy, setUpdatingProxyPolicy] = useState(false)
+  const [updatingBackground, setUpdatingBackground] = useState(false)
+  const [backgroundUrlInput, setBackgroundUrlInput] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [userData, roomData, proxyPolicy] = await Promise.all([
+      const [userData, roomData, proxyPolicy, background] = await Promise.all([
         requestJson<{ users: AdminUser[] }>('/api/admin/users'),
         requestJson<{ rooms: AdminRoom[] }>('/api/admin/rooms'),
         requestJson<AudioProxyPolicy>('/api/admin/audio-proxy-policy'),
+        requestJson<GlobalBackgroundSettings>('/api/admin/background'),
       ])
       setUsers(userData.users)
       setRooms(roomData.rooms)
       setAudioProxyPolicy(proxyPolicy)
+      setGlobalBackground(background)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '管理员数据加载失败')
     } finally {
@@ -85,6 +99,148 @@ export function AdminSection() {
       setUpdatingProxyPolicy(false)
     }
   }
+
+  const uploadBackground = async (file?: File) => {
+    if (!file) return
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      toast.error('仅支持 PNG、JPEG 和 WebP 图片')
+      return
+    }
+    if (file.size > 6 * 1024 * 1024) {
+      toast.error('背景图片不能超过 6MB')
+      return
+    }
+
+    setUpdatingBackground(true)
+    try {
+      const image = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result))
+        reader.onerror = () => reject(new Error('读取图片失败'))
+        reader.readAsDataURL(file)
+      })
+      const settings = await requestJson<GlobalBackgroundSettings>('/api/admin/background', {
+        method: 'POST',
+        body: JSON.stringify({ image }),
+      })
+      setGlobalBackground(settings)
+      toast.success('全局背景已更新')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '背景上传失败')
+    } finally {
+      setUpdatingBackground(false)
+    }
+  }
+
+  const removeBackground = async () => {
+    if (!window.confirm('确定移除全局背景吗？')) return
+    setUpdatingBackground(true)
+    try {
+      const settings = await requestJson<GlobalBackgroundSettings>('/api/admin/background', { method: 'DELETE' })
+      setGlobalBackground(settings)
+      toast.success('全局背景已移除')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '背景移除失败')
+    } finally {
+      setUpdatingBackground(false)
+    }
+  }
+
+  const updateGlassOverlay = async (glassOverlay: boolean) => {
+    setUpdatingBackground(true)
+    try {
+      const settings = await requestJson<GlobalBackgroundSettings>('/api/admin/background', {
+        method: 'PATCH',
+        body: JSON.stringify({ glassOverlay }),
+      })
+      setGlobalBackground(settings)
+      toast.success(glassOverlay ? '毛玻璃遮罩已开启' : '毛玻璃遮罩已关闭')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '毛玻璃设置更新失败')
+    } finally {
+      setUpdatingBackground(false)
+    }
+  }
+
+  const updateColorPreset = async (colorPreset: ColorPreset) => {
+    setUpdatingBackground(true)
+    try {
+      const settings = await requestJson<GlobalBackgroundSettings>('/api/admin/background', {
+        method: 'PATCH',
+        body: JSON.stringify({ colorPreset }),
+      })
+      setGlobalBackground(settings)
+      toast.success('全局配色已更新')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '全局配色更新失败')
+    } finally {
+      setUpdatingBackground(false)
+    }
+  }
+
+  const updateBackgroundBrightness = async (backgroundBrightness: number) => {
+    setUpdatingBackground(true)
+    try {
+      const settings = await requestJson<GlobalBackgroundSettings>('/api/admin/background', {
+        method: 'PATCH',
+        body: JSON.stringify({ backgroundBrightness }),
+      })
+      setGlobalBackground(settings)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '背景亮度更新失败')
+    } finally {
+      setUpdatingBackground(false)
+    }
+  }
+
+  const updateAutoTint = async (autoTint: boolean) => {
+    setUpdatingBackground(true)
+    try {
+      const settings = await requestJson<GlobalBackgroundSettings>('/api/admin/background', {
+        method: 'PATCH',
+        body: JSON.stringify({ autoTint }),
+      })
+      setGlobalBackground(settings)
+      toast.success(autoTint ? '自动适配背景色调已开启' : '自动适配背景色调已关闭')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '自动色调设置更新失败')
+    } finally {
+      setUpdatingBackground(false)
+    }
+  }
+
+  const applyBackgroundUrl = async () => {
+    const imageUrl = backgroundUrlInput.trim()
+    if (!imageUrl) return
+    try {
+      const parsedUrl = new URL(imageUrl)
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) throw new Error('图片 URL 必须使用 HTTP 或 HTTPS')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '图片 URL 格式无效')
+      return
+    }
+
+    setUpdatingBackground(true)
+    try {
+      const settings = await requestJson<GlobalBackgroundSettings>('/api/admin/background', {
+        method: 'POST',
+        body: JSON.stringify({ imageUrl }),
+      })
+      setGlobalBackground(settings)
+      setBackgroundUrlInput('')
+      toast.success('全局背景已从 URL 更新')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '图片 URL 获取失败')
+    } finally {
+      setUpdatingBackground(false)
+    }
+  }
+
+  const backgroundPreview = globalBackground.backgroundUrl
+    ? globalBackground.backgroundUrl.startsWith('/uploads/')
+      ? `${SERVER_URL}${globalBackground.backgroundUrl}`
+      : globalBackground.backgroundUrl
+    : null
 
   const deleteUser = async (user: AdminUser) => {
     if (!window.confirm(`确定删除账号 ${user.id}？`)) return
@@ -156,6 +312,10 @@ export function AdminSection() {
           <TabsTrigger value="rooms">
             <DoorClosed />
             房间
+          </TabsTrigger>
+          <TabsTrigger value="background">
+            <ImagePlus />
+            背景
           </TabsTrigger>
           <TabsTrigger value="proxy">
             <Network />
@@ -252,6 +412,161 @@ export function AdminSection() {
                 </Button>
               </div>
             ))
+          )}
+        </TabsContent>
+
+        <TabsContent value="background" className="rounded-md border p-3">
+          {loading ? (
+            <div className="flex h-24 items-center justify-center">
+              <Loader2 className="h-5 w-5 animate-spin" />
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="overflow-hidden rounded-md border bg-muted/40">
+                {backgroundPreview ? (
+                  <img src={backgroundPreview} alt="当前全局背景" className="h-32 w-full object-cover" />
+                ) : (
+                  <div className="flex h-32 flex-col items-center justify-center gap-2 text-muted-foreground">
+                    <ImagePlus className="h-5 w-5" />
+                    <span className="text-xs">未设置全局背景</span>
+                  </div>
+                )}
+              </div>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                所有首页和房间页使用同一张背景图。上传后会压缩为 WebP 并保存到服务器数据目录。
+              </p>
+              <div className="flex gap-2">
+                <label>
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="sr-only"
+                    disabled={updatingBackground}
+                    onChange={(event) => {
+                      void uploadBackground(event.currentTarget.files?.[0])
+                      event.currentTarget.value = ''
+                    }}
+                  />
+                  <Button asChild type="button" size="sm" disabled={updatingBackground}>
+                    <span>
+                      {updatingBackground ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Upload className="h-4 w-4" />
+                      )}
+                      上传背景
+                    </span>
+                  </Button>
+                </label>
+                {backgroundPreview && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={updatingBackground}
+                    onClick={() => void removeBackground()}
+                  >
+                    <X className="h-4 w-4" />
+                    移除
+                  </Button>
+                )}
+              </div>
+              <div className="flex items-center justify-between gap-3 rounded-md border p-2">
+                <div>
+                  <p className="text-sm font-medium">颜色预设</p>
+                  <p className="text-xs text-muted-foreground">与背景搭配的全站强调色</p>
+                </div>
+                <Select
+                  value={globalBackground.colorPreset}
+                  disabled={updatingBackground}
+                  onValueChange={(value) => void updateColorPreset(value as ColorPreset)}
+                >
+                  <SelectTrigger className="w-32">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="gold">金色暖调</SelectItem>
+                    <SelectItem value="ocean">海洋青绿</SelectItem>
+                    <SelectItem value="rose">玫瑰粉</SelectItem>
+                    <SelectItem value="violet">夜幕紫</SelectItem>
+                    <SelectItem value="sunset">落日橙红</SelectItem>
+                    <SelectItem value="mint">薄荷青柠</SelectItem>
+                    <SelectItem value="mono">黑白银灰</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-2 rounded-md border p-2">
+                <Switch
+                  checked={globalBackground.glassOverlay}
+                  disabled={updatingBackground}
+                  onCheckedChange={(checked) => void updateGlassOverlay(checked)}
+                  aria-label="毛玻璃遮罩"
+                />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">毛玻璃遮罩</p>
+                  <p className="text-xs text-muted-foreground">让背景更柔和，减少对页面内容的干扰</p>
+                </div>
+              </div>
+              <div className="space-y-2 rounded-md border p-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium">背景亮度</p>
+                    <p className="text-xs text-muted-foreground">只调整背景图片，不影响文字和卡片</p>
+                  </div>
+                  <span className="text-xs tabular-nums text-muted-foreground">
+                    {globalBackground.backgroundBrightness}%
+                  </span>
+                </div>
+                <Slider
+                  value={[globalBackground.backgroundBrightness]}
+                  min={20}
+                  max={100}
+                  step={1}
+                  disabled={updatingBackground}
+                  onValueChange={([value]) => {
+                    if (typeof value === 'number') {
+                      setGlobalBackground((current) => ({ ...current, backgroundBrightness: value }))
+                    }
+                  }}
+                  onValueCommit={([value]) => {
+                    if (typeof value === 'number') void updateBackgroundBrightness(value)
+                  }}
+                  aria-label="背景亮度"
+                />
+              </div>
+              <div className="flex items-center gap-2 rounded-md border p-2">
+                <Switch
+                  checked={globalBackground.autoTint}
+                  disabled={updatingBackground || !backgroundPreview}
+                  onCheckedChange={(checked) => void updateAutoTint(checked)}
+                  aria-label="自动适配背景色调"
+                />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">自动适配背景色调</p>
+                  <p className="text-xs text-muted-foreground">从背景图片提取平均色，叠加到背景光效中</p>
+                </div>
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  value={backgroundUrlInput}
+                  onChange={(event) => setBackgroundUrlInput(event.target.value)}
+                  placeholder="图片 API / 图片 URL（返回图片文件）"
+                  disabled={updatingBackground}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') void applyBackgroundUrl()
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={updatingBackground || !backgroundUrlInput.trim()}
+                  onClick={() => void applyBackgroundUrl()}
+                >
+                  {updatingBackground ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
+                  使用 URL
+                </Button>
+              </div>
+            </div>
           )}
         </TabsContent>
 

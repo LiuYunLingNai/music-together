@@ -25,7 +25,7 @@ export function RoomListSection({ rooms, isLoading, onRoomClick }: RoomListSecti
       {isLoading ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="flex flex-col gap-3 rounded-xl border border-border bg-card p-5">
+            <div key={i} className="mt-card flex flex-col gap-3 rounded-2xl p-5">
               <div className="space-y-2">
                 <Skeleton className="h-5 w-2/3" />
                 <Skeleton className="h-3 w-1/2" />
@@ -42,7 +42,7 @@ export function RoomListSection({ rooms, isLoading, onRoomClick }: RoomListSecti
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.25 }}
-          className="flex flex-col items-center gap-4 rounded-xl border border-dashed border-border bg-card/50 px-8 py-16 text-center"
+          className="mt-card flex flex-col items-center gap-4 rounded-2xl border-dashed bg-card/50 px-8 py-16 text-center"
         >
           <Music className="h-10 w-10 text-muted-foreground/25" />
           <div>

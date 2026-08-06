@@ -104,8 +104,8 @@ export function SettingsDialog({
   )
 
   useEffect(() => {
-    if (!open || !initialTab) return
-    const frame = requestAnimationFrame(() => setTab(initialTab))
+    if (!open) return
+    const frame = requestAnimationFrame(() => setTab(initialTab ?? 'room'))
     return () => cancelAnimationFrame(frame)
   }, [open, initialTab])
 

@@ -22,8 +22,8 @@ export const RoomCard = memo(function RoomCard({ room, index, onClick }: RoomCar
       onClick={onClick}
       className={cn(
         'group relative flex w-full flex-col gap-3 overflow-hidden rounded-xl p-5 text-left',
-        'border border-border bg-card transition-all duration-300',
-        'hover:shadow-md hover:border-primary/20',
+        'mt-card rounded-2xl transition-all duration-300',
+        'hover:-translate-y-1 hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5',
       )}
     >
       {/* Room name row */}

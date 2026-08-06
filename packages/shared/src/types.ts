@@ -27,6 +27,17 @@ export interface AudioProxyPolicy {
   kugouForceProxy: boolean
 }
 
+export type ColorPreset = 'gold' | 'ocean' | 'rose' | 'violet' | 'sunset' | 'mint' | 'mono'
+
+/** Administrator-managed background shared by the lobby and every room page. */
+export interface GlobalBackgroundSettings {
+  backgroundUrl: string | null
+  glassOverlay: boolean
+  colorPreset: ColorPreset
+  backgroundBrightness: number
+  autoTint: boolean
+}
+
 /** Music platforms that can supply lyrics and cover art for Bilibili videos. */
 export type BilibiliMetadataSource = 'netease' | 'tencent' | 'kugou' | 'kugou_concept'
 
