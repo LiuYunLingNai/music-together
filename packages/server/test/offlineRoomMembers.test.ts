@@ -96,3 +96,23 @@ test('updates the roster role when an online member becomes temporary admin', ()
 
   roomRepo.delete(room.id)
 })
+
+test('clears a temporary admin role when the room becomes empty before owner returns', () => {
+  const { room } = roomService.createRoom('owner-empty-socket', 'Owner', 'Role reset room', null, 'owner-empty-id')
+  const ownerLeft = roomService.leaveRoom('owner-empty-socket')
+  assert.ok(ownerLeft)
+
+  const memberJoined = roomService.joinRoom('member-empty-socket', room.id, 'Member', 'member-empty-id')
+  assert.ok(memberJoined)
+  assert.equal(room.members.find((member) => member.id === 'member-empty-id')?.role, 'admin')
+
+  const memberLeft = roomService.leaveRoom('member-empty-socket')
+  assert.ok(memberLeft)
+  assert.equal(room.members.find((member) => member.id === 'member-empty-id')?.role, 'member')
+
+  const ownerReturned = roomService.joinRoom('owner-return-socket', room.id, 'Owner', 'owner-empty-id')
+  assert.ok(ownerReturned)
+  assert.equal(ownerReturned.room.members.find((member) => member.id === 'member-empty-id')?.role, 'member')
+
+  roomRepo.delete(room.id)
+})

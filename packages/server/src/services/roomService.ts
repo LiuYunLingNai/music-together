@@ -80,6 +80,11 @@ function reconcileRoomRoles(room: RoomData): boolean {
       room.temporaryAdminUserId = null
       changed = true
     }
+    for (const member of room.members) {
+      const role: UserRole =
+        member.id === room.creatorId ? 'owner' : room.adminUserIds.has(member.id) ? 'admin' : 'member'
+      changed = setMemberRoleIfChanged(room, member.id, role) || changed
+    }
     return changed
   }
 
@@ -95,6 +100,11 @@ function reconcileRoomRoles(room: RoomData): boolean {
       changed = setRoleIfChanged(user, role) || changed
       changed = setMemberRoleIfChanged(room, user.id, role) || changed
     }
+    for (const member of room.members) {
+      const role: UserRole =
+        member.id === room.creatorId ? 'owner' : room.adminUserIds.has(member.id) ? 'admin' : 'member'
+      changed = setMemberRoleIfChanged(room, member.id, role) || changed
+    }
     return changed
   }
 
@@ -108,6 +118,17 @@ function reconcileRoomRoles(room: RoomData): boolean {
     const role: UserRole = user.id === room.temporaryAdminUserId ? 'admin' : 'member'
     changed = setRoleIfChanged(user, role) || changed
     changed = setMemberRoleIfChanged(room, user.id, role) || changed
+  }
+  for (const member of room.members) {
+    const role: UserRole =
+      member.id === room.creatorId
+        ? 'owner'
+        : room.adminUserIds.has(member.id)
+          ? 'admin'
+          : member.id === room.temporaryAdminUserId
+            ? 'admin'
+            : 'member'
+    changed = setMemberRoleIfChanged(room, member.id, role) || changed
   }
 
   return changed
