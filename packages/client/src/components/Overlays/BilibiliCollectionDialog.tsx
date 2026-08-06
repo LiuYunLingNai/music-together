@@ -61,7 +61,7 @@ export function BilibiliCollectionDialog({
         setTitle(data.title || 'B站合集')
         setTracks(collectionTracks)
       })
-      .catch((error: unknown) => {
+      .catch(() => {
         if (controller.signal.aborted) return
         toast.error('读取 B 站合集失败，已按单视频处理')
         onNotCollection()
