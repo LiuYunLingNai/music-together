@@ -23,6 +23,7 @@ import {
   selectKugouV6Good,
 } from './kugouAudioQuality.js'
 import { registerKugouEncryptedAudio, type KugouDecryptedFormat } from './kugouEncryptedAudio.js'
+import { registerKugouProxyRequiredAudio } from './kugouAudioProxy.js'
 import { config } from '../config.js'
 import { parseCookieString } from '../utils/cookieUtils.js'
 import { logger } from '../utils/logger.js'
@@ -1997,6 +1998,7 @@ class MusicProvider {
             }
 
             if (playUrl) {
+              if (concept) registerKugouProxyRequiredAudio(playUrl)
               if (!streamFormat) {
                 const extension = new URL(playUrl).pathname.split('.').pop()?.toLowerCase()
                 streamFormat = extension && extension.length <= 8 ? extension : 'unknown'
@@ -2130,6 +2132,7 @@ class MusicProvider {
         }
 
         const actualBitrate = normalizeBitrate(response.bitrate ?? response.bitRate) ?? selected.actualBitrate
+        if (concept) registerKugouProxyRequiredAudio(playUrl)
         logger.debug('酷狗播放地址解析成功', {
           source: concept ? 'kugou_concept' : 'kugou',
           urlId: hash,
@@ -2140,14 +2143,18 @@ class MusicProvider {
         return { url: playUrl, actualBitrate, actualQuality: selected.actualQuality }
       }
 
-      return this.getKugouStreamUrlLegacy(hash, bitrate)
+      return this.getKugouStreamUrlLegacy(hash, bitrate, concept)
     } catch (err) {
       logger.error('酷狗音源地址解析失败', err)
-      return this.getKugouStreamUrlLegacy(hash, bitrate)
+      return this.getKugouStreamUrlLegacy(hash, bitrate, concept)
     }
   }
 
-  private async getKugouStreamUrlLegacy(hash: string, bitrate: number): Promise<CachedStreamUrl | null> {
+  private async getKugouStreamUrlLegacy(
+    hash: string,
+    bitrate: number,
+    proxyRequired = false,
+  ): Promise<CachedStreamUrl | null> {
     try {
       const body = {
         relate: 1,
@@ -2211,6 +2218,7 @@ class MusicProvider {
       // See the native tracker path above: preserve the upstream protocol for
       // the server-side Kugou audio proxy.
       const urlStr = String(url)
+      if (proxyRequired) registerKugouProxyRequiredAudio(urlStr)
       const actualBitrate = normalizeBitrate(cdnRes.bitRate) ?? normalizeBitrate(bestItem.info?.bitrate)
       logger.debug('酷狗备用播放地址解析成功', { source: 'kugou', urlId: hash, actualBitrate })
       return { url: urlStr, actualBitrate }

@@ -261,9 +261,9 @@ B站没有与房间 128K、320K 完全对应的普通 DASH 音轨，因此分别
 - 全局 `AudioProxyPolicy` 只包含酷狗策略并持久化在 SQLite `server_settings` 表，旧数据库或无效配置默认酷狗强制代理。
 - 只有服务器管理员可以通过 `GET/PATCH /api/admin/audio-proxy-policy` 读取或修改酷狗策略；PATCH 接受 `kugouForceProxy` 并返回完整策略。
 - 新 WebSocket 连接会收到 `server:audio_proxy_policy`，管理员修改后服务端向 `lobby` 中的全部连接广播完整策略。
-- `kugouForceProxy=false` 表示允许具备能力的原生客户端直连酷狗明文资源，不要求所有客户端直连。Android 先请求 CDN，失败时仅回退一次现有服务器代理；Web 始终通过服务器代理播放。
+- `kugouForceProxy=false` 时，Web 端的酷狗标准版明文资源由兼容代理入口返回 `307` 到 CDN，音频字节不经过服务器；酷狗概念版和需要服务端处理的资源仍使用代理。Android 继续按自身能力先请求 CDN，失败时仅回退一次现有服务器代理。
 - 重新启用酷狗强制代理时，Android 将正在直连的对应曲目保留位置切回代理；关闭强制代理不打断当前播放，从下一次加载开始生效。
-- 酷狗策略同时覆盖 `kugou` 与 `kugou_concept`。服务端为已注册 QMC2 解密器的流设置 `Track.requiresServerProxy=true`；Android 即使在关闭强制代理时也直接使用服务器代理解密，仅对明文资源尝试 CDN 直连。旧服务端缺少该字段时按明文资源处理并保留失败回退。
+- 酷狗策略同时覆盖 `kugou` 与 `kugou_concept`。服务端登记概念版 URL，并为已注册 QMC2 解密器的流设置 `Track.requiresServerProxy=true`；`.mflac`/`.mgg` 地址也按加密资源保守处理。Android 即使在关闭强制代理时也直接使用服务器代理解密，仅对明文资源尝试 CDN 直连。
 
 ## 队列清空
 

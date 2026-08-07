@@ -14,13 +14,19 @@ import type { ZodSchema } from 'zod'
 import { musicProvider } from '../services/musicProvider.js'
 import * as authService from '../services/authService.js'
 import { roomRepo } from '../repositories/roomRepository.js'
+import { audioProxyPolicyRepo } from '../repositories/audioProxyPolicyRepository.js'
 import { logger } from '../utils/logger.js'
 import {
   createKugouDecryptStream,
   getKugouEncryptedAudio,
   kugouAudioContentType,
 } from '../services/kugouEncryptedAudio.js'
-import { normalizeKugouAudioUrl } from '../services/kugouAudioUrl.js'
+import { isKugouProxyRequiredAudio } from '../services/kugouAudioProxy.js'
+import {
+  canRedirectKugouAudioDirect,
+  isKugouEncryptedAudioUrl,
+  normalizeKugouAudioUrl,
+} from '../services/kugouAudioUrl.js'
 import { BILIBILI_BVID_PATTERN, BILIBILI_STREAM_ID_PATTERN } from '../services/bilibiliInput.js'
 
 const router: RouterType = Router()
@@ -361,8 +367,9 @@ router.get('/bilibili-audio-proxy', async (req: Request, res: Response) => {
 
 /**
  * KuGou's CDN URLs are signed but frequently omit browser CORS headers,
- * especially for Concept Edition's lossless resources. Proxy only Kugou-owned
- * hosts and preserve byte ranges so the HTML5 player can seek normally.
+ * especially for Concept Edition's lossless resources. Standard plain audio
+ * may be redirected to the CDN when policy allows; protected resources stay
+ * proxied and preserve byte ranges so the HTML5 player can seek normally.
  */
 router.get('/kugou-audio-proxy', async (req: Request, res: Response) => {
   const audioUrl = typeof req.query.url === 'string' ? req.query.url : ''
@@ -381,6 +388,18 @@ router.get('/kugou-audio-proxy', async (req: Request, res: Response) => {
 
   try {
     const encryptedAudio = getKugouEncryptedAudio(audioUrl)
+
+    // The Web player still targets this endpoint for backwards compatibility.
+    // When standard Kugou is allowed to go direct, redirect before fetching any
+    // bytes so the server is not part of the audio data path. Concept Edition
+    // and registered QMC2 resources must retain the proxy/decryption path.
+    const requiresServerProxy =
+      Boolean(encryptedAudio) || isKugouProxyRequiredAudio(audioUrl) || isKugouEncryptedAudioUrl(audioUrl)
+    if (canRedirectKugouAudioDirect(audioUrl, audioProxyPolicyRepo.get().kugouForceProxy, requiresServerProxy)) {
+      res.redirect(307, normalizeKugouAudioUrl(audioUrl))
+      return
+    }
+
     const range = req.headers.range
     const headers = {
       Accept: '*/*',
