@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { EVENTS, ERROR_CODE } from '@music-together/shared'
 import { motion } from 'motion/react'
 import { toast } from 'sonner'
-import { Loader2 } from 'lucide-react'
+import { Loader2, PanelRightOpen } from 'lucide-react'
 import { InteractionGate } from '@/components/InteractionGate'
 import { GlobalBackground } from '@/components/GlobalBackground'
 import { AudioPlayer } from '@/components/Player/AudioPlayer'
@@ -15,6 +15,8 @@ import { SettingsDialog, type SettingsTab } from '@/components/Overlays/Settings
 import { PasswordDialog } from '@/components/Lobby/PasswordDialog'
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from '@/components/ui/drawer'
 import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { isAudioUnlocked, unlockAudio } from '@/lib/audioUnlock'
 import { SERVER_URL } from '@/lib/config'
 import { useRoom } from '@/hooks/useRoom'
@@ -313,23 +315,50 @@ export default function RoomPage() {
         <div className="flex h-dvh flex-col bg-transparent">
           <RoomHeader
             onOpenSearch={() => setSearchOpen(true)}
+            onOpenChat={() => setChatOpen(true)}
             onOpenSettings={() => setSettingsOpen(true)}
             onOpenMembers={handleOpenMembers}
             onLeaveRoom={handleLeaveRoom}
+            chatUnreadCount={chatUnreadCount}
           />
 
           <div className="flex min-h-0 flex-1 overflow-hidden p-2 md:p-3 lg:p-4">
-            <div className="mt-player-stage min-w-0 flex-1">
-              <AudioPlayer
-                onPlay={play}
-                onPause={pause}
-                onSeek={seek}
-                onNext={next}
-                onPrev={prev}
-                onOpenChat={toggleChat}
-                onOpenQueue={() => setQueueOpen(true)}
-                chatUnreadCount={chatUnreadCount}
-              />
+            <div className="relative min-h-0 min-w-0 flex-1">
+              <div className="mt-player-stage h-full">
+                <AudioPlayer
+                  onPlay={play}
+                  onPause={pause}
+                  onSeek={seek}
+                  onNext={next}
+                  onPrev={prev}
+                  onOpenChat={toggleChat}
+                  onOpenQueue={() => setQueueOpen(true)}
+                  chatUnreadCount={chatUnreadCount}
+                />
+              </div>
+
+              {!chatOpen && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="icon"
+                      className="absolute right-3 top-1/2 z-20 hidden -translate-y-1/2 border border-border/60 bg-background/80 shadow-lg backdrop-blur-sm md:inline-flex"
+                      onClick={() => setChatOpen(true)}
+                      aria-label="展开聊天"
+                    >
+                      <PanelRightOpen className="h-4 w-4" />
+                      {chatUnreadCount > 0 && (
+                        <span className="absolute -right-1 -top-1 flex min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] leading-4 text-primary-foreground">
+                          {chatUnreadCount > 99 ? '99+' : chatUnreadCount}
+                        </span>
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="left">展开聊天</TooltipContent>
+                </Tooltip>
+              )}
             </div>
 
             {/* Desktop: inline chat panel that squeezes the player */}
@@ -340,7 +369,7 @@ export default function RoomPage() {
               )}
             >
               <div className="mt-card flex h-full w-[320px] flex-col overflow-hidden rounded-2xl">
-                {chatOpen && <ChatPanel />}
+                {chatOpen && <ChatPanel onCollapse={() => setChatOpen(false)} />}
               </div>
             </div>
           </div>
@@ -352,7 +381,7 @@ export default function RoomPage() {
                 <DrawerHeader className="sr-only">
                   <DrawerTitle>聊天</DrawerTitle>
                 </DrawerHeader>
-                <ChatPanel />
+                <ChatPanel onCollapse={() => setChatOpen(false)} />
               </DrawerContent>
             </Drawer>
           )}

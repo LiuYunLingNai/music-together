@@ -1,4 +1,4 @@
-import { Copy, Ellipsis, LogOut, Search, Settings, Users, Wifi, WifiOff } from 'lucide-react'
+import { Copy, Ellipsis, LogOut, MessageSquare, Search, Settings, Users, Wifi, WifiOff } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
@@ -16,12 +16,21 @@ import { toast } from 'sonner'
 
 interface RoomHeaderProps {
   onOpenSearch: () => void
+  onOpenChat: () => void
   onOpenSettings: () => void
   onOpenMembers: () => void
   onLeaveRoom: () => void
+  chatUnreadCount: number
 }
 
-export function RoomHeader({ onOpenSearch, onOpenSettings, onOpenMembers, onLeaveRoom }: RoomHeaderProps) {
+export function RoomHeader({
+  onOpenSearch,
+  onOpenChat,
+  onOpenSettings,
+  onOpenMembers,
+  onLeaveRoom,
+  chatUnreadCount,
+}: RoomHeaderProps) {
   // Fine-grained selectors to avoid re-renders from queue/playState changes
   const roomName = useRoomStore((s) => s.room?.name)
   const roomId = useRoomStore((s) => s.room?.id)
@@ -126,6 +135,26 @@ export function RoomHeader({ onOpenSearch, onOpenSettings, onOpenMembers, onLeav
       </div>
 
       <div className="flex items-center gap-0.5 sm:gap-1">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="relative h-8 w-8 min-h-11 min-w-11 sm:hidden"
+              onClick={onOpenChat}
+              aria-label="聊天"
+            >
+              <MessageSquare className="h-4 w-4" />
+              {chatUnreadCount > 0 && (
+                <span className="absolute right-1 top-1 flex min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] leading-4 text-primary-foreground">
+                  {chatUnreadCount > 99 ? '99+' : chatUnreadCount}
+                </span>
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>聊天</TooltipContent>
+        </Tooltip>
+
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
