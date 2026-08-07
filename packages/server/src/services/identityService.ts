@@ -6,6 +6,11 @@ import { logger } from '../utils/logger.js'
 
 export const IDENTITY_COOKIE_NAME = 'mt_identity'
 const IDENTITY_TOKEN_VERSION = 1
+const COOKIE_SAME_SITE_LABEL = {
+  lax: 'Lax',
+  strict: 'Strict',
+  none: 'None',
+} as const
 
 interface IdentityPayload {
   uid: string
@@ -55,8 +60,9 @@ function isSecureRequest(req: Request): boolean {
 function serializeIdentityCookie(token: string, secure: boolean): string {
   const maxAgeSec = config.identity.ttlDays * 24 * 60 * 60
   const attrs = [`${IDENTITY_COOKIE_NAME}=${encodeURIComponent(token)}`, 'Path=/', 'HttpOnly', `Max-Age=${maxAgeSec}`]
-  attrs.push('SameSite=Lax')
+  attrs.push(`SameSite=${COOKIE_SAME_SITE_LABEL[config.identity.cookieSameSite]}`)
   if (secure) attrs.push('Secure')
+  if (config.identity.cookiePartitioned) attrs.push('Partitioned')
   return attrs.join('; ')
 }
 
@@ -81,7 +87,8 @@ export function generateIdentityUserId(): string {
 export function issueIdentityCookie(req: Request, res: Response, userId?: string): { userId: string; expiresAt: number } {
   const uid = userId ?? generateIdentityUserId()
   const { token, payload } = issueToken(uid)
-  const secure = config.identity.cookieSecure ?? (config.isProd && isSecureRequest(req))
+  const secureRequired = config.identity.cookieSameSite === 'none' || config.identity.cookiePartitioned
+  const secure = secureRequired || (config.identity.cookieSecure ?? (config.isProd && isSecureRequest(req)))
   res.setHeader('Set-Cookie', serializeIdentityCookie(token, secure))
   return { userId: uid, expiresAt: payload.exp }
 }

@@ -16,6 +16,8 @@ const envSchema = z.object({
   IDENTITY_TTL_DAYS: z.coerce.number().int().positive().default(30),
   REJOIN_TTL_MS: z.coerce.number().int().positive().default(TIMING.ROOM_GRACE_PERIOD_MS),
   IDENTITY_COOKIE_SECURE: z.enum(['true', 'false']).optional(),
+  IDENTITY_COOKIE_SAME_SITE: z.enum(['lax', 'strict', 'none']).default('lax'),
+  IDENTITY_COOKIE_PARTITIONED: z.enum(['true', 'false']).default('false'),
   AUTO_FALLBACK_ENABLED: z.enum(['true', 'false']).default('true'),
   QQ_MUSIC_API_URL: z
     .string()
@@ -47,6 +49,8 @@ export const config = {
     secret: env.IDENTITY_SECRET,
     ttlDays: env.IDENTITY_TTL_DAYS,
     cookieSecure: env.IDENTITY_COOKIE_SECURE ? env.IDENTITY_COOKIE_SECURE === 'true' : null,
+    cookieSameSite: env.IDENTITY_COOKIE_SAME_SITE,
+    cookiePartitioned: env.IDENTITY_COOKIE_PARTITIONED === 'true',
   },
   rejoin: {
     ttlMs: env.REJOIN_TTL_MS,
