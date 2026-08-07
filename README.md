@@ -97,6 +97,37 @@ pnpm dev
 
 Web 客户端在默认自动模式下会连接当前访问来源对应的服务端。分离部署或需要限制来源时，配置服务端的 `CLIENT_URL`。
 
+### 本地构建运行（不使用 Docker）
+
+需要 Node.js 24 或更高版本。构建完成后，Node.js 服务端会自动托管 Web 静态文件、API 和 WebSocket，只需开放一个端口（默认 `3001`）。
+
+```powershell
+git clone https://github.com/LiuYunLingNai/music-together.git
+cd music-together
+pnpm install --frozen-lockfile
+pnpm build
+```
+
+在项目根目录创建 `.env`。建议为数据库使用绝对路径，确保更换启动目录或迁移时不会意外创建新的数据库：
+
+```env
+NODE_ENV=production
+PORT=3001
+DATABASE_URL=file:D:/music-together/data/music-together.db
+IDENTITY_SECRET=replace-with-a-long-random-secret
+SERVER_ADMIN_IDS=你的账号ID
+```
+
+从项目根目录启动：
+
+```powershell
+pnpm start
+```
+
+Windows 的 CMD 启动前可先执行 `chcp 65001`；在 `.env` 中设置 `LOG_FORMAT=json`，可避免中文日志乱码或出现 ANSI 控制字符。
+
+启动后访问 `http://服务器IP:3001`。数据库文件同级的 `avatars/` 和 `backgrounds/` 目录会分别保存头像与全局背景图；迁移时请一并备份整个数据目录。
+
 ## Android 客户端
 
 Android 客户端不是 WebView 套壳，使用 Kotlin、Jetpack Compose、OkHttp WebSocket 和 Media3 ExoPlayer 实现。它支持多服务器房间大厅、后台播放、系统媒体控制、聊天、队列、搜索点歌、账号与歌单、投票以及逐词歌词。

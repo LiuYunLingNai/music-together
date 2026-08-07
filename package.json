@@ -8,7 +8,8 @@
     "dev": "concurrently --kill-others --names server,client --prefix-colors blue,green \"pnpm run dev:server\" \"pnpm run dev:client\"",
     "dev:client": "pnpm --filter @music-together/client dev",
     "dev:server": "pnpm --filter @music-together/server dev",
-    "build": "pnpm -r run build",
+    "build": "pnpm -r run build && node scripts/prepare-production.mjs",
+    "start": "node packages/server/dist/index.js",
     "format": "prettier --write \"packages/*/src/**/*.{ts,tsx}\" \"packages/shared/src/**/*.ts\""
   },
   "keywords": [],
