@@ -3,8 +3,11 @@ import {
   urlQuerySchema,
   lyricQuerySchema,
   coverQuerySchema,
+  downloadOptionsQuerySchema,
+  downloadQuerySchema,
   playlistQuerySchema,
   recommendationsQuerySchema,
+  type Track,
   type PlatformRecommendation,
 } from '@music-together/shared'
 import { Router, type Router as RouterType, type Request, type Response } from 'express'
@@ -28,6 +31,7 @@ import {
   normalizeKugouAudioUrl,
 } from '../services/kugouAudioUrl.js'
 import { BILIBILI_BVID_PATTERN, BILIBILI_STREAM_ID_PATTERN } from '../services/bilibiliInput.js'
+import { MusicDownloadError, resolveDownloadOptions, streamDownload } from '../services/musicDownloadService.js'
 
 const router: RouterType = Router()
 
@@ -149,6 +153,65 @@ router.get(
     res.json({ url })
   }),
 )
+
+function getAuthorizedCurrentTrack(roomId: string, trackId: string, req: Request, res: Response): Track | null {
+  const identityUserId = req.identityUserId
+  if (!identityUserId) {
+    res.status(401).json({ error: 'Unauthorized' })
+    return null
+  }
+  const room = roomRepo.get(roomId)
+  if (!room || !room.users.some((user) => user.id === identityUserId)) {
+    res.status(403).json({ error: 'Forbidden' })
+    return null
+  }
+  if (!room.currentTrack || room.currentTrack.id !== trackId) {
+    res.status(404).json({ error: '当前歌曲已切换' })
+    return null
+  }
+  return room.currentTrack
+}
+
+router.get(
+  '/download-options',
+  validated(downloadOptionsQuerySchema, 'Get download options', async ({ roomId, trackId }, req, res) => {
+    const track = getAuthorizedCurrentTrack(roomId, trackId, req, res)
+    if (!track) return
+    const result = await resolveDownloadOptions(roomId, track)
+    if (roomRepo.get(roomId)?.currentTrack?.id !== track.id) {
+      res.status(409).json({ error: '当前歌曲已切换' })
+      return
+    }
+    res.setHeader('Cache-Control', 'private, no-store')
+    res.json(result)
+  }),
+)
+
+router.get('/download', async (req: Request, res: Response) => {
+  const parsed = downloadQuerySchema.safeParse(req.query)
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid query parameters' })
+    return
+  }
+
+  const { roomId, trackId, quality } = parsed.data
+  const track = getAuthorizedCurrentTrack(roomId, trackId, req, res)
+  if (!track) return
+
+  try {
+    await streamDownload(req, res, roomId, track, quality)
+  } catch (error) {
+    if (req.aborted) return
+    logger.error('Music download failed', error, { roomId, trackId, source: track.source, quality })
+    if (res.headersSent) {
+      res.destroy(error instanceof Error ? error : undefined)
+      return
+    }
+    const statusCode = error instanceof MusicDownloadError ? error.statusCode : 500
+    const message = error instanceof MusicDownloadError ? error.message : '下载失败'
+    res.status(statusCode).json({ error: message })
+  }
+})
 
 router.get(
   '/lyric',

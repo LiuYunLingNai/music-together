@@ -1,6 +1,18 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { getEffectiveQuality, getKugouQualityFallbacks } from '../src/services/audioQualityPolicy.js'
+import {
+  getAvailableAudioQualities,
+  getEffectiveQuality,
+  getKugouQualityFallbacks,
+} from '../src/services/audioQualityPolicy.js'
+
+test('lists every download tier allowed by the highest room membership', () => {
+  assert.deepEqual(getAvailableAudioQualities('netease', 0), [128, 192, 320])
+  assert.deepEqual(getAvailableAudioQualities('netease', 1), [128, 192, 320, 999, 'netease_hires', 'netease_jyeffect'])
+  assert.deepEqual(getAvailableAudioQualities('tencent', 2), [128, 192, 320, 'tencent_flac', 'tencent_master'])
+  assert.deepEqual(getAvailableAudioQualities('kugou_concept', 1), [128, 192, 320, 999])
+  assert.deepEqual(getAvailableAudioQualities('bilibili', 0), ['bilibili_64', 'bilibili_132', 'bilibili_192'])
+})
 
 test('selects one provider quality from the highest logged-in membership tier', () => {
   assert.equal(getEffectiveQuality('netease', 'highest', 0), 320)

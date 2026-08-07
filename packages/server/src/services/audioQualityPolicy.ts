@@ -32,6 +32,17 @@ const MEMBERSHIP_QUALITY_CAP: Record<MusicSource, Record<MembershipTier, AudioQu
   bilibili: { 0: 'bilibili_192', 1: 'bilibili_hires', 2: 'bilibili_hires' },
 }
 
+function normalizeMembershipTier(source: MusicSource, vipType: MembershipTier): MembershipTier {
+  return source === 'netease' ? (vipType === 2 ? 2 : vipType > 0 ? 1 : 0) : vipType >= 2 ? 2 : vipType > 0 ? 1 : 0
+}
+
+/** Return every provider-specific tier permitted by the room's best account. */
+export function getAvailableAudioQualities(source: MusicSource, vipType: MembershipTier): AudioQuality[] {
+  const ladder = PROVIDER_QUALITY_LADDERS[source]
+  const cap = MEMBERSHIP_QUALITY_CAP[source][normalizeMembershipTier(source, vipType)]
+  return ladder.slice(0, ladder.indexOf(cap) + 1)
+}
+
 export function getKugouQualityFallbacks(requested: AudioQuality): AudioQuality[] {
   const ladder: AudioQuality[] = [128, 320, 999, 'kugou_hires', 'kugou_master']
   const exactIndex = ladder.indexOf(requested)
@@ -119,12 +130,10 @@ export function getEffectiveQuality(
   // Persisted accounts from older versions used provider-specific numbers
   // (for example Netease 10/11). Keep the policy total even if one reaches
   // this function before the account restore path normalizes that value.
-  const normalizedVipType: MembershipTier =
-    source === 'netease' ? (vipType === 2 ? 2 : vipType > 0 ? 1 : 0) : vipType >= 2 ? 2 : vipType > 0 ? 1 : 0
+  const normalizedVipType = normalizeMembershipTier(source, vipType)
   const cap = MEMBERSHIP_QUALITY_CAP[source][normalizedVipType]
   const providerSpecific = ladder.includes(requested) ? requested : null
-  const highest =
-    (source === 'kugou' || source === 'kugou_concept') && normalizedVipType >= 2 ? 'kugou_hires' : cap
+  const highest = (source === 'kugou' || source === 'kugou_concept') && normalizedVipType >= 2 ? 'kugou_hires' : cap
   const desired =
     requested === 'highest' ? highest : (providerSpecific ?? qualityForClass(source, requestedQualityClass(requested)))
   return ladder[Math.min(ladder.indexOf(desired), ladder.indexOf(cap))]

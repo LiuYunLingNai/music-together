@@ -114,6 +114,19 @@ export interface Track {
   requestedBy?: string
 }
 
+/** One provider-backed format that the current room can download. */
+export interface DownloadQualityOption {
+  quality: AudioQuality
+  actualBitrate: number | null
+  format?: string
+  fileSize?: number
+}
+
+export interface DownloadOptionsResponse {
+  trackId: string
+  options: DownloadQualityOption[]
+}
+
 export type RecommendationUnavailableReason = 'empty' | 'upstream_unavailable'
 
 /** A logged-in platform's native recommendation feed. */

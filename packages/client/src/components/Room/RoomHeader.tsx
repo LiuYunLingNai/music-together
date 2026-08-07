@@ -1,6 +1,8 @@
-import { Copy, Ellipsis, LogOut, MessageSquare, Search, Settings, Users, Wifi, WifiOff } from 'lucide-react'
+import { Copy, Download, Ellipsis, LogOut, MessageSquare, Search, Settings, Users, Wifi, WifiOff } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { LyricCalibration } from '@/components/Player/LyricCalibration'
+import { MusicDownloadDialog } from '@/components/Player/MusicDownloadDialog'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,6 +13,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { getMedianRTT } from '@/lib/clockSync'
 import { useRoomStore } from '@/stores/roomStore'
+import { usePlayerStore } from '@/stores/playerStore'
 import { useSocketContext } from '@/providers/socket-context'
 import { toast } from 'sonner'
 
@@ -35,7 +38,9 @@ export function RoomHeader({
   const roomName = useRoomStore((s) => s.room?.name)
   const roomId = useRoomStore((s) => s.room?.id)
   const userCount = useRoomStore((s) => s.room?.users.length ?? 0)
+  const hasCurrentTrack = usePlayerStore((s) => Boolean(s.currentTrack))
   const { isConnected } = useSocketContext()
+  const [downloadOpen, setDownloadOpen] = useState(false)
 
   // Poll RTT from clockSync module every 3s
   const [rtt, setRtt] = useState(0)
@@ -170,6 +175,24 @@ export function RoomHeader({
           <TooltipContent>搜索点歌</TooltipContent>
         </Tooltip>
 
+        <LyricCalibration />
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="hidden h-8 w-8 sm:flex"
+              onClick={() => setDownloadOpen(true)}
+              disabled={!hasCurrentTrack}
+              aria-label="下载音乐"
+            >
+              <Download className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>下载音乐</TooltipContent>
+        </Tooltip>
+
         {/* Desktop: inline settings & leave buttons */}
         <Tooltip>
           <TooltipTrigger asChild>
@@ -219,6 +242,10 @@ export function RoomHeader({
               设置
             </DropdownMenuItem>
             <DropdownMenuSeparator />
+            <DropdownMenuItem disabled={!hasCurrentTrack} onClick={() => setDownloadOpen(true)}>
+              <Download className="mr-2 h-4 w-4" />
+              下载音乐
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={copyRoomLink}>
               <Copy className="mr-2 h-4 w-4" />
               复制房间链接
@@ -230,6 +257,7 @@ export function RoomHeader({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      <MusicDownloadDialog open={downloadOpen} onOpenChange={setDownloadOpen} />
     </header>
   )
 }

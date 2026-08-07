@@ -184,6 +184,19 @@ export const urlQuerySchema = z.object({
     .default(320),
 })
 
+export const downloadOptionsQuerySchema = z.object({
+  roomId: z.string().min(1).max(10),
+  trackId: z.string().min(1).max(200),
+})
+
+export const downloadQuerySchema = downloadOptionsQuerySchema.extend({
+  quality: z.preprocess((value) => {
+    if (typeof value !== 'string' || value.trim() === '') return value
+    const numeric = Number(value)
+    return Number.isNaN(numeric) ? value : numeric
+  }, audioQualitySchema),
+})
+
 export const lyricQuerySchema = z.object({
   source: musicSourceSchema,
   lyricId: z.string().min(1),
