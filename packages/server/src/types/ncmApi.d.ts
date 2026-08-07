@@ -74,6 +74,22 @@ declare module '@neteasecloudmusicapienhanced/api' {
       }
     }>
 
+    recommend_resource(params: RequestBaseConfig): Promise<{
+      body: {
+        code?: number
+        recommend?: Array<{
+          id?: string | number
+          name?: string
+          picUrl?: string
+          coverImgUrl?: string
+          trackCount?: number
+          creator?: { nickname?: string }
+          description?: string
+          copywriter?: string
+        }>
+      }
+    }>
+
     personalized(params: { limit?: number } & RequestBaseConfig): Promise<{
       body: {
         code?: number

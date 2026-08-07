@@ -3,6 +3,7 @@ import type { Playlist } from '@music-together/shared'
 import type { GetUserInfoResult } from './authProvider.js'
 import { logger } from '../utils/logger.js'
 import { getCookieValue } from '../utils/cookieUtils.js'
+import { parseTencentRecommendedPlaylists } from './recommendationParsers.js'
 import * as crypto from 'node:crypto'
 
 // ---------------------------------------------------------------------------
@@ -158,6 +159,7 @@ interface TencentApiConfig {
   param?: Record<string, unknown>
   cookie?: string
   commExtras?: Record<string, unknown>
+  sign?: boolean
 }
 
 /**
@@ -181,8 +183,10 @@ async function tencentApiRequest<T = Record<string, unknown>>(reqConfig: Tencent
     },
   }
 
-  const sign = createTencentSign(data)
-  const url = `https://u.y.qq.com/cgi-bin/musics.fcg?sign=${sign}`
+  const shouldSign = reqConfig.sign !== false
+  const url = shouldSign
+    ? `https://u.y.qq.com/cgi-bin/musics.fcg?sign=${createTencentSign(data)}`
+    : 'https://u.y.qq.com/cgi-bin/musicu.fcg'
 
   const response = await fetch(url, {
     method: 'POST',
@@ -205,6 +209,10 @@ async function tencentApiRequest<T = Record<string, unknown>>(reqConfig: Tencent
   const body = (await response.json()) as TencentApiResponse
   const reqRes = body?.req
 
+  if (body.code !== 0 && body.code !== undefined) {
+    throw new Error(`[ResponseCodeError] API ${reqConfig.method} returned global code ${body.code}`)
+  }
+
   if (reqRes?.code !== 0 && reqRes?.code !== undefined) {
     if (reqRes.code === 2000) throw new Error(`[SignInvalidError] API ${reqConfig.method} 签名无效 (2000)`)
     if (reqRes.code === 1000) throw new Error(`[CredentialExpiredError] API ${reqConfig.method} 会话过期 (1000)`)
@@ -212,6 +220,38 @@ async function tencentApiRequest<T = Record<string, unknown>>(reqConfig: Tencent
   }
 
   return (reqRes?.data || body) as T
+}
+
+/**
+ * Minimal get_recommend_songlist request ported from QQMusicApi.
+ * Source: https://github.com/l-1124/QQMusicApi
+ * Commit: 108617ffe80abefec6358717b9f4d3677550db10
+ * License: GPL-3.0
+ */
+export async function getRecommendedPlaylists(cookie: string, limit = 25): Promise<Playlist[]> {
+  const rawUin =
+    getCookieValue(cookie, 'uin') || getCookieValue(cookie, 'qqmusic_uin') || getCookieValue(cookie, 'o_cookie') || ''
+  const uin = Number.parseInt(rawUin.replace(/^o/i, ''), 10) || 0
+  const musicKey = getCookieValue(cookie, 'qm_keyst') || getCookieValue(cookie, 'qqmusic_key') || ''
+  const gtk = musicKey ? hash33(musicKey, 5381) : 5381
+  const size = Math.max(1, Math.min(50, Math.floor(limit)))
+
+  const data = await tencentApiRequest({
+    module: 'music.playlist.PlaylistSquare',
+    method: 'GetRecommendFeed',
+    cookie,
+    sign: false,
+    commExtras: {
+      uin,
+      g_tk: gtk,
+      g_tk_new_20200303: gtk,
+      platform: 'yqq.json',
+      need_new_code: 1,
+    },
+    param: { From: 0, Size: size },
+  })
+
+  return parseTencentRecommendedPlaylists(data).slice(0, size)
 }
 
 // ---------------------------------------------------------------------------

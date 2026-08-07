@@ -133,6 +133,7 @@ export type RecommendationUnavailableReason = 'empty' | 'upstream_unavailable'
 export interface PlatformRecommendation {
   platform: MusicSource
   tracks: Track[]
+  playlists?: Playlist[]
   unavailableReason?: RecommendationUnavailableReason
 }
 

@@ -121,21 +121,23 @@ router.get(
 
     const loggedPlatforms = authService
       .getUserAuthStatus(identityUserId, roomId)
-      .filter((status) => status.loggedIn && status.platform !== 'tencent')
+      .filter((status) => status.loggedIn)
       .map((status) => status.platform)
 
     const recommendations = await Promise.all(
       loggedPlatforms.map(async (platform): Promise<PlatformRecommendation> => {
         const cookie = authService.getUserCookie(identityUserId, platform, roomId)
-        if (!cookie) return { platform, tracks: [], unavailableReason: 'upstream_unavailable' }
+        const emptyResult = platform === 'bilibili' ? { platform, tracks: [] } : { platform, tracks: [], playlists: [] }
+        if (!cookie) return { ...emptyResult, unavailableReason: 'upstream_unavailable' }
 
         try {
           const recommendationLimit = platform === 'bilibili' ? 20 : limit
-          const tracks = await musicProvider.getRecommendations(platform, cookie, recommendationLimit)
-          return tracks.length > 0 ? { platform, tracks } : { platform, tracks, unavailableReason: 'empty' }
+          const result = await musicProvider.getRecommendations(platform, cookie, recommendationLimit)
+          const hasContent = result.tracks.length > 0 || (result.playlists?.length ?? 0) > 0
+          return hasContent ? { platform, ...result } : { platform, ...result, unavailableReason: 'empty' }
         } catch (err) {
           logger.warn('Platform recommendation feed failed', { platform, roomId, identityUserId, err })
-          return { platform, tracks: [], unavailableReason: 'upstream_unavailable' }
+          return { ...emptyResult, unavailableReason: 'upstream_unavailable' }
         }
       }),
     )

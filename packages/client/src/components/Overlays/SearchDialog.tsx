@@ -47,6 +47,63 @@ interface SearchDialogProps {
   onInsertAfterCurrent: (track: Track) => void
 }
 
+interface PlaylistListProps {
+  playlists: Playlist[]
+  onSelect: (playlist: Playlist) => void
+  hasMore?: boolean
+  loadingMore?: boolean
+  onLoadMore?: () => void
+}
+
+function PlaylistList({ playlists, onSelect, hasMore, loadingMore, onLoadMore }: PlaylistListProps) {
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto rounded-md border p-2">
+      <div className="flex flex-col gap-2">
+        {playlists.map((playlist, index) => (
+          <button
+            key={`${playlist.source}-${playlist.id}-${index}`}
+            className="hover:bg-accent flex w-full min-w-0 items-center gap-3 overflow-hidden rounded-lg p-2 text-left transition-colors"
+            onClick={() => onSelect(playlist)}
+          >
+            {playlist.cover ? (
+              <img
+                src={playlist.cover}
+                alt={playlist.name}
+                referrerPolicy="no-referrer"
+                className="h-12 w-12 shrink-0 rounded-md object-cover"
+                loading="lazy"
+              />
+            ) : (
+              <div className="bg-muted flex h-12 w-12 shrink-0 items-center justify-center rounded-md">
+                <ListMusic className="text-muted-foreground h-5 w-5" />
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium">{playlist.name}</p>
+              <p className="text-muted-foreground truncate text-xs">
+                {[
+                  playlist.trackCount > 0 || !['kugou', 'kugou_concept'].includes(playlist.source)
+                    ? `${playlist.trackCount} 首`
+                    : '',
+                  playlist.creator,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </p>
+            </div>
+          </button>
+        ))}
+        {hasMore && onLoadMore && (
+          <Button variant="ghost" size="sm" className="mt-2 w-full" onClick={onLoadMore} disabled={loadingMore}>
+            {loadingMore ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            {loadingMore ? '加载中...' : '加载更多'}
+          </Button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCurrent }: SearchDialogProps) {
   const [source, setSource] = useState<MusicSource>('netease')
   const [searchType, setSearchType] = useState<SearchMode>('song')
@@ -133,10 +190,9 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
   )
   const visibleSources = useMemo(() => {
     if (searchType !== 'recommend') return SOURCES
-    const recommendationSources = SOURCES.filter((item) => item.id !== 'tencent')
-    if (!recommendationsLoaded) return recommendationSources
+    if (!recommendationsLoaded) return SOURCES
     const available = new Set(recommendations.map((recommendation) => recommendation.platform))
-    return recommendationSources.filter((item) => available.has(item.id))
+    return SOURCES.filter((item) => available.has(item.id))
   }, [recommendations, recommendationsLoaded, searchType])
 
   // Auto re-search when source or type changes
@@ -162,7 +218,8 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
   useEffect(() => {
     if (searchType !== 'recommend' || !recommendationsLoaded || recommendations.length === 0) return
     if (!recommendations.some((recommendation) => recommendation.platform === source)) {
-      setSource(recommendations[0]!.platform)
+      const frame = requestAnimationFrame(() => setSource(recommendations[0]!.platform))
+      return () => cancelAnimationFrame(frame)
     }
   }, [recommendations, recommendationsLoaded, searchType, source])
 
@@ -173,11 +230,11 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
     const activeBtn = container.querySelector<HTMLButtonElement>(`[data-source="${source}"]`)
     if (!activeBtn) return
     setPillStyle({ left: activeBtn.offsetLeft, width: activeBtn.offsetWidth })
-  }, [source, visibleSources])
+  }, [source])
 
   useLayoutEffect(() => {
     measurePill()
-  }, [measurePill])
+  }, [measurePill, visibleSources])
 
   // Re-measure after dialog opens (DOM may not be ready on first render)
   useEffect(() => {
@@ -322,9 +379,14 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
     [addedIds, queueKeys],
   )
 
-  const handleSelectAlbum = (album: Playlist) => {
-    setSelectedAlbum(album)
-    fetchPlaylistTracks(source, album.id, album.trackCount, searchType as 'album' | 'playlist')
+  const handleSelectAlbum = (playlist: Playlist, type?: 'album' | 'playlist') => {
+    setSelectedAlbum(playlist)
+    fetchPlaylistTracks(
+      playlist.source,
+      playlist.id,
+      playlist.trackCount,
+      type ?? (searchType === 'album' ? 'album' : 'playlist'),
+    )
   }
 
   return (
@@ -473,7 +535,7 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                       <span className="text-sm">请先在设置中登录音乐平台，再查看平台推荐</span>
                     </div>
                   </div>
-                ) : (
+                ) : source === 'bilibili' ? (
                   <VirtualTrackList
                     ref={listRef}
                     tracks={activeRecommendation?.tracks ?? []}
@@ -495,6 +557,22 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                         : '平台暂时没有返回推荐内容'
                     }
                   />
+                ) : (activeRecommendation?.playlists?.length ?? 0) > 0 ? (
+                  <PlaylistList
+                    playlists={activeRecommendation?.playlists ?? []}
+                    onSelect={(playlist) => handleSelectAlbum(playlist, 'playlist')}
+                  />
+                ) : (
+                  <div className="flex min-h-0 flex-1 items-center justify-center rounded-md border">
+                    <div className="text-muted-foreground flex h-48 flex-col items-center justify-center gap-2 px-6 text-center">
+                      <Sparkles className="h-8 w-8" />
+                      <span className="text-sm">
+                        {activeRecommendation?.unavailableReason === 'upstream_unavailable'
+                          ? '平台推荐暂时不可用，请刷新重试'
+                          : '平台暂时没有返回推荐歌单'}
+                      </span>
+                    </div>
+                  </div>
                 )
               ) : hasSearched ? (
                 searchType === 'song' ? (
@@ -517,61 +595,25 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                       source === 'bilibili' ? '暂无结果，请检查链接、BV号或更换关键词' : '暂无结果，换个关键词试试'
                     }
                   />
-                ) : (
-                  <div className="min-h-0 flex-1 overflow-y-auto rounded-md border p-2">
-                    {loading && results.length === 0 ? (
-                      <div className="flex h-full items-center justify-center">
-                        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                      </div>
-                    ) : results.length === 0 ? (
-                      <div className="flex h-48 flex-col items-center justify-center gap-2 text-muted-foreground">
-                        <Music2 className="h-8 w-8" />
-                        <span className="text-sm">暂无结果，换个关键词试试</span>
-                      </div>
-                    ) : (
-                      <div className="flex flex-col gap-2">
-                        {(results as Playlist[]).map((album, index) => (
-                          <button
-                            key={`${album.id}-${index}`}
-                            className="hover:bg-accent flex w-full min-w-0 items-center gap-3 overflow-hidden rounded-lg p-2 text-left transition-colors"
-                            onClick={() => handleSelectAlbum(album)}
-                          >
-                            {album.cover ? (
-                              <img
-                                src={album.cover}
-                                alt={album.name}
-                                referrerPolicy="no-referrer"
-                                className="h-12 w-12 shrink-0 rounded-md object-cover"
-                                loading="lazy"
-                              />
-                            ) : (
-                              <div className="bg-muted flex h-12 w-12 shrink-0 items-center justify-center rounded-md">
-                                <ListMusic className="text-muted-foreground h-5 w-5" />
-                              </div>
-                            )}
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-sm font-medium">{album.name}</p>
-                              <p className="text-muted-foreground truncate text-xs">
-                                {album.trackCount} 首{album.creator ? ` · ${album.creator}` : ''}
-                              </p>
-                            </div>
-                          </button>
-                        ))}
-                        {hasMore && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="w-full mt-2"
-                            onClick={loadMore}
-                            disabled={loadingMore}
-                          >
-                            {loadingMore ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                            {loadingMore ? '加载中...' : '加载更多'}
-                          </Button>
-                        )}
-                      </div>
-                    )}
+                ) : loading && results.length === 0 ? (
+                  <div className="flex min-h-0 flex-1 items-center justify-center rounded-md border">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                   </div>
+                ) : results.length === 0 ? (
+                  <div className="flex min-h-0 flex-1 items-center justify-center rounded-md border">
+                    <div className="flex h-48 flex-col items-center justify-center gap-2 text-muted-foreground">
+                      <Music2 className="h-8 w-8" />
+                      <span className="text-sm">暂无结果，换个关键词试试</span>
+                    </div>
+                  </div>
+                ) : (
+                  <PlaylistList
+                    playlists={results as Playlist[]}
+                    onSelect={handleSelectAlbum}
+                    hasMore={hasMore}
+                    loadingMore={loadingMore}
+                    onLoadMore={loadMore}
+                  />
                 )
               ) : (
                 <div className="min-h-0 flex-1 overflow-y-auto rounded-md border">

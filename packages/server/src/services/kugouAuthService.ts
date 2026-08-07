@@ -4,6 +4,7 @@ import type { Playlist } from '@music-together/shared'
 import type { GetUserInfoResult, UserInfoData } from './authProvider.js'
 import { logger } from '../utils/logger.js'
 import { parseCookieString } from '../utils/cookieUtils.js'
+import { parseKugouRecommendedPlaylists } from './recommendationParsers.js'
 
 /**
  * Kugou Music authentication service.
@@ -76,6 +77,11 @@ function signatureAndroidParams(
     .join('')
   const { signatureSalt } = kugouEditionConfig(edition)
   return md5(`${signatureSalt}${sorted}${data || ''}${signatureSalt}`)
+}
+
+function recommendationRequestKey(clienttime: number, edition: KugouEdition): string {
+  const { appId, clientVer, signatureSalt } = kugouEditionConfig(edition)
+  return md5(`${appId}${signatureSalt}${clientVer}${clienttime}`)
 }
 
 /**
@@ -254,48 +260,106 @@ export function parseKugouRecommendationSongs(value: unknown): Record<string, un
   return []
 }
 
-export function parseKugouRecommendationPlaylistIds(value: unknown): string[] {
-  if (!value || typeof value !== 'object') return []
-  const data = (value as Record<string, unknown>).data as Record<string, unknown> | undefined
-  const playlists = Array.isArray(data?.special_list) ? data.special_list : []
-  const seen = new Set<string>()
+/**
+ * The special recommendation feed sometimes omits songcount or returns zero
+ * even though the collection is playable. Resolve a small first page through
+ * the native detail endpoint so cards can show a useful count. If the detail
+ * endpoint still cannot provide one, keep the playable collection with zero
+ * so the client can hide only the unavailable count.
+ */
+async function hydrateRecommendedPlaylistCounts(
+  playlists: Playlist[],
+  cookie: string,
+  edition: KugouEdition,
+): Promise<Playlist[]> {
+  const candidates = playlists.slice(0, 20)
+  if (candidates.length === 0) return []
 
-  return playlists.flatMap((playlist) => {
-    if (!playlist || typeof playlist !== 'object') return []
-    const item = playlist as Record<string, unknown>
-    const id = String(item.specialid ?? item.special_id ?? '').trim()
-    if (!id || seen.has(id)) return []
-    seen.add(id)
-    return [id]
-  })
+  const hydrated = [...candidates]
+  let nextIndex = 0
+  const worker = async () => {
+    while (true) {
+      const index = nextIndex++
+      const playlist = candidates[index]
+      if (!playlist) return
+
+      if (playlist.trackCount > 0) continue
+
+      const result =
+        edition === 'concept'
+          ? await getConceptPlaylistTracks(playlist.id, 1, 1, cookie)
+          : await getPlaylistTracks(playlist.id, 1, 1, cookie)
+      if (result.total > 0) hydrated[index] = { ...playlist, trackCount: result.total }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(4, candidates.length) }, () => worker()))
+  return hydrated
 }
 
-export async function getRecommendationPlaylistIds(limit = 4): Promise<string[]> {
-  const payload = {
-    appid: 1001,
-    clienttime: 1566798337219,
-    clientver: 8275,
-    key: 'f1f93580115bb106680d2375f8032d96',
-    mid: '21511157a05844bd085308bc76ef3343',
-    platform: 'pc',
-    userid: '262643156',
-    return_min: Math.min(limit, 6),
-    return_max: Math.max(limit, 6),
-  }
-  const response = await fetch('http://everydayrec.service.kugou.com/guess_special_recommend', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'User-Agent': 'KuGou2012-8275-web_browser_event_handler',
-    },
-    body: new URLSearchParams(Object.entries(payload).map(([key, value]) => [key, String(value)])),
-    signal: AbortSignal.timeout(10_000),
-  })
-  if (!response.ok) throw new Error(`Kugou recommendation playlists HTTP ${response.status}`)
+async function getRecommendedPlaylistsForEdition(
+  cookie: string,
+  limit = 20,
+  edition: KugouEdition = 'standard',
+): Promise<Playlist[]> {
+  const cookieObj = parseCookieString(cookie)
+  const clienttime = Math.floor(Date.now() / 1000)
+  const size = Math.max(1, Math.min(50, Math.floor(limit)))
+  const { appId, clientVer } = kugouEditionConfig(edition)
+  const source = edition === 'concept' ? 'kugou_concept' : 'kugou'
 
-  const body = (await response.json()) as Record<string, unknown>
-  if (Number(body.status) !== 1) throw new Error(`Kugou recommendation playlists returned status ${body.status ?? 'missing'}`)
-  return parseKugouRecommendationPlaylistIds(body).slice(0, limit)
+  const body = await kugouRequest({
+    baseURL: 'https://gateway.kugou.com',
+    url: '/v2/special_recommend',
+    method: 'POST',
+    params: { clienttime },
+    data: {
+      appid: appId,
+      mid: MID,
+      clientver: clientVer,
+      platform: 'android',
+      clienttime,
+      userid: cookieObj.userid || 0,
+      module_id: 1,
+      page: 1,
+      pagesize: size,
+      key: recommendationRequestKey(clienttime, edition),
+      special_recommend: {
+        withtag: 1,
+        withsong: 1,
+        sort: 1,
+        ugc: 1,
+        is_selected: 0,
+        withrecommend: 1,
+        area_code: 1,
+        categoryid: 0,
+      },
+      req_multi: 1,
+      retrun_min: 5,
+      return_special_falg: 1,
+    },
+    encryptType: 'android',
+    cookie: cookieObj,
+    headers: { 'x-router': 'specialrec.service.kugou.com' },
+    edition,
+  })
+
+  if (body.status !== undefined && Number(body.status) !== 1) {
+    throw new Error(`Kugou recommendation playlists returned status ${body.status}`)
+  }
+  if (body.error_code !== undefined && Number(body.error_code) !== 0) {
+    throw new Error(`Kugou recommendation playlists returned error ${body.error_code}`)
+  }
+  const playlists = parseKugouRecommendedPlaylists(body, source).slice(0, size)
+  return hydrateRecommendedPlaylistCounts(playlists, cookie, edition)
+}
+
+export async function getRecommendedPlaylists(cookie: string, limit = 20): Promise<Playlist[]> {
+  return getRecommendedPlaylistsForEdition(cookie, limit)
+}
+
+export async function getConceptRecommendedPlaylists(cookie: string, limit = 20): Promise<Playlist[]> {
+  return getRecommendedPlaylistsForEdition(cookie, limit, 'concept')
 }
 
 async function getRecommendationSongsForEdition(
@@ -327,10 +391,7 @@ export async function getRecommendationSongs(cookie: string, limit = 20): Promis
   return getRecommendationSongsForEdition(cookie, limit)
 }
 
-export async function getConceptRecommendationSongs(
-  cookie: string,
-  limit = 20,
-): Promise<Record<string, unknown>[]> {
+export async function getConceptRecommendationSongs(cookie: string, limit = 20): Promise<Record<string, unknown>[]> {
   return getRecommendationSongsForEdition(cookie, limit, 'concept')
 }
 
@@ -550,22 +611,22 @@ export function parseKugouMembership(
   const hasSvipExpiry = membershipSources.some((source) =>
     hasActiveKugouExpiry(source, ['su_vip_end_time', 'su_vip_y_endtime', 'su_vip_clearday'], now),
   )
-  const hasProviderVip =
-    membershipSources.some((source) => Number(source.is_vip) === 1) || hasRegularVipExpiry
+  const hasProviderVip = membershipSources.some((source) => Number(source.is_vip) === 1) || hasRegularVipExpiry
   const isVip = hasProviderVip || hasBusinessVip
   const isSvip =
     membershipSources.some(
-      (source) =>
-        Number(source.is_svip) === 1 || Number(source.svip_type) > 0 || Number(source.super_vip_type) > 0,
+      (source) => Number(source.is_svip) === 1 || Number(source.svip_type) > 0 || Number(source.super_vip_type) > 0,
     ) ||
     hasSvipExpiry ||
     hasPaidBusinessSvip
   const vipType = isSvip ? 2 : isVip ? 1 : 0
-  const rawVipLevel = membershipSources
-    .map((source) => Number(source.vip_level ?? source.svip_level ?? source.level ?? 0))
-    .find((level) => Number.isInteger(level) && level > 0) ?? 0
+  const rawVipLevel =
+    membershipSources
+      .map((source) => Number(source.vip_level ?? source.svip_level ?? source.level ?? 0))
+      .find((level) => Number.isInteger(level) && level > 0) ?? 0
   const vipLevel = vipType > 0 && Number.isInteger(rawVipLevel) && rawVipLevel > 0 ? rawVipLevel : undefined
-  const vipLabel = hasBusinessVip && !hasProviderVip && !hasPaidBusinessSvip ? '畅听VIP' : formatKugouVipLabel(vipType, vipLevel)
+  const vipLabel =
+    hasBusinessVip && !hasProviderVip && !hasPaidBusinessSvip ? '畅听VIP' : formatKugouVipLabel(vipType, vipLevel)
   return { vipType, vipLabel, vipLevel }
 }
 
@@ -587,10 +648,7 @@ export function getKugouMembershipResponseData(body: KugouApiResponse): Record<s
 export function isKugouInvalidParamsResponse(body: KugouApiResponse): boolean {
   const data = body?.data
   const message = String(
-    body?.message ??
-      body?.error_msg ??
-      (data && typeof data === 'object' ? (data.errmsg ?? data.error_msg) : '') ??
-      '',
+    body?.message ?? body?.error_msg ?? (data && typeof data === 'object' ? (data.errmsg ?? data.error_msg) : '') ?? '',
   ).toLowerCase()
   return Number(body?.error_code) === 20017 || message.includes('params invalid')
 }

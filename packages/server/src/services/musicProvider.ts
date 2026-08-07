@@ -1,7 +1,7 @@
 import Meting from '@meting/core'
 import { get as kugouLrcGet, Format } from '@s4p/kugou-lrc'
 import type { KrcInfo } from '@s4p/kugou-lrc'
-import type { AudioQuality, BilibiliStreamFormat, MusicSource, Track } from '@music-together/shared'
+import type { AudioQuality, BilibiliStreamFormat, MusicSource, Playlist, Track } from '@music-together/shared'
 import { LRUCache } from 'lru-cache'
 import { nanoid } from 'nanoid'
 import pLimit from 'p-limit'
@@ -17,16 +17,13 @@ import {
   parseBilibiliStreamId,
   resolveBilibiliVideoId,
 } from './bilibiliInput.js'
-import {
-  collectKugouV6Goods,
-  kugouProviderQualityToAudioQuality,
-  selectKugouV6Good,
-} from './kugouAudioQuality.js'
+import { collectKugouV6Goods, kugouProviderQualityToAudioQuality, selectKugouV6Good } from './kugouAudioQuality.js'
 import { registerKugouEncryptedAudio, type KugouDecryptedFormat } from './kugouEncryptedAudio.js'
 import { registerKugouProxyRequiredAudio } from './kugouAudioProxy.js'
 import { config } from '../config.js'
 import { parseCookieString } from '../utils/cookieUtils.js'
 import { logger } from '../utils/logger.js'
+import { parseNeteaseRecommendedPlaylists } from './recommendationParsers.js'
 import crypto from 'node:crypto'
 import { createRequire } from 'node:module'
 
@@ -851,7 +848,8 @@ class MusicProvider {
       const title = MusicProvider.stripBilibiliMarkup(episode.arc?.title ?? episode.title) || 'Unknown'
       const episodeAuthor = episode.arc?.author
       const authorName = typeof episodeAuthor === 'object' ? episodeAuthor?.name : episodeAuthor
-      const author = MusicProvider.stripBilibiliMarkup(episode.arc?.owner?.name ?? authorName) || view.author || 'Bilibili'
+      const author =
+        MusicProvider.stripBilibiliMarkup(episode.arc?.owner?.name ?? authorName) || view.author || 'Bilibili'
       const cover = normalizeBilibiliCoverUrl(episode.arc?.pic) || view.cover
       const duration = Math.max(0, Number(episode.page?.duration ?? episode.arc?.duration) || 0)
       tracks.push({
@@ -948,9 +946,7 @@ class MusicProvider {
     }
 
     const getUsableCandidates = (payload: Record<string, any> | null) =>
-      collectBilibiliAudioCandidates(payload?.data?.dash).filter((candidate) =>
-        Boolean(findUsableUrl(candidate.raw)),
-      )
+      collectBilibiliAudioCandidates(payload?.data?.dash).filter((candidate) => Boolean(findUsableUrl(candidate.raw)))
     let candidates = getUsableCandidates(response)
 
     // WBI playurl occasionally rejects an otherwise playable video because of
@@ -1654,52 +1650,30 @@ class MusicProvider {
   }
 
   /** Fetch a platform's native logged-in recommendation feed. */
-  async getRecommendations(source: MusicSource, cookie: string, limit = 20): Promise<Track[]> {
+  async getRecommendations(
+    source: MusicSource,
+    cookie: string,
+    limit = 20,
+  ): Promise<{ tracks: Track[]; playlists?: Playlist[] }> {
     let tracks: Track[]
 
     switch (source) {
       case 'netease': {
-        const response = await withTimeout(ncmApi.recommend_songs({ cookie, timestamp: Date.now() }))
-        const dailySongs = response?.body?.data?.dailySongs
-        if (response?.body?.code !== 200 || !Array.isArray(dailySongs)) {
+        const response = await withTimeout(ncmApi.recommend_resource({ cookie, timestamp: Date.now() }))
+        if (response?.body?.code !== 200 || !Array.isArray(response.body.recommend)) {
           throw new Error(`Netease recommendation feed failed: ${response?.body?.code ?? 'empty response'}`)
         }
-
-        const recommendedSongs = await this.getNeteaseRecommendedPlaylistSongs(cookie, limit - dailySongs.length)
-        const sourceIds = new Set<string>()
-        const allTracks = [...dailySongs, ...recommendedSongs]
-          .map((song) => this.rawToTrack(song, source))
-          .filter((track) => {
-            if (sourceIds.has(track.sourceId)) return false
-            sourceIds.add(track.sourceId)
-            return true
-          })
-        tracks = this.shuffle(allTracks).slice(0, limit)
-        await this.batchResolveCover(tracks, source)
-        break
+        return { tracks: [], playlists: parseNeteaseRecommendedPlaylists(response).slice(0, limit) }
       }
       case 'tencent':
-        throw new Error('QQ Music recommendations are not supported')
+        return { tracks: [], playlists: await tencentAuth.getRecommendedPlaylists(cookie, limit) }
       case 'kugou':
       case 'kugou_concept': {
-        const dailySongs =
+        const playlists =
           source === 'kugou'
-            ? await kugouAuth.getRecommendationSongs(cookie, limit)
-            : await kugouAuth.getConceptRecommendationSongs(cookie, limit)
-        // Kugou's legacy `guess_special_recommend` endpoint is no longer
-        // reliable (it returns business status 0 with its obsolete static
-        // client parameters). Keep the native daily feed as the source of
-        // truth instead of adding a noisy, best-effort request here.
-        const recommendedSongs: kugouAuth.KugouPlaylistTrack[] = []
-        const sourceIds = new Set<string>()
-        const allTracks = [...dailySongs, ...recommendedSongs].flatMap((song) => {
-          const track = this.kugouSongToTrack(song, source)
-          if (!track || sourceIds.has(track.sourceId)) return []
-          sourceIds.add(track.sourceId)
-          return [track]
-        })
-        tracks = this.shuffle(allTracks).slice(0, limit)
-        break
+            ? await kugouAuth.getRecommendedPlaylists(cookie, limit)
+            : await kugouAuth.getConceptRecommendedPlaylists(cookie, limit)
+        return { tracks: [], playlists }
       }
       case 'bilibili': {
         const videos = await bilibiliAuth.getRecommendedVideos(cookie, limit)
@@ -1728,44 +1702,7 @@ class MusicProvider {
 
     for (const track of tracks) this.enrichFromRegistry(track)
     this.registerTracks(tracks)
-    return tracks
-  }
-
-  private async getNeteaseRecommendedPlaylistSongs(cookie: string, needed: number): Promise<Record<string, unknown>[]> {
-    if (needed <= 0) return []
-
-    try {
-      const response = await withTimeout(ncmApi.personalized({ cookie, limit: 4, timestamp: Date.now() }))
-      const playlistIds = this.shuffle(
-        response?.body.result
-          ?.map((playlist) => String(playlist.id ?? '').trim())
-          .filter((playlistId) => playlistId.length > 0) ?? [],
-      ).slice(0, 4)
-
-      const results = await Promise.all(
-        playlistIds.map(async (playlistId) => {
-          const playlist = await withTimeout(
-            ncmApi.playlist_track_all({ cookie, id: playlistId, limit: 10, offset: 0, timestamp: Date.now() }),
-          )
-          return Array.isArray(playlist?.body.songs) ? playlist.body.songs : []
-        }),
-      )
-      return this.shuffle(results.flat()).slice(0, needed * 2)
-    } catch (err) {
-      logger.warn('Netease recommended playlists unavailable', { err })
-      return []
-    }
-  }
-
-  private shuffle<T>(items: T[]): T[] {
-    const shuffled = [...items]
-    for (let index = shuffled.length - 1; index > 0; index--) {
-      const randomIndex = crypto.randomInt(index + 1)
-      const track = shuffled[index]!
-      shuffled[index] = shuffled[randomIndex]!
-      shuffled[randomIndex] = track
-    }
-    return shuffled
+    return { tracks }
   }
 
   // ---------------------------------------------------------------------------
@@ -1786,11 +1723,7 @@ class MusicProvider {
     return crypto.createHash('md5').update(value).digest('hex')
   }
 
-  private static kugouAndroidSignature(
-    params: Record<string, string | number>,
-    concept = false,
-    body = '',
-  ): string {
+  private static kugouAndroidSignature(params: Record<string, string | number>, concept = false, body = ''): string {
     const joined = Object.keys(params)
       .sort()
       .map((key) => `${key}=${params[key]}`)
@@ -1875,9 +1808,7 @@ class MusicProvider {
       const numericUserId = Number(userid || 0)
 
       const appId = concept ? MusicProvider.KUGOU_CONCEPT_APP_ID : MusicProvider.KUGOU_APP_ID
-      const clientVersion = concept
-        ? MusicProvider.KUGOU_CONCEPT_CLIENT_VERSION
-        : 20489
+      const clientVersion = concept ? MusicProvider.KUGOU_CONCEPT_CLIENT_VERSION : 20489
 
       const v6Body = {
         area_code: '1',
@@ -1958,16 +1889,14 @@ class MusicProvider {
           if (selected) {
             let playUrl = selected.plainUrl
             let fileSize = selected.fileSize
-            let streamFormat = String(selected.raw.info?.extname ?? '').toLowerCase().replace(/^\./, '')
+            let streamFormat = String(selected.raw.info?.extname ?? '')
+              .toLowerCase()
+              .replace(/^\./, '')
             let encrypted = false
 
             if (!playUrl && selected.encryptedUrl && selected.ekey) {
               const decryptedFormat: KugouDecryptedFormat | null =
-                selected.encryptedExtension === 'mflac'
-                  ? 'flac'
-                  : selected.encryptedExtension === 'mgg'
-                    ? 'ogg'
-                    : null
+                selected.encryptedExtension === 'mflac' ? 'flac' : selected.encryptedExtension === 'mgg' ? 'ogg' : null
               if (decryptedFormat) {
                 try {
                   registerKugouEncryptedAudio(
