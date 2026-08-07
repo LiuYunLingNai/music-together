@@ -19,6 +19,10 @@ import roomRoutes from './routes/rooms.js'
 import settingsRoutes from './routes/settings.js'
 import { clearAllTimers } from './services/roomLifecycleService.js'
 import * as playerService from './services/playerService.js'
+import {
+  startTencentCredentialRefreshScheduler,
+  stopTencentCredentialRefreshScheduler,
+} from './services/tencentCredentialRefreshService.js'
 import { logger } from './utils/logger.js'
 import { databasePath } from './repositories/database.js'
 
@@ -101,6 +105,7 @@ initializeSocket(io)
 // Keep permanent-room playback position durable while a track is playing.
 const playbackPersistenceTimer = setInterval(() => playerService.persistPlaybackSnapshots(), 5_000)
 playbackPersistenceTimer.unref()
+const tencentCredentialRefreshTimer = startTencentCredentialRefreshScheduler()
 
 httpServer.on('error', (err: NodeJS.ErrnoException) => {
   if (err.code === 'EADDRINUSE') {
@@ -128,6 +133,7 @@ httpServer.listen(config.port, () => {
 function shutdown(signal: string) {
   logger.info(`收到 ${signal} 信号，正在安全关闭服务器……`)
   clearInterval(playbackPersistenceTimer)
+  stopTencentCredentialRefreshScheduler(tencentCredentialRefreshTimer)
   playerService.persistPlaybackSnapshots()
   clearAllTimers()
   io.close(() => {

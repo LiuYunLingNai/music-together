@@ -98,10 +98,14 @@ export function addCookie(
   const entries = getPlatformEntries(roomId, platform)
   // Dedup by cookie value (same account) or by userId (same socket)
   const idx = entries.findIndex((e) => e.cookie === cookie || e.userId === userId)
+  const previousCookie = idx === -1 ? null : entries[idx]?.cookie
   if (idx !== -1) entries.splice(idx, 1)
   entries.push({ cookie, userId, nickname, vipType, vipLabel, vipLevel })
   if (persist) {
-    platformAuthRepo.save({ userId, platform, cookie, nickname, vipType, vipLabel, vipLevel })
+    platformAuthRepo.save(
+      { userId, platform, cookie, nickname, vipType, vipLabel, vipLevel },
+      { resetCredentialRefreshSchedule: platform === 'tencent' && previousCookie !== cookie },
+    )
   }
   logger.info(`用户“${nickname}”已在房间 ${roomId} 登录 ${platform}`, {
     event: 'auth.account_added',
@@ -257,6 +261,26 @@ export function persistUserCookieFromRoom(roomId: string, platform: MusicSource,
     vipLabel: entry.vipLabel,
     vipLevel: entry.vipLevel,
   })
+  return true
+}
+
+/** Replace a refreshed credential in persistent storage and every active room. */
+export function replaceCredentialCookie(
+  userId: string,
+  platform: MusicSource,
+  expectedCookie: string,
+  refreshedCookie: string,
+): boolean {
+  const persisted = platformAuthRepo.loadUser(userId).find((entry) => entry.platform === platform)
+  if (!persisted || persisted.cookie !== expectedCookie) return false
+
+  platformAuthRepo.save({ ...persisted, cookie: refreshedCookie })
+  for (const [roomId, pool] of roomCookiePool) {
+    const entry = pool.get(platform)?.find((item) => item.userId === userId && item.cookie === expectedCookie)
+    if (!entry) continue
+    entry.cookie = refreshedCookie
+    membershipRefreshHistory.delete(`${roomId}:${platform}:${userId}`)
+  }
   return true
 }
 

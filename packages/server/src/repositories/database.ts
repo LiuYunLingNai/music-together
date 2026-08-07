@@ -88,6 +88,7 @@ ensureColumn('platform_auth', 'nickname_snapshot', 'nickname_snapshot TEXT')
 ensureColumn('platform_auth', 'vip_type', 'vip_type INTEGER NOT NULL DEFAULT 0')
 ensureColumn('platform_auth', 'vip_label', 'vip_label TEXT')
 ensureColumn('platform_auth', 'vip_level', 'vip_level INTEGER')
+ensureColumn('platform_auth', 'credential_refresh_attempted_at', 'credential_refresh_attempted_at INTEGER')
 ensureColumn('permanent_rooms', 'chat_history_json', "chat_history_json TEXT NOT NULL DEFAULT '[]'")
 
 const findMigration = db.prepare<[string], { id: string }>('SELECT id FROM schema_migrations WHERE id = ?')
@@ -167,6 +168,13 @@ runMigrationOnce('20260801_revalidate_tencent_identity_membership', () => {
     WHERE platform = 'tencent' AND vip_type > 0
   `,
   ).run()
+})
+
+// QQ Music credentials persisted by older builds did not contain the refresh
+// fields required by LoginServer.Login. Force a clean QR login once so every
+// account starts with a refreshable credential.
+runMigrationOnce('20260807_reset_tencent_credentials_for_refresh', () => {
+  db.prepare("DELETE FROM platform_auth WHERE platform = 'tencent'").run()
 })
 
 export const databasePath = dbPath

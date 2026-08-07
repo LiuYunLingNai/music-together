@@ -38,7 +38,7 @@ export function useAuthSync() {
       message: string
       platform?: MusicSource
       cookie?: string
-      reason?: 'expired' | 'error'
+      reason?: 'expired' | 'error' | 'reauth_required'
     }) => {
       if (data.success) {
         // 持久化 cookie
@@ -60,7 +60,10 @@ export function useAuthSync() {
           pendingAutoResendRef.current--
         }
 
-        if (data.reason === 'expired') {
+        if (data.reason === 'reauth_required') {
+          storage.removeAuthCookie(data.platform)
+          toast.warning(data.message, { id: `auth-reauth-${data.platform}` })
+        } else if (data.reason === 'expired') {
           toast.warning(`${name} 登录验证失败，将在下次进入房间时重试`, { id: `auth-expired-${data.platform}` })
         } else if (data.reason === 'error') {
           toast.info(`${name} 登录验证失败，将在下次进入房间时重试`, { id: `auth-error-${data.platform}` })

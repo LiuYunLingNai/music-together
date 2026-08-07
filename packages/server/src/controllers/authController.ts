@@ -3,6 +3,7 @@ import type { MusicSource } from '@music-together/shared'
 import * as authService from '../services/authService.js'
 import { AUTH_PROVIDERS } from '../services/authProvider.js'
 import * as kugouAuth from '../services/kugouAuthService.js'
+import * as tencentAuth from '../services/tencentAuthService.js'
 import { roomRepo } from '../repositories/roomRepository.js'
 import { logger } from '../utils/logger.js'
 import type { TypedServer, TypedSocket } from '../middleware/types.js'
@@ -103,6 +104,22 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
         })
         return
       }
+      if (platform === 'tencent' && !tencentAuth.isRefreshableCredential(result.cookie)) {
+        qrCheckInFlight = false
+        activeQr = null
+        socket.emit(EVENTS.AUTH_SET_COOKIE_RESULT, {
+          success: false,
+          message: '未获取到 QQ 音乐刷新凭证，请重新扫码登录',
+          platform,
+          reason: 'reauth_required',
+        })
+        socket.emit(EVENTS.AUTH_QR_STATUS, {
+          status: QR_STATUS.EXPIRED,
+          message: '未获取到刷新凭证，请重新获取二维码',
+          key: data.key,
+        })
+        return
+      }
 
       // 登录成功：验证 cookie 并加入池（防止重复 803）
       if (result.status === QR_STATUS.SUCCESS && result.cookie && !qrSuccessHandled) {
@@ -196,6 +213,41 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
       const platform = data.platform as MusicSource
       const mapping = getSocketMapping(socket.id)
       const roomId = mapping?.roomId ?? null
+      const serverCookie = mapping && roomId ? authService.getUserCookie(mapping.userId, platform, roomId) : null
+      const incomingTencentCredential = platform === 'tencent' ? tencentAuth.parseTencentCredential(cookie) : null
+      const serverTencentCredential =
+        platform === 'tencent' && serverCookie ? tencentAuth.parseTencentCredential(serverCookie) : null
+
+      // A scheduled refresh updates the server copy first. On reconnect, send
+      // that newer credential back instead of allowing stale localStorage to
+      // overwrite it with the pre-refresh musickey.
+      if (
+        platform === 'tencent' &&
+        serverCookie &&
+        serverCookie !== cookie &&
+        incomingTencentCredential?.musicid === serverTencentCredential?.musicid &&
+        tencentAuth.isRefreshableCredential(serverCookie)
+      ) {
+        socket.emit(EVENTS.AUTH_SET_COOKIE_RESULT, {
+          success: true,
+          message: '已恢复服务器上的最新 QQ 音乐凭证',
+          platform,
+          cookie: serverCookie,
+        })
+        if (mapping) broadcastAuthStatus(io, socket, mapping)
+        return
+      }
+
+      if (platform === 'tencent' && !tencentAuth.isRefreshableCredential(cookie)) {
+        socket.emit(EVENTS.AUTH_SET_COOKIE_RESULT, {
+          success: false,
+          message: 'QQ 音乐登录凭证已升级，请重新扫码登录',
+          platform,
+          reason: 'reauth_required',
+        })
+        if (mapping) broadcastAuthStatus(io, socket, mapping)
+        return
+      }
 
       // Fast path: cookie 已在房间池中，跳过验证
       if (

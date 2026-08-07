@@ -54,7 +54,7 @@ after(() => {
   rmSync(testDataDir, { recursive: true, force: true })
 })
 
-test('startup migration queues generic QQ/Kugou labels for refresh and normalizes legacy tiers', () => {
+test('startup migration removes legacy QQ credentials and normalizes other provider tiers', () => {
   const rows = db
     .prepare<
       [],
@@ -65,12 +65,12 @@ test('startup migration queues generic QQ/Kugou labels for refresh and normalize
   assert.deepEqual(rows, [
     { platform: 'kugou', vip_type: 2, vip_label: null, vip_level: 5 },
     { platform: 'netease', vip_type: 1, vip_label: 'VIP·伍', vip_level: 5 },
-    { platform: 'tencent', vip_type: 1, vip_label: null, vip_level: null },
   ])
   assert.deepEqual(db.prepare('SELECT id FROM schema_migrations ORDER BY id').all(), [
     { id: '20260729_normalize_platform_membership' },
     { id: '20260729_reclassify_kugou_concept_listening_vip' },
     { id: '20260729_revalidate_kugou_standard_membership' },
     { id: '20260801_revalidate_tencent_identity_membership' },
+    { id: '20260807_reset_tencent_credentials_for_refresh' },
   ])
 })

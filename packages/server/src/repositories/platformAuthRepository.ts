@@ -12,6 +12,7 @@ export interface PersistedPlatformAuth {
   vipType: number
   vipLabel?: string
   vipLevel?: number
+  credentialRefreshAttemptedAt?: number
 }
 
 interface PlatformAuthRow {
@@ -22,6 +23,7 @@ interface PlatformAuthRow {
   vip_type: number | null
   vip_label: string | null
   vip_level: number | null
+  credential_refresh_attempted_at: number | null
 }
 
 const upsertAuth = db.prepare(`
@@ -34,22 +36,36 @@ const upsertAuth = db.prepare(`
     vip_type,
     vip_label,
     vip_level,
+    credential_refresh_attempted_at,
     created_at,
     updated_at
   )
-  VALUES (@id, @userId, @platform, @cookie, @nickname, @vipType, @vipLabel, @vipLevel, @now, @now)
+  VALUES (@id, @userId, @platform, @cookie, @nickname, @vipType, @vipLabel, @vipLevel, @refreshAttemptedAt, @now, @now)
   ON CONFLICT(id) DO UPDATE SET
     cookie_encrypted = excluded.cookie_encrypted,
     nickname_snapshot = excluded.nickname_snapshot,
     vip_type = excluded.vip_type,
     vip_label = excluded.vip_label,
     vip_level = excluded.vip_level,
+    credential_refresh_attempted_at = COALESCE(
+      excluded.credential_refresh_attempted_at,
+      platform_auth.credential_refresh_attempted_at
+    ),
     updated_at = excluded.updated_at
 `)
 const loadUserAuth = db.prepare<[string], PlatformAuthRow>(
-  'SELECT user_id, platform, cookie_encrypted, nickname_snapshot, vip_type, vip_label, vip_level FROM platform_auth WHERE user_id = ? ORDER BY updated_at DESC',
+  'SELECT user_id, platform, cookie_encrypted, nickname_snapshot, vip_type, vip_label, vip_level, credential_refresh_attempted_at FROM platform_auth WHERE user_id = ? ORDER BY updated_at DESC',
+)
+const loadDueTencentAuth = db.prepare<[number], PlatformAuthRow>(
+  `SELECT user_id, platform, cookie_encrypted, nickname_snapshot, vip_type, vip_label, vip_level, credential_refresh_attempted_at
+   FROM platform_auth
+   WHERE platform = 'tencent' AND (credential_refresh_attempted_at IS NULL OR credential_refresh_attempted_at <= ?)
+   ORDER BY updated_at ASC`,
 )
 const deleteUserPlatformAuth = db.prepare('DELETE FROM platform_auth WHERE user_id = ? AND platform = ?')
+const markCredentialRefreshAttempt = db.prepare(
+  'UPDATE platform_auth SET credential_refresh_attempted_at = ?, updated_at = ? WHERE user_id = ? AND platform = ?',
+)
 
 function authId(userId: string, platform: MusicSource): string {
   return `account:${userId}:${platform}`
@@ -80,7 +96,8 @@ function decryptCookie(value: string): string | null {
 }
 
 export const platformAuthRepo = {
-  save(entry: PersistedPlatformAuth): void {
+  save(entry: PersistedPlatformAuth, options?: { resetCredentialRefreshSchedule?: boolean }): void {
+    const now = Date.now()
     upsertAuth.run({
       id: authId(entry.userId, entry.platform),
       userId: entry.userId,
@@ -90,7 +107,8 @@ export const platformAuthRepo = {
       vipType: entry.vipType,
       vipLabel: entry.vipLabel ?? null,
       vipLevel: entry.vipLevel ?? null,
-      now: Date.now(),
+      refreshAttemptedAt: options?.resetCredentialRefreshSchedule ? now : (entry.credentialRefreshAttemptedAt ?? null),
+      now,
     })
   },
 
@@ -115,6 +133,7 @@ export const platformAuthRepo = {
                 vipType: row.vip_type ?? 0,
                 vipLabel: row.vip_label ?? undefined,
                 vipLevel: row.vip_level ?? undefined,
+                credentialRefreshAttemptedAt: row.credential_refresh_attempted_at ?? undefined,
               },
             ]
           : []
@@ -123,5 +142,29 @@ export const platformAuthRepo = {
 
   remove(userId: string, platform: MusicSource): boolean {
     return deleteUserPlatformAuth.run(userId, platform).changes > 0
+  },
+
+  loadDueTencent(cutoff: number): PersistedPlatformAuth[] {
+    return loadDueTencentAuth.all(cutoff).flatMap((row) => {
+      const cookie = decryptCookie(row.cookie_encrypted)
+      return cookie
+        ? [
+            {
+              userId: row.user_id,
+              platform: row.platform,
+              cookie,
+              nickname: row.nickname_snapshot ?? row.user_id,
+              vipType: row.vip_type ?? 0,
+              vipLabel: row.vip_label ?? undefined,
+              vipLevel: row.vip_level ?? undefined,
+              credentialRefreshAttemptedAt: row.credential_refresh_attempted_at ?? undefined,
+            },
+          ]
+        : []
+    })
+  },
+
+  markCredentialRefreshAttempt(userId: string, platform: MusicSource, attemptedAt = Date.now()): void {
+    markCredentialRefreshAttempt.run(attemptedAt, attemptedAt, userId, platform)
   },
 }

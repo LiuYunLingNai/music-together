@@ -2,7 +2,7 @@ import QRCode from 'qrcode'
 import type { Playlist } from '@music-together/shared'
 import type { GetUserInfoResult } from './authProvider.js'
 import { logger } from '../utils/logger.js'
-import { getCookieValue } from '../utils/cookieUtils.js'
+import { getCookieValue, parseCookieString } from '../utils/cookieUtils.js'
 import { parseTencentRadarRecommendationPage, parseTencentRecommendedPlaylistPage } from './recommendationParsers.js'
 import * as crypto from 'node:crypto'
 
@@ -60,9 +60,199 @@ interface ProfileData {
 }
 
 interface MusicKeyData {
-  musickey?: string
-  musicid?: number
+  code?: number
+  openid?: string
   refresh_token?: string
+  refreshToken?: string
+  access_token?: string
+  accessToken?: string
+  expired_at?: number
+  expired_in?: number
+  musicid?: number | string
+  musickey?: string
+  unionid?: string
+  str_musicid?: string
+  refresh_key?: string
+  refreshKey?: string
+  musickeyCreateTime?: number
+  keyExpiresIn?: number
+  firstLogin?: number
+  bindAccountType?: number
+  needRefreshKeyIn?: number
+  encryptUin?: string
+  loginType?: number
+}
+
+export interface TencentCredential {
+  musicid: number
+  musickey: string
+  openid: string
+  refreshToken: string
+  accessToken: string
+  expiredAt: number
+  unionid: string
+  strMusicid: string
+  refreshKey: string
+  musickeyCreateTime: number
+  keyExpiresIn: number
+  loginType: number
+  refreshVersion: number
+}
+
+function nonEmptyString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function numberValue(value: unknown): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+/** Parse QQMusicApi-compatible credential fields from the persisted cookie. */
+export function parseTencentCredential(cookie: string): TencentCredential | null {
+  const values = parseCookieString(cookie)
+  const rawMusicid = values.musicid || values.uin || values.qqmusic_uin || values.o_cookie
+  const musicid = Number.parseInt(nonEmptyString(rawMusicid).replace(/^o0*/, ''), 10)
+  const musickey = values.musickey || values.qm_keyst || values.qqmusic_key || ''
+  if (!Number.isFinite(musicid) || musicid <= 0 || !musickey) return null
+
+  const loginType = numberValue(values.loginType || values.login_type) || (musickey.startsWith('W_X') ? 1 : 2)
+  return {
+    musicid,
+    musickey,
+    openid: values.openid || '',
+    refreshToken: values.refresh_token || values.o_refresh_token || '',
+    accessToken: values.access_token || '',
+    expiredAt: numberValue(values.expired_at || values.expired_in),
+    unionid: values.unionid || '',
+    strMusicid: values.str_musicid || String(musicid),
+    refreshKey: values.refresh_key || values.o_refresh_key || '',
+    musickeyCreateTime: numberValue(values.musickeyCreateTime || values.musickey_create_time),
+    keyExpiresIn: numberValue(values.keyExpiresIn || values.key_expires_in),
+    loginType,
+    refreshVersion: numberValue(values.qqmusic_refresh_v),
+  }
+}
+
+export function isRefreshableCredential(cookie: string): boolean {
+  const credential = parseTencentCredential(cookie)
+  return Boolean(credential && credential.refreshVersion >= 1 && credential.refreshToken && credential.refreshKey)
+}
+
+function credentialField(data: MusicKeyData, ...names: string[]): unknown {
+  for (const name of names) {
+    const value = data[name as keyof MusicKeyData]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value
+  }
+  return undefined
+}
+
+/** Build a cookie containing both playback keys and refresh fields. */
+export function buildTencentCredentialCookie(previousCookie: string, data: MusicKeyData): string {
+  const previous = parseCookieString(previousCookie)
+  const parsedPrevious = parseTencentCredential(previousCookie)
+  const musicid = numberValue(credentialField(data, 'musicid')) || parsedPrevious?.musicid || 0
+  const musickey = nonEmptyString(credentialField(data, 'musickey')) || parsedPrevious?.musickey || ''
+  if (musicid <= 0 || !musickey) throw new Error('QQ 音乐凭证响应缺少 musicid 或 musickey')
+
+  const set = (key: string, value: unknown, fallback = '') => {
+    const resolved = typeof value === 'number' ? (value > 0 ? String(value) : '') : nonEmptyString(value)
+    if (resolved) previous[key] = resolved
+    else if (fallback) previous[key] = fallback
+  }
+
+  set('uin', musicid)
+  set('qqmusic_uin', musicid)
+  set('musicid', musicid)
+  set('o_cookie', musicid)
+  set('qm_keyst', musickey)
+  set('qqmusic_key', musickey)
+  set('musickey', musickey)
+  set('openid', credentialField(data, 'openid'), parsedPrevious?.openid)
+  set('refresh_token', credentialField(data, 'refresh_token', 'refreshToken'), parsedPrevious?.refreshToken)
+  set('o_refresh_token', credentialField(data, 'refresh_token', 'refreshToken'), parsedPrevious?.refreshToken)
+  set('access_token', credentialField(data, 'access_token', 'accessToken'), parsedPrevious?.accessToken)
+  set(
+    'expired_at',
+    credentialField(data, 'expired_at', 'expired_in'),
+    parsedPrevious?.expiredAt ? String(parsedPrevious.expiredAt) : '',
+  )
+  set('unionid', credentialField(data, 'unionid'), parsedPrevious?.unionid)
+  set('str_musicid', credentialField(data, 'str_musicid'), parsedPrevious?.strMusicid)
+  set('refresh_key', credentialField(data, 'refresh_key', 'refreshKey'), parsedPrevious?.refreshKey)
+  set(
+    'musickeyCreateTime',
+    credentialField(data, 'musickeyCreateTime'),
+    parsedPrevious?.musickeyCreateTime ? String(parsedPrevious.musickeyCreateTime) : '',
+  )
+  set(
+    'keyExpiresIn',
+    credentialField(data, 'keyExpiresIn'),
+    parsedPrevious?.keyExpiresIn ? String(parsedPrevious.keyExpiresIn) : '',
+  )
+  set(
+    'loginType',
+    credentialField(data, 'loginType'),
+    parsedPrevious?.loginType ? String(parsedPrevious.loginType) : '2',
+  )
+  set('qqmusic_refresh_v', 1)
+
+  return Object.entries(previous)
+    .filter(([, value]) => value.length > 0)
+    .map(([key, value]) => `${key}=${value}`)
+    .join('; ')
+}
+
+/** Refresh the QQ Music musickey using the refresh credentials from the cookie. */
+export async function refreshCredential(cookie: string): Promise<string> {
+  const credential = parseTencentCredential(cookie)
+  if (!credential) throw new Error('QQ 音乐凭证缺少 musicid 或 musickey')
+  if (!isRefreshableCredential(cookie)) {
+    throw new Error('QQ 音乐凭证缺少 refresh_token / refresh_key，请重新扫码登录')
+  }
+
+  const common = {
+    openid: credential.openid,
+    access_token: credential.accessToken,
+    refresh_token: credential.refreshToken,
+    expired_in: credential.expiredAt,
+    musicid: credential.musicid,
+    musickey: credential.musickey,
+    refresh_key: credential.refreshKey,
+    loginMode: 2,
+  }
+  const param =
+    credential.loginType === 1
+      ? {
+          openid: credential.openid,
+          refresh_token: credential.refreshToken,
+          str_musicid: credential.strMusicid || String(credential.musicid),
+          musickey: credential.musickey,
+          unionid: credential.unionid,
+          refresh_key: credential.refreshKey,
+          loginMode: 2,
+        }
+      : common
+
+  const data = await tencentApiRequest<MusicKeyData>({
+    module: 'music.login.LoginServer',
+    method: 'Login',
+    param,
+    cookie,
+    sign: false,
+    commExtras: {
+      uin: credential.musicid,
+      g_tk: hash33(credential.musickey, 5381),
+      g_tk_new_20200303: hash33(credential.musickey, 5381),
+      platform: 'yqq.json',
+      need_new_code: 1,
+      tmeLoginType: credential.loginType,
+    },
+  })
+  const responseCode = numberValue(data.code)
+  if (responseCode !== 0) throw new Error(`[CredentialRefreshError] QQ 音乐凭证刷新失败 (${responseCode})`)
+  return buildTencentCredentialCookie(cookie, data)
 }
 
 interface PlaylistItem {
@@ -799,8 +989,9 @@ async function fetchMusicKeySession(code: string): Promise<string | null> {
     })
 
     if (data?.musickey && data?.musicid) {
-      // 完美提取！生成给 musicProvider / API 都可以通吃的凭证
-      return `uin=${data.musicid}; qm_keyst=${data.musickey}; qqmusic_key=${data.musickey}; o_cookie=${data.musicid}; o_refresh_token=${data.refresh_token || ''}`
+      // Keep every field required by QQMusicApi.refresh_credential, not just
+      // the short-lived musickey used by playback.
+      return buildTencentCredentialCookie('', data)
     }
     return null
   } catch (err) {
