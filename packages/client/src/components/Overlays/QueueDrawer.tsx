@@ -317,19 +317,21 @@ export function QueueDrawer({
                         >
                           {track.title}
                         </MarqueeText>
-                        <MarqueeText className="text-xs text-muted-foreground">{track.artist.join(' / ')}</MarqueeText>
+                        <div className="flex min-w-0 items-center gap-1">
+                          <MarqueeText className="min-w-0 flex-1 text-xs text-muted-foreground">
+                            {track.artist.join(' / ')}
+                          </MarqueeText>
+                          {track.requestedBy && (
+                            <Badge
+                              variant="outline"
+                              className="h-4 max-w-28 shrink-0 gap-0.5 truncate border-primary/30 bg-primary/10 px-1.5 py-0 text-[10px] font-normal text-primary"
+                            >
+                              <User className="h-2.5 w-2.5 shrink-0" />
+                              <span className="truncate">{track.requestedBy}</span>
+                            </Badge>
+                          )}
+                        </div>
                       </div>
-
-                      {/* Requester badge — absolute top-right inside item */}
-                      {track.requestedBy && (
-                        <Badge
-                          variant="outline"
-                          className="absolute right-2 top-1.5 z-10 h-4 gap-0.5 border-primary/30 bg-primary/10 px-1.5 py-0 text-[10px] font-normal text-primary"
-                        >
-                          <User className="h-2.5 w-2.5" />
-                          {track.requestedBy}
-                        </Badge>
-                      )}
 
                       {/* Actions — visible on hover (desktop) or tap (mobile) */}
                       <div
