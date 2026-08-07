@@ -23,6 +23,14 @@ function countValue(...values: unknown[]): number {
   return 0
 }
 
+function booleanValue(...values: unknown[]): boolean {
+  for (const value of values) {
+    if (value === true || value === 1 || value === '1' || value === 'true') return true
+    if (value === false || value === 0 || value === '0' || value === 'false') return false
+  }
+  return false
+}
+
 function uniquePlaylists(playlists: Playlist[]): Playlist[] {
   const seen = new Set<string>()
   return playlists.filter((playlist) => {
@@ -30,6 +38,23 @@ function uniquePlaylists(playlists: Playlist[]): Playlist[] {
     seen.add(playlist.id)
     return true
   })
+}
+
+function tencentResponseData(value: unknown): Record<string, unknown> | null {
+  const root = asRecord(value)
+  const req = asRecord(root?.req)
+  return asRecord(req?.data) ?? asRecord(root?.data) ?? root
+}
+
+export interface TencentRecommendedPlaylistPage {
+  playlists: Playlist[]
+  hasMore: boolean
+  fromLimit: number
+}
+
+export interface TencentRadarRecommendationPage {
+  songs: Record<string, unknown>[]
+  hasMore: boolean
 }
 
 /**
@@ -40,12 +65,14 @@ function uniquePlaylists(playlists: Playlist[]): Playlist[] {
  * License: GPL-3.0
  */
 export function parseTencentRecommendedPlaylists(value: unknown): Playlist[] {
-  const root = asRecord(value)
-  const req = asRecord(root?.req)
-  const data = asRecord(req?.data) ?? asRecord(root?.data) ?? root
+  return parseTencentRecommendedPlaylistPage(value).playlists
+}
+
+export function parseTencentRecommendedPlaylistPage(value: unknown): TencentRecommendedPlaylistPage {
+  const data = tencentResponseData(value)
   const list = Array.isArray(data?.List) ? data.List : []
 
-  return uniquePlaylists(
+  const playlists = uniquePlaylists(
     list.flatMap((entry): Playlist[] => {
       const playlist = asRecord(asRecord(entry)?.Playlist)
       const basic = asRecord(playlist?.basic)
@@ -75,6 +102,33 @@ export function parseTencentRecommendedPlaylists(value: unknown): Playlist[] {
       ]
     }),
   )
+
+  return {
+    playlists,
+    hasMore: booleanValue(data?.HasMore, data?.hasMore, data?.has_more),
+    fromLimit: countValue(data?.FromLimit, data?.fromLimit, data?.from_limit),
+  }
+}
+
+export function parseTencentRadarRecommendationPage(value: unknown): TencentRadarRecommendationPage {
+  const data = tencentResponseData(value)
+  const vecSongs = Array.isArray(data?.VecSongs) ? data.VecSongs : []
+  const seen = new Set<string>()
+  const songs = vecSongs.flatMap((entry): Record<string, unknown>[] => {
+    const item = asRecord(entry)
+    const track = asRecord(item?.Track) ?? asRecord(item?.track)
+    if (!track) return []
+
+    const mid = stringValue(track.mid, track.songmid, track.songMid)
+    if (!mid || seen.has(mid)) return []
+    seen.add(mid)
+    return [track]
+  })
+
+  return {
+    songs,
+    hasMore: booleanValue(data?.HasMore, data?.hasMore, data?.has_more),
+  }
 }
 
 export function parseNeteaseRecommendedPlaylists(value: unknown): Playlist[] {

@@ -106,45 +106,53 @@ router.get('/bilibili-collection', async (req: Request, res: Response) => {
 
 router.get(
   '/recommendations',
-  validated(recommendationsQuerySchema, 'Get recommendations', async ({ roomId, limit }, req, res) => {
-    const identityUserId = req.identityUserId
-    if (!identityUserId) {
-      res.status(401).json({ error: 'Unauthorized' })
-      return
-    }
+  validated(
+    recommendationsQuerySchema,
+    'Get recommendations',
+    async ({ roomId, limit, radarPage, playlistOffset }, req, res) => {
+      const identityUserId = req.identityUserId
+      if (!identityUserId) {
+        res.status(401).json({ error: 'Unauthorized' })
+        return
+      }
 
-    const room = roomRepo.get(roomId)
-    if (!room || !room.users.some((user) => user.id === identityUserId)) {
-      res.status(403).json({ error: 'Forbidden' })
-      return
-    }
+      const room = roomRepo.get(roomId)
+      if (!room || !room.users.some((user) => user.id === identityUserId)) {
+        res.status(403).json({ error: 'Forbidden' })
+        return
+      }
 
-    const loggedPlatforms = authService
-      .getUserAuthStatus(identityUserId, roomId)
-      .filter((status) => status.loggedIn)
-      .map((status) => status.platform)
+      const loggedPlatforms = authService
+        .getUserAuthStatus(identityUserId, roomId)
+        .filter((status) => status.loggedIn)
+        .map((status) => status.platform)
 
-    const recommendations = await Promise.all(
-      loggedPlatforms.map(async (platform): Promise<PlatformRecommendation> => {
-        const cookie = authService.getUserCookie(identityUserId, platform, roomId)
-        const emptyResult = platform === 'bilibili' ? { platform, tracks: [] } : { platform, tracks: [], playlists: [] }
-        if (!cookie) return { ...emptyResult, unavailableReason: 'upstream_unavailable' }
+      const recommendations = await Promise.all(
+        loggedPlatforms.map(async (platform): Promise<PlatformRecommendation> => {
+          const cookie = authService.getUserCookie(identityUserId, platform, roomId)
+          const emptyResult =
+            platform === 'bilibili' ? { platform, tracks: [] } : { platform, tracks: [], playlists: [] }
+          if (!cookie) return { ...emptyResult, unavailableReason: 'upstream_unavailable' }
 
-        try {
-          const recommendationLimit = platform === 'bilibili' ? 20 : limit
-          const result = await musicProvider.getRecommendations(platform, cookie, recommendationLimit)
-          const hasContent = result.tracks.length > 0 || (result.playlists?.length ?? 0) > 0
-          return hasContent ? { platform, ...result } : { platform, ...result, unavailableReason: 'empty' }
-        } catch (err) {
-          logger.warn('Platform recommendation feed failed', { platform, roomId, identityUserId, err })
-          return { ...emptyResult, unavailableReason: 'upstream_unavailable' }
-        }
-      }),
-    )
+          try {
+            const recommendationLimit = platform === 'bilibili' ? 20 : limit
+            const result = await musicProvider.getRecommendations(platform, cookie, recommendationLimit, {
+              radarPage,
+              playlistOffset,
+            })
+            const hasContent = result.tracks.length > 0 || (result.playlists?.length ?? 0) > 0
+            return hasContent ? { platform, ...result } : { platform, ...result, unavailableReason: 'empty' }
+          } catch (err) {
+            logger.warn('Platform recommendation feed failed', { platform, roomId, identityUserId, err })
+            return { ...emptyResult, unavailableReason: 'upstream_unavailable' }
+          }
+        }),
+      )
 
-    res.setHeader('Cache-Control', 'private, no-store')
-    res.json({ recommendations })
-  }),
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.json({ recommendations })
+    },
+  ),
 )
 
 router.get(

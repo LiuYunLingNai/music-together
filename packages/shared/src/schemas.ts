@@ -170,6 +170,8 @@ export const searchQuerySchema = z.discriminatedUnion('source', [
 export const recommendationsQuerySchema = z.object({
   roomId: z.string().min(1).max(10),
   limit: z.coerce.number().int().min(1).max(50).default(20),
+  radarPage: z.coerce.number().int().min(1).max(10_000).default(1),
+  playlistOffset: z.coerce.number().int().min(0).max(1_000_000).default(0),
 })
 
 export const urlQuerySchema = z.object({

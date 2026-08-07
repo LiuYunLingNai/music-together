@@ -129,11 +129,23 @@ export interface DownloadOptionsResponse {
 
 export type RecommendationUnavailableReason = 'empty' | 'upstream_unavailable'
 
+export interface RecommendationPagination {
+  tracks?: {
+    hasMore: boolean
+    nextPage: number
+  }
+  playlists?: {
+    hasMore: boolean
+    nextOffset: number
+  }
+}
+
 /** A logged-in platform's native recommendation feed. */
 export interface PlatformRecommendation {
   platform: MusicSource
   tracks: Track[]
   playlists?: Playlist[]
+  pagination?: RecommendationPagination
   unavailableReason?: RecommendationUnavailableReason
 }
 

@@ -1,7 +1,14 @@
 import Meting from '@meting/core'
 import { get as kugouLrcGet, Format } from '@s4p/kugou-lrc'
 import type { KrcInfo } from '@s4p/kugou-lrc'
-import type { AudioQuality, BilibiliStreamFormat, MusicSource, Playlist, Track } from '@music-together/shared'
+import type {
+  AudioQuality,
+  BilibiliStreamFormat,
+  MusicSource,
+  Playlist,
+  RecommendationPagination,
+  Track,
+} from '@music-together/shared'
 import { LRUCache } from 'lru-cache'
 import { nanoid } from 'nanoid'
 import pLimit from 'p-limit'
@@ -1654,7 +1661,8 @@ class MusicProvider {
     source: MusicSource,
     cookie: string,
     limit = 20,
-  ): Promise<{ tracks: Track[]; playlists?: Playlist[] }> {
+    pagination: { radarPage?: number; playlistOffset?: number } = {},
+  ): Promise<{ tracks: Track[]; playlists?: Playlist[]; pagination?: RecommendationPagination }> {
     let tracks: Track[]
 
     switch (source) {
@@ -1665,8 +1673,44 @@ class MusicProvider {
         }
         return { tracks: [], playlists: parseNeteaseRecommendedPlaylists(response).slice(0, limit) }
       }
-      case 'tencent':
-        return { tracks: [], playlists: await tencentAuth.getRecommendedPlaylists(cookie, limit) }
+      case 'tencent': {
+        const [radarResult, playlistResult] = await Promise.allSettled([
+          tencentAuth.getRadarRecommendations(cookie, pagination.radarPage),
+          tencentAuth.getRecommendedPlaylistPage(cookie, limit, pagination.playlistOffset),
+        ])
+        if (radarResult.status === 'rejected' && playlistResult.status === 'rejected') {
+          throw new Error('QQ radar and playlist recommendation feeds both failed')
+        }
+        if (radarResult.status === 'rejected') {
+          logger.warn('QQ radar recommendation feed failed', { err: radarResult.reason })
+        }
+        if (playlistResult.status === 'rejected') {
+          logger.warn('QQ playlist recommendation feed failed', { err: playlistResult.reason })
+        }
+
+        const radar = radarResult.status === 'fulfilled' ? radarResult.value : null
+        const playlistPage = playlistResult.status === 'fulfilled' ? playlistResult.value : null
+        tracks = (radar?.songs ?? []).slice(0, limit).map((song) => this.rawToTrack(song, source))
+        await this.batchResolveCover(tracks, source)
+        for (const track of tracks) this.enrichFromRegistry(track)
+        this.registerTracks(tracks)
+
+        const recommendationPagination: RecommendationPagination = {}
+        if (radar) {
+          recommendationPagination.tracks = { hasMore: radar.hasMore, nextPage: radar.nextPage }
+        }
+        if (playlistPage) {
+          recommendationPagination.playlists = {
+            hasMore: playlistPage.hasMore,
+            nextOffset: playlistPage.nextOffset,
+          }
+        }
+        return {
+          tracks,
+          playlists: playlistPage?.playlists ?? [],
+          pagination: recommendationPagination,
+        }
+      }
       case 'kugou':
       case 'kugou_concept': {
         const playlists =
@@ -3071,18 +3115,23 @@ class MusicProvider {
       case 'tencent': {
         // Tencent sometimes wraps data in musicData
         const t = s.musicData || s
+        const mid = String(t.mid || t.songmid || t.songMid || '').trim()
+        const albumMid = String(t.album?.pmid || t.album?.mid || '').trim()
+        const artists = (t.singer || [])
+          .map((artist: Record<string, unknown>) => String(artist.name ?? '').trim())
+          .filter(Boolean)
         return {
           id: nanoid(),
-          title: t.name || 'Unknown',
-          artist: (t.singer || []).map((a: Record<string, unknown>) => a.name),
-          album: (t.album?.title || '').trim(),
+          title: t.name || t.title || 'Unknown',
+          artist: artists.length > 0 ? artists : ['Unknown'],
+          album: String(t.album?.title || t.album?.name || '').trim(),
           duration: t.interval || 0, // already in seconds
-          cover: '', // resolved via pic()
+          cover: albumMid ? `https://y.gtimg.cn/music/photo_new/T002R300x300M000${albumMid}.jpg` : '',
           source,
-          sourceId: String(t.mid),
-          urlId: String(t.mid),
-          lyricId: String(t.mid),
-          picId: String(t.album?.mid || ''),
+          sourceId: mid,
+          urlId: mid,
+          lyricId: mid,
+          picId: albumMid,
           // pay.pay_play=1 表示需要 VIP, pay.pay_month=1 表示月度VIP, pay.price_track>0 表示付费单曲
           vip: t.pay?.pay_play === 1 || t.pay?.pay_month === 1 || (t.pay?.price_track ?? 0) > 0,
         }

@@ -3,7 +3,7 @@ import type { Playlist } from '@music-together/shared'
 import type { GetUserInfoResult } from './authProvider.js'
 import { logger } from '../utils/logger.js'
 import { getCookieValue } from '../utils/cookieUtils.js'
-import { parseTencentRecommendedPlaylists } from './recommendationParsers.js'
+import { parseTencentRadarRecommendationPage, parseTencentRecommendedPlaylistPage } from './recommendationParsers.js'
 import * as crypto from 'node:crypto'
 
 // ---------------------------------------------------------------------------
@@ -162,9 +162,7 @@ interface TencentApiConfig {
   sign?: boolean
 }
 
-/**
- * 向 musicu.fcg 接口发送带有底层加密签名的 POST 请求
- */
+/** 向 QQ musicu/musics CGI 网关发送 POST 请求。 */
 async function tencentApiRequest<T = Record<string, unknown>>(reqConfig: TencentApiConfig): Promise<T> {
   const data = {
     comm: {
@@ -222,36 +220,101 @@ async function tencentApiRequest<T = Record<string, unknown>>(reqConfig: Tencent
   return (reqRes?.data || body) as T
 }
 
-/**
- * Minimal get_recommend_songlist request ported from QQMusicApi.
- * Source: https://github.com/l-1124/QQMusicApi
- * Commit: 108617ffe80abefec6358717b9f4d3677550db10
- * License: GPL-3.0
- */
-export async function getRecommendedPlaylists(cookie: string, limit = 25): Promise<Playlist[]> {
+function getTencentRecommendationComm(cookie: string): Record<string, unknown> {
   const rawUin =
     getCookieValue(cookie, 'uin') || getCookieValue(cookie, 'qqmusic_uin') || getCookieValue(cookie, 'o_cookie') || ''
   const uin = Number.parseInt(rawUin.replace(/^o/i, ''), 10) || 0
   const musicKey = getCookieValue(cookie, 'qm_keyst') || getCookieValue(cookie, 'qqmusic_key') || ''
   const gtk = musicKey ? hash33(musicKey, 5381) : 5381
+
+  return {
+    uin,
+    g_tk: gtk,
+    g_tk_new_20200303: gtk,
+    platform: 'yqq.json',
+    need_new_code: 1,
+  }
+}
+
+export interface TencentRecommendedPlaylistResult {
+  playlists: Playlist[]
+  hasMore: boolean
+  nextOffset: number
+}
+
+export interface TencentRadarRecommendationResult {
+  songs: Record<string, unknown>[]
+  hasMore: boolean
+  nextPage: number
+}
+
+/**
+ * Minimal get_recommend_songlist pagination ported from QQMusicApi.
+ * Source: https://github.com/l-1124/QQMusicApi
+ * Commit: 108617ffe80abefec6358717b9f4d3677550db10
+ * License: GPL-3.0
+ */
+export async function getRecommendedPlaylistPage(
+  cookie: string,
+  limit = 25,
+  offset = 0,
+): Promise<TencentRecommendedPlaylistResult> {
   const size = Math.max(1, Math.min(50, Math.floor(limit)))
+  const from = Math.max(0, Math.floor(offset))
 
   const data = await tencentApiRequest({
     module: 'music.playlist.PlaylistSquare',
     method: 'GetRecommendFeed',
     cookie,
     sign: false,
-    commExtras: {
-      uin,
-      g_tk: gtk,
-      g_tk_new_20200303: gtk,
-      platform: 'yqq.json',
-      need_new_code: 1,
-    },
-    param: { From: 0, Size: size },
+    commExtras: getTencentRecommendationComm(cookie),
+    param: { From: from, Size: size },
   })
 
-  return parseTencentRecommendedPlaylists(data).slice(0, size)
+  const page = parseTencentRecommendedPlaylistPage(data)
+  const fallbackOffset = from + size
+  return {
+    playlists: page.playlists.slice(0, size),
+    hasMore: page.hasMore,
+    nextOffset: page.hasMore && page.fromLimit > from ? page.fromLimit : page.hasMore ? fallbackOffset : 0,
+  }
+}
+
+export async function getRecommendedPlaylists(cookie: string, limit = 25, page = 1): Promise<Playlist[]> {
+  const size = Math.max(1, Math.min(50, Math.floor(limit)))
+  const currentPage = Math.max(1, Math.floor(page))
+  const result = await getRecommendedPlaylistPage(cookie, size, size * (currentPage - 1))
+  return result.playlists
+}
+
+/**
+ * Minimal get_radar_recommend pagination ported from QQMusicApi.
+ * Source: https://github.com/l-1124/QQMusicApi
+ * Commit: 108617ffe80abefec6358717b9f4d3677550db10
+ * License: GPL-3.0
+ */
+export async function getRadarRecommendations(cookie: string, page = 1): Promise<TencentRadarRecommendationResult> {
+  const currentPage = Math.max(1, Math.floor(page))
+  const data = await tencentApiRequest({
+    module: 'music.recommend.TrackRelationServer',
+    method: 'GetRadarSong',
+    cookie,
+    sign: false,
+    commExtras: getTencentRecommendationComm(cookie),
+    param: {
+      Page: currentPage,
+      ReqType: 0,
+      FavSongs: [],
+      EntranceSongs: [],
+    },
+  })
+
+  const result = parseTencentRadarRecommendationPage(data)
+  return {
+    songs: result.songs,
+    hasMore: result.hasMore,
+    nextPage: result.hasMore ? currentPage + 1 : 1,
+  }
 }
 
 // ---------------------------------------------------------------------------

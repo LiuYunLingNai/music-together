@@ -7,7 +7,7 @@ import {
   ResponsiveDialogTitle,
 } from '@/components/ui/responsive-dialog'
 import { Input } from '@/components/ui/input'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { VirtualTrackList, type VirtualTrackListRef } from '@/components/VirtualTrackList'
 import { PLATFORM_ACTIVE, PLATFORM_TEXT } from '@/lib/platform'
 import { cn, trackKey } from '@/lib/utils'
@@ -20,7 +20,7 @@ import { useSocketContext } from '@/providers/socket-context'
 import { EVENTS } from '@music-together/shared'
 import type { MusicSource, Track, Playlist } from '@music-together/shared'
 import type { BilibiliMetadataSource } from '@music-together/shared'
-import { Loader2, Music2, Search, ListMusic, RefreshCw, Sparkles } from 'lucide-react'
+import { Loader2, Music2, Search, ListMusic, Radio, RefreshCw, Sparkles } from 'lucide-react'
 import { motion } from 'motion/react'
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, useEffect } from 'react'
 import { toast } from 'sonner'
@@ -31,6 +31,7 @@ import { BilibiliMetadataDialog } from './BilibiliMetadataDialog'
 const EMPTY_QUEUE: Track[] = []
 type BilibiliQueueAction = 'add' | 'insert'
 type SearchMode = 'song' | 'album' | 'playlist' | 'recommend'
+type TencentRecommendationView = 'radar' | 'playlists'
 
 const SOURCES: { id: MusicSource; label: string }[] = [
   { id: 'netease', label: '网易云' },
@@ -107,6 +108,7 @@ function PlaylistList({ playlists, onSelect, hasMore, loadingMore, onLoadMore }:
 export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCurrent }: SearchDialogProps) {
   const [source, setSource] = useState<MusicSource>('netease')
   const [searchType, setSearchType] = useState<SearchMode>('song')
+  const [tencentRecommendationView, setTencentRecommendationView] = useState<TencentRecommendationView>('radar')
   const [bilibiliMatch, setBilibiliMatch] = useState<{ track: Track; action: BilibiliQueueAction } | null>(null)
   const [bilibiliCollectionMatch, setBilibiliCollectionMatch] = useState<{
     track: Track
@@ -180,8 +182,10 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
   const {
     recommendations,
     loading: recommendationsLoading,
+    loadingMore: recommendationsLoadingMore,
     loaded: recommendationsLoaded,
     load: loadRecommendations,
+    loadMore: loadMoreRecommendations,
     reset: resetRecommendations,
   } = useRecommendations(roomId)
   const activeRecommendation = useMemo(
@@ -490,8 +494,8 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={loadRecommendations}
-                    disabled={recommendationsLoading}
+                    onClick={() => loadRecommendations()}
+                    disabled={recommendationsLoading || recommendationsLoadingMore}
                     aria-label="刷新推荐"
                   >
                     <RefreshCw className={cn('h-4 w-4', recommendationsLoading && 'animate-spin')} />
@@ -557,6 +561,68 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                         : '平台暂时没有返回推荐内容'
                     }
                   />
+                ) : source === 'tencent' ? (
+                  <Tabs
+                    value={tencentRecommendationView}
+                    onValueChange={(value) => setTencentRecommendationView(value as TencentRecommendationView)}
+                    className="min-h-0 flex-1 gap-2"
+                  >
+                    <TabsList className="grid w-full grid-cols-2">
+                      <TabsTrigger value="radar">
+                        <Radio />
+                        雷达歌曲
+                      </TabsTrigger>
+                      <TabsTrigger value="playlists">
+                        <ListMusic />
+                        推荐歌单
+                      </TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="radar" className="flex min-h-0 flex-1 flex-col">
+                      <VirtualTrackList
+                        ref={listRef}
+                        tracks={activeRecommendation?.tracks ?? []}
+                        loading={false}
+                        hasMore={activeRecommendation?.pagination?.tracks?.hasMore ?? false}
+                        loadingMore={recommendationsLoadingMore}
+                        onLoadMore={loadMoreRecommendations}
+                        isTrackAdded={isTrackAdded}
+                        onAddTrack={handleAdd}
+                        onInsertAfterCurrent={handleInsertAfterCurrent}
+                        onArtistClick={(artist) => {
+                          setSearchType('song')
+                          handleSearch(artist)
+                        }}
+                        emptyIcon={<Radio className="h-8 w-8" />}
+                        emptyMessage={
+                          activeRecommendation?.unavailableReason === 'upstream_unavailable'
+                            ? 'QQ 雷达暂时不可用，请刷新重试'
+                            : 'QQ 雷达暂时没有返回歌曲'
+                        }
+                      />
+                    </TabsContent>
+                    <TabsContent value="playlists" className="flex min-h-0 flex-1 flex-col">
+                      {(activeRecommendation?.playlists?.length ?? 0) > 0 ? (
+                        <PlaylistList
+                          playlists={activeRecommendation?.playlists ?? []}
+                          onSelect={(playlist) => handleSelectAlbum(playlist, 'playlist')}
+                          hasMore={activeRecommendation?.pagination?.playlists?.hasMore ?? false}
+                          loadingMore={recommendationsLoadingMore}
+                          onLoadMore={loadMoreRecommendations}
+                        />
+                      ) : (
+                        <div className="flex min-h-0 flex-1 items-center justify-center rounded-md border">
+                          <div className="text-muted-foreground flex h-48 flex-col items-center justify-center gap-2 px-6 text-center">
+                            <ListMusic className="h-8 w-8" />
+                            <span className="text-sm">
+                              {activeRecommendation?.unavailableReason === 'upstream_unavailable'
+                                ? 'QQ 推荐歌单暂时不可用，请刷新重试'
+                                : 'QQ 暂时没有返回推荐歌单'}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </TabsContent>
+                  </Tabs>
                 ) : (activeRecommendation?.playlists?.length ?? 0) > 0 ? (
                   <PlaylistList
                     playlists={activeRecommendation?.playlists ?? []}
