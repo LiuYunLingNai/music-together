@@ -113,9 +113,11 @@ pnpm build
 ```env
 NODE_ENV=production
 PORT=3001
-DATABASE_URL=file:D:/music-together/data/music-together.db
-IDENTITY_SECRET=replace-with-a-long-random-secret
+DATABASE_URL=file:db文件路径，默认根目录/data，不填写则默认
 SERVER_ADMIN_IDS=你的账号ID
+QQ_MUSIC_API_KEY=填入key
+QQ_MUSIC_API_URL=填入url
+
 ```
 
 从项目根目录启动：
