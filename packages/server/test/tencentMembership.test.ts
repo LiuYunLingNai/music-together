@@ -74,7 +74,6 @@ test('refreshes and rotates a complete QQ Music credential', async () => {
       musicid: 123456,
       musickey: 'old-music-key',
       refresh_token: 'old-refresh-token',
-      refresh_key: 'old-refresh-key',
       access_token: 'old-access-token',
       loginType: 2,
     })
@@ -84,7 +83,7 @@ test('refreshes and rotates a complete QQ Music credential', async () => {
     assert.equal(requestBody?.req?.module, 'music.login.LoginServer')
     assert.equal(requestBody?.req?.method, 'Login')
     assert.equal(requestBody?.req?.param?.refresh_token, 'old-refresh-token')
-    assert.equal(requestBody?.req?.param?.refresh_key, 'old-refresh-key')
+    assert.equal(requestBody?.req?.param?.refresh_key, '')
     assert.equal(requestBody?.req?.param?.loginMode, 2)
     assert.equal(requestBody?.comm?.uin, 123456)
     assert.equal(requestBody?.comm?.tmeLoginType, 2)
@@ -112,4 +111,17 @@ test('rejects legacy QQ Music cookies without complete refresh fields', async ()
   const legacyCookie = 'uin=123456; qm_keyst=old-key; o_refresh_token=old-refresh-token'
   assert.equal(isRefreshableCredential(legacyCookie), false)
   await assert.rejects(refreshCredential(legacyCookie), /重新扫码登录/)
+})
+
+test('accepts either refresh_token or refresh_key from a new QR login', () => {
+  const baseCredential = { musicid: 123456, musickey: 'music-key', loginType: 2 }
+  assert.equal(
+    isRefreshableCredential(buildTencentCredentialCookie('', { ...baseCredential, refresh_token: 'refresh-token' })),
+    true,
+  )
+  assert.equal(
+    isRefreshableCredential(buildTencentCredentialCookie('', { ...baseCredential, refresh_key: 'refresh-key' })),
+    true,
+  )
+  assert.equal(isRefreshableCredential(buildTencentCredentialCookie('', baseCredential)), false)
 })

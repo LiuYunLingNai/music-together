@@ -44,7 +44,7 @@ export async function refreshDueTencentCredentials(
         try {
           const refreshedCookie = await refresh(entry.cookie)
           if (!tencentAuth.isRefreshableCredential(refreshedCookie)) {
-            throw new Error('刷新响应缺少 refresh_token / refresh_key')
+            throw new Error('刷新响应未包含可用的 refresh_token 或 refresh_key')
           }
           if (!authService.replaceCredentialCookie(entry.userId, 'tencent', entry.cookie, refreshedCookie)) {
             summary.skipped++

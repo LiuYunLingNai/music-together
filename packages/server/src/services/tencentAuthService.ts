@@ -136,7 +136,7 @@ export function parseTencentCredential(cookie: string): TencentCredential | null
 
 export function isRefreshableCredential(cookie: string): boolean {
   const credential = parseTencentCredential(cookie)
-  return Boolean(credential && credential.refreshVersion >= 1 && credential.refreshToken && credential.refreshKey)
+  return Boolean(credential && credential.refreshVersion >= 1 && (credential.refreshToken || credential.refreshKey))
 }
 
 function credentialField(data: MusicKeyData, ...names: string[]): unknown {
@@ -989,6 +989,12 @@ async function fetchMusicKeySession(code: string): Promise<string | null> {
     })
 
     if (data?.musickey && data?.musicid) {
+      logger.info('QQ 音乐登录刷新字段已获取', {
+        event: 'auth.qq_refresh_fields_received',
+        hasRefreshToken: Boolean(data.refresh_token || data.refreshToken),
+        hasRefreshKey: Boolean(data.refresh_key || data.refreshKey),
+        loginType: data.loginType,
+      })
       // Keep every field required by QQMusicApi.refresh_credential, not just
       // the short-lived musickey used by playback.
       return buildTencentCredentialCookie('', data)
