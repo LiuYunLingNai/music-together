@@ -10,7 +10,19 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { getLyricOffsetKey } from '@/lib/lyricOffset'
 import type { PlayMode, VoteAction } from '@music-together/shared'
 import { EVENTS, TIMING } from '@music-together/shared'
-import { ArrowRightToLine, Clock3, ListMusic, Pause, Play, Repeat, Repeat1, RotateCcw, Shuffle, SkipBack, SkipForward } from 'lucide-react'
+import {
+  ArrowRightToLine,
+  Clock3,
+  ListMusic,
+  Pause,
+  Play,
+  Repeat,
+  Repeat1,
+  RotateCcw,
+  Shuffle,
+  SkipBack,
+  SkipForward,
+} from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { memo, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
@@ -158,15 +170,15 @@ export const PlayerControls = memo(function PlayerControls({
               className="overflow-hidden rounded-lg border border-white/10 bg-black/15 px-3 py-2"
             >
               <div className="mb-2 flex items-center justify-between gap-2 text-xs">
-                <span className="font-medium text-white/80">歌词校正</span>
+                <span className="font-medium text-primary/90">歌词校正</span>
                 <div className="flex items-center gap-1">
-                  <span className="text-white/55">{lyricOffsetLabel}</span>
+                  <span className="text-primary/65">{lyricOffsetLabel}</span>
                   {lyricOffsetMs !== 0 && (
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon-xs"
-                      className="text-white/70 hover:bg-white/10 hover:text-white"
+                      className="text-primary/75 hover:bg-primary/10 hover:text-primary"
                       onClick={() => {
                         setLyricOffsetPreview(null)
                         clearLyricOffset(lyricOffsetKey)
@@ -234,7 +246,7 @@ export const PlayerControls = memo(function PlayerControls({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-9 w-9 text-white/70 hover:bg-white/10"
+                    className="h-9 w-9 text-primary/75 hover:bg-primary/10 hover:text-primary"
                     onClick={handlePlayModeToggle}
                     disabled={!canSetMode && !canVote}
                     aria-label={modeConfig.label}
@@ -261,7 +273,7 @@ export const PlayerControls = memo(function PlayerControls({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-9 w-9 text-white/70 hover:bg-white/10"
+                    className="h-9 w-9 text-primary/75 hover:bg-primary/10 hover:text-primary"
                     onClick={() => {
                       if (calibrationOpen) setLyricOffsetPreview(null)
                       setCalibrationOpen((open) => !open)
@@ -285,7 +297,7 @@ export const PlayerControls = memo(function PlayerControls({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-9 w-9 text-white/70 hover:bg-white/10"
+                    className="h-9 w-9 text-primary/75 hover:bg-primary/10 hover:text-primary"
                     disabled={disabled || skipCooldown}
                     onClick={() => handleSkip(onPrev, 'prev')}
                     aria-label="上一首"
@@ -303,7 +315,7 @@ export const PlayerControls = memo(function PlayerControls({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-14 w-14 rounded-full bg-white/20 text-white/90 hover:bg-white/30 hover:text-white"
+                    className="h-14 w-14 rounded-full bg-primary/20 text-primary hover:bg-primary/30 hover:text-primary"
                     disabled={disabled || playCooldown}
                     onClick={handlePlayPause}
                     aria-label={isPlaying ? '暂停' : '播放'}
@@ -325,7 +337,7 @@ export const PlayerControls = memo(function PlayerControls({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-9 w-9 text-white/70 hover:bg-white/10"
+                    className="h-9 w-9 text-primary/75 hover:bg-primary/10 hover:text-primary"
                     disabled={disabled || skipCooldown}
                     onClick={() => handleSkip(onNext, 'next')}
                     aria-label="下一首"
@@ -346,7 +358,7 @@ export const PlayerControls = memo(function PlayerControls({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="relative h-9 w-9 text-white/70 hover:bg-white/10"
+                    className="relative h-9 w-9 text-primary/75 hover:bg-primary/10 hover:text-primary"
                     onClick={onOpenQueue}
                     aria-label="播放列表"
                   >

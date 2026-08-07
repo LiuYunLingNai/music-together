@@ -18,11 +18,13 @@ import type {
   VoteAction,
   VoteState,
   RoomAutoFallbackEvent,
+  GlobalBackgroundSettings,
 } from './types.js'
 
 /** 服务端 → 客户端 事件接口 */
 export interface ServerToClientEvents {
   [EVENTS.SERVER_AUDIO_PROXY_POLICY]: (policy: AudioProxyPolicy) => void
+  [EVENTS.SERVER_GLOBAL_BACKGROUND]: (settings: GlobalBackgroundSettings) => void
 
   [EVENTS.ROOM_CREATED]: (data: { roomId: string; userId: string }) => void
   [EVENTS.ROOM_STATE]: (room: RoomState) => void

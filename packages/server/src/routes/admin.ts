@@ -1,10 +1,15 @@
 import { Router, type NextFunction, type Request, type Response } from 'express'
 import bcrypt from 'bcryptjs'
 import * as z from 'zod/v4'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
+import path from 'node:path'
+import sharp from 'sharp'
 import type { TypedServer } from '../middleware/types.js'
 import { roomRepo } from '../repositories/roomRepository.js'
 import { userRepo } from '../repositories/userRepository.js'
 import { audioProxyPolicyRepo } from '../repositories/audioProxyPolicyRepository.js'
+import { globalBackgroundRepo } from '../repositories/globalBackgroundRepository.js'
+import { databasePath } from '../repositories/database.js'
 import { destroyRoom } from '../services/roomLifecycleService.js'
 import { logger } from '../utils/logger.js'
 import { EVENTS } from '@music-together/shared'
@@ -38,6 +43,33 @@ const audioProxyPolicyPatchSchema = z.object({
   kugouForceProxy: z.boolean(),
 })
 
+const backgroundSourceSchema = z
+  .object({
+    image: z.string().min(1).optional(),
+    imageUrl: z.string().url().optional(),
+  })
+  .refine((value) => Boolean(value.image) !== Boolean(value.imageUrl), {
+    message: 'Provide either an image upload or an image URL',
+  })
+const backgroundPatchSchema = z
+  .object({
+    glassOverlay: z.boolean().optional(),
+    colorPreset: z.enum(['gold', 'ocean', 'rose', 'violet', 'sunset', 'mint', 'mono']).optional(),
+    backgroundBrightness: z.number().int().min(20).max(100).optional(),
+    autoTint: z.boolean().optional(),
+  })
+  .refine(
+    (value) =>
+      value.glassOverlay !== undefined ||
+      value.colorPreset !== undefined ||
+      value.backgroundBrightness !== undefined ||
+      value.autoTint !== undefined,
+    {
+    message: 'No background setting was provided',
+    },
+  )
+const MAX_BACKGROUND_BYTES = 6 * 1024 * 1024
+
 export function createAdminRoutes(io: TypedServer): Router {
   const router = Router()
   router.use(requireServerAdmin)
@@ -65,6 +97,94 @@ export function createAdminRoutes(io: TypedServer): Router {
       ...policy,
     })
     res.json(policy)
+  })
+
+  router.get('/background', (req, res) => {
+    const settings = globalBackgroundRepo.get()
+    logger.info('服务器管理员查看了全局背景设置', {
+      event: 'admin.global_background_viewed',
+      ...auditContext(req),
+      hasBackground: Boolean(settings.backgroundUrl),
+    })
+    res.json(settings)
+  })
+
+  router.post('/background', async (req, res) => {
+    const parsed = backgroundSourceSchema.safeParse(req.body)
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid image' })
+      return
+    }
+
+    try {
+      if (parsed.data.imageUrl) {
+        const parsedUrl = new URL(parsed.data.imageUrl)
+        if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+          res.status(400).json({ error: 'Only HTTP and HTTPS image URLs are supported' })
+          return
+        }
+        const settings = globalBackgroundRepo.update({ backgroundUrl: parsed.data.imageUrl })
+        io.emit(EVENTS.SERVER_GLOBAL_BACKGROUND, settings)
+        res.json(settings)
+        return
+      }
+
+      const match = /^data:image\/(png|jpeg|jpg|webp);base64,([a-z0-9+/=]+)$/i.exec(parsed.data.image!)
+      if (!match) throw new Error('Only PNG, JPEG, and WebP images are supported')
+      const input = Buffer.from(match[2]!, 'base64')
+      if (input.length > MAX_BACKGROUND_BYTES) throw new Error('Background image must be 6MB or smaller')
+
+      const output = await sharp(input, { failOn: 'error' })
+        .rotate()
+        .resize(2560, 1440, { fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: 84 })
+        .toBuffer()
+      const backgroundsDir = path.join(path.dirname(databasePath), 'backgrounds')
+      await mkdir(backgroundsDir, { recursive: true })
+      await writeFile(path.join(backgroundsDir, 'global-background.webp'), output)
+      const settings = globalBackgroundRepo.update({
+        backgroundUrl: `/uploads/backgrounds/global-background.webp?v=${Date.now()}`,
+      })
+      io.emit(EVENTS.SERVER_GLOBAL_BACKGROUND, settings)
+      logger.info('服务器管理员更新了全局背景', {
+        event: 'admin.global_background_updated',
+        ...auditContext(req),
+        inputBytes: input.length,
+        outputBytes: output.length,
+      })
+      res.json(settings)
+    } catch (err) {
+      logger.warn('Global background processing failed', { err, ...auditContext(req) })
+      res.status(400).json({ error: 'Invalid image data' })
+    }
+  })
+
+  router.patch('/background', (req, res) => {
+    const parsed = backgroundPatchSchema.safeParse(req.body)
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid background settings' })
+      return
+    }
+    const settings = globalBackgroundRepo.update(parsed.data)
+    io.emit(EVENTS.SERVER_GLOBAL_BACKGROUND, settings)
+    res.json(settings)
+  })
+
+  router.delete('/background', async (req, res) => {
+    try {
+      const backgroundsDir = path.join(path.dirname(databasePath), 'backgrounds')
+      await rm(path.join(backgroundsDir, 'global-background.webp'), { force: true })
+      const settings = globalBackgroundRepo.update({ backgroundUrl: null })
+      io.emit(EVENTS.SERVER_GLOBAL_BACKGROUND, settings)
+      logger.info('服务器管理员移除了全局背景', {
+        event: 'admin.global_background_removed',
+        ...auditContext(req),
+      })
+      res.json(settings)
+    } catch (err) {
+      logger.error('Global background removal failed', err, auditContext(req))
+      res.status(500).json({ error: 'Failed to remove background' })
+    }
   })
 
   router.get('/users', (req, res) => {

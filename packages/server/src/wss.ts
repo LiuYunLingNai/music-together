@@ -266,6 +266,15 @@ export class TypedServer<
 
   // -- Room / broadcast -----------------------------------------------------
 
+  /** Broadcast an event to every connected socket, regardless of room. */
+  emit<E extends keyof ServerToClientEvents & string>(event: E, ...args: any[]): void {
+    const data = args.length <= 1 ? args[0] : args
+    const message = JSON.stringify({ event, data })
+    for (const socket of this.sockets) {
+      if (socket.ws.readyState === WebSocket.OPEN) socket.ws.send(message)
+    }
+  }
+
   to(room: string): Broadcaster<ServerToClientEvents> {
     return new Broadcaster(this, room)
   }

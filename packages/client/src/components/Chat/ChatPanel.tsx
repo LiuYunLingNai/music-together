@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { ArrowDown, MessageSquare, Send } from 'lucide-react'
+import { ArrowDown, MessageSquare, PanelRightClose, Send } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -11,7 +11,11 @@ import { useChat } from '@/hooks/useChat'
 /** Threshold (px) to consider the user "at the bottom" of the scroll container */
 const SCROLL_BOTTOM_THRESHOLD = 80
 
-export function ChatPanel() {
+interface ChatPanelProps {
+  onCollapse?: () => void
+}
+
+export function ChatPanel({ onCollapse }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [showNewMsgHint, setShowNewMsgHint] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -56,8 +60,25 @@ export function ChatPanel() {
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col border-l border-border/50 bg-background/60 backdrop-blur-sm">
       {/* Header */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-border/50 px-4 py-3">
+      <div className="relative flex shrink-0 items-center gap-2 border-b border-border/50 px-4 py-3">
         <MessageSquare className="h-4 w-4 text-muted-foreground" />
+        {onCollapse && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                className="absolute right-3"
+                onClick={onCollapse}
+                aria-label="收起聊天"
+              >
+                <PanelRightClose className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>收起聊天</TooltipContent>
+          </Tooltip>
+        )}
         <span className="text-sm font-medium">聊天</span>
       </div>
 

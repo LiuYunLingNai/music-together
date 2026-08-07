@@ -9,6 +9,7 @@ import { logger } from '../utils/logger.js'
 import type { TypedServer } from '../middleware/types.js'
 import { EVENTS } from '@music-together/shared'
 import { audioProxyPolicyRepo } from '../repositories/audioProxyPolicyRepository.js'
+import { globalBackgroundRepo } from '../repositories/globalBackgroundRepository.js'
 
 export function initializeSocket(io: TypedServer) {
   io.on('connection', (socket) => {
@@ -17,6 +18,7 @@ export function initializeSocket(io: TypedServer) {
     // 新连接默认加入 lobby 频道（首页房间列表推送）
     socket.join('lobby')
     socket.emit(EVENTS.SERVER_AUDIO_PROXY_POLICY, audioProxyPolicyRepo.get())
+    socket.emit(EVENTS.SERVER_GLOBAL_BACKGROUND, globalBackgroundRepo.get())
 
     registerRoomController(io, socket)
     registerPlayerController(io, socket)

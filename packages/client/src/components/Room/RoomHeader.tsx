@@ -1,4 +1,4 @@
-import { Copy, Ellipsis, LogOut, Search, Settings, Users, Wifi, WifiOff } from 'lucide-react'
+import { Copy, Ellipsis, LogOut, MessageSquare, Search, Settings, Users, Wifi, WifiOff } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
@@ -16,12 +16,21 @@ import { toast } from 'sonner'
 
 interface RoomHeaderProps {
   onOpenSearch: () => void
+  onOpenChat: () => void
   onOpenSettings: () => void
   onOpenMembers: () => void
   onLeaveRoom: () => void
+  chatUnreadCount: number
 }
 
-export function RoomHeader({ onOpenSearch, onOpenSettings, onOpenMembers, onLeaveRoom }: RoomHeaderProps) {
+export function RoomHeader({
+  onOpenSearch,
+  onOpenChat,
+  onOpenSettings,
+  onOpenMembers,
+  onLeaveRoom,
+  chatUnreadCount,
+}: RoomHeaderProps) {
   // Fine-grained selectors to avoid re-renders from queue/playState changes
   const roomName = useRoomStore((s) => s.room?.name)
   const roomId = useRoomStore((s) => s.room?.id)
@@ -58,7 +67,7 @@ export function RoomHeader({ onOpenSearch, onOpenSettings, onOpenMembers, onLeav
   }
 
   return (
-    <header className="flex items-center justify-between border-b border-border/50 bg-background/95 px-2 py-2 backdrop-blur-sm sm:px-4">
+    <header className="flex items-center justify-between border-b border-border/50 bg-background/80 px-2 py-2 backdrop-blur-md sm:px-4">
       <div className="flex min-w-0 items-center gap-1.5 sm:gap-3">
         {roomId && (
           <>
@@ -73,7 +82,7 @@ export function RoomHeader({ onOpenSearch, onOpenSettings, onOpenMembers, onLeav
                 <Button
                   variant="outline"
                   size="sm"
-                  className="hidden h-7 gap-1 border-border/50 px-2 font-mono text-xs sm:flex"
+                  className="hidden h-7 gap-1 border-primary/20 bg-primary/5 px-2 font-mono text-xs text-primary sm:flex"
                   onClick={copyRoomLink}
                   aria-label="复制房间链接"
                 >
@@ -88,7 +97,7 @@ export function RoomHeader({ onOpenSearch, onOpenSettings, onOpenMembers, onLeav
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-7 gap-1 px-1.5 text-sm text-muted-foreground"
+                  className="h-7 gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 text-sm text-primary"
                   onClick={onOpenMembers}
                   aria-label="查看成员"
                 >
@@ -104,7 +113,7 @@ export function RoomHeader({ onOpenSearch, onOpenSettings, onOpenMembers, onLeav
         <Tooltip>
           <TooltipTrigger asChild>
             <span
-              className="flex items-center gap-1"
+              className="flex items-center gap-1 rounded-full border border-emerald-400/20 bg-emerald-400/5 px-2 py-1"
               role="status"
               aria-live="polite"
               aria-label={isConnected ? `已连接 · 延迟 ${Math.round(displayedRtt)}ms` : '连接断开，正在重连'}
@@ -126,6 +135,26 @@ export function RoomHeader({ onOpenSearch, onOpenSettings, onOpenMembers, onLeav
       </div>
 
       <div className="flex items-center gap-0.5 sm:gap-1">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="relative h-8 w-8 min-h-11 min-w-11 sm:hidden"
+              onClick={onOpenChat}
+              aria-label="聊天"
+            >
+              <MessageSquare className="h-4 w-4" />
+              {chatUnreadCount > 0 && (
+                <span className="absolute right-1 top-1 flex min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] leading-4 text-primary-foreground">
+                  {chatUnreadCount > 99 ? '99+' : chatUnreadCount}
+                </span>
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>聊天</TooltipContent>
+        </Tooltip>
+
         <Tooltip>
           <TooltipTrigger asChild>
             <Button

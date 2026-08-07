@@ -5,6 +5,7 @@ import { NicknameDialog } from '@/components/Lobby/NicknameDialog'
 import { PasswordDialog } from '@/components/Lobby/PasswordDialog'
 import { RoomListSection } from '@/components/Lobby/RoomListSection'
 import { UserPopover } from '@/components/Lobby/UserPopover'
+import { GlobalBackground } from '@/components/GlobalBackground'
 import { Separator } from '@/components/ui/separator'
 import { useLobby } from '@/hooks/useLobby'
 import { unlockAudio } from '@/lib/audioUnlock'
@@ -237,11 +238,12 @@ export default function HomePage() {
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.2 }}
-      className="flex min-h-screen flex-col bg-background"
+      className="mt-page-surface mt-home-page flex min-h-screen flex-col bg-background"
     >
+      <GlobalBackground />
       {/* Header */}
-      <header className="border-b border-border/50 bg-background/95 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
+      <header className="border-b border-border/50 bg-background/80 backdrop-blur-md">
+        <div className="mx-auto flex w-[min(1040px,calc(100%-32px))] items-center justify-between py-3">
           <div className="flex items-center gap-2.5">
             <Headphones className="h-5 w-5 text-primary" />
             <span className="text-base font-semibold tracking-tight text-foreground">Music Together</span>
@@ -252,7 +254,7 @@ export default function HomePage() {
 
       {/* Main */}
       <main className="flex-1">
-        <div className="mx-auto max-w-5xl px-4 py-8">
+        <div className="mx-auto w-[min(1040px,calc(100%-32px))] py-8 sm:py-10">
           <HeroSection />
 
           <ActionCards
@@ -263,15 +265,15 @@ export default function HomePage() {
             actionLoading={actionLoading}
           />
 
-          <Separator className="mb-8" />
+          <Separator className="mt-soft-divider mb-8 bg-transparent" />
 
           <RoomListSection rooms={rooms} isLoading={isLoading} onRoomClick={handleRoomClick} />
         </div>
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-border/50">
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-2 px-4 py-4">
+      <footer className="mt-[38px] border-t border-border bg-transparent">
+        <div className="mx-auto flex min-h-14 w-[min(1040px,calc(100%-32px))] flex-wrap items-center justify-between gap-2 py-4">
           <span className="text-xs text-muted-foreground">
             Music Together · Made by Yueby - Forked by LiuYunLingNai && 15515151 && YuapXc ·{' '}
             <a
