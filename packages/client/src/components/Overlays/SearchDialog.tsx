@@ -17,7 +17,7 @@ import { useRecommendations } from '@/hooks/useRecommendations'
 import { usePlaylist } from '@/hooks/usePlaylist'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useSocketContext } from '@/providers/socket-context'
-import { EVENTS } from '@music-together/shared'
+import { EVENTS, LIMITS } from '@music-together/shared'
 import type { MusicSource, Track, Playlist } from '@music-together/shared'
 import type { BilibiliMetadataSource } from '@music-together/shared'
 import { Loader2, Music2, Search, ListMusic, Radio, RefreshCw, Sparkles } from 'lucide-react'
@@ -172,6 +172,7 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
     hasMoreTracks,
     fetchPlaylistTracks,
     loadMoreTracks,
+    fetchAllPlaylistTracks,
   } = usePlaylist()
 
   const { results, loading, loadingMore, hasMore, hasSearched, search, loadMore, resetState } = useSearch(
@@ -364,7 +365,12 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
   const handleAddBatch = useCallback(
     (tracks: Track[], playlistName?: string) => {
       if (tracks.length === 0) return
-      socket.emit(EVENTS.QUEUE_ADD_BATCH, { tracks, playlistName })
+      for (let offset = 0; offset < tracks.length; offset += LIMITS.QUEUE_BATCH_MAX_SIZE) {
+        socket.emit(EVENTS.QUEUE_ADD_BATCH, {
+          tracks: tracks.slice(offset, offset + LIMITS.QUEUE_BATCH_MAX_SIZE),
+          playlistName,
+        })
+      }
       setAddedIds((prev) => {
         const next = new Set(prev)
         for (const t of tracks) next.add(trackKey(t))
@@ -452,6 +458,7 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
               onAddTrack={handleAdd}
               onInsertAfterCurrent={handleInsertAfterCurrent}
               onAddAll={handleAddBatch}
+              onLoadAll={fetchAllPlaylistTracks}
               onLoadMore={loadMoreTracks}
             />
           ) : (

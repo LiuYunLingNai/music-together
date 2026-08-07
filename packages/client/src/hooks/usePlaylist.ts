@@ -226,6 +226,68 @@ export function usePlaylist() {
     }
   }, [hasMoreTracks, playlistTotal])
 
+  /**
+   * Fetch every page of the active playlist and return the complete track list.
+   * The regular detail view stays paginated; this is only used by "add all".
+   */
+  const fetchAllPlaylistTracks = useCallback(async (): Promise<Track[]> => {
+    const ctx = currentPlaylistRef.current
+    if (!ctx) return []
+    if (loadingMoreRef.current) throw new Error('Playlist tracks are already loading')
+
+    loadingMoreRef.current = true
+    setLoadingMore(true)
+
+    try {
+      const allTracks: Track[] = []
+      let offset = 0
+      let total = playlistTotal
+      let hasMore = true
+
+      while (hasMore) {
+        const url = buildPlaylistUrl(ctx.source, ctx.id, PAGE_SIZE, offset, {
+          total,
+          roomId: useRoomStore.getState().room?.id,
+          type: ctx.type,
+        })
+        const res = await fetch(url, { credentials: 'include' })
+        if (!res.ok) throw new Error(`Failed to load playlist page: ${res.status}`)
+
+        const currentCtx = currentPlaylistRef.current
+        if (
+          !currentCtx ||
+          currentCtx.source !== ctx.source ||
+          currentCtx.id !== ctx.id ||
+          currentCtx.type !== ctx.type
+        ) {
+          throw new Error('Active playlist changed while loading')
+        }
+
+        const data = await res.json()
+        const pageTracks: Track[] = data.tracks ?? []
+        total = data.total ?? total
+
+        if (pageTracks.length === 0 && data.hasMore) {
+          throw new Error('Playlist pagination returned an empty page')
+        }
+
+        allTracks.push(...pageTracks)
+        offset += pageTracks.length
+        hasMore = data.hasMore ?? offset < total
+
+        setPlaylistTracks([...allTracks])
+        setPlaylistTotal(total)
+        setHasMoreTracks(hasMore)
+        offsetRef.current = offset
+      }
+
+      return allTracks
+    } finally {
+      loadingMoreRef.current = false
+      setLoadingMore(false)
+    }
+  }, [playlistTotal])
+
   const addTrackToQueue = useCallback(
     (track: Track) => {
       socket.emit(EVENTS.QUEUE_ADD, { track })
@@ -263,6 +325,7 @@ export function usePlaylist() {
     fetchMyPlaylists,
     fetchPlaylistTracks,
     loadMoreTracks,
+    fetchAllPlaylistTracks,
     addTrackToQueue,
     insertTrackAfterCurrent,
     addBatchToQueue,

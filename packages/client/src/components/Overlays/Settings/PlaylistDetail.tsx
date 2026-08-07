@@ -6,7 +6,7 @@ import { trackKey } from '@/lib/utils'
 import { useRoomStore } from '@/stores/roomStore'
 import type { BilibiliMetadataSource, Playlist, Track } from '@music-together/shared'
 import { LIMITS } from '@music-together/shared'
-import { ArrowLeft, ListPlus, Music } from 'lucide-react'
+import { ArrowLeft, ListPlus, Loader2, Music } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
@@ -24,6 +24,7 @@ interface PlaylistDetailProps {
   onAddTrack: (track: Track) => void
   onInsertAfterCurrent?: (track: Track) => void
   onAddAll: (tracks: Track[], playlistName?: string) => void
+  onLoadAll: () => Promise<Track[]>
   onLoadMore: () => void
 }
 
@@ -38,11 +39,13 @@ export function PlaylistDetail({
   onAddTrack,
   onInsertAfterCurrent,
   onAddAll,
+  onLoadAll,
   onLoadMore,
 }: PlaylistDetailProps) {
   const queue = useRoomStore((s) => s.room?.queue ?? EMPTY_QUEUE)
   const roomId = useRoomStore((s) => s.room?.id)
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set())
+  const [addingAll, setAddingAll] = useState(false)
   const [bilibiliMatch, setBilibiliMatch] = useState<{ track: Track; action: BilibiliQueueAction } | null>(null)
   const queueKeys = useMemo(() => new Set(queue.map(trackKey)), [queue])
 
@@ -90,25 +93,61 @@ export function PlaylistDetail({
 
   // Dynamic "add all" logic — filter duplicates
   const availableSlots = LIMITS.QUEUE_MAX_SIZE - queue.length
-  const uniqueTracks = useMemo(() => tracks.filter((t) => !isTrackAdded(t)), [tracks, isTrackAdded])
+  const uniqueTracks = useMemo(() => {
+    const seen = new Set([...queueKeys, ...addedIds])
+    return tracks.filter((track) => {
+      const key = trackKey(track)
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  }, [tracks, queueKeys, addedIds])
   const addCount = Math.min(availableSlots, uniqueTracks.length)
   const isQueueFull = availableSlots <= 0
 
-  const handleAddAll = useCallback(() => {
-    if (addCount <= 0) return
-    const toAdd = uniqueTracks.slice(0, addCount)
-    onAddAll(toAdd, playlist?.name)
-    setAddedIds((prev) => {
-      const next = new Set(prev)
-      for (const t of toAdd) next.add(trackKey(t))
-      return next
-    })
-    if (addCount < uniqueTracks.length) {
-      toast.success(`已添加 ${addCount} 首到队列（队列已满，还有 ${uniqueTracks.length - addCount} 首未添加）`)
-    } else {
-      toast.success(`已添加全部 ${addCount} 首到队列`)
+  const handleAddAll = useCallback(async () => {
+    if (addingAll || isQueueFull) return
+    setAddingAll(true)
+
+    try {
+      const allTracks = hasMore ? await onLoadAll() : tracks
+      const currentQueue = useRoomStore.getState().room?.queue ?? EMPTY_QUEUE
+      const seen = new Set(currentQueue.map(trackKey))
+      for (const id of addedIds) seen.add(id)
+
+      const tracksToAdd = allTracks.filter((track) => {
+        const key = trackKey(track)
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
+      const currentAvailableSlots = LIMITS.QUEUE_MAX_SIZE - currentQueue.length
+      const toAdd = tracksToAdd.slice(0, currentAvailableSlots)
+
+      if (toAdd.length === 0) {
+        toast.info('歌单中的歌曲已全部在队列中')
+        return
+      }
+
+      onAddAll(toAdd, playlist?.name)
+      setAddedIds((prev) => {
+        const next = new Set(prev)
+        for (const track of toAdd) next.add(trackKey(track))
+        return next
+      })
+
+      const skippedCount = tracksToAdd.length - toAdd.length
+      if (skippedCount > 0) {
+        toast.success(`已添加 ${toAdd.length} 首到队列（队列已满，还有 ${skippedCount} 首未添加）`)
+      } else {
+        toast.success(`已添加歌单全部 ${toAdd.length} 首到队列`)
+      }
+    } catch {
+      toast.error('完整歌单加载失败，请重试')
+    } finally {
+      setAddingAll(false)
     }
-  }, [addCount, uniqueTracks, onAddAll, playlist?.name])
+  }, [addingAll, isQueueFull, hasMore, onLoadAll, tracks, addedIds, onAddAll, playlist?.name])
 
   const applyBilibiliMetadataMatch = useCallback(
     (metadataTrack: Track, metadataSource: BilibiliMetadataSource) => {
@@ -140,12 +179,16 @@ export function PlaylistDetail({
   let addAllLabel: string
   if (loading) {
     addAllLabel = '加载中…'
+  } else if (addingAll) {
+    addAllLabel = '正在加载全部…'
   } else if (tracks.length === 0) {
     addAllLabel = '添加全部'
   } else if (isQueueFull) {
     addAllLabel = '队列已满'
-  } else if (uniqueTracks.length === 0) {
+  } else if (!hasMore && uniqueTracks.length === 0) {
     addAllLabel = '全部已添加'
+  } else if (hasMore) {
+    addAllLabel = `添加全部 ${Math.min(availableSlots, total)} 首`
   } else if (addCount === uniqueTracks.length) {
     addAllLabel = `添加全部 ${addCount} 首`
   } else {
@@ -173,10 +216,10 @@ export function PlaylistDetail({
           variant="outline"
           size="sm"
           onClick={handleAddAll}
-          disabled={loading || isQueueFull || uniqueTracks.length === 0}
+          disabled={loading || loadingMore || addingAll || isQueueFull || (!hasMore && uniqueTracks.length === 0)}
           className="shrink-0 gap-1"
         >
-          <ListPlus className="h-3.5 w-3.5" />
+          {addingAll ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ListPlus className="h-3.5 w-3.5" />}
           {addAllLabel}
         </Button>
       </div>
