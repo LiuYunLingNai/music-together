@@ -120,18 +120,35 @@ internal fun PlaylistDetailPane(state: AppState, playlist: Playlist, viewModel: 
             Column(Modifier.weight(1f)) {
                 Text(playlist.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold)
                 Text(
-                    if (hub.playlistLoading) "加载中…" else "${hub.playlistTotal} 首 · 已加载 ${hub.playlistTracks.size}",
+                    when {
+                        hub.playlistLoading -> "加载中…"
+                        hub.playlistAddingAll -> "正在加载全部 · ${hub.playlistTracks.size}/${hub.playlistTotal}"
+                        else -> "${hub.playlistTotal} 首 · 已加载 ${hub.playlistTracks.size}"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             FilledTonalButton(
                 onClick = { viewModel.addPlaylistTracksToQueue(playlist) },
-                enabled = !hub.playlistLoading && addableCount > 0,
+                enabled = !hub.playlistLoading && !hub.playlistLoadingMore && !hub.playlistAddingAll &&
+                    availableCount > 0 && (hub.playlistHasMore || addableCount > 0),
             ) {
-                Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null, Modifier.size(18.dp))
+                if (hub.playlistAddingAll) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else {
+                    Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null, Modifier.size(18.dp))
+                }
                 Spacer(Modifier.width(4.dp))
-                Text(if (addableCount > 0) "添加 $addableCount 首" else "已添加")
+                Text(
+                    when {
+                        hub.playlistAddingAll -> "加载全部"
+                        availableCount <= 0 -> "队列已满"
+                        hub.playlistHasMore -> "添加全部"
+                        addableCount > 0 -> "添加 $addableCount 首"
+                        else -> "已添加"
+                    },
+                )
             }
         }
         HorizontalDivider()

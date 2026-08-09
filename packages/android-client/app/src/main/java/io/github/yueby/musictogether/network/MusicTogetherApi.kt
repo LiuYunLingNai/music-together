@@ -245,10 +245,14 @@ class MusicTogetherApi(private val client: OkHttpClient) {
         server: ServerAddress,
         roomId: String,
         limit: Int = 50,
+        radarPage: Int = 1,
+        playlistOffset: Int = 0,
     ): List<PlatformRecommendation> = withContext(Dispatchers.IO) {
         val url = server.api("music", "recommendations").newBuilder()
             .addQueryParameter("roomId", roomId)
             .addQueryParameter("limit", limit.coerceIn(1, 50).toString())
+            .addQueryParameter("radarPage", radarPage.coerceAtLeast(1).toString())
+            .addQueryParameter("playlistOffset", playlistOffset.coerceAtLeast(0).toString())
             .build()
         parsePlatformRecommendations(executeJson(url, "recommendations"))
     }
@@ -285,10 +289,11 @@ class MusicTogetherApi(private val client: OkHttpClient) {
         val tracks = json.optJSONArray("tracks")?.let { array ->
             List(array.length()) { array.getJSONObject(it).toTrack() }
         }.orEmpty()
+        val total = json.optInt("total", offset + tracks.size).coerceAtLeast(offset + tracks.size)
         PlaylistPage(
             tracks = tracks,
-            total = json.optInt("total", tracks.size),
-            hasMore = json.optBoolean("hasMore", false),
+            total = total,
+            hasMore = if (json.has("hasMore")) json.optBoolean("hasMore") else offset + tracks.size < total,
         )
     }
 
@@ -411,17 +416,4 @@ class MusicTogetherApi(private val client: OkHttpClient) {
     private companion object {
         val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     }
-}
-
-internal fun parsePlatformRecommendations(json: JSONObject): List<PlatformRecommendation> {
-    val recommendations = json.optJSONArray("recommendations") ?: JSONArray()
-    return List(recommendations.length()) { index ->
-        val recommendation = recommendations.getJSONObject(index)
-        val tracks = recommendation.optJSONArray("tracks") ?: JSONArray()
-        PlatformRecommendation(
-            platform = recommendation.optString("platform"),
-            tracks = List(tracks.length()) { trackIndex -> tracks.getJSONObject(trackIndex).toTrack() },
-            unavailableReason = recommendation.stringOrNull("unavailableReason"),
-        )
-    }.filter { it.platform.isNotBlank() }
 }

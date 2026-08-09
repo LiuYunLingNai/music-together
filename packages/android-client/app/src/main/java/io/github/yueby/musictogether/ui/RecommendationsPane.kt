@@ -2,7 +2,6 @@ package io.github.yueby.musictogether.ui
 
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -11,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
@@ -47,9 +47,18 @@ import io.github.yueby.musictogether.model.queueIdentity
 internal fun recommendationPlatforms(recommendations: List<PlatformRecommendation>): List<String> =
     recommendations.map { it.platform }.distinct()
 
+internal fun recommendationShowsTracks(recommendation: PlatformRecommendation, tencentView: String): Boolean =
+    recommendation.platform == "bilibili" ||
+        (recommendation.platform == "tencent" && tencentView == "tracks") ||
+        (recommendation.platform != "tencent" && recommendation.playlists.isEmpty() && recommendation.tracks.isNotEmpty())
+
 @Composable
 internal fun RecommendationsPane(state: AppState, viewModel: MusicTogetherViewModel) {
     val room = state.room ?: return
+    state.platformHub.selectedPlaylist?.let { playlist ->
+        PlaylistDetailPane(state, playlist, viewModel)
+        return
+    }
     val platforms = recommendationPlatforms(state.recommendations)
     var selectedPlatform by remember(room.id) { mutableStateOf<String?>(null) }
     val selectedRecommendation = state.recommendations.firstOrNull { it.platform == selectedPlatform }
@@ -74,7 +83,10 @@ internal fun RecommendationsPane(state: AppState, viewModel: MusicTogetherViewMo
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            IconButton(onClick = viewModel::loadRecommendations, enabled = !state.recommendationsLoading) {
+            IconButton(
+                onClick = viewModel::loadRecommendations,
+                enabled = !state.recommendationsLoading && !state.recommendationsLoadingMore,
+            ) {
                 Icon(Icons.Default.Refresh, "刷新推荐")
             }
         }
@@ -111,48 +123,166 @@ internal fun RecommendationsPane(state: AppState, viewModel: MusicTogetherViewMo
                         )
                     }
                 }
-                RecommendationTrackList(selectedRecommendation, state, viewModel)
+                RecommendationContent(selectedRecommendation, state, viewModel)
             }
         }
     }
 }
 
 @Composable
-private fun RecommendationTrackList(
+private fun RecommendationContent(
     recommendation: PlatformRecommendation?,
     state: AppState,
     viewModel: MusicTogetherViewModel,
 ) {
-    when {
-        recommendation == null -> RecommendationStatus(text = "暂无可用推荐")
-        recommendation.tracks.isEmpty() -> RecommendationStatus(
-            text = when (recommendation.unavailableReason) {
-                "upstream_unavailable" -> "平台推荐暂时不可用，请刷新重试"
-                else -> "平台暂时没有返回推荐内容"
-            },
-            action = if (recommendation.unavailableReason == "upstream_unavailable") viewModel::loadRecommendations else null,
-        )
-        else -> LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(vertical = 8.dp),
+    if (recommendation == null) {
+        RecommendationStatus(text = "暂无可用推荐")
+        return
+    }
+    var tencentView by remember(recommendation.platform) { mutableStateOf("tracks") }
+    if (recommendation.platform == "tencent") {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            items(recommendation.tracks, key = { it.queueIdentity() }) { track ->
-                val isAdded = state.room?.queue?.any { it.queueIdentity() == track.queueIdentity() } == true
-                TrackRow(
-                    track = track,
-                    subtitle = "${track.artist.joinToString(" / ")} · ${track.album}",
-                    primaryAction = null,
-                    primaryIcon = Icons.AutoMirrored.Filled.PlaylistAdd,
-                    onClick = if (isAdded) null else ({ viewModel.addTrack(track) }),
-                    trailingContent = {
-                        RecommendationTrackActions(
-                            isAdded = isAdded,
-                            onAdd = { viewModel.addTrack(track) },
-                            onPin = { viewModel.insertAfterCurrent(track) },
-                        )
-                    },
-                )
-                HorizontalDivider()
+            AssistChip(
+                onClick = { tencentView = "tracks" },
+                label = { Text("雷达歌曲") },
+                leadingIcon = if (tencentView == "tracks") {
+                    { Icon(Icons.Default.Check, null, Modifier.size(16.dp)) }
+                } else {
+                    null
+                },
+            )
+            AssistChip(
+                onClick = { tencentView = "playlists" },
+                label = { Text("推荐歌单") },
+                leadingIcon = if (tencentView == "playlists") {
+                    { Icon(Icons.Default.Check, null, Modifier.size(16.dp)) }
+                } else {
+                    null
+                },
+            )
+        }
+    }
+    val showTracks = recommendationShowsTracks(recommendation, tencentView)
+    if (showTracks) {
+        RecommendationTrackList(
+            recommendation = recommendation,
+            state = state,
+            viewModel = viewModel,
+            canLoadMore = recommendation.platform == "tencent" &&
+                recommendation.pagination?.tracks?.hasMore == true,
+        )
+    } else {
+        RecommendationPlaylistList(
+            recommendation = recommendation,
+            state = state,
+            viewModel = viewModel,
+            canLoadMore = recommendation.platform == "tencent" &&
+                recommendation.pagination?.playlists?.hasMore == true,
+        )
+    }
+}
+
+@Composable
+private fun RecommendationTrackList(
+    recommendation: PlatformRecommendation,
+    state: AppState,
+    viewModel: MusicTogetherViewModel,
+    canLoadMore: Boolean,
+) {
+    if (recommendation.tracks.isEmpty()) {
+        RecommendationStatus(
+            text = recommendationEmptyText(recommendation, "平台暂时没有返回推荐歌曲"),
+            action = recommendationRetry(recommendation, viewModel),
+        )
+        return
+    }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(vertical = 8.dp),
+    ) {
+        items(recommendation.tracks, key = { it.queueIdentity() }) { track ->
+            val isAdded = state.room?.queue?.any { it.queueIdentity() == track.queueIdentity() } == true
+            TrackRow(
+                track = track,
+                subtitle = "${track.artist.joinToString(" / ")} · ${track.album}",
+                primaryAction = null,
+                primaryIcon = Icons.AutoMirrored.Filled.PlaylistAdd,
+                onClick = if (isAdded) null else ({ viewModel.addTrack(track) }),
+                trailingContent = {
+                    RecommendationTrackActions(
+                        isAdded = isAdded,
+                        onAdd = { viewModel.addTrack(track) },
+                        onPin = { viewModel.insertAfterCurrent(track) },
+                    )
+                },
+            )
+            HorizontalDivider()
+        }
+        recommendationLoadMoreItem(canLoadMore, state, viewModel)
+    }
+}
+
+@Composable
+private fun RecommendationPlaylistList(
+    recommendation: PlatformRecommendation,
+    state: AppState,
+    viewModel: MusicTogetherViewModel,
+    canLoadMore: Boolean,
+) {
+    if (recommendation.playlists.isEmpty()) {
+        RecommendationStatus(
+            text = recommendationEmptyText(recommendation, "平台暂时没有返回推荐歌单"),
+            action = recommendationRetry(recommendation, viewModel),
+        )
+        return
+    }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(vertical = 8.dp),
+    ) {
+        items(recommendation.playlists, key = { "${it.source}:${it.id}" }) { playlist ->
+            PlaylistRow(playlist) { viewModel.openPlaylist(playlist) }
+            HorizontalDivider()
+        }
+        recommendationLoadMoreItem(canLoadMore, state, viewModel)
+    }
+}
+
+private fun recommendationEmptyText(recommendation: PlatformRecommendation, fallback: String): String =
+    if (recommendation.unavailableReason == "upstream_unavailable") {
+        "平台推荐暂时不可用，请刷新重试"
+    } else {
+        fallback
+    }
+
+private fun recommendationRetry(
+    recommendation: PlatformRecommendation,
+    viewModel: MusicTogetherViewModel,
+): (() -> Unit)? = if (recommendation.unavailableReason == "upstream_unavailable") {
+    viewModel::loadRecommendations
+} else {
+    null
+}
+
+private fun LazyListScope.recommendationLoadMoreItem(
+    canLoadMore: Boolean,
+    state: AppState,
+    viewModel: MusicTogetherViewModel,
+) {
+    if (!canLoadMore) return
+    item {
+        TextButton(
+            onClick = viewModel::loadMoreRecommendations,
+            enabled = !state.recommendationsLoadingMore,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        ) {
+            if (state.recommendationsLoadingMore) {
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+            } else {
+                Text(if (state.recommendationsError != null) "加载失败，点击重试" else "继续加载")
             }
         }
     }

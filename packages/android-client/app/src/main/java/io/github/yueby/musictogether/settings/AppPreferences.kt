@@ -2,8 +2,10 @@ package io.github.yueby.musictogether.settings
 
 import android.content.Context
 import io.github.yueby.musictogether.logging.AppLogger
+import io.github.yueby.musictogether.model.DEFAULT_MUSIC_DOWNLOAD_DIRECTORY
 import io.github.yueby.musictogether.model.UpdateDownloadSource
 import io.github.yueby.musictogether.network.ServerCatalog
+import io.github.yueby.musictogether.network.normalizeMusicDownloadDirectory
 import org.json.JSONObject
 
 internal data class PlaybackSyncSettings(
@@ -57,6 +59,14 @@ internal class AppPreferences(context: Context) {
 
     fun setUpdateSource(source: UpdateDownloadSource) {
         preferences.edit().putString(UPDATE_SOURCE_KEY, source.name).apply()
+    }
+
+    fun musicDownloadDirectory(): String = normalizeMusicDownloadDirectory(
+        preferences.getString(MUSIC_DOWNLOAD_DIRECTORY_KEY, DEFAULT_MUSIC_DOWNLOAD_DIRECTORY).orEmpty(),
+    )
+
+    fun setMusicDownloadDirectory(value: String) {
+        preferences.edit().putString(MUSIC_DOWNLOAD_DIRECTORY_KEY, normalizeMusicDownloadDirectory(value)).apply()
     }
 
     fun syncPacketInterval(defaultValue: Int, range: IntRange): Int =
@@ -161,6 +171,7 @@ internal class AppPreferences(context: Context) {
         const val SERVERS_KEY = "server_urls"
         const val NICKNAME_KEY = "nickname"
         const val UPDATE_SOURCE_KEY = "update_download_source"
+        const val MUSIC_DOWNLOAD_DIRECTORY_KEY = "music_download_directory"
         const val LYRIC_OFFSETS_KEY = "lyric_offsets"
         const val PLAYBACK_TEMPO_SYNC_KEY = "playback_tempo_sync_enabled"
         const val PLAYBACK_HARD_SEEK_SYNC_KEY = "playback_hard_seek_sync_enabled"
