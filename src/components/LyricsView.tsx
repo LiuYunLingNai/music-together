@@ -1,28 +1,49 @@
-import { LocateFixed, Music2 } from 'lucide-react'
+import type { LyricLineMouseEvent, OptimizeLyricOptions } from '@applemusic-like-lyrics/core'
+import '@applemusic-like-lyrics/core/style.css'
+import { LyricPlayer } from '@applemusic-like-lyrics/react'
+import type { LyricPlayerRef } from '@applemusic-like-lyrics/react'
+import { Music2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { LyricLine, LyricWord } from '../domain/types'
-import { buildInterludes, findActiveGroup, findActiveInterlude, wordProgress } from '../lyrics/engine'
+import { createPortal } from 'react-dom'
+import { toAmllLines } from '../lyrics/amll'
 import { seekPlayback } from '../services/runtime'
 import { useAppStore } from '../store/app-store'
 
+const FULL_SIZE_STYLE = { width: '100%', height: '100%' } as const
+
+// The desktop timeline has already gone through the normalization pipeline in
+// engine.ts. Disabling AMLL's second pass prevents focus times from drifting.
+const PRESERVE_DESKTOP_TIMELINE: OptimizeLyricOptions = {
+  normalizeSpaces: false,
+  resetLineTimestamps: false,
+  convertExcessiveBackgroundLines: false,
+  syncMainAndBackgroundLines: false,
+  cleanUnintentionalOverlaps: false,
+  tryAdvanceStartTime: false,
+}
+
+const SPRING_PRESETS = {
+  smooth: { mass: 0.8, damping: 18, stiffness: 110, soft: true },
+  sharp: { mass: 0.55, damping: 22, stiffness: 190, soft: false },
+  soft: { mass: 1.15, damping: 20, stiffness: 72, soft: true },
+  easeout: { mass: 0.7, damping: 26, stiffness: 125, soft: true },
+} as const
+
 export function LyricsView() {
   const groups = useAppStore((state) => state.lyricGroups)
-  const currentTime = useAppStore((state) => state.currentTime)
+  const isPlaying = useAppStore((state) => state.isPlaying)
   const loading = useAppStore((state) => state.lyricsLoading)
   const error = useAppStore((state) => state.lyricsError)
   const room = useAppStore((state) => state.room)!
   const settings = useAppStore((state) => state.lyricSettings)
+  const visual = useAppStore((state) => state.playerVisualSettings)
+  const notify = useAppStore((state) => state.notify)
   const [offset, setOffset] = useState(0)
-  const [manual, setManual] = useState(false)
-  const manualTimer = useRef(0)
-  const hasFocused = useRef(false)
-  const scrollRef = useRef<HTMLDivElement | null>(null)
-  const lineRefs = useRef<Array<HTMLButtonElement | null>>([])
-  const positionMs = currentTime * 1000 - offset
-  const activeIndex = findActiveGroup(groups, positionMs)
-  const interludes = useMemo(() => buildInterludes(groups), [groups])
-  const activeInterlude = findActiveInterlude(interludes, positionMs)
+  const [reducedMotion, setReducedMotion] = useState(false)
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; original: string; translated: string; startTime: number } | null>(null)
+  const playerRef = useRef<LyricPlayerRef>(null)
+  const lines = useMemo(() => toAmllLines(groups), [groups])
 
   useEffect(() => {
     const track = room.currentTrack
@@ -35,99 +56,92 @@ export function LyricsView() {
   }, [room.currentTrack])
 
   useEffect(() => {
-    if (manual || activeIndex < 0) return
-    scrollLyricLine(scrollRef.current, lineRefs.current[activeIndex], settings.alignAnchor, settings.alignPosition, settings.animation && hasFocused.current ? 'smooth' : 'auto')
-    hasFocused.current = true
-  }, [activeIndex, manual, settings.alignAnchor, settings.alignPosition, settings.animation])
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const sync = () => setReducedMotion(media.matches)
+    sync()
+    media.addEventListener('change', sync)
+    return () => media.removeEventListener('change', sync)
+  }, [])
 
-  const markManual = () => {
-    setManual(true)
-    window.clearTimeout(manualTimer.current)
-    manualTimer.current = window.setTimeout(() => setManual(false), 3_500)
-  }
+  useEffect(() => {
+    if (!contextMenu) return
+    const close = () => setContextMenu(null)
+    window.addEventListener('pointerdown', close)
+    window.addEventListener('blur', close)
+    return () => { window.removeEventListener('pointerdown', close); window.removeEventListener('blur', close) }
+  }, [contextMenu])
 
-  const restoreFocus = () => {
-    setManual(false)
-    scrollLyricLine(scrollRef.current, lineRefs.current[activeIndex], settings.alignAnchor, settings.alignPosition, settings.animation ? 'smooth' : 'auto')
-  }
+  useEffect(() => {
+    const updateTime = (seconds: number) => playerRef.current?.lyricPlayer?.setCurrentTime(Math.max(0, Math.round(seconds * 1000 - offset)))
+    updateTime(useAppStore.getState().currentTime)
+    return useAppStore.subscribe((state, previous) => {
+      if (state.currentTime !== previous.currentTime) updateTime(state.currentTime)
+    })
+  }, [lines, offset])
 
   if (loading) return <div className="lyrics-state"><span className="loading-bars"><i /><i /><i /></span><strong>正在整理歌词时间轴</strong></div>
-  if (error || !groups.length) return <div className="lyrics-state"><Music2 size={28} /><strong>{error || '这首歌暂无歌词'}</strong><span>音乐仍会继续播放</span></div>
+  if (error || !lines.length) return <div className="lyrics-state"><Music2 size={28} /><strong>{error || '这首歌暂时没有歌词'}</strong><span>音乐仍会继续播放</span></div>
+
+  const handleLineClick = (event: LyricLineMouseEvent) => {
+    const line = event.line.getLine()
+    const startTime = line.words[0]?.startTime ?? line.startTime
+    seekPlayback(Math.max(0, (startTime + offset) / 1000))
+  }
+
+  const handleLineContextMenu = (event: LyricLineMouseEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const line = event.line.getLine()
+    setContextMenu({
+      x: Math.min(event.clientX, window.innerWidth - 230),
+      y: Math.min(event.clientY, window.innerHeight - 150),
+      original: line.words.map((word) => word.word).join(''),
+      translated: line.translatedLyric ?? '',
+      startTime: line.words[0]?.startTime ?? line.startTime,
+    })
+  }
+  const copy = async (text: string) => { await navigator.clipboard.writeText(text); notify('歌词已复制'); setContextMenu(null) }
+  const spring = SPRING_PRESETS[visual.lyricMotion]
 
   return (
     <div
-      className={`lyrics-wrap ${settings.animation ? '' : 'lyrics--no-animation'} ${settings.blur ? 'lyrics--blur' : ''} ${settings.scale ? '' : 'lyrics--no-scale'}`}
+      className={`lyrics-wrap amll-container lyrics-wrap--${visual.lyricMotion}`}
       style={{
-        '--lyric-anchor-position': `${settings.alignPosition * 100}%`,
-        '--lyric-font-size': settings.fontSize / 100,
-        '--lyric-font-weight': settings.fontWeight,
-        '--lyric-translation-size': settings.translationFontSize / 100,
-        '--lyric-roman-size': settings.romanFontSize / 100,
+        fontWeight: settings.fontWeight,
+        fontFamily: visual.customFontFamily || undefined,
+        '--amll-lp-font-size': `clamp(24px, calc(5.8cqh * ${settings.fontSize / 100}), 62px)`,
+        '--amll-translated-font-size': `${settings.translationFontSize / 100}em`,
+        '--amll-roman-font-size': `${settings.romanFontSize / 100}em`,
       } as CSSProperties}
     >
-      <div ref={scrollRef} className="lyrics-scroll" onWheel={markManual} onPointerDown={markManual}>
-        <div className="lyrics-spacer" />
-        {groups.map((group, index) => (
-          <button
-            key={`${group.startTimeMs}-${index}`}
-            ref={(element) => { lineRefs.current[index] = element }}
-            className={`lyric-line ${index === activeIndex ? 'is-active' : ''} ${index < activeIndex ? 'is-past' : ''} ${group.main.isDuet ? 'is-duet' : ''}`}
-            onClick={() => {
-              seekPlayback(Math.max(0, (group.main.words[0]?.startTimeMs ?? group.startTimeMs) / 1000 + offset / 1000))
-              setManual(false)
-            }}
-          >
-            <KaraokeLine line={group.main} positionMs={positionMs} active={index === activeIndex} />
-            {group.background && <div className="lyric-background"><KaraokeLine line={group.background} positionMs={positionMs} active={index === activeIndex} /></div>}
-          </button>
-        ))}
-        <div className="lyrics-spacer" />
-      </div>
-      {manual && <button className="return-focus" onClick={restoreFocus}><LocateFixed size={15} />回到当前歌词</button>}
-      {activeInterlude && (
-        <div className="interlude" style={{ '--interlude-progress': `${Math.max(0, Math.min(1, (positionMs - activeInterlude.startTimeMs) / (activeInterlude.endTimeMs - activeInterlude.startTimeMs))) * 100}%` } as CSSProperties}>
-          <span /><span /><span />
-        </div>
-      )}
+      <LyricPlayer
+        ref={playerRef}
+        lyricLines={lines}
+        playing={isPlaying}
+        alignAnchor={settings.alignAnchor}
+        alignPosition={settings.alignPosition}
+        enableSpring={settings.animation && !reducedMotion}
+        enableBlur={settings.blur}
+        enableScale={settings.scale}
+        wordFadeWidth={0.5}
+        linePosYSpringParams={spring}
+        lineScaleSpringParams={spring}
+        optimizeOptions={PRESERVE_DESKTOP_TIMELINE}
+        onLyricLineClick={handleLineClick}
+        onLyricLineContextMenu={handleLineContextMenu}
+        bottomLine={room.currentTrack ? (
+          <div className={`lyrics-credit lyrics-credit--${visual.contributors}`}>
+            <span>{room.currentTrack.title}</span>
+            <span>{room.currentTrack.artist.join(' / ')}</span>
+          </div>
+        ) : undefined}
+        style={FULL_SIZE_STYLE}
+      />
+      {contextMenu && createPortal(<div className="lyric-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
+        <button onClick={() => void copy(contextMenu.original)}>复制原文</button>
+        {contextMenu.translated && <button onClick={() => void copy(contextMenu.translated)}>复制翻译</button>}
+        <button onClick={() => { seekPlayback(Math.max(0, (contextMenu.startTime + offset) / 1000)); setContextMenu(null) }}>跳转到此处</button>
+      </div>, document.body)}
     </div>
-  )
-}
-
-function scrollLyricLine(
-  container: HTMLDivElement | null,
-  line: HTMLButtonElement | null,
-  anchor: 'top' | 'center' | 'bottom',
-  position: number,
-  behavior: ScrollBehavior,
-): void {
-  if (!container || !line) return
-  const itemAnchor = line.offsetTop + (anchor === 'top' ? 0 : anchor === 'bottom' ? line.offsetHeight : line.offsetHeight / 2)
-  const viewportAnchor = container.clientHeight * Math.min(1, Math.max(0, position))
-  container.scrollTo({ top: Math.max(0, itemAnchor - viewportAnchor), behavior })
-}
-
-function KaraokeLine({ line, positionMs, active }: { line: LyricLine; positionMs: number; active: boolean }) {
-  return (
-    <div className="karaoke-line">
-      <div className="karaoke-main">
-        {line.words.map((word, index) => <KaraokeWord key={`${word.startTimeMs}-${index}`} word={word} positionMs={positionMs} active={active} />)}
-      </div>
-      {line.romanLyric && <div className="lyric-roman">{line.romanLyric}</div>}
-      {line.translatedLyric && <div className="lyric-translation">{line.translatedLyric}</div>}
-    </div>
-  )
-}
-
-function KaraokeWord({ word, positionMs, active }: { word: LyricWord; positionMs: number; active: boolean }) {
-  const progress = active ? wordProgress(word, positionMs) : positionMs >= word.endTimeMs ? 1 : 0
-  const emphasized = active && word.endTimeMs - word.startTimeMs >= 1_000 && (Array.from(word.text.trim()).length <= 7)
-  const effect = emphasized ? Math.sin(Math.PI * progress) : 0
-  const style = { '--word-reveal': `${progress * 100}%`, '--word-lift': `${effect * 0.035 + 1}` } as CSSProperties
-  return (
-    <span className="karaoke-word" style={style}>
-      {word.ruby?.length ? <ruby>{word.text}<rt>{word.ruby.map((part) => part.text).join('')}</rt></ruby> : word.text}
-      <span className="karaoke-word__fill" aria-hidden="true">{word.ruby?.length ? <ruby>{word.text}<rt>{word.ruby.map((part) => part.text).join('')}</rt></ruby> : word.text}</span>
-      {word.romanText && <span className="karaoke-word__roman">{word.romanText}</span>}
-    </span>
   )
 }

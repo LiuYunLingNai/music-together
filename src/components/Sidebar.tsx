@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { connectClient, createRoom, disconnectClient, joinRoom, leaveRoom } from '../services/runtime'
 import { useAppStore } from '../store/app-store'
 
-export function Sidebar() {
+export function Sidebar({ hidden = false }: { hidden?: boolean }) {
   const serverUrl = useAppStore((state) => state.serverUrl)
   const nickname = useAppStore((state) => state.nickname)
   const status = useAppStore((state) => state.connectionStatus)
@@ -32,7 +32,7 @@ export function Sidebar() {
   }, [passwordRetry, set])
 
   return (
-    <aside className="sidebar">
+    <aside id="room-navigation-panel" className="sidebar" aria-hidden={hidden} inert={hidden || undefined}>
       <div className="sidebar__section-label"><Server size={13} />服务器</div>
       <form className="connection-form" onSubmit={submitConnection}>
         <input aria-label="服务器地址" value={serverUrl} disabled={status !== 'disconnected'} onChange={(event) => set({ serverUrl: event.target.value })} placeholder="http://127.0.0.1:3001" />
@@ -50,10 +50,10 @@ export function Sidebar() {
 
       <div className="sidebar__section-heading">
         <span className="sidebar__section-label"><Headphones size={13} />房间</span>
-        {status === 'connected' && <><button className="icon-button" title="通过房间号加入" onClick={() => setDirectJoin((value) => !value)}><Link2 size={15} /></button><button className="icon-button" title="创建房间" onClick={() => setCreating((value) => !value)}><Plus size={15} /></button></>}
+        {status === 'connected' && <><button className="icon-button" title="通过房间号加入" aria-label="通过房间号加入" onClick={() => setDirectJoin((value) => !value)}><Link2 size={15} /></button><button className="icon-button" title="创建房间" aria-label="创建房间" onClick={() => setCreating((value) => !value)}><Plus size={15} /></button></>}
       </div>
 
-      {directJoin && status === 'connected' && <form className="create-room" onSubmit={(event) => { event.preventDefault(); if (!directRoomId.trim()) return; joinRoom(directRoomId.trim()); setDirectRoomId(''); setDirectJoin(false) }}><input autoFocus value={directRoomId} onChange={(event) => setDirectRoomId(event.target.value)} placeholder="房间号或房间链接" /><button className="icon-button" title="加入房间"><ChevronRight size={16} /></button></form>}
+      {directJoin && status === 'connected' && <form className="create-room" onSubmit={(event) => { event.preventDefault(); if (!directRoomId.trim()) return; joinRoom(directRoomId.trim()); setDirectRoomId(''); setDirectJoin(false) }}><input autoFocus aria-label="房间号或房间链接" value={directRoomId} onChange={(event) => setDirectRoomId(event.target.value)} placeholder="房间号或房间链接" /><button className="icon-button" title="加入房间" aria-label="加入房间"><ChevronRight size={16} /></button></form>}
 
       {creating && (
         <form className="create-room" onSubmit={(event) => {
@@ -63,9 +63,9 @@ export function Sidebar() {
           setRoomName('')
           setNewRoomPassword('')
         }}>
-          <input autoFocus value={roomName} onChange={(event) => setRoomName(event.target.value)} placeholder="房间名称" maxLength={40} />
-          <input type="password" value={newRoomPassword} onChange={(event) => setNewRoomPassword(event.target.value)} placeholder="密码（可选）" maxLength={64} />
-          <button className="icon-button" title="确认创建"><ChevronRight size={16} /></button>
+          <input autoFocus aria-label="房间名称" value={roomName} onChange={(event) => setRoomName(event.target.value)} placeholder="房间名称" maxLength={40} />
+          <input type="password" aria-label="房间密码（可选）" value={newRoomPassword} onChange={(event) => setNewRoomPassword(event.target.value)} placeholder="密码（可选）" maxLength={64} />
+          <button className="icon-button" title="确认创建" aria-label="确认创建房间"><ChevronRight size={16} /></button>
         </form>
       )}
 
@@ -86,7 +86,7 @@ export function Sidebar() {
       {room && (
         <div className="sidebar__room-footer">
           <div><span className="status-dot status-dot--online" /><strong>{room.users.length}</strong> 人在线</div>
-          <button className="icon-button" title="离开房间" onClick={leaveRoom}><DoorOpen size={16} /></button>
+          <button className="icon-button" title="离开房间" aria-label="离开房间" onClick={leaveRoom}><DoorOpen size={16} /></button>
         </div>
       )}
       {passwordRoom && (
@@ -97,8 +97,8 @@ export function Sidebar() {
             setPasswordRoom(null)
             setJoinPassword('')
           }}>
-            <header><div><span>受保护的房间</span><strong>{passwordRoom.name}</strong></div><button type="button" className="icon-button" title="关闭" onClick={() => setPasswordRoom(null)}><X size={16} /></button></header>
-            <input autoFocus type="password" value={joinPassword} onChange={(event) => setJoinPassword(event.target.value)} placeholder="输入房间密码" />
+            <header><div><span>受保护的房间</span><strong>{passwordRoom.name}</strong></div><button type="button" className="icon-button" title="关闭" aria-label="关闭密码输入" onClick={() => setPasswordRoom(null)}><X size={16} /></button></header>
+            <input autoFocus type="password" aria-label="房间密码" value={joinPassword} onChange={(event) => setJoinPassword(event.target.value)} placeholder="输入房间密码" />
             <button className="button button--primary" disabled={!joinPassword}>加入房间</button>
           </form>
         </div>

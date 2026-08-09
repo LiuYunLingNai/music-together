@@ -61,7 +61,7 @@ export function SettingsOverlay() {
           <div className="settings-identity"><code>{profile?.id ?? '访客身份'}</code><span>{profile?.nickname || '尚未设置昵称'}</span></div>
         </aside>
         <main ref={contentRef} className="settings-content" tabIndex={0}>
-          <button className="settings-close icon-button" title="关闭设置" onClick={() => set({ settingsOpen: false })}><X size={18} /></button>
+          <button className="settings-close icon-button" title="关闭设置" aria-label="关闭设置" onClick={() => set({ settingsOpen: false })}><X size={18} /></button>
           {section === 'room' && room && <RoomSettings />}
           {section === 'sources' && <SourceAccounts />}
           {section === 'account' && <AccountSettings />}
@@ -88,7 +88,7 @@ function AppearanceSettings() {
     { id: 'dark', label: '夜间', icon: <Moon size={16} /> },
   ]
   return <div className="settings-section"><SectionHeader title="外观主题" description="自动模式跟随 Windows / Linux 系统主题；手动选择会保存在本机。" />
-    <div className="settings-group"><SettingRow label="主题模式" description={`当前显示：${resolved === 'dark' ? '夜间' : '白天'}`}><div className="theme-segment">{options.map((option) => <button key={option.id} className={preference === option.id ? 'is-active' : ''} onClick={(event) => void setThemePreference(option.id, event.clientX, event.clientY)}>{option.icon}<span>{option.label}</span></button>)}</div></SettingRow><SettingRow label="界面字号" description="调整桌面控件和文字；歌词字号请在歌词显示中单独设置"><Range value={uiScale} min={0.9} max={1.4} step={0.05} suffix="%" scale={100} onChange={setUiScale} /></SettingRow><SettingRow label="动态背景 FPS"><Range value={backgroundFps} min={15} max={60} step={1} suffix="" onChange={(value) => updateBackgroundSettings({ backgroundFps: value })} /></SettingRow><SettingRow label="动态背景流动速度"><Range value={backgroundFlowSpeed} min={0.1} max={2} step={0.1} suffix="x" onChange={(value) => updateBackgroundSettings({ backgroundFlowSpeed: value })} /></SettingRow><SettingRow label="动态背景渲染精度"><Range value={backgroundRenderScale} min={0.25} max={1} step={0.05} suffix="x" onChange={(value) => updateBackgroundSettings({ backgroundRenderScale: value })} /></SettingRow></div>
+    <div className="settings-group"><SettingRow label="主题模式" description={`当前显示：${resolved === 'dark' ? '夜间' : '白天'}`}><div className="theme-segment">{options.map((option) => <button key={option.id} className={preference === option.id ? 'is-active' : ''} onClick={(event) => void setThemePreference(option.id, event.clientX, event.clientY)}>{option.icon}<span>{option.label}</span></button>)}</div></SettingRow><SettingRow label="界面字号" description="调整桌面控件和文字；歌词字号请在歌词显示中单独设置"><Range value={uiScale} min={0.9} max={1.4} step={0.05} suffix="%" scale={100} onChange={setUiScale} /></SettingRow><SettingRow label="动态背景 FPS" description="高质量 60 FPS 需要 GPU 硬件加速"><Range value={backgroundFps} min={5} max={60} step={5} suffix="" onChange={(value) => updateBackgroundSettings({ backgroundFps: value })} /></SettingRow><SettingRow label="动态背景流动速度"><Range value={backgroundFlowSpeed} min={0.1} max={2} step={0.1} suffix="x" onChange={(value) => updateBackgroundSettings({ backgroundFlowSpeed: value })} /></SettingRow><SettingRow label="动态背景渲染精度"><Range value={backgroundRenderScale} min={0.25} max={1} step={0.05} suffix="x" onChange={(value) => updateBackgroundSettings({ backgroundRenderScale: value })} /></SettingRow></div>
   </div>
 }
 

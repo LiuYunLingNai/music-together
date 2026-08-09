@@ -1,64 +1,70 @@
-import { useEffect, useRef } from 'react'
-import { useAppStore } from '../store/app-store'
+import { lazy, Suspense, useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { getProxiedCoverUrl } from '../lib/cover'
+import { extractStagePalette, type StagePalette } from '../lib/stage-palette'
+import { useAppStore } from '../store/app-store'
+
+const AmllFluidBackground = lazy(() => import('@applemusic-like-lyrics/react').then((module) => ({ default: module.BackgroundRender })))
+const DARK_FALLBACK = extractStagePalette(new Uint8ClampedArray(), false)
+const LIGHT_FALLBACK = extractStagePalette(new Uint8ClampedArray(), true)
 
 export function BackgroundRender({ cover }: { cover: string }) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const serverUrl = useAppStore((state) => state.serverUrl)
   const fps = useAppStore((state) => state.backgroundFps)
   const flowSpeed = useAppStore((state) => state.backgroundFlowSpeed)
   const renderScale = useAppStore((state) => state.backgroundRenderScale)
+  const isPlaying = useAppStore((state) => state.isPlaying)
+  const resolvedTheme = useAppStore((state) => state.resolvedTheme)
+  const visual = useAppStore((state) => state.playerVisualSettings)
+  const [palette, setPalette] = useState<StagePalette>(() => resolvedTheme === 'light' ? LIGHT_FALLBACK : DARK_FALLBACK)
+  const coverUrl = getProxiedCoverUrl(serverUrl, cover)
 
   useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas || !cover) return
-    const context = canvas.getContext('2d')
-    if (!context) return
     const image = new Image()
     image.crossOrigin = 'anonymous'
-    image.src = getProxiedCoverUrl(serverUrl, cover)
-    let last = 0
-    let animation = 0
-    const resize = () => {
-      const rect = canvas.getBoundingClientRect()
-      canvas.width = Math.max(1, Math.round(rect.width * renderScale * devicePixelRatio))
-      canvas.height = Math.max(1, Math.round(rect.height * renderScale * devicePixelRatio))
-    }
-    const draw = (time: number) => {
-      if (time - last < 1000 / fps) { animation = requestAnimationFrame(draw); return }
-      last = time
-      const width = canvas.width
-      const height = canvas.height
-      context.clearRect(0, 0, width, height)
-      if (image.complete && image.naturalWidth > 0) {
-        const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight)
-        const imageWidth = image.naturalWidth * scale
-        const imageHeight = image.naturalHeight * scale
-        context.globalAlpha = 0.24
-        context.drawImage(image, (width - imageWidth) / 2, (height - imageHeight) / 2, imageWidth, imageHeight)
-        context.globalAlpha = 1
+    image.src = coverUrl
+    const onLoad = () => {
+      try {
+        const sampler = document.createElement('canvas')
+        sampler.width = 32
+        sampler.height = 32
+        const context = sampler.getContext('2d', { willReadFrequently: true })
+        context?.drawImage(image, 0, 0, 32, 32)
+        const pixels = context?.getImageData(0, 0, 32, 32).data
+        if (pixels) setPalette(extractStagePalette(pixels, resolvedTheme === 'light'))
+      } catch {
+        setPalette(resolvedTheme === 'light' ? LIGHT_FALLBACK : DARK_FALLBACK)
       }
-      context.fillStyle = 'rgba(10, 12, 16, .7)'
-      context.fillRect(0, 0, width, height)
-      context.strokeStyle = 'rgba(255, 255, 255, .08)'
-      context.lineWidth = Math.max(1, width / 900)
-      context.beginPath()
-      const offset = (time / 1000) * flowSpeed
-      for (let x = 0; x <= width; x += Math.max(18, width / 28)) {
-        const y = height * 0.55 + Math.sin(x / width * 10 + offset) * height * 0.08
-        if (x === 0) context.moveTo(x, y)
-        else context.lineTo(x, y)
-      }
-      context.stroke()
-      animation = requestAnimationFrame(draw)
     }
-    resize()
-    window.addEventListener('resize', resize)
-    const onImageLoad = () => resize()
-    image.addEventListener('load', onImageLoad)
-    animation = requestAnimationFrame(draw)
-    return () => { cancelAnimationFrame(animation); window.removeEventListener('resize', resize); image.removeEventListener('load', onImageLoad) }
-  }, [cover, fps, flowSpeed, renderScale, serverUrl])
+    image.addEventListener('load', onLoad)
+    return () => image.removeEventListener('load', onLoad)
+  }, [coverUrl, resolvedTheme])
 
-  return <canvas ref={canvasRef} className="background-render" aria-hidden="true" />
+  const accentIndex = visual.accentVariant === 'secondary' ? 1 : visual.accentVariant === 'tertiary' ? 2 : 0
+  const accent = palette.colors[accentIndex] ?? palette.accent
+  const style = useMemo(() => ({
+    '--player-accent': accent,
+    '--player-color-1': palette.colors[0],
+    '--player-color-2': palette.colors[1],
+    '--player-color-3': palette.colors[2],
+    '--player-color-4': palette.colors[3],
+    '--player-background-dim': visual.backgroundDim / 100,
+    '--player-background-blur': `${visual.backgroundBlur}px`,
+    '--player-cover-url': `url("${coverUrl.replaceAll('"', '\\"')}")`,
+  }) as CSSProperties, [accent, coverUrl, palette, visual.backgroundBlur, visual.backgroundDim])
+
+  useEffect(() => {
+    const shell = document.querySelector<HTMLElement>('.app-shell')
+    shell?.style.setProperty('--player-accent', accent)
+  }, [accent])
+
+  if (visual.backgroundMode === 'none') return null
+  return (
+    <div className={`background-render background-render--${visual.backgroundMode}`} style={style} aria-hidden="true">
+      {visual.backgroundMode === 'fluid' ? (
+        <Suspense fallback={<div className="background-render__gradient" />}>
+          <AmllFluidBackground album={coverUrl} fps={fps} flowSpeed={flowSpeed} renderScale={renderScale} playing={isPlaying} staticMode={visual.staticFluid} />
+        </Suspense>
+      ) : <div className="background-render__surface" />}
+    </div>
+  )
 }

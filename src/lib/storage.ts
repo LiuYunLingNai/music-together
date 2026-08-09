@@ -1,4 +1,4 @@
-import type { LyricSettings, MusicSource } from '../domain/types'
+import type { LyricSettings, MusicSource, PlayerVisualSettings } from '../domain/types'
 import type { ThemePreference } from './theme'
 
 const PREFIX = 'music-together-desktop:'
@@ -41,14 +41,72 @@ export const DEFAULT_LYRIC_SETTINGS: LyricSettings = {
   ttmlEnabled: true,
   ttmlDbUrl: 'https://amlldb.bikonoo.com/ncm-lyrics/%s.ttml',
   alignAnchor: 'center',
-  alignPosition: 0.4,
+  alignPosition: 0.46,
   animation: true,
-  blur: false,
+  blur: true,
   scale: true,
   fontSize: 90,
-  fontWeight: 600,
+  fontWeight: 700,
   translationFontSize: 75,
   romanFontSize: 75,
+}
+
+export const DEFAULT_PLAYER_VISUAL_SETTINGS: PlayerVisualSettings = {
+  layout: 'split',
+  backgroundMode: 'fluid',
+  staticFluid: false,
+  backgroundDim: 30,
+  backgroundBlur: 64,
+  accentVariant: 'primary',
+  coverShape: 'rounded',
+  coverHorizontalAlign: 'left',
+  coverVerticalAlign: 'center',
+  coverScale: 1,
+  coverShadow: true,
+  controlsMode: 'auto',
+  progressAtBottom: false,
+  progressPreview: true,
+  remainingTime: false,
+  lyricTextAlign: 'left',
+  lyricFade: true,
+  lyricMotion: 'smooth',
+  lyricGlow: true,
+  textShadow: false,
+  contributors: 'hover',
+  customFontFamily: '',
+}
+
+const oneOf = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T => typeof value === 'string' && allowed.includes(value as T) ? value as T : fallback
+const numberBetween = (value: unknown, min: number, max: number, fallback: number) => typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback
+const booleanOr = (value: unknown, fallback: boolean) => typeof value === 'boolean' ? value : fallback
+
+export function normalizePlayerVisualSettings(value: unknown): PlayerVisualSettings {
+  const fallback = DEFAULT_PLAYER_VISUAL_SETTINGS
+  const candidate = value && typeof value === 'object' ? value as Partial<PlayerVisualSettings> : {}
+  return {
+    layout: oneOf(candidate.layout, ['split', 'lyrics-only'], fallback.layout),
+    backgroundMode: oneOf(candidate.backgroundMode, ['fluid', 'blur', 'gradient', 'solid', 'none'], fallback.backgroundMode),
+    staticFluid: booleanOr(candidate.staticFluid, fallback.staticFluid),
+    backgroundDim: numberBetween(candidate.backgroundDim, 0, 90, fallback.backgroundDim),
+    backgroundBlur: numberBetween(candidate.backgroundBlur, 0, 128, fallback.backgroundBlur),
+    accentVariant: oneOf(candidate.accentVariant, ['primary', 'secondary', 'tertiary'], fallback.accentVariant),
+    coverShape: oneOf(candidate.coverShape, ['rounded', 'square', 'circle'], fallback.coverShape),
+    coverHorizontalAlign: oneOf(candidate.coverHorizontalAlign, ['left', 'center'], fallback.coverHorizontalAlign),
+    coverVerticalAlign: oneOf(candidate.coverVerticalAlign, ['center', 'bottom'], fallback.coverVerticalAlign),
+    coverScale: numberBetween(candidate.coverScale, 0.7, 1.25, fallback.coverScale),
+    coverShadow: booleanOr(candidate.coverShadow, fallback.coverShadow),
+    controlsMode: oneOf(candidate.controlsMode, ['auto', 'always', 'hidden'], fallback.controlsMode),
+    progressAtBottom: booleanOr(candidate.progressAtBottom, fallback.progressAtBottom),
+    progressPreview: booleanOr(candidate.progressPreview, fallback.progressPreview),
+    remainingTime: booleanOr(candidate.remainingTime, fallback.remainingTime),
+    lyricTextAlign: oneOf(candidate.lyricTextAlign, ['left', 'center'], fallback.lyricTextAlign),
+    lyricFade: booleanOr(candidate.lyricFade, fallback.lyricFade),
+    lyricMotion: oneOf(candidate.lyricMotion, ['smooth', 'sharp', 'soft', 'easeout'], fallback.lyricMotion),
+    lyricGlow: booleanOr(candidate.lyricGlow, fallback.lyricGlow),
+    textShadow: booleanOr(candidate.textShadow, fallback.textShadow),
+    contributors: oneOf(candidate.contributors, ['always', 'hover', 'never'], fallback.contributors),
+    customFontFamily: typeof candidate.customFontFamily === 'string' ? candidate.customFontFamily.trim().slice(0, 120) : fallback.customFontFamily,
+  }
 }
 
 function getNumber(key: string, fallback: number): number {
@@ -84,14 +142,16 @@ export const storage = {
   setPlaybackTempoSyncEnabled: (value: boolean) => set('playback-tempo-sync', String(value)),
   getPlaybackHardSeekSyncEnabled: () => get('playback-hard-seek-sync') === 'true',
   setPlaybackHardSeekSyncEnabled: (value: boolean) => set('playback-hard-seek-sync', String(value)),
-  getBackgroundFps: () => Math.min(60, Math.max(15, getNumber('background-fps', 30))),
+  getBackgroundFps: () => Math.min(60, Math.max(5, getNumber('background-fps', 60))),
   setBackgroundFps: (value: number) => set('background-fps', String(value)),
   getBackgroundFlowSpeed: () => Math.min(2, Math.max(0.1, getNumber('background-flow-speed', 1))),
   setBackgroundFlowSpeed: (value: number) => set('background-flow-speed', String(value)),
-  getBackgroundRenderScale: () => Math.min(1, Math.max(0.25, getNumber('background-render-scale', 0.65))),
+  getBackgroundRenderScale: () => Math.min(1, Math.max(0.25, getNumber('background-render-scale', 1))),
   setBackgroundRenderScale: (value: number) => set('background-render-scale', String(value)),
   getLyricSettings: (): LyricSettings => ({ ...DEFAULT_LYRIC_SETTINGS, ...getJson<Partial<LyricSettings>>('lyric-settings', {}) }),
   setLyricSettings: (value: LyricSettings) => set('lyric-settings', JSON.stringify(value)),
+  getPlayerVisualSettings: (): PlayerVisualSettings => normalizePlayerVisualSettings(getJson<Partial<PlayerVisualSettings>>('player-visual-settings', {})),
+  setPlayerVisualSettings: (value: PlayerVisualSettings) => set('player-visual-settings', JSON.stringify(value)),
   getAuthCookies: () => getJson<Array<{ platform: MusicSource; cookie: string }>>('auth-cookies', []),
   upsertAuthCookie: (platform: MusicSource, cookie: string) => {
     const cookies = getJson<Array<{ platform: MusicSource; cookie: string }>>('auth-cookies', []).filter((item) => item.platform !== platform)

@@ -60,8 +60,12 @@ function appendDiagnosticLog(level: string, message: string): void {
 
 appendDiagnosticLog('info', `Music Together started; version=${app.getVersion()} platform=${process.platform} packaged=${app.isPackaged}`)
 
-// Avoid startup crashes on Windows systems whose GPU driver cannot initialize Chromium's compositor.
-app.disableHardwareAcceleration()
+// AMLL and the immersive player rely on Chromium's GPU compositor. Keep hardware
+// acceleration enabled by default, while retaining an explicit recovery path for
+// machines whose graphics driver cannot initialize Chromium safely.
+const softwareRendering = process.argv.includes('--software-rendering') || process.env.MT_SOFTWARE_RENDERING === '1'
+if (softwareRendering) app.disableHardwareAcceleration()
+appendDiagnosticLog('info', `Graphics mode=${softwareRendering ? 'software' : 'hardware'}`)
 
 function updatesSupported(): boolean {
   return app.isPackaged && process.platform === 'win32' && !process.env.PORTABLE_EXECUTABLE_DIR

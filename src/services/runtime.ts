@@ -6,7 +6,7 @@ import { reduceVote } from '../domain/vote'
 import type { AudioProxyPolicy, AudioQuality, ChatMessage, MusicSource, MyPlatformAuth, PlatformAuthStatus, PlayState, Playlist, RoomAutoFallbackEvent, RoomListItem, RoomState, Track, User, UserRole, VoteAction, VoteState } from '../domain/types'
 import { prepareLyricGroups } from '../lyrics/engine'
 import { parseServerLyrics, parseTtml } from '../lyrics/parser'
-import { normalizeServerUrl, storage } from '../lib/storage'
+import { normalizePlayerVisualSettings, normalizeServerUrl, storage } from '../lib/storage'
 import { useAppStore } from '../store/app-store'
 import { bootstrapIdentity, fetchCurrentProfile, fetchRecommendations, fetchServerLyrics, logoutIdentity, recoverIdentity, searchTracks, setInitialPassword, updateAccountId, updateCurrentProfile, uploadCurrentAvatar } from './api'
 import { DesktopAudioPlayer } from './audio-player'
@@ -466,7 +466,7 @@ export function updatePlaybackSyncSettings(settings: { playbackTempoSyncEnabled?
 
 export function updateBackgroundSettings(settings: { backgroundFps?: number; backgroundFlowSpeed?: number; backgroundRenderScale?: number }): void {
   const next = {
-    ...(settings.backgroundFps === undefined ? {} : { backgroundFps: Math.min(60, Math.max(15, Math.round(settings.backgroundFps))) }),
+    ...(settings.backgroundFps === undefined ? {} : { backgroundFps: Math.min(60, Math.max(5, Math.round(settings.backgroundFps))) }),
     ...(settings.backgroundFlowSpeed === undefined ? {} : { backgroundFlowSpeed: Math.min(2, Math.max(0.1, settings.backgroundFlowSpeed)) }),
     ...(settings.backgroundRenderScale === undefined ? {} : { backgroundRenderScale: Math.min(1, Math.max(0.25, settings.backgroundRenderScale)) }),
   }
@@ -474,6 +474,13 @@ export function updateBackgroundSettings(settings: { backgroundFps?: number; bac
   if (next.backgroundFlowSpeed !== undefined) storage.setBackgroundFlowSpeed(next.backgroundFlowSpeed)
   if (next.backgroundRenderScale !== undefined) storage.setBackgroundRenderScale(next.backgroundRenderScale)
   useAppStore.getState().set(next)
+}
+
+export function updatePlayerVisualSettings(settings: Partial<import('../domain/types').PlayerVisualSettings>): void {
+  const state = useAppStore.getState()
+  const next = normalizePlayerVisualSettings({ ...state.playerVisualSettings, ...settings })
+  storage.setPlayerVisualSettings(next)
+  state.set({ playerVisualSettings: next })
 }
 
 export async function refreshProfile(): Promise<void> {

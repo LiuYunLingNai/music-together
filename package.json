@@ -27,6 +27,8 @@
     "dist:linux": "npm run build && electron-builder --linux"
   },
   "dependencies": {
+    "@applemusic-like-lyrics/core": "^0.5.2",
+    "@applemusic-like-lyrics/react": "^0.5.2",
     "@fontsource-variable/manrope": "^5.2.6",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",

@@ -202,6 +202,31 @@ export interface LyricSettings {
   romanFontSize: number
 }
 
+export interface PlayerVisualSettings {
+  layout: 'split' | 'lyrics-only'
+  backgroundMode: 'fluid' | 'blur' | 'gradient' | 'solid' | 'none'
+  staticFluid: boolean
+  backgroundDim: number
+  backgroundBlur: number
+  accentVariant: 'primary' | 'secondary' | 'tertiary'
+  coverShape: 'rounded' | 'square' | 'circle'
+  coverHorizontalAlign: 'left' | 'center'
+  coverVerticalAlign: 'center' | 'bottom'
+  coverScale: number
+  coverShadow: boolean
+  controlsMode: 'auto' | 'always' | 'hidden'
+  progressAtBottom: boolean
+  progressPreview: boolean
+  remainingTime: boolean
+  lyricTextAlign: 'left' | 'center'
+  lyricFade: boolean
+  lyricMotion: 'smooth' | 'sharp' | 'soft' | 'easeout'
+  lyricGlow: boolean
+  textShadow: boolean
+  contributors: 'always' | 'hover' | 'never'
+  customFontFamily: string
+}
+
 export interface LyricRuby {
   text: string
   startTimeMs: number

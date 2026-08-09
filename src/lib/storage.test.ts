@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { storage } from './storage'
+import { DEFAULT_PLAYER_VISUAL_SETTINGS, normalizePlayerVisualSettings, storage } from './storage'
 
 describe('preference storage defaults', () => {
   beforeEach(() => localStorage.clear())
@@ -14,5 +14,15 @@ describe('preference storage defaults', () => {
   it('clamps a persisted UI scale to the supported range', () => {
     localStorage.setItem('music-together-desktop:ui-scale', '2')
     expect(storage.getUiScale()).toBe(1.4)
+  })
+
+  it('normalizes untrusted player visual preferences', () => {
+    const settings = normalizePlayerVisualSettings({ layout: 'invalid' as 'split', backgroundDim: 999, coverScale: -2, customFontFamily: ' A '.repeat(100) })
+    expect(settings.layout).toBe('split')
+    expect(settings.backgroundDim).toBe(90)
+    expect(settings.coverScale).toBe(0.7)
+    expect(settings.customFontFamily.length).toBeLessThanOrEqual(120)
+    expect(normalizePlayerVisualSettings(null)).toEqual(DEFAULT_PLAYER_VISUAL_SETTINGS)
+    expect(normalizePlayerVisualSettings('invalid')).toEqual(DEFAULT_PLAYER_VISUAL_SETTINGS)
   })
 })

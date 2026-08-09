@@ -1,11 +1,10 @@
 import { create } from 'zustand'
-import type { AccountProfile, AppUpdateStatus, AudioProxyPolicy, ChatMessage, LyricGroup, LyricSettings, MusicSource, MyPlatformAuth, PlatformAuthStatus, PlatformRecommendation, Playlist, RoomListItem, RoomState, Track, VoteState } from '../domain/types'
+import type { AccountProfile, AppUpdateStatus, AudioProxyPolicy, ChatMessage, LyricGroup, LyricSettings, MusicSource, MyPlatformAuth, PlatformAuthStatus, PlatformRecommendation, PlayerVisualSettings, Playlist, RoomListItem, RoomState, Track, VoteState } from '../domain/types'
 import { storage } from '../lib/storage'
 import type { ResolvedTheme, ThemePreference } from '../lib/theme'
 import { resolveTheme } from '../lib/theme'
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting'
-export type CenterView = 'lyrics' | 'artwork'
 
 interface AppState {
   serverUrl: string
@@ -29,7 +28,9 @@ interface AppState {
   isPlaying: boolean
   volume: number
   buffered: number
-  centerView: CenterView
+  immersivePlayer: boolean
+  playerQuickSettingsOpen: boolean
+  lyricsOverviewOpen: boolean
   searchOpen: boolean
   searchLoading: boolean
   searchResults: Array<Track | Playlist>
@@ -60,6 +61,7 @@ interface AppState {
   deepLinkRoomId?: string
   passwordRetry?: { roomId: string; message: string }
   lyricSettings: LyricSettings
+  playerVisualSettings: PlayerVisualSettings
   notice?: { id: number; text: string; error?: boolean }
   set: (partial: Partial<Omit<AppState, 'set'>>) => void
   updateRoom: (partial: Partial<RoomState>) => void
@@ -86,7 +88,9 @@ export const useAppStore = create<AppState>((set) => ({
   isPlaying: false,
   volume: storage.getVolume(),
   buffered: 0,
-  centerView: 'lyrics',
+  immersivePlayer: false,
+  playerQuickSettingsOpen: false,
+  lyricsOverviewOpen: false,
   searchOpen: false,
   searchLoading: false,
   searchResults: [],
@@ -114,6 +118,7 @@ export const useAppStore = create<AppState>((set) => ({
   backgroundFlowSpeed: storage.getBackgroundFlowSpeed(),
   backgroundRenderScale: storage.getBackgroundRenderScale(),
   lyricSettings: storage.getLyricSettings(),
+  playerVisualSettings: storage.getPlayerVisualSettings(),
   set: (partial) => set(partial),
   updateRoom: (partial) => set((state) => state.room ? { room: { ...state.room, ...partial } } : {}),
   notify: (text, error) => set({ notice: { id: Date.now(), text, error } }),
@@ -134,6 +139,9 @@ export const useAppStore = create<AppState>((set) => ({
     recommendationsLoaded: false,
     chatOpen: false,
     unreadChatCount: 0,
+    immersivePlayer: false,
+    playerQuickSettingsOpen: false,
+    lyricsOverviewOpen: false,
     platformStatus: [],
     myPlatformAuth: [],
     qrData: null,

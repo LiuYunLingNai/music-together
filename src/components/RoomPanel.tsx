@@ -51,15 +51,15 @@ export function RoomPanel({ collapsed, onToggle }: { collapsed: boolean; onToggl
   }
 
   return (
-    <aside className={`room-panel ${collapsed ? 'room-panel--collapsed' : ''}`}>
+    <aside id="room-detail-panel" className={`room-panel ${collapsed ? 'room-panel--collapsed' : ''}`} aria-hidden={collapsed} inert={collapsed || undefined}>
       {collapsed ? (
-        <button className="room-panel__expand icon-button" title="展开右侧栏" aria-label="展开右侧栏" onClick={onToggle}><ArrowLeft size={16} /></button>
+        <button className="room-panel__expand icon-button" title="展开右侧栏" aria-label="展开右侧栏" aria-controls="room-detail-panel" aria-expanded={false} onClick={onToggle}><ArrowLeft size={16} /></button>
       ) : <>
         <div className="panel-tabs">
           <button className={tab === 'queue' ? 'is-active' : ''} onClick={() => setTab('queue')}><ListMusic size={15} />队列 <span>{room.queue.length}</span></button>
           <button className={tab === 'chat' ? 'is-active' : ''} onClick={() => setTab('chat')}><MessageCircle size={15} />聊天 {unreadChatCount > 0 && <span className="unread-badge">{unreadChatCount > 99 ? '99+' : unreadChatCount}</span>}</button>
           <button className={tab === 'members' ? 'is-active' : ''} onClick={() => setTab('members')}><Users size={15} /><span>{room.users.length}</span></button>
-          <button className="panel-tabs__collapse icon-button" title="收起右侧栏" aria-label="收起右侧栏" onClick={onToggle}><ArrowRight size={15} /></button>
+          <button className="panel-tabs__collapse icon-button" title="收起右侧栏" aria-label="收起右侧栏" aria-controls="room-detail-panel" aria-expanded onClick={onToggle}><ArrowRight size={15} /></button>
         </div>
       </>}
       {!collapsed && <>
@@ -68,8 +68,8 @@ export function RoomPanel({ collapsed, onToggle }: { collapsed: boolean; onToggl
           <div className="panel-toolbar">
             <div><strong>播放队列</strong><span>{canReorder ? '可拖动或使用箭头排序' : '成员移除歌曲需要投票'} · RTT {rttMs > 0 ? `${rttMs} ms` : '--'}</span></div>
             <div className="panel-toolbar__actions">
-              {canClear && <button className="icon-button" title="清空队列" disabled={!room.queue.length} onClick={() => { if (window.confirm('确定清空整个播放队列？')) clearQueue() }}><Trash2 size={15} /></button>}
-              <button className="icon-button" title="搜索并点歌" onClick={() => set({ searchOpen: true })}><Search size={16} /></button>
+              {canClear && <button className="icon-button" title="清空队列" aria-label="清空队列" disabled={!room.queue.length} onClick={() => { if (window.confirm('确定清空整个播放队列？')) clearQueue() }}><Trash2 size={15} /></button>}
+              <button className="icon-button" title="搜索并点歌" aria-label="搜索并点歌" onClick={() => set({ searchOpen: true })}><Search size={16} /></button>
             </div>
           </div>
           <div className="queue-list">
@@ -87,12 +87,12 @@ export function RoomPanel({ collapsed, onToggle }: { collapsed: boolean; onToggl
                 <div className="queue-copy"><strong>{track.title}</strong><span>{formatArtists(track.artist)}{track.requestedBy ? ` · ${track.requestedBy}` : ''}</span></div>
                 <span className="queue-duration">{formatTime(track.duration)}</span>
                 <div className="queue-actions">
-                  <button title="指定播放" onClick={() => playQueuedTrack(track)}><Play size={13} /></button>
-                  {canReorder && <button title="置顶到当前播放之后" disabled={track.id === room.currentTrack?.id} onClick={() => pinAfterCurrent(track)}><ArrowDownToLine size={13} /></button>}
-                  {canReorder && <button title="上移" disabled={index === 0} onClick={() => move(index, index - 1)}><ArrowUp size={13} /></button>}
-                  {canReorder && <button title="下移" disabled={index === room.queue.length - 1} onClick={() => move(index, index + 1)}><ArrowDown size={13} /></button>}
-                  {track.source === 'bilibili' && <button title="匹配歌词与封面" onClick={() => setMetadataTrack(track)}><Captions size={13} /></button>}
-                  <button title={canClear ? '从队列移除' : '投票移除'} onClick={() => removeFromQueue(track.id, track.title)}><Trash2 size={13} /></button>
+                  <button title="指定播放" aria-label={`播放 ${track.title}`} onClick={() => playQueuedTrack(track)}><Play size={13} /></button>
+                  {canReorder && <button title="置顶到当前播放之后" aria-label={`将 ${track.title} 置顶到当前播放之后`} disabled={track.id === room.currentTrack?.id} onClick={() => pinAfterCurrent(track)}><ArrowDownToLine size={13} /></button>}
+                  {canReorder && <button title="上移" aria-label={`上移 ${track.title}`} disabled={index === 0} onClick={() => move(index, index - 1)}><ArrowUp size={13} /></button>}
+                  {canReorder && <button title="下移" aria-label={`下移 ${track.title}`} disabled={index === room.queue.length - 1} onClick={() => move(index, index + 1)}><ArrowDown size={13} /></button>}
+                  {track.source === 'bilibili' && <button title="匹配歌词与封面" aria-label={`为 ${track.title} 匹配歌词与封面`} onClick={() => setMetadataTrack(track)}><Captions size={13} /></button>}
+                  <button title={canClear ? '从队列移除' : '投票移除'} aria-label={`${canClear ? '从队列移除' : '投票移除'} ${track.title}`} onClick={() => removeFromQueue(track.id, track.title)}><Trash2 size={13} /></button>
                 </div>
               </div>
             ))}
@@ -103,7 +103,7 @@ export function RoomPanel({ collapsed, onToggle }: { collapsed: boolean; onToggl
               {room.users.slice(0, 4).map((user) => user.avatarUrl ? <img key={user.id} src={resolveAsset(user.avatarUrl)} alt={user.nickname} title={user.nickname} /> : <span key={user.id} title={user.nickname}>{user.nickname.slice(0, 1).toUpperCase()}</span>)}
             </div>
             <span><UserRound size={13} />{room.users.length} 人正在听</span>
-            <button className="icon-button" title="房间成员" onClick={() => setTab('members')}><MoreHorizontal size={16} /></button>
+            <button className="icon-button" title="房间成员" aria-label="查看房间成员" onClick={() => setTab('members')}><MoreHorizontal size={16} /></button>
           </div>
         </>
       )}
@@ -121,7 +121,7 @@ export function RoomPanel({ collapsed, onToggle }: { collapsed: boolean; onToggl
           </div>
           <form className="chat-compose" onSubmit={(event) => { event.preventDefault(); sendChat(message); setMessage('') }}>
             <input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="发送消息" maxLength={500} />
-            <button className="icon-button is-active" title="发送" disabled={!message.trim()}><Send size={15} /></button>
+            <button className="icon-button is-active" title="发送" aria-label="发送消息" disabled={!message.trim()}><Send size={15} /></button>
           </form>
         </>
       )}
@@ -176,7 +176,7 @@ function MetadataDialog({ track, onClose }: { track: Track; onClose: () => void 
   return (
     <div className="panel-modal-backdrop">
       <section className="metadata-dialog">
-        <header><div><span>B 站元数据</span><strong>匹配歌词与封面</strong></div><button className="icon-button" title="关闭" onClick={onClose}><X size={16} /></button></header>
+        <header><div><span>B 站元数据</span><strong>匹配歌词与封面</strong></div><button className="icon-button" title="关闭" aria-label="关闭元数据匹配" onClick={onClose}><X size={16} /></button></header>
         <div className="metadata-controls"><select value={source} onChange={(event) => setSource(event.target.value as typeof source)}>{BILIBILI_METADATA_SOURCES.map((item) => <option key={item} value={item}>{({ netease: '网易云', tencent: 'QQ 音乐', kugou: '酷狗', kugou_concept: '酷狗概念版' })[item]}</option>)}</select><input value={keyword} onChange={(event) => setKeyword(event.target.value)} /><button className="button" onClick={() => void run()} disabled={loading}>{loading ? '搜索中' : '搜索'}</button></div>
         <div className="metadata-results">
           {results.map((result) => <button key={result.id} onClick={() => { updateQueueMetadata(track.id, { metadataSource: source, lyricId: result.lyricId ?? result.sourceId, picId: result.picId, cover: result.cover }); onClose() }}><img src={result.cover} alt="" /><span><strong>{result.title}</strong><small>{formatArtists(result.artist)}</small></span></button>)}

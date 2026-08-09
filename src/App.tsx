@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useAppStore } from './store/app-store'
 import { Titlebar } from './components/Titlebar'
 import { Sidebar } from './components/Sidebar'
@@ -21,8 +22,12 @@ export default function App() {
   const connectionStatus = useAppStore((state) => state.connectionStatus)
   const set = useAppStore((state) => state.set)
   const deepLinkRoomId = useAppStore((state) => state.deepLinkRoomId)
+  const immersivePlayer = useAppStore((state) => state.immersivePlayer)
+  const controlsMode = useAppStore((state) => state.playerVisualSettings.controlsMode)
+  const [leftPanelOpen, setLeftPanelOpen] = useState(true)
   const [rightPanelOpen, setRightPanelOpen] = useState(true)
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false)
+  const [controlsIdle, setControlsIdle] = useState(false)
 
   const exportLogs = async () => {
     if (!window.desktop?.isDebug) {
@@ -38,8 +43,52 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (!room) setRightPanelOpen(true)
-  }, [room])
+    setLeftPanelOpen(true)
+    setRightPanelOpen(true)
+  }, [room?.id])
+
+  useEffect(() => {
+    if (room || !immersivePlayer) return
+    set({ immersivePlayer: false })
+  }, [immersivePlayer, room, set])
+
+  useEffect(() => {
+    if (!room) {
+      setControlsIdle(false)
+      return
+    }
+    let timer = 0
+    let activityFrame = 0
+    const showControls = () => {
+      setControlsIdle(false)
+      window.clearTimeout(timer)
+      if (controlsMode === 'auto') timer = window.setTimeout(() => setControlsIdle(true), 2_600)
+    }
+    const onPointerMove = () => {
+      if (activityFrame) return
+      activityFrame = window.requestAnimationFrame(() => {
+        activityFrame = 0
+        showControls()
+      })
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        const state = useAppStore.getState()
+        if (state.playerQuickSettingsOpen || state.lyricsOverviewOpen) set({ playerQuickSettingsOpen: false, lyricsOverviewOpen: false })
+        else if (state.immersivePlayer) set({ immersivePlayer: false })
+      }
+      else showControls()
+    }
+    showControls()
+    window.addEventListener('pointermove', onPointerMove, { passive: true })
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.clearTimeout(timer)
+      window.cancelAnimationFrame(activityFrame)
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [controlsMode, room?.id, set])
 
   useEffect(() => {
     if (!notice) return
@@ -75,16 +124,17 @@ export default function App() {
   }, [deepLinkRoomId, connectionStatus, room?.id, set])
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell app-shell--controls-${controlsMode} ${immersivePlayer ? 'app-shell--immersive' : ''} ${room && (controlsIdle || controlsMode === 'hidden') ? 'app-shell--idle' : ''}`}>
       <Titlebar onOpenUpdate={() => setUpdateDialogOpen(true)} onExportLogs={() => void exportLogs()} />
-      <div className={`workspace ${room ? `workspace--room${rightPanelOpen ? '' : ' workspace--room-collapsed'}` : 'workspace--lobby'}`}>
-        <Sidebar />
+      <div className={`workspace ${room ? `workspace--room workspace--left-${leftPanelOpen ? 'open' : 'closed'} workspace--right-${rightPanelOpen ? 'open' : 'closed'}${immersivePlayer ? ' workspace--immersive' : ''}` : 'workspace--lobby'}`}>
+        <Sidebar hidden={Boolean(room) && !leftPanelOpen} />
+        {room && <button className={`side-panel-toggle side-panel-toggle--left ${leftPanelOpen ? 'is-open' : 'is-closed'}`} type="button" title={leftPanelOpen ? '收起房间面板' : '展开房间面板'} aria-label={leftPanelOpen ? '收起房间面板' : '展开房间面板'} aria-controls="room-navigation-panel" aria-expanded={leftPanelOpen} onClick={() => setLeftPanelOpen((open) => !open)}>{leftPanelOpen ? <PanelLeftClose size={16} /> : <><PanelLeftOpen size={16} /><span>房间</span></>}</button>}
         <main className="main-stage">
           {room ? <NowPlaying /> : <Lobby />}
         </main>
         {room && <RoomPanel collapsed={!rightPanelOpen} onToggle={() => setRightPanelOpen((open) => !open)} />}
       </div>
-      {room && <TransportBar />}
+      {room && <TransportBar rightPanelOpen={rightPanelOpen} onToggleRightPanel={() => setRightPanelOpen((open) => !open)} />}
       {room && <VoteBanner />}
       {searchOpen && <SearchOverlay />}
       {settingsOpen && <SettingsOverlay />}
