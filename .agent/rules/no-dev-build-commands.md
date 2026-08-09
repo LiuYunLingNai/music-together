@@ -28,7 +28,11 @@ Shell: pnpm dev
 
 以下命令**可以**正常执行，不受此规则限制：
 
-- `pnpm install` / `pnpm add <pkg>` — 安装依赖
-- `pnpm exec …` — 执行工具命令（如 `pnpm exec prisma migrate`）
+- `pnpm install` / `pnpm add <pkg>` — 仅在任务明确需要变更依赖时安装依赖
+- `pnpm exec …` — 执行与当前任务相关的静态工具；涉及迁移、生成或外部写入时仍需先确认影响
 - `pnpm run lint` / `pnpm run typecheck` — 代码检查
+- `pnpm --filter @music-together/server test` — 服务端测试
+- `git diff --check` — 空白与补丁检查
 - `npx shadcn@latest add …` — 添加 shadcn 组件
+
+允许执行检查不代表必须运行全部命令。应按改动风险选择最小充分验证，并在交付时说明未执行的构建或运行验证。

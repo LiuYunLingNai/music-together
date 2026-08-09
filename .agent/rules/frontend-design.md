@@ -24,13 +24,14 @@ import { Button } from "@mui/material";
 
 ## 设计工作流
 
-开始前端开发/设计任务时，**必须**按以下顺序执行：
+开始前端开发或设计任务时，按以下顺序工作：
 
-1. **调用 `/ui-ux-pro-max` command** — 搜索匹配的风格、配色、字体、UX 规范
-2. **遵循 `frontend-design` skill** — 确定大胆的美学方向，拒绝 AI 通用审美
-3. **遵循 `frontend-patterns` skill** — React/状态管理/性能优化最佳实践
+1. 阅读现有页面、相邻组件、`index.css` 和 [UI 设计文档](../../docs/architecture/ui-design.md)
+2. 明确本次改动延续的布局、配色、字体、层级、动效和响应式行为
+3. 优先复用现有 shadcn/ui、CSS 变量、组件模式和 `motion` 动画能力
+4. 实现后检查键盘、焦点、触控、加载、空状态、错误状态以及减少动画设置
 
-关键搜索维度（按需组合）：
+如果当前环境提供设计检索或前端设计 skill，可用它补充以下维度，但不能把某个未安装命令作为继续工作的前置条件：
 
 - `--domain style` — 视觉风格（glassmorphism、minimalism 等）
 - `--domain typography` — 字体配对与 Google Fonts 导入
@@ -80,10 +81,11 @@ import { Button } from "@mui/material";
 
 ### 现代化体验
 
-- 使用 `framer-motion` 实现流畅过渡动画（页面切换、元素进出场）
+- 使用项目已安装的 `motion`（从 `motion/react` 导入）实现需要编排的 React 动画；简单状态优先使用 CSS transition
 - 可交互元素必须有视觉反馈（hover/active/focus 状态）
-- 所有可点击元素添加 `cursor-pointer`
+- 非原生可点击容器必须同时提供正确语义、键盘操作和焦点样式；不要只添加 `cursor-pointer`
 - 过渡动画时长 150–300ms，使用 `ease-out` 缓动
+- 尊重 `prefers-reduced-motion`，持续背景和高成本效果在低性能设备上需要降级
 
 ### 视觉层次
 
@@ -94,6 +96,6 @@ import { Button } from "@mui/material";
 ## 代码规范
 
 - 组件文件使用 PascalCase：`PlayerControls.tsx`
-- 每个组件文件控制在 200 行以内，超出则拆分子组件
+- 文件持续膨胀且出现可独立维护职责时拆分；不要为了满足固定行数制造无意义组件
 - 样式优先使用 Tailwind 工具类，复杂样式提取为 CSS Variables
 - 响应式使用 Mobile-First（`sm:`/`md:`/`lg:` 断点），禁止 Desktop-First 写法
