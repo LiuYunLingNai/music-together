@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.content.ContentValues
 import android.content.Context
 import android.media.MediaScannerConnection
+import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import androidx.annotation.RequiresApi
@@ -22,6 +23,7 @@ internal class PendingMusicDownload internal constructor(
     val output: OutputStream,
     val fileName: String,
     val displayPath: String,
+    val playbackUri: String,
     private val completeAction: () -> Unit,
     private val abortAction: () -> Unit,
 ) {
@@ -65,6 +67,7 @@ internal class MusicDownloadStorage(private val context: Context) {
             output = output,
             fileName = safeName,
             displayPath = "${directory.absolutePath}/$safeName",
+            playbackUri = uri.toString(),
             completeAction = {
                 resolver.update(
                     uri,
@@ -95,6 +98,7 @@ internal class MusicDownloadStorage(private val context: Context) {
             output = output,
             fileName = file.name,
             displayPath = file.absolutePath,
+            playbackUri = Uri.fromFile(file).toString(),
             completeAction = {
                 MediaScannerConnection.scanFile(context, arrayOf(file.absolutePath), arrayOf(mimeType), null)
             },

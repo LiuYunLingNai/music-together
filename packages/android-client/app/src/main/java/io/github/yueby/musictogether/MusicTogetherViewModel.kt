@@ -126,6 +126,8 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         .build()
     private val api = MusicTogetherApi(okHttp)
     private val offlineLibrary = OfflineLibrary(application, okHttp)
+    private val initialMusicDownloadDirectory = appPreferences.musicDownloadDirectory()
+    private val initialOfflineTracks = offlineLibrary.tracks()
     private val musicDownloads = MusicDownloadService(okHttp)
     private val musicDownloadStorage = MusicDownloadStorage(application)
     private val socket = MusicTogetherSocket(okHttp, this)
@@ -146,8 +148,8 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 range = MIN_SYNC_PACKET_INTERVAL_SECONDS..MAX_SYNC_PACKET_INTERVAL_SECONDS,
             ),
             updateSource = appPreferences.updateSource(),
-            offlineLibrary = OfflineLibraryState(tracks = offlineLibrary.tracks()),
-            musicDownloadDirectory = appPreferences.musicDownloadDirectory(),
+            offlineLibrary = OfflineLibraryState(tracks = initialOfflineTracks),
+            musicDownloadDirectory = initialMusicDownloadDirectory,
         ),
     )
     val state: StateFlow<AppState> = _state.asStateFlow()
@@ -236,6 +238,12 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             override fun onTogglePlayback() = this@MusicTogetherViewModel.togglePlayback()
             override fun onNext() = this@MusicTogetherViewModel.next()
             override fun onPrevious() = this@MusicTogetherViewModel.previous()
+        }
+        viewModelScope.launch {
+            val tracks = withContext(Dispatchers.IO) {
+                offlineLibrary.importPublicDownloads(initialMusicDownloadDirectory)
+            }
+            updateOfflineLibrary { it.copy(tracks = tracks) }
         }
         checkForAppUpdate(silent = true)
         if (_state.value.serverUrl.isNotBlank()) connect()
@@ -1009,7 +1017,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     fun downloadTrack(track: Track) {
         val key = track.offlineDownloadKey()
         if (offlineDownloadJobs[key]?.isActive == true) return
-        if (offlineLibrary.fileFor(track) != null) {
+        if (offlineLibrary.playbackUrlFor(track) != null) {
             setNotice("《${track.title}》已下载")
             return
         }
@@ -1070,11 +1078,12 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             setNotice("请先离开房间后播放本地音乐", isError = true)
             return
         }
-        val file = offlineLibrary.fileFor(track) ?: return setNotice("本地音频不存在，请重新下载", isError = true)
+        val playbackUrl = offlineLibrary.playbackUrlFor(track)
+            ?: return setNotice("本地音频不存在，请重新下载", isError = true)
         nativePlayer.load(
             track = track,
             playState = PlayState(isPlaying = true),
-            playbackUrl = Uri.fromFile(file).toString(),
+            playbackUrl = playbackUrl,
             localPlayback = true,
         )
     }
@@ -1311,6 +1320,10 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 )
                 val averageBytesPerSecond = speedTracker.average(result.downloadedBytes)
                 withContext(Dispatchers.IO) { pending.complete() }
+                withContext(Dispatchers.IO) {
+                    offlineLibrary.registerExternal(track, pending.playbackUri, result.downloadedBytes)
+                }
+                updateOfflineLibrary { it.copy(tracks = offlineLibrary.tracks()) }
                 if (_state.value.room?.currentTrack?.id != track.id) return@launch
                 _state.value = _state.value.copy(
                     musicDownload = _state.value.musicDownload.copy(
@@ -2291,9 +2304,9 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     } ?: track.streamUrl?.let(::PlaybackTarget)
 
     private fun loadTrack(track: Track, playState: PlayState) {
-        offlineLibrary.fileFor(track)?.let { file ->
+        offlineLibrary.playbackUrlFor(track)?.let { playbackUrl ->
             AppLogger.info("Player", "load local track=${track.id} source=${track.source}")
-            nativePlayer.load(track, playState, Uri.fromFile(file).toString())
+            nativePlayer.load(track, playState, playbackUrl)
             return
         }
         val target = playbackTarget(track)

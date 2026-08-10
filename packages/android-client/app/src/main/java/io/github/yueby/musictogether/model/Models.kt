@@ -91,6 +91,7 @@ data class DownloadedTrack(
     val track: Track,
     val sizeBytes: Long,
     val downloadedAt: Long,
+    val playbackUri: String? = null,
 )
 
 @Immutable

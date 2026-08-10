@@ -1,11 +1,16 @@
 package io.github.yueby.musictogether.offline
 
 import android.content.Context
+import android.content.ContentUris
+import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
 import io.github.yueby.musictogether.model.DownloadedTrack
 import io.github.yueby.musictogether.model.Track
 import io.github.yueby.musictogether.model.offlineDownloadKey
 import io.github.yueby.musictogether.network.toJson
 import io.github.yueby.musictogether.network.toTrack
+import io.github.yueby.musictogether.network.resolveMusicDownloadDirectory
 import io.github.yueby.musictogether.player.PlaybackRequestHeaders
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -31,9 +36,11 @@ internal class OfflineLibrary(
 
     private val directory = File(context.filesDir, DIRECTORY_NAME)
     private val indexFile = File(directory, INDEX_FILE_NAME)
+    private val contentResolver = context.contentResolver
+    private val packageName = context.packageName
 
     fun tracks(): List<DownloadedTrack> = synchronized(this) {
-        val entries = readIndex().filter { entry -> audioFile(entry.key).isFile && audioFile(entry.key).length() > 0L }
+        val entries = readIndex().filter(::isAvailable)
         writeIndex(entries)
         entries.sortedByDescending { it.downloadedAt }
     }
@@ -43,6 +50,84 @@ internal class OfflineLibrary(
         readIndex().firstOrNull { it.key == key }
             ?.takeIf { audioFile(it.key).isFile && audioFile(it.key).length() > 0L }
             ?.let { audioFile(it.key) }
+    }
+
+    fun playbackUrlFor(track: Track): String? = synchronized(this) {
+        readIndex().firstOrNull { it.key == track.offlineDownloadKey() }
+            ?.takeIf(::isAvailable)
+            ?.playbackUri
+            ?: fileFor(track)?.let { Uri.fromFile(it).toString() }
+    }
+
+    fun registerExternal(track: Track, playbackUri: String, sizeBytes: Long) = synchronized(this) {
+        val key = track.offlineDownloadKey()
+        val entry = DownloadedTrack(
+            key = key,
+            track = track,
+            sizeBytes = sizeBytes.coerceAtLeast(0L),
+            downloadedAt = System.currentTimeMillis(),
+            playbackUri = playbackUri,
+        )
+        audioFile(key).delete()
+        writeIndex(readIndex().filterNot { it.key == key } + entry)
+        entry
+    }
+
+    fun importPublicDownloads(directoryPath: String): List<DownloadedTrack> = synchronized(this) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return tracks()
+        val directory = resolveMusicDownloadDirectory(directoryPath) ?: return tracks()
+        val entries = readIndex()
+        val indexedUris = entries.mapNotNullTo(hashSetOf()) { it.playbackUri }
+        val imported = contentResolver.query(
+            MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+            arrayOf(
+                MediaStore.Downloads._ID,
+                MediaStore.Downloads.DISPLAY_NAME,
+                MediaStore.Downloads.SIZE,
+                MediaStore.Downloads.DATE_ADDED,
+            ),
+            "${MediaStore.Downloads.RELATIVE_PATH}=? AND ${MediaStore.MediaColumns.OWNER_PACKAGE_NAME}=?",
+            arrayOf("${directory.mediaStoreRelativePath}/", packageName),
+            "${MediaStore.Downloads.DATE_ADDED} DESC",
+        )?.use { cursor ->
+            val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID)
+            val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Downloads.DISPLAY_NAME)
+            val sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Downloads.SIZE)
+            val dateColumn = cursor.getColumnIndexOrThrow(MediaStore.Downloads.DATE_ADDED)
+            buildList {
+                while (cursor.moveToNext()) {
+                    val uri = ContentUris.withAppendedId(
+                        MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                        cursor.getLong(idColumn),
+                    ).toString()
+                    if (uri !in indexedUris) {
+                        val name = cursor.getString(nameColumn).orEmpty()
+                        add(
+                            DownloadedTrack(
+                                key = "local:${cursor.getLong(idColumn)}",
+                                track = Track(
+                                    id = "local:${cursor.getLong(idColumn)}",
+                                    title = name.substringBeforeLast('.', name),
+                                    artist = emptyList(),
+                                    album = "本地下载",
+                                    duration = 0.0,
+                                    cover = "",
+                                    source = "local",
+                                    sourceId = cursor.getLong(idColumn).toString(),
+                                    urlId = cursor.getLong(idColumn).toString(),
+                                ),
+                                sizeBytes = cursor.getLong(sizeColumn).coerceAtLeast(0L),
+                                downloadedAt = cursor.getLong(dateColumn).coerceAtLeast(0L) * 1000L,
+                                playbackUri = uri,
+                            ),
+                        )
+                    }
+                }
+            }
+        }.orEmpty()
+        val merged = entries + imported
+        writeIndex(merged)
+        merged.filter(::isAvailable).sortedByDescending { it.downloadedAt }
     }
 
     suspend fun download(
@@ -124,11 +209,24 @@ internal class OfflineLibrary(
     fun remove(track: Track): Boolean = synchronized(this) {
         val key = track.offlineDownloadKey()
         val entries = readIndex()
-        val removed = entries.any { it.key == key }
-        if (!removed) return false
-        audioFile(key).delete()
+        val removed = entries.firstOrNull { it.key == key } ?: return false
+        removed.playbackUri?.let(::removeExternal) ?: audioFile(key).delete()
         writeIndex(entries.filterNot { it.key == key })
         true
+    }
+
+    private fun isAvailable(entry: DownloadedTrack): Boolean = when (val playbackUri = entry.playbackUri) {
+        null -> audioFile(entry.key).isFile && audioFile(entry.key).length() > 0L
+        else -> Uri.parse(playbackUri).scheme != "file" || File(Uri.parse(playbackUri).path.orEmpty()).isFile
+    }
+
+    private fun removeExternal(playbackUri: String) {
+        val uri = Uri.parse(playbackUri)
+        if (uri.scheme == "file") {
+            File(uri.path.orEmpty()).delete()
+        } else {
+            runCatching { contentResolver.delete(uri, null, null) }
+        }
     }
 
     private fun readIndex(): List<DownloadedTrack> {
@@ -145,6 +243,7 @@ internal class OfflineLibrary(
                     track = track,
                     sizeBytes = item.optLong("sizeBytes").coerceAtLeast(0L),
                     downloadedAt = item.optLong("downloadedAt").coerceAtLeast(0L),
+                    playbackUri = item.optString("playbackUri").takeIf { it.isNotBlank() },
                 )
             }
         }.filterNotNull()
@@ -159,7 +258,8 @@ internal class OfflineLibrary(
                         .put("key", entry.key)
                         .put("track", entry.track.toJson())
                         .put("sizeBytes", entry.sizeBytes)
-                        .put("downloadedAt", entry.downloadedAt),
+                        .put("downloadedAt", entry.downloadedAt)
+                        .put("playbackUri", entry.playbackUri),
                 )
             }
         }.toString()
