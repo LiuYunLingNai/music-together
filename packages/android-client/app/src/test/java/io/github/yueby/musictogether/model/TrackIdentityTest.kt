@@ -47,6 +47,19 @@ class TrackIdentityTest {
         assertNotEquals(firstPart.queueIdentity(), secondPart.queueIdentity())
     }
 
+    @Test
+    fun offlineDownloadKeySeparatesSourcesAndVideoParts() {
+        val netease = track(id = "1", source = "netease", sourceId = "1")
+        val tencent = track(id = "1", source = "tencent", sourceId = "1")
+        val firstPart = track(id = "video", source = "bilibili", sourceId = "BV1", urlId = "BV1?cid=1")
+        val secondPart = track(id = "video", source = "bilibili", sourceId = "BV1", urlId = "BV1?cid=2")
+        val repeatedSearchResult = track(id = "different-id", source = "netease", sourceId = "1")
+
+        assertNotEquals(netease.offlineDownloadKey(), tencent.offlineDownloadKey())
+        assertNotEquals(firstPart.offlineDownloadKey(), secondPart.offlineDownloadKey())
+        assertEquals(netease.offlineDownloadKey(), repeatedSearchResult.offlineDownloadKey())
+    }
+
     private fun track(id: String, source: String, sourceId: String, urlId: String = sourceId) = Track(
         id = id,
         title = "晴天",

@@ -201,11 +201,11 @@ internal fun PlatformTrackRow(track: Track, isAdded: Boolean, onAdd: () -> Unit,
         modifier = if (isAdded) Modifier.fillMaxWidth() else Modifier.fillMaxWidth().clickable(onClick = onAdd),
         colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
         leadingContent = {
-            AsyncImage(
-                model = rememberCoverImageRequest(track.cover),
+            TrackCover(
+                track = track,
+                size = 50.dp,
+                cornerRadius = 8.dp,
                 contentDescription = null,
-                modifier = Modifier.size(50.dp).clip(RoundedCornerShape(8.dp)),
-                contentScale = ContentScale.Crop,
             )
         },
         headlineContent = { Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },

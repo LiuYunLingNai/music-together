@@ -12,9 +12,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -44,13 +44,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil3.compose.AsyncImage
 import io.github.yueby.musictogether.MusicTogetherViewModel
 import io.github.yueby.musictogether.model.RoomState
 import io.github.yueby.musictogether.model.Track
@@ -160,6 +158,9 @@ internal fun QueuePane(
                     secondaryAction = if (canReorder) null else ({ viewModel.removeTrack(track) }),
                     primaryIcon = Icons.Default.PlayArrow,
                     secondaryIcon = Icons.Default.Delete,
+                    extraAction = { viewModel.downloadTrack(track) },
+                    extraIcon = Icons.Default.Download,
+                    extraContentDescription = "下载歌曲",
                     onClick = { viewModel.playTrack(track) },
                     highlighted = isCurrent,
                     compact = true,
@@ -175,6 +176,7 @@ internal fun QueuePane(
                                 onMoveDown = { viewModel.moveTrack(track, 1) },
                                 onPin = { viewModel.pinTrack(track) },
                                 onRemove = { viewModel.removeTrack(track) },
+                                onDownload = { viewModel.downloadTrack(track) },
                                 onReselectMetadata =
                                     track.takeIf { it.source == "bilibili" }?.let { video ->
                                         { viewModel.reselectBilibiliMetadata(video) }
@@ -200,6 +202,9 @@ internal fun TrackRow(
     primaryIcon: androidx.compose.ui.graphics.vector.ImageVector,
     secondaryAction: (() -> Unit)? = null,
     secondaryIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    extraAction: (() -> Unit)? = null,
+    extraIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    extraContentDescription: String? = null,
     onClick: (() -> Unit)? = null,
     highlighted: Boolean = false,
     compact: Boolean = false,
@@ -211,13 +216,11 @@ internal fun TrackRow(
             containerColor = if (highlighted) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
         ),
         leadingContent = {
-            AsyncImage(
-                model = rememberCoverImageRequest(track.cover),
+            TrackCover(
+                track = track,
+                size = if (compact) 40.dp else 48.dp,
+                cornerRadius = if (compact) 6.dp else 8.dp,
                 contentDescription = null,
-                modifier = Modifier
-                    .size(if (compact) 40.dp else 48.dp)
-                    .clip(RoundedCornerShape(if (compact) 6.dp else 8.dp)),
-                contentScale = ContentScale.Crop,
             )
         },
         headlineContent = {
@@ -241,6 +244,9 @@ internal fun TrackRow(
                 trailingContent()
             } else {
                 Row {
+                    if (extraAction != null && extraIcon != null && extraContentDescription != null) {
+                        IconButton(onClick = extraAction) { Icon(extraIcon, extraContentDescription) }
+                    }
                     primaryAction?.let { IconButton(onClick = it) { Icon(primaryIcon, "播放或投票播放") } }
                     if (secondaryAction != null && secondaryIcon != null) {
                         IconButton(onClick = secondaryAction) { Icon(secondaryIcon, "移除或投票移除") }
@@ -262,6 +268,7 @@ private fun QueueControlMenu(
     onMoveDown: () -> Unit,
     onPin: () -> Unit,
     onRemove: () -> Unit,
+    onDownload: () -> Unit,
     onReselectMetadata: (() -> Unit)? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -297,6 +304,11 @@ private fun QueueControlMenu(
                 leadingIcon = { Icon(Icons.Default.VerticalAlignTop, null) },
                 enabled = canPin,
                 onClick = { expanded = false; onPin() },
+            )
+            DropdownMenuItem(
+                text = { Text("下载") },
+                leadingIcon = { Icon(Icons.Default.Download, null) },
+                onClick = { expanded = false; onDownload() },
             )
             DropdownMenuItem(
                 text = { Text("移除") },

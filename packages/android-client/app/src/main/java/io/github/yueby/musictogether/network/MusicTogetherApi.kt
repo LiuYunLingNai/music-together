@@ -205,6 +205,17 @@ class MusicTogetherApi(private val client: OkHttpClient) {
         }
     }
 
+    suspend fun streamUrl(server: ServerAddress, track: Track, bitrate: String): String? =
+        withContext(Dispatchers.IO) {
+            if (track.urlId.isBlank()) return@withContext null
+            val url = server.api("music", "url").newBuilder()
+                .addQueryParameter("source", track.source)
+                .addQueryParameter("urlId", track.urlId)
+                .addQueryParameter("bitrate", bitrate)
+                .build()
+            executeJson(url, "stream URL:${track.source}").stringOrNull("url")
+        }
+
     suspend fun search(server: ServerAddress, keyword: String, source: String, roomId: String?, page: Int): SearchPage =
         withContext(Dispatchers.IO) {
             val url = server.api("music", "search").newBuilder()

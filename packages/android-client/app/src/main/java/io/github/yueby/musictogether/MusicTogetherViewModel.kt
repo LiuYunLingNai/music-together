@@ -16,6 +16,8 @@ import io.github.yueby.musictogether.model.AudioProxyPolicy
 import io.github.yueby.musictogether.model.BilibiliMetadataMatchState
 import io.github.yueby.musictogether.model.BilibiliCollectionState
 import io.github.yueby.musictogether.model.ConnectionStatus
+import io.github.yueby.musictogether.model.OfflineDownloadState
+import io.github.yueby.musictogether.model.OfflineLibraryState
 import io.github.yueby.musictogether.model.LyricsState
 import io.github.yueby.musictogether.model.nextChatUnreadCount
 import io.github.yueby.musictogether.model.PlatformHubState
@@ -28,6 +30,7 @@ import io.github.yueby.musictogether.model.Track
 import io.github.yueby.musictogether.model.UiNotice
 import io.github.yueby.musictogether.model.UpdateDownloadSource
 import io.github.yueby.musictogether.model.queueIdentity
+import io.github.yueby.musictogether.model.offlineDownloadKey
 import io.github.yueby.musictogether.network.AppUpdateService
 import io.github.yueby.musictogether.network.DiscoveryConnectionCoordinator
 import io.github.yueby.musictogether.network.Events
@@ -55,6 +58,7 @@ import io.github.yueby.musictogether.network.toUser
 import io.github.yueby.musictogether.network.toVoteState
 import io.github.yueby.musictogether.network.toJson
 import io.github.yueby.musictogether.notifications.ChatNotificationManager
+import io.github.yueby.musictogether.offline.OfflineLibrary
 import io.github.yueby.musictogether.player.ClockSync
 import io.github.yueby.musictogether.player.NativePlayer
 import io.github.yueby.musictogether.player.PlaybackCommandBridge
@@ -73,6 +77,7 @@ import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 class MusicTogetherViewModel(application: Application) : AndroidViewModel(application), SocketEvents {
@@ -104,6 +109,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         .pingInterval(25, TimeUnit.SECONDS)
         .build()
     private val api = MusicTogetherApi(okHttp)
+    private val offlineLibrary = OfflineLibrary(application, okHttp)
     private val socket = MusicTogetherSocket(okHttp, this)
     private val chatNotifications = ChatNotificationManager(application)
     private val clock = ClockSync()
@@ -121,6 +127,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 range = MIN_SYNC_PACKET_INTERVAL_SECONDS..MAX_SYNC_PACKET_INTERVAL_SECONDS,
             ),
             updateSource = appPreferences.updateSource(),
+            offlineLibrary = OfflineLibraryState(tracks = offlineLibrary.tracks()),
         ),
     )
     val state: StateFlow<AppState> = _state.asStateFlow()
@@ -163,6 +170,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     val playerState: StateFlow<PlayerUiState> = nativePlayer.state
 
     private var activeServer: ServerAddress? = null
+    private val offlineDownloadJobs = mutableMapOf<String, Job>()
     private val discovery = DiscoveryConnectionCoordinator(
         okHttp = okHttp,
         api = api,
@@ -856,6 +864,79 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         }
     }
 
+    fun downloadTrack(track: Track) {
+        val key = track.offlineDownloadKey()
+        if (offlineDownloadJobs[key]?.isActive == true) return
+        if (offlineLibrary.fileFor(track) != null) {
+            setNotice("《${track.title}》已下载")
+            return
+        }
+        if (activeServer == null && track.streamUrl.isNullOrBlank()) {
+            return setError("请先连接服务器后下载歌曲")
+        }
+        updateOfflineLibrary { library ->
+            library.copy(downloads = library.downloads + (key to OfflineDownloadState(track = track)))
+        }
+        offlineDownloadJobs[key] = viewModelScope.launch {
+            runCatching {
+                val resolvedTrack = resolveTrackForDownload(track)
+                val target = playbackTarget(resolvedTrack) ?: throw IOException("服务端未返回可下载音频")
+                fun updateProgress(progress: Int?) {
+                    updateOfflineLibrary { library ->
+                        val current = library.downloads[key] ?: return@updateOfflineLibrary library
+                        library.copy(downloads = library.downloads + (key to current.copy(progressPercent = progress)))
+                    }
+                }
+                try {
+                    offlineLibrary.download(track, target.primaryUrl, ::updateProgress)
+                } catch (primaryError: Throwable) {
+                    val fallbackUrl = target.fallbackUrl ?: throw primaryError
+                    AppLogger.warn("Offline", "primary download failed; retrying fallback track=${track.id}")
+                    offlineLibrary.download(track, fallbackUrl, ::updateProgress)
+                }
+            }.onSuccess {
+                updateOfflineLibrary { library ->
+                    library.copy(
+                        tracks = offlineLibrary.tracks(),
+                        downloads = library.downloads - key,
+                    )
+                }
+                setNotice("《${track.title}》已下载")
+            }.onFailure { error ->
+                if (error is CancellationException) throw error
+                updateOfflineLibrary { library -> library.copy(downloads = library.downloads - key) }
+                setNotice("《${track.title}》下载失败：${error.message ?: "未知错误"}", isError = true)
+            }
+            offlineDownloadJobs.remove(key)
+        }
+    }
+
+    fun removeDownloadedTrack(track: Track) {
+        val key = track.offlineDownloadKey()
+        offlineDownloadJobs.remove(key)?.cancel()
+        val removed = offlineLibrary.remove(track)
+        if (!removed) return
+        if (nativePlayer.state.value.localPlayback && nativePlayer.state.value.track?.offlineDownloadKey() == key) {
+            nativePlayer.stop()
+        }
+        updateOfflineLibrary { it.copy(tracks = offlineLibrary.tracks(), downloads = it.downloads - key) }
+        setNotice("已删除《${track.title}》")
+    }
+
+    fun playDownloadedTrack(track: Track) {
+        if (_state.value.room != null) {
+            setNotice("请先离开房间后播放本地音乐", isError = true)
+            return
+        }
+        val file = offlineLibrary.fileFor(track) ?: return setNotice("本地音频不存在，请重新下载", isError = true)
+        nativePlayer.load(
+            track = track,
+            playState = PlayState(isPlaying = true),
+            playbackUrl = Uri.fromFile(file).toString(),
+            localPlayback = true,
+        )
+    }
+
     fun removeTrack(track: Track) {
         if (canRemoveQueueTrack()) {
             socket.emit(Events.QUEUE_REMOVE, JSONObject().put("trackId", track.id))
@@ -905,6 +986,10 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun togglePlayback() {
+        if (nativePlayer.state.value.localPlayback) {
+            nativePlayer.toggleLocalPlayback()
+            return
+        }
         val action = if (nativePlayer.state.value.playing) "pause" else "resume"
         if (canControl()) {
             socket.emit(if (action == "pause") Events.PLAYER_PAUSE else Events.PLAYER_PLAY)
@@ -913,10 +998,19 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         }
     }
 
-    fun next() = controlOrVote(Events.PLAYER_NEXT, "next")
-    fun previous() = controlOrVote(Events.PLAYER_PREV, "prev")
+    fun next() {
+        if (!nativePlayer.state.value.localPlayback) controlOrVote(Events.PLAYER_NEXT, "next")
+    }
+
+    fun previous() {
+        if (!nativePlayer.state.value.localPlayback) controlOrVote(Events.PLAYER_PREV, "prev")
+    }
 
     fun seek(seconds: Double) {
+        if (nativePlayer.state.value.localPlayback) {
+            nativePlayer.seekLocal(seconds)
+            return
+        }
         if (canControl()) socket.emit(Events.PLAYER_SEEK, JSONObject().put("currentTime", seconds.coerceAtLeast(0.0)))
     }
 
@@ -1872,6 +1966,11 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     } ?: track.streamUrl?.let(::PlaybackTarget)
 
     private fun loadTrack(track: Track, playState: PlayState) {
+        offlineLibrary.fileFor(track)?.let { file ->
+            AppLogger.info("Player", "load local track=${track.id} source=${track.source}")
+            nativePlayer.load(track, playState, Uri.fromFile(file).toString())
+            return
+        }
         val target = playbackTarget(track)
         AppLogger.info(
             "Player",
@@ -1879,6 +1978,23 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 "requiresServerProxy=${track.requiresServerProxy}",
         )
         nativePlayer.load(track, playState, target?.primaryUrl, target?.fallbackUrl)
+    }
+
+    private suspend fun resolveTrackForDownload(track: Track): Track {
+        if (!track.streamUrl.isNullOrBlank()) return track
+        _state.value.room?.currentTrack
+            ?.takeIf { it.offlineDownloadKey() == track.offlineDownloadKey() }
+            ?.takeIf { !it.streamUrl.isNullOrBlank() }
+            ?.let { return it }
+        val server = activeServer ?: throw IOException("尚未连接服务器")
+        val bitrate = _state.value.room?.audioQuality ?: "320"
+        val streamUrl = api.streamUrl(server, track, bitrate)
+            ?: throw IOException("该音源需要先在房间播放后才能下载")
+        return track.copy(streamUrl = streamUrl)
+    }
+
+    private fun updateOfflineLibrary(transform: (OfflineLibraryState) -> OfflineLibraryState) {
+        _state.value = _state.value.copy(offlineLibrary = transform(_state.value.offlineLibrary))
     }
 
     private fun applyAudioProxyPolicy(policy: AudioProxyPolicy) {
@@ -2164,6 +2280,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         recommendationsJob?.cancel()
         bilibiliMetadataSearchJob?.cancel()
         bilibiliCollectionJob?.cancel()
+        offlineDownloadJobs.values.forEach(Job::cancel)
         PlaybackCommandBridge.listener = null
         socket.disconnect()
         socketServerUrl = null

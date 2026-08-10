@@ -6,6 +6,7 @@ import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -25,7 +26,7 @@ class PlaybackService : MediaSessionService() {
         super.onCreate()
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
             .setUserAgent(PlaybackRequestHeaders.USER_AGENT)
-        val dataSourceFactory = ResolvingDataSource.Factory(httpDataSourceFactory) { dataSpec ->
+        val dataSourceFactory = ResolvingDataSource.Factory(DefaultDataSource.Factory(this, httpDataSourceFactory)) { dataSpec ->
             val host = dataSpec.uri.host.orEmpty().lowercase()
             val headers = PlaybackRequestHeaders.forHost(host)
             if (headers.isNotEmpty()) {

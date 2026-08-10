@@ -5,6 +5,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -21,13 +22,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import io.github.yueby.musictogether.model.Track
 import io.github.yueby.musictogether.ui.rememberCoverImageRequest
+import io.github.yueby.musictogether.ui.TrackPlatformBadge
 
 private data class ArtworkTarget(
     val trackId: String?,
     val coverUrl: String?,
+    val source: String?,
 )
 
 @Composable
@@ -41,15 +45,18 @@ internal fun PlayerArtwork(
     val target = ArtworkTarget(
         trackId = track?.id,
         coverUrl = track?.cover?.takeIf(String::isNotBlank),
+        source = track?.source,
     )
     Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(cornerRadius))
-            .background(Color.White.copy(alpha = 0.10f)),
+        modifier = modifier,
         contentAlignment = Alignment.Center,
     ) {
         Crossfade(
             targetState = target,
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(cornerRadius))
+                .background(Color.White.copy(alpha = 0.10f)),
             animationSpec = tween(360),
             label = "player-artwork-crossfade",
         ) { artwork ->
@@ -76,5 +83,12 @@ internal fun PlayerArtwork(
                 }
             }
         }
+        TrackPlatformBadge(
+            source = target.source,
+            compact = placeholderIconSize <= 24.dp,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .offset(x = if (placeholderIconSize <= 24.dp) 3.dp else 6.dp, y = if (placeholderIconSize <= 24.dp) 4.dp else 8.dp),
+        )
     }
 }

@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Refresh
@@ -71,8 +72,18 @@ fun LobbyScreen(
     var directRoomId by remember { mutableStateOf("") }
     var connectionSettingsOpen by remember { mutableStateOf(false) }
     var accountSettingsOpen by remember { mutableStateOf(false) }
+    var localLibraryOpen by remember { mutableStateOf(false) }
     val connectedServerCount = state.servers.count { it.status == ConnectionStatus.Connected }
     val roomCount = state.servers.sumOf { it.rooms.size }
+
+    if (localLibraryOpen) {
+        LocalMusicPane(
+            state = state,
+            viewModel = viewModel,
+            onBack = { localLibraryOpen = false },
+        )
+        return
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -119,6 +130,9 @@ fun LobbyScreen(
                 }
                 IconButton(onClick = { connectionSettingsOpen = true }) {
                     Icon(Icons.Default.Settings, contentDescription = "服务器设置")
+                }
+                IconButton(onClick = { localLibraryOpen = true }) {
+                    Icon(Icons.Default.LibraryMusic, contentDescription = "本地音乐")
                 }
                 IconButton(onClick = { accountSettingsOpen = true }) {
                     if (state.accountProfile?.avatarUrl != null) {

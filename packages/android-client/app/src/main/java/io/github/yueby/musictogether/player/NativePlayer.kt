@@ -29,6 +29,7 @@ import kotlin.math.max
 @Immutable
 data class PlayerUiState(
     val track: Track? = null,
+    val localPlayback: Boolean = false,
     val playing: Boolean = false,
     val positionSeconds: Double = 0.0,
     val durationSeconds: Double = 0.0,
@@ -129,6 +130,7 @@ class NativePlayer(
         playState: PlayState,
         playbackUrl: String? = track.streamUrl,
         fallbackUrl: String? = null,
+        localPlayback: Boolean = false,
     ) {
         val streamUrl = playbackUrl ?: run {
             fallbackPlaybackUrl = null
@@ -139,7 +141,11 @@ class NativePlayer(
         pendingLoad = null
         fallbackPlaybackUrl = fallbackUrl?.takeIf { it != streamUrl }
         resetPlaybackCorrection()
-        _state.value = PlayerUiState(track = track, connectedToMediaSession = player != null)
+        _state.value = PlayerUiState(
+            track = track,
+            localPlayback = localPlayback,
+            connectedToMediaSession = player != null,
+        )
         val elapsed = if (playState.isPlaying && playState.serverTimestamp > 0) {
             max(0.0, (clock.serverTime() - playState.serverTimestamp) / 1000.0)
         } else 0.0
@@ -199,6 +205,18 @@ class NativePlayer(
     fun seek(playState: PlayState) = schedule(playState.serverTimeToExecute) {
         resetPlaybackCorrection(it)
         it.seekTo(positionAtExecution(playState, advanceIfLate = playState.isPlaying))
+    }
+
+    fun toggleLocalPlayback() {
+        if (!_state.value.localPlayback) return
+        withPlayer { controller ->
+            if (controller.isPlaying) controller.pause() else controller.play()
+        }
+    }
+
+    fun seekLocal(seconds: Double) {
+        if (!_state.value.localPlayback) return
+        withPlayer { it.seekTo((seconds * 1_000).toLong().coerceAtLeast(0L)) }
     }
 
     fun setTempoSyncEnabled(enabled: Boolean) {

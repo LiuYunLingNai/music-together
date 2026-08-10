@@ -84,6 +84,28 @@ data class Track(
 )
 
 @Immutable
+data class DownloadedTrack(
+    val key: String,
+    val track: Track,
+    val sizeBytes: Long,
+    val downloadedAt: Long,
+)
+
+@Immutable
+data class OfflineDownloadState(
+    val track: Track? = null,
+    val progressPercent: Int? = null,
+)
+
+@Immutable
+data class OfflineLibraryState(
+    val tracks: List<DownloadedTrack> = emptyList(),
+    val downloads: Map<String, OfflineDownloadState> = emptyMap(),
+)
+
+fun Track.offlineDownloadKey(): String = queueIdentity()
+
+@Immutable
 data class BilibiliMetadataMatchState(
     val track: Track? = null,
     val pinned: Boolean = false,
@@ -353,6 +375,7 @@ data class AppState(
     val updateDownloadProgress: Int? = null,
     val updateReadyToInstall: Boolean = false,
     val updateError: String? = null,
+    val offlineLibrary: OfflineLibraryState = OfflineLibraryState(),
     val notice: UiNotice? = null,
     val error: String? = null,
 )

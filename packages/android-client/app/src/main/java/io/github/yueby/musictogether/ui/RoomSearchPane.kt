@@ -21,6 +21,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.VerticalAlignTop
@@ -58,6 +59,7 @@ import io.github.yueby.musictogether.model.BilibiliCollectionState
 import io.github.yueby.musictogether.model.BilibiliMetadataMatchState
 import io.github.yueby.musictogether.model.Track
 import io.github.yueby.musictogether.model.queueIdentity
+import io.github.yueby.musictogether.model.offlineDownloadKey
 import io.github.yueby.musictogether.network.searchInputMaxLength
 
 @Composable
@@ -136,6 +138,9 @@ internal fun SearchPane(state: AppState, viewModel: MusicTogetherViewModel) {
                 items(state.searchResults, key = { it.id }) { track ->
                     val trackKey = track.queueIdentity()
                     val isAdded = state.room?.queue?.any { it.queueIdentity() == trackKey } == true
+                    val downloadKey = track.offlineDownloadKey()
+                    val isDownloaded = state.offlineLibrary.tracks.any { it.key == downloadKey }
+                    val download = state.offlineLibrary.downloads[downloadKey]
                     TrackRow(
                         track = track,
                         subtitle = "${track.artist.joinToString(" / ")} · ${track.album}",
@@ -145,8 +150,12 @@ internal fun SearchPane(state: AppState, viewModel: MusicTogetherViewModel) {
                         trailingContent = {
                             SearchTrackActions(
                                 isAdded = isAdded,
+                                isDownloaded = isDownloaded,
+                                isDownloading = download != null,
+                                downloadProgress = download?.progressPercent,
                                 onAdd = { viewModel.addTrack(track) },
                                 onPin = { viewModel.insertAfterCurrent(track) },
+                                onDownload = { viewModel.downloadTrack(track) },
                             )
                         },
                     )
@@ -327,8 +336,31 @@ internal fun BilibiliMetadataDialog(
 }
 
 @Composable
-private fun SearchTrackActions(isAdded: Boolean, onAdd: () -> Unit, onPin: () -> Unit) {
+private fun SearchTrackActions(
+    isAdded: Boolean,
+    isDownloaded: Boolean,
+    isDownloading: Boolean,
+    downloadProgress: Int?,
+    onAdd: () -> Unit,
+    onPin: () -> Unit,
+    onDownload: () -> Unit,
+) {
     Row {
+        when {
+            isDownloaded -> IconButton(onClick = {}, enabled = false) {
+                Icon(Icons.Default.Check, "已下载", tint = MaterialTheme.colorScheme.primary)
+            }
+            isDownloading -> Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(
+                    progress = { (downloadProgress ?: 0) / 100f },
+                    modifier = Modifier.size(22.dp),
+                    strokeWidth = 2.dp,
+                )
+            }
+            else -> IconButton(onClick = onDownload) {
+                Icon(Icons.Default.Download, "下载歌曲")
+            }
+        }
         IconButton(onClick = onAdd, enabled = !isAdded) {
             Icon(
                 if (isAdded) Icons.Default.Check else Icons.AutoMirrored.Filled.PlaylistAdd,
