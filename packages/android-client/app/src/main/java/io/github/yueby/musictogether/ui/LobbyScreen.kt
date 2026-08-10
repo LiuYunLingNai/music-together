@@ -1,5 +1,6 @@
 package io.github.yueby.musictogether.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -59,6 +60,14 @@ import io.github.yueby.musictogether.model.RoomListItem
 
 private data class RoomTarget(val serverUrl: String, val room: RoomListItem)
 
+internal enum class LobbyBackAction {
+    CloseLocalLibrary,
+    ExitApp,
+}
+
+internal fun resolveLobbyBackAction(localLibraryOpen: Boolean): LobbyBackAction =
+    if (localLibraryOpen) LobbyBackAction.CloseLocalLibrary else LobbyBackAction.ExitApp
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LobbyScreen(
@@ -77,6 +86,11 @@ fun LobbyScreen(
     val roomCount = state.servers.sumOf { it.rooms.size }
 
     if (localLibraryOpen) {
+        BackHandler {
+            if (resolveLobbyBackAction(localLibraryOpen) == LobbyBackAction.CloseLocalLibrary) {
+                localLibraryOpen = false
+            }
+        }
         LocalMusicPane(
             state = state,
             viewModel = viewModel,
