@@ -30,7 +30,7 @@ import { registerKugouProxyRequiredAudio } from './kugouAudioProxy.js'
 import { config } from '../config.js'
 import { parseCookieString } from '../utils/cookieUtils.js'
 import { logger } from '../utils/logger.js'
-import { parseNeteaseRecommendedPlaylists } from './recommendationParsers.js'
+import { parseNeteaseRecommendedPlaylistPage } from './recommendationParsers.js'
 import crypto from 'node:crypto'
 import { createRequire } from 'node:module'
 
@@ -1661,17 +1661,45 @@ class MusicProvider {
     source: MusicSource,
     cookie: string,
     limit = 20,
-    pagination: { radarPage?: number; playlistOffset?: number } = {},
+    pagination: { radarPage?: number; playlistOffset?: number; neteasePlaylistOffset?: number } = {},
   ): Promise<{ tracks: Track[]; playlists?: Playlist[]; pagination?: RecommendationPagination }> {
     let tracks: Track[]
 
     switch (source) {
       case 'netease': {
-        const response = await withTimeout(ncmApi.recommend_resource({ cookie, timestamp: Date.now() }))
-        if (response?.body?.code !== 200 || !Array.isArray(response.body.recommend)) {
-          throw new Error(`Netease recommendation feed failed: ${response?.body?.code ?? 'empty response'}`)
+        const [dailyResult, personalizedResult] = await Promise.allSettled([
+          withTimeout(ncmApi.recommend_resource({ cookie, timestamp: Date.now() })),
+          withTimeout(ncmApi.personalized({ cookie, limit: 100, timestamp: Date.now() })),
+        ])
+        const daily =
+          dailyResult.status === 'fulfilled' &&
+          dailyResult.value?.body?.code === 200 &&
+          Array.isArray(dailyResult.value.body.recommend)
+            ? dailyResult.value
+            : null
+        const personalized =
+          personalizedResult.status === 'fulfilled' &&
+          personalizedResult.value?.body?.code === 200 &&
+          Array.isArray(personalizedResult.value.body.result)
+            ? personalizedResult.value
+            : null
+        if (!daily && !personalized) {
+          throw new Error('Netease recommendation feeds failed')
         }
-        return { tracks: [], playlists: parseNeteaseRecommendedPlaylists(response).slice(0, limit) }
+        if (!daily) logger.warn('Netease daily recommendation feed failed')
+        if (!personalized) logger.warn('Netease personalized recommendation feed failed')
+
+        const page = parseNeteaseRecommendedPlaylistPage(
+          daily,
+          personalized,
+          limit,
+          pagination.neteasePlaylistOffset ?? pagination.playlistOffset ?? 0,
+        )
+        return {
+          tracks: [],
+          playlists: page.playlists,
+          pagination: { playlists: { hasMore: page.hasMore, nextOffset: page.nextOffset } },
+        }
       }
       case 'tencent': {
         const [radarResult, playlistResult] = await Promise.allSettled([

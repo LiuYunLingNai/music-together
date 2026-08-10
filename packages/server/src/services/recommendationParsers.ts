@@ -40,6 +40,12 @@ function uniquePlaylists(playlists: Playlist[]): Playlist[] {
   })
 }
 
+export interface NeteaseRecommendedPlaylistPage {
+  playlists: Playlist[]
+  hasMore: boolean
+  nextOffset: number
+}
+
 function tencentResponseData(value: unknown): Record<string, unknown> | null {
   const root = asRecord(value)
   const req = asRecord(root?.req)
@@ -134,7 +140,13 @@ export function parseTencentRadarRecommendationPage(value: unknown): TencentRada
 export function parseNeteaseRecommendedPlaylists(value: unknown): Playlist[] {
   const root = asRecord(value)
   const body = asRecord(root?.body) ?? root
-  const recommend = Array.isArray(value) ? value : Array.isArray(body?.recommend) ? body.recommend : []
+  const recommend = Array.isArray(value)
+    ? value
+    : Array.isArray(body?.recommend)
+      ? body.recommend
+      : Array.isArray(body?.result)
+        ? body.result
+        : []
 
   return uniquePlaylists(
     recommend.flatMap((entry): Playlist[] => {
@@ -157,6 +169,32 @@ export function parseNeteaseRecommendedPlaylists(value: unknown): Playlist[] {
       ]
     }),
   )
+}
+
+/**
+ * Build a stable local page from NetEase's recommendation pool. The native
+ * personalized endpoint accepts a limit but no offset, so callers request a
+ * larger pool and page it here while preserving the account-specific daily
+ * recommendations returned by recommend_resource.
+ */
+export function parseNeteaseRecommendedPlaylistPage(
+  dailyValue: unknown,
+  personalizedValue: unknown,
+  limit: number,
+  offset: number,
+): NeteaseRecommendedPlaylistPage {
+  const pool = uniquePlaylists([
+    ...parseNeteaseRecommendedPlaylists(dailyValue),
+    ...parseNeteaseRecommendedPlaylists(personalizedValue),
+  ])
+  const playlists = pool.slice(offset, offset + limit)
+  const nextOffset = offset + playlists.length
+
+  return {
+    playlists,
+    hasMore: nextOffset < pool.length,
+    nextOffset,
+  }
 }
 
 export function normalizeKugouRecommendationCover(value: unknown, size = 400): string {

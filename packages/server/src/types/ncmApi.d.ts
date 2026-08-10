@@ -93,7 +93,16 @@ declare module '@neteasecloudmusicapienhanced/api' {
     personalized(params: { limit?: number } & RequestBaseConfig): Promise<{
       body: {
         code?: number
-        result?: Array<{ id?: string | number }>
+        result?: Array<{
+          id?: string | number
+          name?: string
+          picUrl?: string
+          coverImgUrl?: string
+          trackCount?: number
+          creator?: { nickname?: string }
+          description?: string
+          copywriter?: string
+        }>
       }
     }>
 

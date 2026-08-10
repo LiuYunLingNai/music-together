@@ -109,7 +109,11 @@ router.get(
   validated(
     recommendationsQuerySchema,
     'Get recommendations',
-    async ({ roomId, limit, radarPage, playlistOffset }, req, res) => {
+    async (
+      { roomId, platform: requestedPlatform, limit, radarPage, playlistOffset, neteasePlaylistOffset },
+      req,
+      res,
+    ) => {
       const identityUserId = req.identityUserId
       if (!identityUserId) {
         res.status(401).json({ error: 'Unauthorized' })
@@ -124,7 +128,7 @@ router.get(
 
       const loggedPlatforms = authService
         .getUserAuthStatus(identityUserId, roomId)
-        .filter((status) => status.loggedIn)
+        .filter((status) => status.loggedIn && (!requestedPlatform || status.platform === requestedPlatform))
         .map((status) => status.platform)
 
       const recommendations = await Promise.all(
@@ -139,6 +143,7 @@ router.get(
             const result = await musicProvider.getRecommendations(platform, cookie, recommendationLimit, {
               radarPage,
               playlistOffset,
+              neteasePlaylistOffset,
             })
             const hasContent = result.tracks.length > 0 || (result.playlists?.length ?? 0) > 0
             return hasContent ? { platform, ...result } : { platform, ...result, unavailableReason: 'empty' }

@@ -12,6 +12,7 @@ import {
 } from '../src/services/tencentAuthService.js'
 import {
   parseKugouRecommendedPlaylists,
+  parseNeteaseRecommendedPlaylistPage,
   parseNeteaseRecommendedPlaylists,
   parseTencentRadarRecommendationPage,
   parseTencentRecommendedPlaylistPage,
@@ -118,6 +119,37 @@ test('maps NetEase recommend_resource playlists', () => {
       source: 'netease',
     },
   ])
+})
+
+test('pages and deduplicates NetEase daily and personalized playlists', () => {
+  const daily = {
+    body: {
+      recommend: [
+        { id: 1, name: 'Daily first' },
+        { id: 2, name: 'Daily second' },
+      ],
+    },
+  }
+  const personalized = {
+    body: {
+      result: [
+        { id: 2, name: 'Duplicate personalized' },
+        { id: 3, name: 'Personalized third' },
+        { id: 4, name: 'Personalized fourth' },
+      ],
+    },
+  }
+  const firstPage = parseNeteaseRecommendedPlaylistPage(daily, personalized, 2, 0)
+  const page = parseNeteaseRecommendedPlaylistPage(daily, personalized, 2, 2)
+
+  assert.equal(firstPage.hasMore, true)
+  assert.equal(firstPage.nextOffset, 2)
+  assert.deepEqual(
+    page.playlists.map((playlist) => playlist.id),
+    ['3', '4'],
+  )
+  assert.equal(page.hasMore, false)
+  assert.equal(page.nextOffset, 4)
 })
 
 test('maps standard and concept Kugou recommended playlists', () => {

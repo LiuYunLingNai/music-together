@@ -591,7 +591,7 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                         loading={false}
                         hasMore={activeRecommendation?.pagination?.tracks?.hasMore ?? false}
                         loadingMore={recommendationsLoadingMore}
-                        onLoadMore={loadMoreRecommendations}
+                        onLoadMore={() => loadMoreRecommendations('tencent')}
                         isTrackAdded={isTrackAdded}
                         onAddTrack={handleAdd}
                         onInsertAfterCurrent={handleInsertAfterCurrent}
@@ -614,7 +614,7 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                           onSelect={(playlist) => handleSelectAlbum(playlist, 'playlist')}
                           hasMore={activeRecommendation?.pagination?.playlists?.hasMore ?? false}
                           loadingMore={recommendationsLoadingMore}
-                          onLoadMore={loadMoreRecommendations}
+                          onLoadMore={() => loadMoreRecommendations('tencent')}
                         />
                       ) : (
                         <div className="flex min-h-0 flex-1 items-center justify-center rounded-md border">
@@ -634,6 +634,9 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                   <PlaylistList
                     playlists={activeRecommendation?.playlists ?? []}
                     onSelect={(playlist) => handleSelectAlbum(playlist, 'playlist')}
+                    hasMore={activeRecommendation?.pagination?.playlists?.hasMore ?? false}
+                    loadingMore={recommendationsLoadingMore}
+                    onLoadMore={() => loadMoreRecommendations(source)}
                   />
                 ) : (
                   <div className="flex min-h-0 flex-1 items-center justify-center rounded-md border">
