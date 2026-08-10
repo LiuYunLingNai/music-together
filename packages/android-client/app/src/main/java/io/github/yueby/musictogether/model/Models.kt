@@ -2,6 +2,8 @@ package io.github.yueby.musictogether.model
 
 import androidx.compose.runtime.Immutable
 
+const val DEFAULT_MUSIC_DOWNLOAD_DIRECTORY = "/storage/emulated/0/Download/music-together"
+
 @Immutable
 data class User(
     val id: String,
@@ -272,7 +274,45 @@ data class Playlist(
 data class PlatformRecommendation(
     val platform: String,
     val tracks: List<Track>,
+    val playlists: List<Playlist> = emptyList(),
+    val pagination: RecommendationPagination? = null,
     val unavailableReason: String? = null,
+)
+
+@Immutable
+data class RecommendationTrackPagination(
+    val hasMore: Boolean = false,
+    val nextPage: Int = 1,
+)
+
+@Immutable
+data class RecommendationPlaylistPagination(
+    val hasMore: Boolean = false,
+    val nextOffset: Int = 0,
+)
+
+@Immutable
+data class RecommendationPagination(
+    val tracks: RecommendationTrackPagination? = null,
+    val playlists: RecommendationPlaylistPagination? = null,
+)
+
+@Immutable
+data class DownloadQualityOption(
+    val quality: String,
+    val actualBitrate: Int? = null,
+    val format: String? = null,
+    val fileSize: Long? = null,
+)
+
+@Immutable
+data class MusicDownloadState(
+    val trackId: String? = null,
+    val options: List<DownloadQualityOption> = emptyList(),
+    val optionsLoading: Boolean = false,
+    val optionsError: String? = null,
+    val downloadingQuality: String? = null,
+    val downloadError: String? = null,
 )
 
 @Immutable
@@ -306,6 +346,7 @@ data class PlatformHubState(
     val playlistHasMore: Boolean = false,
     val playlistLoading: Boolean = false,
     val playlistLoadingMore: Boolean = false,
+    val playlistAddingAll: Boolean = false,
     val playlistError: String? = null,
     val claimingKugouConceptVip: Boolean = false,
 )
@@ -355,8 +396,11 @@ data class AppState(
     val searchError: String? = null,
     val recommendations: List<PlatformRecommendation> = emptyList(),
     val recommendationsLoading: Boolean = false,
+    val recommendationsLoadingMore: Boolean = false,
     val recommendationsLoaded: Boolean = false,
     val recommendationsError: String? = null,
+    val musicDownload: MusicDownloadState = MusicDownloadState(),
+    val musicDownloadDirectory: String = DEFAULT_MUSIC_DOWNLOAD_DIRECTORY,
     val bilibiliMetadataMatch: BilibiliMetadataMatchState = BilibiliMetadataMatchState(),
     val bilibiliCollection: BilibiliCollectionState = BilibiliCollectionState(),
     val lyricOffsets: Map<String, Int> = emptyMap(),

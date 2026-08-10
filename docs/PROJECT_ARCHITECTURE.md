@@ -139,7 +139,7 @@ UI 操作
 
 `MusicTogetherViewModel` 持有 `StateFlow<AppState>`，并作为 Compose 使用的统一操作门面。账号、队列待确认状态、应用更新、本地设置和多服务器发现分别由独立协调组件管理；这些组件通过显式状态变换回调更新 `AppState`，不直接持有第二份应用状态。
 
-`AppState` 包含服务器、房间、账号、搜索、平台推荐、歌词、平台中心、同步设置、服务端音频代理策略和应用更新状态。平台推荐请求使用独立可取消任务，离开房间或释放 ViewModel 时取消并清理状态。旧服务端没有代理策略事件时，酷狗默认强制代理。
+`AppState` 包含服务器、房间、账号、搜索、平台推荐、当前歌曲下载、歌词、平台中心、同步设置、服务端音频代理策略和应用更新状态。平台推荐、完整歌单加载、下载选项和文件下载分别使用可取消任务；切换歌单或歌曲、离开房间及释放 ViewModel 时取消对应旧任务。旧服务端没有代理策略事件时，酷狗默认强制代理。
 
 已下载歌曲保存于应用私有目录并由离线索引关联曲目元数据；下载请求沿用当前播放目标和平台请求头策略，B 站及需要代理的酷狗资源下载服务器可播放版本。房间播放曲目时先查询离线索引，命中后仍按房间的同步时间、计划操作和漂移校正播放本地文件；未命中时继续使用网络资源。主页的本地音乐页只在未加入房间时启动本地播放，避免与房间同步播放意图冲突。
 
@@ -156,6 +156,7 @@ UI 操作
 | `RoomQueuePane.kt` | 播放队列、固定操作栏和队列控制 |
 | `RoomSearchPane.kt` | 搜索、点歌、B 站合集/分 P 选择和元数据匹配 |
 | `RecommendationsPane.kt` | 已登录音乐平台的原生推荐内容和快捷点歌 |
+| `MusicDownloadPane.kt` | 当前歌曲的可用下载音质与 Android 系统保存流程 |
 | `RoomChatPane.kt` | 房间聊天 |
 | `RoomSettingsPane.kt` | 房间设置与临时管理员队列权限 |
 | `AccountSettingsPane.kt` | 身份账号和服务器管理 |
@@ -185,7 +186,11 @@ UI 操作
 
 房间状态包含临时管理员标识以及“删除单曲”“清空歌单”两个独立权限。Android 仅向房主或服务器管理员展示开关；临时管理员根据服务端下发的对应权限执行队列操作，旧服务端缺少字段时默认关闭。
 
-`/api/music/recommendations` 按当前身份和房间返回已登录平台的原生推荐内容。请求携带 `roomId` 和 1 至 50 的 `limit`；响应按平台提供曲目列表，并通过可选的 `unavailableReason` 区分空推荐与上游暂时不可用。旧服务端缺少该接口时，Android 显示可重试错误，不影响搜索和点歌流程。
+`/api/music/recommendations` 按当前身份和房间返回已登录平台的原生推荐内容。请求携带 `roomId`、1 至 50 的 `limit`，并可使用 `radarPage` 与 `playlistOffset` 继续读取 QQ 雷达歌曲和推荐歌单；响应按平台提供 `tracks`、`playlists` 与独立的 `pagination` 游标。Android 按歌曲身份和 `source:id` 合并、去重分页结果；新增字段缺失时分别回退为空列表和无后续页。`unavailableReason` 区分空推荐与上游暂时不可用，旧服务端缺少接口时显示可重试错误，不影响搜索和点歌流程。
+
+歌单详情继续按 100 首分页浏览。点击“添加全部”时，Android 从当前歌单第一页开始读取全部分页，按稳定歌曲身份去重，排除房间队列和本地待确认项，最多填充至 1000 首容量，并按每批 200 首发送 `queue:add_batch`。切换歌单或离开房间会取消未完成的全量读取。
+
+`/api/music/download-options` 仅为当前房间正在播放的曲目返回可下载音质、实际码率、格式和可选文件大小；`/api/music/download` 按所选音质流式返回附件。Android 复用按服务器隔离的 OkHttp Cookie，默认保存到 `/storage/emulated/0/Download/music-together`，并允许在下载页修改为公共 `Download` 下的其他子目录。Android 10 及以上通过 MediaStore 写入，Android 8/9 首次下载时请求旧版外部存储权限；文件名会清理非法字符并自动避让重名。下载通知显示字节或百分比进度及当前下载速度，完成后显示整段下载的平均速度；失败和取消也会更新通知，取消、切歌或离房会终止请求并清理未完成文件。旧服务端缺少接口时显示“不支持”，其他失败保留重试入口。
 
 ### WebSocket 协议
 
@@ -215,7 +220,7 @@ UI 操作
 
 `PersistentCookieJar.kt` 按 `scheme://host:port` 保存网络 Cookie，避免多个服务端之间共享身份。
 
-应用还会保存平台登录 Cookie，并在加入房间后恢复平台认证。平台 Cookie 的生命周期与用户主动登录、退出操作保持一致。
+应用还会保存平台登录 Cookie，并在加入房间后恢复平台认证。平台 Cookie 的生命周期与用户主动登录、退出操作保持一致；自动恢复失败默认保留凭据，只有 QQ 明确返回 `reauth_required` 时才删除当前服务器下对应 Cookie 并提示重新扫码，`expired` 和 `error` 仍留待下次进入房间重试。
 
 ## 5. 播放同步
 
@@ -324,10 +329,11 @@ AMLL 纯算法按职责分布：
 - 歌词偏移
 - 播放同步间隔、自动变速和大偏差硬 Seek 设置
 - 更新下载源
+- 音乐默认下载目录
 
 `ChatNotificationManager.kt` 负责后台聊天通知。`AppLogger.kt` 只在 Debug 构建中写入和导出日志。
 
-`AndroidManifest.xml` 声明网络、媒体前台服务、通知和应用内安装权限。`PlaybackService` 作为 MediaSessionService 提供系统媒体通知和锁屏控制。
+`AndroidManifest.xml` 声明网络、媒体前台服务、通知、应用内安装权限，以及仅限 Android 8/9 的公共下载目录写入权限。`PlaybackService` 作为 MediaSessionService 提供系统媒体通知和锁屏控制。
 
 ## 8. 构建与发布
 

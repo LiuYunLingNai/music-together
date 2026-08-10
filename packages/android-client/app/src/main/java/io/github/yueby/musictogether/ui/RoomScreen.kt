@@ -43,7 +43,7 @@ import io.github.yueby.musictogether.ui.player.PlayerPane
 import kotlinx.coroutines.delay
 
 internal enum class RoomOverlay {
-    Queue, Search, Recommendations, Chat, Members, Accounts, AccountSettings, RoomSettings
+    Queue, Search, Recommendations, Download, Chat, Members, Accounts, AccountSettings, RoomSettings
 }
 
 internal enum class RoomBackAction {
@@ -202,7 +202,7 @@ fun RoomScreen(
                             .fillMaxWidth()
                             .fillMaxHeight(
                                 when (overlay) {
-                                    RoomOverlay.Queue, RoomOverlay.Chat, RoomOverlay.Members -> 0.70f
+                                    RoomOverlay.Queue, RoomOverlay.Chat, RoomOverlay.Members, RoomOverlay.Download -> 0.70f
                                     RoomOverlay.Accounts, RoomOverlay.AccountSettings, RoomOverlay.RoomSettings -> 0.90f
                                     RoomOverlay.Search, RoomOverlay.Recommendations -> 0.96f
                                 },
@@ -212,6 +212,7 @@ fun RoomScreen(
                             RoomOverlay.Queue -> QueuePane(room, viewModel)
                             RoomOverlay.Search -> SearchPane(appState, viewModel)
                             RoomOverlay.Recommendations -> RecommendationsPane(appState, viewModel)
+                            RoomOverlay.Download -> MusicDownloadPane(appState, viewModel)
                             RoomOverlay.Chat -> ChatPane(appState.messages, viewModel)
                             RoomOverlay.Members -> MembersPane(room, appState.userId)
                             RoomOverlay.Accounts -> PlatformPane(appState, viewModel)

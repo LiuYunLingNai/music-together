@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Lock
@@ -236,6 +237,12 @@ internal fun RoomHeader(
                 RoomMenuAction(Icons.Default.MusicNote, "音源账号与歌单") {
                     onMenuExpandedChange(false)
                     onOpenOverlay(RoomOverlay.Accounts)
+                }
+                if (room.currentTrack != null) {
+                    RoomMenuAction(Icons.Default.Download, "下载当前歌曲") {
+                        onMenuExpandedChange(false)
+                        onOpenOverlay(RoomOverlay.Download)
+                    }
                 }
                 if (BuildConfig.DEBUG) {
                     HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))

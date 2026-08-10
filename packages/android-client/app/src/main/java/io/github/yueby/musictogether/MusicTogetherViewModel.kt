@@ -19,6 +19,7 @@ import io.github.yueby.musictogether.model.ConnectionStatus
 import io.github.yueby.musictogether.model.OfflineDownloadState
 import io.github.yueby.musictogether.model.OfflineLibraryState
 import io.github.yueby.musictogether.model.LyricsState
+import io.github.yueby.musictogether.model.MusicDownloadState
 import io.github.yueby.musictogether.model.nextChatUnreadCount
 import io.github.yueby.musictogether.model.PlatformHubState
 import io.github.yueby.musictogether.model.Playlist
@@ -32,8 +33,12 @@ import io.github.yueby.musictogether.model.UpdateDownloadSource
 import io.github.yueby.musictogether.model.queueIdentity
 import io.github.yueby.musictogether.model.offlineDownloadKey
 import io.github.yueby.musictogether.network.AppUpdateService
+import io.github.yueby.musictogether.network.ApiException
+import io.github.yueby.musictogether.network.DownloadSpeedTracker
 import io.github.yueby.musictogether.network.DiscoveryConnectionCoordinator
 import io.github.yueby.musictogether.network.Events
+import io.github.yueby.musictogether.network.MusicDownloadService
+import io.github.yueby.musictogether.network.MusicDownloadStorage
 import io.github.yueby.musictogether.network.MusicTogetherApi
 import io.github.yueby.musictogether.network.MusicTogetherSocket
 import io.github.yueby.musictogether.network.PersistentCookieJar
@@ -46,6 +51,11 @@ import io.github.yueby.musictogether.network.SocketEvents
 import io.github.yueby.musictogether.network.normalizeSearchKeyword
 import io.github.yueby.musictogether.network.stringOrNull
 import io.github.yueby.musictogether.network.audioQuality
+import io.github.yueby.musictogether.network.mergeTencentRecommendationPages
+import io.github.yueby.musictogether.network.musicMimeType
+import io.github.yueby.musictogether.network.resolveMusicDownloadDirectory
+import io.github.yueby.musictogether.network.shouldRemoveStoredPlatformCredential
+import io.github.yueby.musictogether.network.suggestedMusicFileName
 import io.github.yueby.musictogether.network.toChatMessage
 import io.github.yueby.musictogether.network.toPlayState
 import io.github.yueby.musictogether.network.toPlaylist
@@ -59,21 +69,27 @@ import io.github.yueby.musictogether.network.toVoteState
 import io.github.yueby.musictogether.network.toJson
 import io.github.yueby.musictogether.notifications.ChatNotificationManager
 import io.github.yueby.musictogether.offline.OfflineLibrary
+import io.github.yueby.musictogether.notifications.MusicDownloadNotificationManager
 import io.github.yueby.musictogether.player.ClockSync
 import io.github.yueby.musictogether.player.NativePlayer
 import io.github.yueby.musictogether.player.PlaybackCommandBridge
 import io.github.yueby.musictogether.player.PlayerUiState
 import io.github.yueby.musictogether.queue.QueueActionTracker
+import io.github.yueby.musictogether.queue.loadCompletePlaylist
+import io.github.yueby.musictogether.queue.planPlaylistQueueBatches
 import io.github.yueby.musictogether.settings.AppPreferences
 import io.github.yueby.musictogether.updates.AppUpdateCoordinator
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import org.json.JSONArray
 import org.json.JSONObject
@@ -110,8 +126,11 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         .build()
     private val api = MusicTogetherApi(okHttp)
     private val offlineLibrary = OfflineLibrary(application, okHttp)
+    private val musicDownloads = MusicDownloadService(okHttp)
+    private val musicDownloadStorage = MusicDownloadStorage(application)
     private val socket = MusicTogetherSocket(okHttp, this)
     private val chatNotifications = ChatNotificationManager(application)
+    private val musicDownloadNotifications = MusicDownloadNotificationManager(application)
     private val clock = ClockSync()
     private val _state = MutableStateFlow(
         AppState(
@@ -128,6 +147,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             ),
             updateSource = appPreferences.updateSource(),
             offlineLibrary = OfflineLibraryState(tracks = offlineLibrary.tracks()),
+            musicDownloadDirectory = appPreferences.musicDownloadDirectory(),
         ),
     )
     val state: StateFlow<AppState> = _state.asStateFlow()
@@ -193,9 +213,12 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private var lyricJob: Job? = null
     private var searchJob: Job? = null
     private var recommendationsJob: Job? = null
+    private var downloadOptionsJob: Job? = null
+    private var musicDownloadJob: Job? = null
     private var qrPollJob: Job? = null
     private var qrCloseJob: Job? = null
     private var playlistJob: Job? = null
+    private var playlistAddAllJob: Job? = null
     private var playlistContext: PlaylistContext? = null
     private var restoredAuthRoomId: String? = null
     private var appInForeground = false
@@ -556,24 +579,52 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         )
     }
 
-    fun loadRecommendations() {
+    fun loadRecommendations() = requestRecommendations(append = false)
+
+    fun loadMoreRecommendations() {
+        val pagination = _state.value.recommendations
+            .firstOrNull { it.platform == "tencent" }
+            ?.pagination
+            ?: return
+        if (pagination.tracks?.hasMore != true && pagination.playlists?.hasMore != true) return
+        requestRecommendations(append = true)
+    }
+
+    private fun requestRecommendations(append: Boolean) {
         val room = _state.value.room ?: return
         val server = activeServer ?: return
         val roomId = room.id
+        val pagination = _state.value.recommendations
+            .firstOrNull { it.platform == "tencent" }
+            ?.pagination
+        if (append && (pagination?.tracks?.hasMore != true && pagination?.playlists?.hasMore != true)) return
         recommendationsJob?.cancel()
         _state.value = _state.value.copy(
-            recommendationsLoading = true,
+            recommendationsLoading = !append,
+            recommendationsLoadingMore = append,
             recommendationsError = null,
         )
-        AppLogger.info("Recommendations", "load room=$roomId")
+        AppLogger.info("Recommendations", "load room=$roomId append=$append")
         recommendationsJob = viewModelScope.launch {
-            runCatching { api.recommendations(server, roomId) }
+            runCatching {
+                api.recommendations(
+                    server = server,
+                    roomId = roomId,
+                    radarPage = if (append) pagination?.tracks?.nextPage ?: 1 else 1,
+                    playlistOffset = if (append) pagination?.playlists?.nextOffset ?: 0 else 0,
+                )
+            }
                 .onFailure { if (it is CancellationException) throw it }
                 .onSuccess { recommendations ->
                     if (_state.value.room?.id != roomId) return@onSuccess
                     _state.value = _state.value.copy(
-                        recommendations = recommendations,
+                        recommendations = if (append) {
+                            mergeTencentRecommendationPages(_state.value.recommendations, recommendations)
+                        } else {
+                            recommendations
+                        },
                         recommendationsLoading = false,
+                        recommendationsLoadingMore = false,
                         recommendationsLoaded = true,
                         recommendationsError = null,
                     )
@@ -583,8 +634,9 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     if (_state.value.room?.id != roomId) return@onFailure
                     AppLogger.error("Recommendations", "load failed room=$roomId", it)
                     _state.value = _state.value.copy(
-                        recommendations = emptyList(),
+                        recommendations = if (append) _state.value.recommendations else emptyList(),
                         recommendationsLoading = false,
+                        recommendationsLoadingMore = false,
                         recommendationsLoaded = true,
                         recommendationsError = it.message ?: "推荐加载失败",
                     )
@@ -781,6 +833,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         val room = _state.value.room ?: return
         val server = activeServer ?: return
         playlistJob?.cancel()
+        playlistAddAllJob?.cancel()
         playlistContext = PlaylistContext(playlist.source, playlist.id, room.id)
         _state.value = _state.value.copy(
             platformHub = _state.value.platformHub.copy(
@@ -790,6 +843,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 playlistHasMore = false,
                 playlistLoading = true,
                 playlistLoadingMore = false,
+                playlistAddingAll = false,
                 playlistError = null,
             ),
         )
@@ -798,6 +852,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
 
     fun closePlaylist() {
         playlistJob?.cancel()
+        playlistAddAllJob?.cancel()
         playlistContext = null
         _state.value = _state.value.copy(
             platformHub = _state.value.platformHub.copy(
@@ -807,6 +862,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 playlistHasMore = false,
                 playlistLoading = false,
                 playlistLoadingMore = false,
+                playlistAddingAll = false,
                 playlistError = null,
             ),
         )
@@ -817,40 +873,126 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         val playlist = hub.selectedPlaylist ?: return
         val context = playlistContext ?: return
         val server = activeServer ?: return
-        if (hub.playlistLoading || hub.playlistLoadingMore || !hub.playlistHasMore) return
+        if (hub.playlistLoading || hub.playlistLoadingMore || hub.playlistAddingAll || !hub.playlistHasMore) return
         requestPlaylistPage(server, playlist, context.roomId, hub.playlistTracks.size, append = true)
     }
 
     fun addPlaylistTracksToQueue(playlist: Playlist) {
         val room = _state.value.room ?: return
-        val queueKeys = room.queue.mapTo(mutableSetOf()) { it.queueIdentity() }
-        val reservedKeys = queueActions.reservedKeys(queueKeys)
-        val unavailableKeys = queueKeys + reservedKeys
-        val available = (MAX_QUEUE_SIZE - room.queue.size - reservedKeys.size).coerceAtLeast(0)
-        val tracks = _state.value.platformHub.playlistTracks
-            .filterNot { it.queueIdentity() in unavailableKeys }
-            .distinctBy { it.queueIdentity() }
-            .take(available)
-        if (tracks.isEmpty()) {
-            setNotice(if (available == 0) "播放队列已满" else "当前已加载歌曲都在队列中")
-            return
-        }
-        var sent = true
-        tracks.chunked(MAX_QUEUE_BATCH_SIZE).forEach { page ->
-            val pageSent = socket.emit(
-                Events.QUEUE_ADD_BATCH,
-                JSONObject()
-                    .put("tracks", JSONArray(page.map { it.toJson() }))
-                    .put("playlistName", playlist.name),
-            )
-            if (pageSent) queueActions.reserveAll(page.map { it.queueIdentity() })
-            sent = pageSent && sent
-        }
-        AppLogger.info("Queue", "playlist batch=${tracks.size} source=${playlist.source} sent=$sent")
-        setNotice(
-            if (sent) "已提交 ${tracks.size} 首歌曲到播放队列" else "批量点歌发送失败，请检查连接",
-            isError = !sent,
+        val server = activeServer ?: return
+        val expected = PlaylistContext(playlist.source, playlist.id, room.id)
+        if (playlistContext != expected || _state.value.platformHub.playlistAddingAll) return
+        playlistJob?.cancel()
+        playlistAddAllJob?.cancel()
+        _state.value = _state.value.copy(
+            platformHub = _state.value.platformHub.copy(
+                playlistLoadingMore = false,
+                playlistAddingAll = true,
+                playlistError = null,
+            ),
         )
+        playlistAddAllJob = viewModelScope.launch {
+            var knownTotal: Int? = playlist.trackCount.takeIf { it > 0 }
+            runCatching {
+                loadCompletePlaylist(
+                    loadPage = { offset ->
+                        api.playlist(
+                            server = server,
+                            source = playlist.source,
+                            id = playlist.id,
+                            roomId = room.id,
+                            offset = offset,
+                            total = knownTotal,
+                        )
+                    },
+                    onPageLoaded = { tracks, total, hasMore ->
+                        if (playlistContext != expected) return@loadCompletePlaylist
+                        knownTotal = total.takeIf { it > 0 }
+                        _state.value = _state.value.copy(
+                            platformHub = _state.value.platformHub.copy(
+                                playlistTracks = tracks,
+                                playlistTotal = total,
+                                playlistHasMore = hasMore,
+                                playlistLoading = false,
+                                playlistLoadingMore = false,
+                                playlistError = null,
+                            ),
+                        )
+                    },
+                )
+            }
+                .onFailure { if (it is CancellationException) throw it }
+                .onSuccess { allTracks ->
+                    if (playlistContext != expected || _state.value.room?.id != room.id) return@onSuccess
+                    val currentRoom = _state.value.room ?: return@onSuccess
+                    val queueKeys = currentRoom.queue.mapTo(hashSetOf()) { it.queueIdentity() }
+                    val pendingKeys = queueActions.reservedKeys(queueKeys)
+                    val plan = planPlaylistQueueBatches(
+                        tracks = allTracks,
+                        queueKeys = queueKeys,
+                        pendingKeys = pendingKeys,
+                        queueSize = currentRoom.queue.size,
+                        maxQueueSize = MAX_QUEUE_SIZE,
+                        maxBatchSize = MAX_QUEUE_BATCH_SIZE,
+                    )
+                    if (plan.batches.isEmpty()) {
+                        val queueFull = currentRoom.queue.size + pendingKeys.size >= MAX_QUEUE_SIZE
+                        _state.value = _state.value.copy(
+                            platformHub = _state.value.platformHub.copy(playlistAddingAll = false),
+                        )
+                        setNotice(if (queueFull) "播放队列已满" else "歌单中的歌曲已全部在队列或待确认列表中")
+                        return@onSuccess
+                    }
+
+                    var sentCount = 0
+                    var allSent = true
+                    for (batch in plan.batches) {
+                        val sent = socket.emit(
+                            Events.QUEUE_ADD_BATCH,
+                            JSONObject()
+                                .put("tracks", JSONArray(batch.map { it.toJson() }))
+                                .put("playlistName", playlist.name),
+                        )
+                        if (!sent) {
+                            allSent = false
+                            break
+                        }
+                        queueActions.reserveAll(batch.map { it.queueIdentity() })
+                        sentCount += batch.size
+                    }
+                    _state.value = _state.value.copy(
+                        platformHub = _state.value.platformHub.copy(playlistAddingAll = false),
+                    )
+                    AppLogger.info(
+                        "Queue",
+                        "playlist all=${allTracks.size} sent=$sentCount source=${playlist.source} success=$allSent",
+                    )
+                    val capacitySuffix = if (plan.skippedForCapacity > 0) {
+                        "，队列容量不足，另有 ${plan.skippedForCapacity} 首未提交"
+                    } else {
+                        ""
+                    }
+                    setNotice(
+                        if (allSent) {
+                            "已提交 $sentCount 首歌曲到播放队列$capacitySuffix"
+                        } else {
+                            "已提交 $sentCount 首，后续批次发送失败，请检查连接"
+                        },
+                        isError = !allSent,
+                    )
+                }
+                .onFailure { error ->
+                    if (playlistContext != expected) return@onFailure
+                    AppLogger.error("Playlist", "load all failed source=${playlist.source}", error)
+                    _state.value = _state.value.copy(
+                        platformHub = _state.value.platformHub.copy(
+                            playlistAddingAll = false,
+                            playlistError = error.message ?: "完整歌单加载失败",
+                        ),
+                    )
+                    setNotice(error.message ?: "完整歌单加载失败，请重试", isError = true)
+                }
+        }
     }
 
     fun playTrack(track: Track) {
@@ -1076,6 +1218,149 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         _state.value = _state.value.copy(notice = null)
     }
 
+    fun loadMusicDownloadOptions() {
+        val room = _state.value.room ?: return
+        val track = room.currentTrack ?: return
+        val server = activeServer ?: return
+        if (musicDownloadJob?.isActive == true && _state.value.musicDownload.trackId == track.id) return
+        downloadOptionsJob?.cancel()
+        _state.value = _state.value.copy(
+            musicDownload = MusicDownloadState(trackId = track.id, optionsLoading = true),
+        )
+        downloadOptionsJob = viewModelScope.launch {
+            runCatching { musicDownloads.options(server, room.id, track.id) }
+                .onFailure { if (it is CancellationException) throw it }
+                .onSuccess { response ->
+                    if (_state.value.room?.currentTrack?.id != track.id || response.trackId != track.id) return@onSuccess
+                    _state.value = _state.value.copy(
+                        musicDownload = _state.value.musicDownload.copy(
+                            options = response.options,
+                            optionsLoading = false,
+                            optionsError = null,
+                        ),
+                    )
+                }
+                .onFailure { error ->
+                    if (_state.value.room?.currentTrack?.id != track.id) return@onFailure
+                    _state.value = _state.value.copy(
+                        musicDownload = _state.value.musicDownload.copy(
+                            optionsLoading = false,
+                            optionsError = musicDownloadErrorMessage(error),
+                        ),
+                    )
+                }
+        }
+    }
+
+    fun updateMusicDownloadDirectory(value: String) {
+        val directory = resolveMusicDownloadDirectory(value)
+        if (directory == null) {
+            setNotice("下载目录必须位于 /storage/emulated/0/Download", isError = true)
+            return
+        }
+        appPreferences.setMusicDownloadDirectory(directory.absolutePath)
+        _state.value = _state.value.copy(musicDownloadDirectory = directory.absolutePath)
+        setNotice("下载目录已更新")
+    }
+
+    fun reportDownloadStoragePermissionDenied() {
+        setNotice("需要存储权限才能在此 Android 版本保存音乐", isError = true)
+    }
+
+    fun downloadCurrentTrack(quality: String) {
+        val room = _state.value.room ?: return
+        val track = room.currentTrack ?: return
+        val server = activeServer ?: return
+        val option = _state.value.musicDownload.options.firstOrNull { it.quality == quality } ?: return
+        if (_state.value.musicDownload.trackId != track.id) return
+        musicDownloadJob?.cancel()
+        _state.value = _state.value.copy(
+            musicDownload = _state.value.musicDownload.copy(
+                downloadingQuality = quality,
+                downloadError = null,
+            ),
+        )
+        musicDownloadJob = viewModelScope.launch {
+            var destination: io.github.yueby.musictogether.network.PendingMusicDownload? = null
+            try {
+                val speedTracker = DownloadSpeedTracker()
+                val fallbackName = suggestedMusicFileName(track, option.format)
+                val pending = withContext(Dispatchers.IO) {
+                    musicDownloadStorage.create(
+                        directoryPath = _state.value.musicDownloadDirectory,
+                        fileName = fallbackName,
+                        mimeType = musicMimeType(option.format),
+                    )
+                }
+                destination = pending
+                val result = musicDownloads.download(
+                    server = server,
+                    roomId = room.id,
+                    trackId = track.id,
+                    quality = quality,
+                    fallbackFileName = fallbackName,
+                    output = pending.output,
+                    onProgress = { downloadedBytes, totalBytes ->
+                        musicDownloadNotifications.showProgress(
+                            track.title,
+                            downloadedBytes,
+                            totalBytes,
+                            speedTracker.record(downloadedBytes),
+                        )
+                    },
+                )
+                val averageBytesPerSecond = speedTracker.average(result.downloadedBytes)
+                withContext(Dispatchers.IO) { pending.complete() }
+                if (_state.value.room?.currentTrack?.id != track.id) return@launch
+                _state.value = _state.value.copy(
+                    musicDownload = _state.value.musicDownload.copy(
+                        downloadingQuality = null,
+                        downloadError = null,
+                    ),
+                )
+                setNotice("已保存到 ${pending.displayPath}")
+                musicDownloadNotifications.showCompleted(
+                    track.title,
+                    pending.displayPath,
+                    averageBytesPerSecond,
+                )
+                AppLogger.info("Download", "completed track=${track.id} quality=$quality")
+            } catch (error: CancellationException) {
+                withContext(NonCancellable + Dispatchers.IO) { runCatching { destination?.abort() } }
+                musicDownloadNotifications.showCancelled(track.title)
+                throw error
+            } catch (error: Throwable) {
+                withContext(Dispatchers.IO) { runCatching { destination?.abort() } }
+                if (_state.value.room?.currentTrack?.id != track.id) return@launch
+                val message = musicDownloadErrorMessage(error)
+                _state.value = _state.value.copy(
+                    musicDownload = _state.value.musicDownload.copy(
+                        downloadingQuality = null,
+                        downloadError = message,
+                    ),
+                )
+                musicDownloadNotifications.showFailed(track.title, message)
+                AppLogger.error("Download", "failed track=${track.id} quality=$quality", error)
+            }
+        }
+    }
+
+    fun cancelMusicDownload() {
+        musicDownloadJob?.cancel()
+        musicDownloadJob = null
+        _state.value = _state.value.copy(
+            musicDownload = _state.value.musicDownload.copy(
+                downloadingQuality = null,
+                downloadError = "下载已取消，可重新选择音质重试",
+            ),
+        )
+    }
+
+    fun dismissMusicDownload() {
+        downloadOptionsJob?.cancel()
+        downloadOptionsJob = null
+    }
+
     fun selectUpdateDownloadSource(source: UpdateDownloadSource) {
         appPreferences.setUpdateSource(source)
         _state.value = _state.value.copy(updateSource = source)
@@ -1240,6 +1525,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             }
             Events.ROOM_STATE -> {
                 val room = (data as? JSONObject)?.toRoomState() ?: return
+                handleCurrentTrackChanged(room.currentTrack?.id)
                 val isJoinSnapshot = waitingForJoinRoomState
                 waitingForJoinRoomState = false
                 desiredRoomId = room.id
@@ -1419,6 +1705,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 val value = data as? JSONObject ?: return
                 val track = value.optJSONObject("track")?.toTrack() ?: return
                 val playState = value.optJSONObject("playState")?.toPlayState() ?: PlayState()
+                handleCurrentTrackChanged(track.id)
                 updateRoom { it.copy(currentTrack = track, playState = playState) }
                 _state.value = _state.value.copy(syncDriftSeconds = 0.0)
                 if (_state.value.lyrics.trackId != track.id) loadLyrics(track)
@@ -1558,6 +1845,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 val value = data as? JSONObject ?: return
                 val platform = value.stringOrNull("platform")
                 val success = value.optBoolean("success")
+                val reason = value.stringOrNull("reason")
                 val automatic = platform != null && autoRestoringPlatforms.remove(platform)
                 if (!success && platform == null) autoRestoringPlatforms.clear()
                 if (success && platform != null) {
@@ -1571,10 +1859,25 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     loadedPlaylistPlatforms.remove(platform)
                     socket.emit(Events.AUTH_GET_STATUS)
                 }
-                val message = value.optString("message", if (success) "登录成功" else "登录失败")
+                if (shouldRemoveStoredPlatformCredential(success, platform, reason)) {
+                    appPreferences.removePlatformCookie(activeServer?.displayUrl.orEmpty(), requireNotNull(platform))
+                    loadedPlaylistPlatforms.remove(platform)
+                    val hub = _state.value.platformHub
+                    _state.value = _state.value.copy(
+                        platformHub = hub.copy(
+                            myAuth = hub.myAuth.filterNot { it.platform == platform },
+                            playlists = hub.playlists + (platform to emptyList()),
+                        ),
+                    )
+                }
+                val message = if (shouldRemoveStoredPlatformCredential(success, platform, reason)) {
+                    "QQ 音乐登录已失效，请重新扫码登录"
+                } else {
+                    value.optString("message", if (success) "登录成功" else "登录失败")
+                }
                 AppLogger.info(
                     "Auth",
-                    "cookie result platform=${platform.orEmpty()} success=$success automatic=$automatic reason=${value.optString("reason")}",
+                    "cookie result platform=${platform.orEmpty()} success=$success automatic=$automatic reason=${reason.orEmpty()}",
                 )
                 if (!automatic || !success) setNotice(message, isError = !success)
             }
@@ -1756,7 +2059,10 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         qrPollJob?.cancel()
         qrCloseJob?.cancel()
         playlistJob?.cancel()
+        playlistAddAllJob?.cancel()
         recommendationsJob?.cancel()
+        downloadOptionsJob?.cancel()
+        musicDownloadJob?.cancel()
         playlistContext = null
         restoredAuthRoomId = null
         autoRestoringPlatforms.clear()
@@ -1765,9 +2071,28 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             platformHub = PlatformHubState(),
             recommendations = emptyList(),
             recommendationsLoading = false,
+            recommendationsLoadingMore = false,
             recommendationsLoaded = false,
             recommendationsError = null,
+            musicDownload = MusicDownloadState(),
         )
+    }
+
+    private fun handleCurrentTrackChanged(trackId: String?) {
+        val downloadTrackId = _state.value.musicDownload.trackId ?: return
+        if (downloadTrackId == trackId) return
+        downloadOptionsJob?.cancel()
+        musicDownloadJob?.cancel()
+        downloadOptionsJob = null
+        musicDownloadJob = null
+        _state.value = _state.value.copy(musicDownload = MusicDownloadState())
+    }
+
+    private fun musicDownloadErrorMessage(error: Throwable): String = when {
+        error is ApiException && error.statusCode == 404 && !error.message.orEmpty().contains("切换") ->
+            "当前服务端不支持音乐下载"
+        error is ApiException && error.statusCode == 409 -> "当前歌曲已切换，请重新打开下载"
+        else -> error.message ?: "音乐下载失败，请重试"
     }
 
     private fun setNotice(message: String, isError: Boolean = false) {
@@ -2278,6 +2603,10 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         lyricJob?.cancel()
         searchJob?.cancel()
         recommendationsJob?.cancel()
+        playlistJob?.cancel()
+        playlistAddAllJob?.cancel()
+        downloadOptionsJob?.cancel()
+        musicDownloadJob?.cancel()
         bilibiliMetadataSearchJob?.cancel()
         bilibiliCollectionJob?.cancel()
         offlineDownloadJobs.values.forEach(Job::cancel)

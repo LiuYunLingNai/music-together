@@ -83,7 +83,7 @@
 - Cookie 按 `scheme://host:port` 隔离
 - discovery socket 只更新对应服务器的房间列表
 - 只有 active socket 可以更新当前房间状态
-- 平台 Cookie 只在用户主动退出对应账号时删除
+- 平台 Cookie 只在用户主动退出对应账号时删除；QQ 自动恢复仅在服务端明确返回 `reauth_required` 时删除当前服务器下对应凭据，`expired` 和 `error` 必须保留以便下次重试
 - 旧服务端缺少可选字段时保留安全回退
 
 ### 播放同步
