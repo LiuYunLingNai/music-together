@@ -243,23 +243,28 @@ jobs:
               "$GITHUB_SHA" 2>/dev/null || true
           )"
           notes_file="$RUNNER_TEMP/android-release-notes.md"
+          release_notes="docs/releases/${VERSION}.md"
 
-          {
-            printf '## Full Changelog\n\n'
-            if [ -n "$previous_tag" ]; then
-              git log \
-                --no-merges \
-                --format='- %s (`%h`)' \
-                "$previous_tag..$GITHUB_SHA"
-              printf '\n**Full Changelog**: https://github.com/%s/compare/%s...%s\n' \
-                "$GITHUB_REPOSITORY" "$previous_tag" "$tag"
-            else
-              git log \
-                --no-merges \
-                --format='- %s (`%h`)' \
-                "$GITHUB_SHA"
-            fi
-          } > "$notes_file"
+          if [ -f "$release_notes" ]; then
+            cp "$release_notes" "$notes_file"
+          else
+            {
+              printf '## Full Changelog\n\n'
+              if [ -n "$previous_tag" ]; then
+                git log \
+                  --no-merges \
+                  --format='- %s (`%h`)' \
+                  "$previous_tag..$GITHUB_SHA"
+                printf '\n**Full Changelog**: https://github.com/%s/compare/%s...%s\n' \
+                  "$GITHUB_REPOSITORY" "$previous_tag" "$tag"
+              else
+                git log \
+                  --no-merges \
+                  --format='- %s (`%h`)' \
+                  "$GITHUB_SHA"
+              fi
+            } > "$notes_file"
+          fi
 
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             for stale_asset in \

@@ -2,14 +2,15 @@ package io.github.yueby.musictogether.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,34 +20,37 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -57,6 +61,7 @@ import io.github.yueby.musictogether.MusicTogetherViewModel
 import io.github.yueby.musictogether.model.AppState
 import io.github.yueby.musictogether.model.ConnectionStatus
 import io.github.yueby.musictogether.model.RoomListItem
+import io.github.yueby.musictogether.model.Track
 
 private data class RoomTarget(val serverUrl: String, val room: RoomListItem)
 
@@ -75,190 +80,198 @@ fun LobbyScreen(
     contentPadding: PaddingValues,
     viewModel: MusicTogetherViewModel,
     bottomContentPadding: Dp = 0.dp,
+    onOpenPlayer: (() -> Unit)? = null,
 ) {
     var createDialog by remember { mutableStateOf(false) }
     var joinTarget by remember { mutableStateOf<RoomTarget?>(null) }
     var directRoomId by remember { mutableStateOf("") }
+    var joinDialogOpen by remember { mutableStateOf(false) }
     var connectionSettingsOpen by remember { mutableStateOf(false) }
-    var accountSettingsOpen by remember { mutableStateOf(false) }
-    var localLibraryOpen by remember { mutableStateOf(false) }
+    var selectedTab by rememberSaveable { mutableStateOf(LobbyTab.Home) }
     val connectedServerCount = state.servers.count { it.status == ConnectionStatus.Connected }
     val roomCount = state.servers.sumOf { it.rooms.size }
 
-    if (localLibraryOpen) {
-        BackHandler {
-            if (resolveLobbyBackAction(localLibraryOpen) == LobbyBackAction.CloseLocalLibrary) {
-                localLibraryOpen = false
-            }
+    LaunchedEffect(state.room?.id) {
+        if (state.room == null && selectedTab == LobbyTab.Recommendations) {
+            selectedTab = LobbyTab.Home
         }
-        LocalMusicPane(
-            state = state,
-            viewModel = viewModel,
-            onBack = { localLibraryOpen = false },
-        )
-        return
     }
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(contentPadding),
-        contentPadding = PaddingValues(
-            start = 16.dp,
-            top = 12.dp,
-            end = 16.dp,
-            bottom = 20.dp + bottomContentPadding,
-        ),
-        verticalArrangement = Arrangement.spacedBy(18.dp),
-    ) {
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+    Column(Modifier.fillMaxSize()) {
+        if (selectedTab == LobbyTab.Home) {
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(contentPadding),
+                contentPadding = PaddingValues(
+                    start = 20.dp,
+                    top = 18.dp,
+                    end = 20.dp,
+                    bottom = 24.dp + bottomContentPadding,
+                ),
+                verticalArrangement = Arrangement.spacedBy(24.dp),
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primaryContainer),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.MusicNote,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
-                }
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = "Music Together",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        text = "$connectedServerCount/${state.servers.size} 台服务器在线",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                IconButton(onClick = { connectionSettingsOpen = true }) {
-                    Icon(Icons.Default.Settings, contentDescription = "服务器设置")
-                }
-                IconButton(onClick = { localLibraryOpen = true }) {
-                    Icon(Icons.Default.LibraryMusic, contentDescription = "本地音乐")
-                }
-                IconButton(onClick = { accountSettingsOpen = true }) {
-                    if (state.accountProfile?.avatarUrl != null) {
-                        AsyncImage(
-                            model = state.accountProfile.avatarUrl,
-                            contentDescription = "账户设置",
-                            modifier = Modifier
-                                .size(30.dp)
-                                .clip(CircleShape),
-                            contentScale = ContentScale.Crop,
-                        )
-                    } else {
-                        Icon(Icons.Default.AccountCircle, contentDescription = "账户设置")
-                    }
-                }
-            }
-        }
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = "快速开始",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Button(
-                    onClick = { createDialog = true },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Text(text = "创建房间", modifier = Modifier.padding(start = 8.dp))
-                }
-                OutlinedTextField(
-                    value = directRoomId,
-                    onValueChange = { directRoomId = it.take(512) },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    label = { Text("加入房间") },
-                    placeholder = { Text("房间号或邀请链接") },
-                    trailingIcon = {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = "Music Together",
+                                style = MaterialTheme.typography.displaySmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                text = "$connectedServerCount/${state.servers.size} 台服务器在线",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         IconButton(
-                            onClick = { viewModel.joinRoomInput(directRoomId) },
-                            enabled = directRoomId.isNotBlank(),
+                            onClick = viewModel::refreshRooms,
+                            enabled = state.servers.any { it.status == ConnectionStatus.Connected },
                         ) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "加入房间")
+                            Icon(Icons.Default.Refresh, contentDescription = "刷新房间")
                         }
-                    },
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(
-                        onDone = {
-                            if (directRoomId.isNotBlank()) viewModel.joinRoomInput(directRoomId)
-                        },
-                    ),
-                )
-            }
-        }
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = "公开房间",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        text = "$roomCount 个房间 · ${state.servers.size} 台服务器",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                        IconButton(onClick = { connectionSettingsOpen = true }) {
+                            Icon(Icons.Default.Dns, contentDescription = "添加或管理服务器")
+                        }
+                    }
                 }
-                IconButton(
-                    onClick = viewModel::refreshRooms,
-                    enabled = state.servers.any { it.status == ConnectionStatus.Connected },
-                ) {
-                    Icon(Icons.Default.Refresh, contentDescription = "刷新房间")
+                state.room?.currentTrack?.let { track ->
+                    item {
+                        LobbySectionTitle(title = "继续播放", icon = Icons.Default.MusicNote)
+                        TrackResumeCard(track = track, onClick = onOpenPlayer)
+                    }
                 }
-            }
-        }
-        if (state.servers.all { it.rooms.isEmpty() }) {
-            item {
-                EmptyRoomList(
-                    title =
-                        if (state.servers.any { it.status == ConnectionStatus.Connected }) {
-                            "暂无公开房间"
-                        } else {
-                            "正在连接服务器"
-                        },
-                )
-            }
-        } else {
-            state.servers.filter { it.rooms.isNotEmpty() }.forEach { server ->
-                item(key = "server:${server.url}") {
-                    ServerHeader(
-                        url = server.url,
-                        status = server.status,
-                        roomCount = server.rooms.size,
-                        selected = server.url == state.selectedServerUrl,
-                    )
+                item {
+                    LobbySectionTitle(title = "快速开始", icon = Icons.Default.Add)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        LobbyActionCard(
+                            icon = Icons.Default.Add,
+                            title = "创建房间",
+                            subtitle = "邀请朋友一起听",
+                            onClick = { createDialog = true },
+                            modifier = Modifier.weight(1f),
+                        )
+                        LobbyActionCard(
+                            icon = Icons.AutoMirrored.Filled.ArrowForward,
+                            title = "加入房间",
+                            subtitle = "输入房间号或链接",
+                            onClick = { joinDialogOpen = true },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    TextButton(
+                        onClick = { connectionSettingsOpen = true },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 2.dp),
+                    ) {
+                        Icon(Icons.Default.Dns, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text("添加或管理服务器", modifier = Modifier.padding(start = 8.dp))
+                    }
                 }
-                items(server.rooms, key = { room -> "${server.url}:${room.id}" }) { room ->
-                    RoomCard(room) {
-                        if (room.hasPassword) {
-                            joinTarget = RoomTarget(server.url, room)
-                        } else {
-                            viewModel.joinRoomOnServer(server.url, room.id)
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("公开房间", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = "$roomCount 个房间 · ${state.servers.size} 台服务器",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        IconButton(
+                            onClick = viewModel::refreshRooms,
+                            enabled = state.servers.any { it.status == ConnectionStatus.Connected },
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = "刷新房间")
+                        }
+                    }
+                }
+                if (state.servers.all { it.rooms.isEmpty() }) {
+                    item {
+                        EmptyRoomList(
+                            title = if (state.servers.any { it.status == ConnectionStatus.Connected }) {
+                                "暂无公开房间"
+                            } else {
+                                "正在连接服务器"
+                            },
+                        )
+                    }
+                } else {
+                    state.servers.filter { it.rooms.isNotEmpty() }.forEach { server ->
+                        item(key = "server:${server.url}") {
+                            ServerHeader(
+                                url = server.url,
+                                status = server.status,
+                                roomCount = server.rooms.size,
+                                selected = server.url == state.selectedServerUrl,
+                            )
+                        }
+                        items(server.rooms, key = { room -> "${server.url}:${room.id}" }) { room ->
+                            RoomCard(room) {
+                                if (room.hasPassword) {
+                                    joinTarget = RoomTarget(server.url, room)
+                                } else {
+                                    viewModel.joinRoomOnServer(server.url, room.id)
+                                }
+                            }
                         }
                     }
                 }
             }
+    } else {
+        BackHandler { selectedTab = LobbyTab.Home }
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(top = contentPadding.calculateTopPadding()),
+        ) {
+            when (selectedTab) {
+                LobbyTab.Search -> if (state.connectionStatus == ConnectionStatus.Connected) {
+                    SearchPane(state, viewModel)
+                } else {
+                    LobbySearchUnavailablePane(onOpenSettings = { connectionSettingsOpen = true })
+                }
+                LobbyTab.Library -> LocalMusicPane(
+                    state = state,
+                    viewModel = viewModel,
+                    onBack = { selectedTab = LobbyTab.Home },
+                )
+                LobbyTab.Recommendations -> RecommendationsPane(state, viewModel)
+                LobbyTab.Settings -> Column(Modifier.fillMaxSize()) {
+                    LobbyTabHeader(
+                        title = "设置",
+                        onBack = { selectedTab = LobbyTab.Home },
+                        onAction = { connectionSettingsOpen = true },
+                    )
+                    Box(Modifier.weight(1f)) {
+                        AccountSettingsPane(state, viewModel)
+                    }
+                }
+                LobbyTab.Home -> Unit
+            }
         }
+    }
+
+    LobbyBottomNavigation(
+        selectedTab = selectedTab,
+        onTabSelected = { selectedTab = it },
+        showRecommendations = state.room != null,
+        modifier = Modifier.padding(bottom = contentPadding.calculateBottomPadding()),
+    )
+
     }
 
     if (connectionSettingsOpen) {
@@ -266,6 +279,17 @@ fun LobbyScreen(
             state = state,
             viewModel = viewModel,
             onDismiss = { connectionSettingsOpen = false },
+        )
+    }
+    if (joinDialogOpen) {
+        JoinRoomDialog(
+            initialValue = directRoomId,
+            onDismiss = { joinDialogOpen = false },
+            onJoin = { input ->
+                directRoomId = input
+                joinDialogOpen = false
+                viewModel.joinRoomInput(input)
+            },
         )
     }
     if (createDialog) {
@@ -285,10 +309,257 @@ fun LobbyScreen(
             viewModel.joinRoomOnServer(target.serverUrl, target.room.id, password)
         }
     }
-    if (accountSettingsOpen) {
-        ModalBottomSheet(onDismissRequest = { accountSettingsOpen = false }) {
-            Column(Modifier.fillMaxWidth().fillMaxHeight(0.90f)) {
-                AccountSettingsPane(state, viewModel)
+}
+
+@Composable
+private fun LobbySectionTitle(title: String, icon: ImageVector) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(26.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+@Composable
+private fun LobbyActionCard(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(16.dp)
+    Card(
+        onClick = onClick,
+        modifier = modifier
+            .height(112.dp)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.48f), shape),
+        shape = shape,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.78f),
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(24.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun TrackResumeCard(track: Track, onClick: (() -> Unit)?) {
+    val shape = RoundedCornerShape(16.dp)
+    Card(
+        onClick = onClick ?: {},
+        enabled = onClick != null,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.48f), shape),
+        shape = shape,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.78f),
+        ),
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (track.cover.isNotBlank()) {
+                AsyncImage(
+                    model = track.cover,
+                    contentDescription = track.title,
+                    modifier = Modifier
+                        .size(68.dp)
+                        .clip(RoundedCornerShape(10.dp)),
+                    contentScale = ContentScale.Crop,
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(68.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Default.MusicNote, contentDescription = null)
+                }
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = track.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = track.artist.joinToString(" / "),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                contentDescription = "打开播放器",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LobbyTabHeader(
+    title: String,
+    onBack: () -> Unit,
+    onAction: (() -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onBack) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回首页")
+        }
+        Text(
+            title,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+        )
+        onAction?.let { action ->
+            IconButton(onClick = action) {
+                Icon(Icons.Default.Settings, contentDescription = "服务器设置")
+            }
+        }
+    }
+}
+
+@Composable
+private fun LobbySearchUnavailablePane(onOpenSettings: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(
+            imageVector = Icons.Default.Search,
+            contentDescription = null,
+            modifier = Modifier.size(36.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = "连接服务器后搜索歌曲",
+            modifier = Modifier.padding(top = 12.dp),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = "搜索结果会根据当前服务器和已选音源返回",
+            modifier = Modifier.padding(top = 6.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+        TextButton(onClick = onOpenSettings, modifier = Modifier.padding(top = 8.dp)) {
+            Icon(Icons.Default.Dns, contentDescription = null, modifier = Modifier.size(18.dp))
+            Text("连接服务器", modifier = Modifier.padding(start = 8.dp))
+        }
+    }
+}
+
+@Composable
+private fun LobbySearchPane(
+    state: AppState,
+    directRoomId: String,
+    onDirectRoomIdChange: (String) -> Unit,
+    onJoinDirectRoom: () -> Unit,
+    onJoinRoom: (String, RoomListItem) -> Unit,
+    onBack: () -> Unit,
+) {
+    Column(Modifier.fillMaxSize()) {
+        LobbyTabHeader(title = "搜索房间", onBack = onBack)
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("加入房间", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    OutlinedTextField(
+                        value = directRoomId,
+                        onValueChange = onDirectRoomIdChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("房间号或邀请链接") },
+                        trailingIcon = {
+                            IconButton(onClick = onJoinDirectRoom, enabled = directRoomId.isNotBlank()) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "加入房间")
+                            }
+                        },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { if (directRoomId.isNotBlank()) onJoinDirectRoom() }),
+                    )
+                }
+            }
+            item {
+                Text("公开房间", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            }
+            if (state.servers.all { it.rooms.isEmpty() }) {
+                item { EmptyRoomList("暂无可加入的公开房间") }
+            } else {
+                state.servers.filter { it.rooms.isNotEmpty() }.forEach { server ->
+                    item(key = "search-server:${server.url}") {
+                        ServerHeader(
+                            url = server.url,
+                            status = server.status,
+                            roomCount = server.rooms.size,
+                            selected = server.url == state.selectedServerUrl,
+                        )
+                    }
+                    items(server.rooms, key = { room -> "search:${server.url}:${room.id}" }) { room ->
+                        RoomCard(room) { onJoinRoom(server.url, room) }
+                    }
+                }
             }
         }
     }
@@ -369,11 +640,16 @@ private fun ServerHeader(
 
 @Composable
 private fun RoomCard(room: RoomListItem, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(12.dp)
     Card(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.38f), shape),
+        shape = shape,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.74f),
+        ),
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),

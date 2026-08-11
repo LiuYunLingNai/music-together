@@ -76,6 +76,7 @@ fun MusicTogetherApp(viewModel: MusicTogetherViewModel) {
                             contentPadding = padding,
                             viewModel = viewModel,
                             bottomContentPadding = if (playerMinimized) 76.dp else 0.dp,
+                            onOpenPlayer = { playerMinimized = false },
                         )
                         room?.takeIf { playerMinimized }?.let { activeRoom ->
                             MinimizedPlayerBar(
@@ -87,7 +88,7 @@ fun MusicTogetherApp(viewModel: MusicTogetherViewModel) {
                                 modifier = Modifier
                                     .align(Alignment.BottomCenter)
                                     .padding(
-                                        bottom = padding.calculateBottomPadding(),
+                                        bottom = padding.calculateBottomPadding() + LobbyNavigationDefaults.Height,
                                     ),
                             )
                         }

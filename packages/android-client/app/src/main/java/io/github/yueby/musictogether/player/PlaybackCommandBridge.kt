@@ -9,4 +9,16 @@ object PlaybackCommandBridge {
 
     @Volatile
     var listener: Listener? = null
+
+    @Volatile
+    var audioFocusEnabled: Boolean = true
+        private set
+
+    @Volatile
+    var audioFocusListener: ((Boolean) -> Unit)? = null
+
+    fun setAudioFocusEnabled(enabled: Boolean) {
+        audioFocusEnabled = enabled
+        audioFocusListener?.invoke(enabled)
+    }
 }

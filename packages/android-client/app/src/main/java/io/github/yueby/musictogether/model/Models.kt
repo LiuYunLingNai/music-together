@@ -410,6 +410,7 @@ data class AppState(
     val platformHub: PlatformHubState = PlatformHubState(),
     val playbackTempoSyncEnabled: Boolean = false,
     val playbackHardSeekSyncEnabled: Boolean = false,
+    val allowAudioMixing: Boolean = false,
     val syncPacketIntervalSeconds: Int = 3,
     val syncDriftSeconds: Double = 0.0,
     val pingMs: Long? = null,

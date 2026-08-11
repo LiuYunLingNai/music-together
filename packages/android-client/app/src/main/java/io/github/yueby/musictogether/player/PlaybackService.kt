@@ -21,6 +21,10 @@ import io.github.yueby.musictogether.logging.AppLogger
 class PlaybackService : MediaSessionService() {
     private lateinit var player: ExoPlayer
     private lateinit var mediaSession: MediaSession
+    private val audioAttributes = AudioAttributes.Builder()
+        .setUsage(C.USAGE_MEDIA)
+        .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+        .build()
 
     override fun onCreate() {
         super.onCreate()
@@ -38,15 +42,8 @@ class PlaybackService : MediaSessionService() {
         player = ExoPlayer.Builder(this)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
             .build()
-            .apply {
-                setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(C.USAGE_MEDIA)
-                        .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-                        .build(),
-                    true,
-                )
-            }
+        configureAudioFocus(PlaybackCommandBridge.audioFocusEnabled)
+        PlaybackCommandBridge.audioFocusListener = ::configureAudioFocus
         val sessionPlayer = RoomMediaSessionPlayer(player)
         mediaSession = MediaSession.Builder(this, sessionPlayer)
             .setMediaButtonPreferences(roomMediaButtonPreferences())
@@ -90,9 +87,15 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         AppLogger.info("MediaSession", "playback service destroyed")
+        PlaybackCommandBridge.audioFocusListener = null
         mediaSession.release()
         player.release()
         super.onDestroy()
+    }
+
+    private fun configureAudioFocus(enabled: Boolean) {
+        player.setAudioAttributes(audioAttributes, enabled)
+        AppLogger.info("Player", "audio focus enabled=$enabled")
     }
 }
 

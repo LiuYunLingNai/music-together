@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -192,6 +193,25 @@ fun RoomSettingsPane(state: AppState, viewModel: MusicTogetherViewModel) {
                         onCheckedChange = viewModel::updatePlaybackHardSeekSync,
                     )
                 }
+            }
+        }
+        item { HorizontalDivider() }
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.AutoMirrored.Filled.VolumeUp, null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("允许与其他应用同时播放", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "开启后不再请求音频焦点，本应用不会主动暂停或压低其他媒体的音量。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = state.allowAudioMixing,
+                    onCheckedChange = viewModel::updateAllowAudioMixing,
+                )
             }
         }
         item { HorizontalDivider() }

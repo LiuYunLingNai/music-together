@@ -49,6 +49,39 @@ import io.github.yueby.musictogether.model.ConnectionStatus
 import io.github.yueby.musictogether.model.ServerConnection
 
 @Composable
+internal fun JoinRoomDialog(
+    initialValue: String,
+    onDismiss: () -> Unit,
+    onJoin: (String) -> Unit,
+) {
+    var input by remember(initialValue) { mutableStateOf(initialValue) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("加入房间") },
+        text = {
+            OutlinedTextField(
+                value = input,
+                onValueChange = { input = it.take(512) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text("房间号或邀请链接") },
+            )
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onJoin(input) },
+                enabled = input.isNotBlank(),
+            ) {
+                Text("加入")
+            }
+        },
+    )
+}
+
+@Composable
 internal fun ConnectionSettingsDialog(
     state: AppState,
     viewModel: MusicTogetherViewModel,

@@ -143,6 +143,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             lyricOffsets = appPreferences.loadLyricOffsets(),
             playbackTempoSyncEnabled = playbackSyncSettings.tempoEnabled,
             playbackHardSeekSyncEnabled = playbackSyncSettings.hardSeekEnabled,
+            allowAudioMixing = appPreferences.allowAudioMixing(),
             syncPacketIntervalSeconds = appPreferences.syncPacketInterval(
                 defaultValue = DEFAULT_SYNC_PACKET_INTERVAL_SECONDS,
                 range = MIN_SYNC_PACKET_INTERVAL_SECONDS..MAX_SYNC_PACKET_INTERVAL_SECONDS,
@@ -234,6 +235,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private val supportedPlatforms = listOf("netease", "tencent", "kugou", "kugou_concept", "bilibili")
 
     init {
+        PlaybackCommandBridge.setAudioFocusEnabled(!_state.value.allowAudioMixing)
         PlaybackCommandBridge.listener = object : PlaybackCommandBridge.Listener {
             override fun onTogglePlayback() = this@MusicTogetherViewModel.togglePlayback()
             override fun onNext() = this@MusicTogetherViewModel.next()
@@ -316,6 +318,12 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         appPreferences.setPlaybackHardSeekSync(enabled)
         _state.value = _state.value.copy(playbackHardSeekSyncEnabled = enabled)
         nativePlayer.setHardSeekSyncEnabled(enabled)
+    }
+
+    fun updateAllowAudioMixing(enabled: Boolean) {
+        appPreferences.setAllowAudioMixing(enabled)
+        _state.value = _state.value.copy(allowAudioMixing = enabled)
+        PlaybackCommandBridge.setAudioFocusEnabled(!enabled)
     }
 
     fun updateSyncPacketInterval(seconds: Int) {

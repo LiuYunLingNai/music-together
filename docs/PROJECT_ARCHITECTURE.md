@@ -354,6 +354,6 @@ AMLL 纯算法按职责分布：
 - Vivo Debug APK 构建
 - SHA-256 生成和 Debug 产物上传
 
-推送中 `versionName` 发生变化时，CI 会触发签名 Release 构建，与提交类型无关。发布任务生成 Standard/Vivo APK、Standard AAB 和 SHA-256，并创建或更新对应的 GitHub Release。Release 正文以最近的上一版本标签为基线，逐条列出到当前构建提交之间所有非合并提交的标题与短 SHA，并附带 GitHub 比较链接；同版本重新发布时也会同步刷新正文。
+推送中 `versionName` 发生变化时，CI 会触发签名 Release 构建，与提交类型无关。发布任务生成 Standard/Vivo APK、Standard AAB 和 SHA-256，并创建或更新对应的 GitHub Release。若存在版本专用说明 `docs/releases/<version>.md`，Release 正文直接采用该文件；否则以最近的上一版本标签为基线，逐条列出到当前构建提交之间所有非合并提交的标题与短 SHA，并附带 GitHub 比较链接。同版本重新发布时也会同步刷新正文。
 
 本地构建与验证命令见根目录 [AGENTS.md](../AGENTS.md)。
