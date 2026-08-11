@@ -1,6 +1,6 @@
 # ---- 阶段 1: 安装依赖 ----
 FROM node:26-alpine AS deps
-RUN npm install --global pnpm@10.29.2
+RUN npm install --global pnpm@11.21.0
 WORKDIR /app
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY packages/shared/package.json packages/shared/
@@ -19,7 +19,7 @@ RUN pnpm --filter @music-together/client run build
 
 # ---- 阶段 3: 生产镜像 ----
 FROM node:26-alpine AS production
-RUN npm install --global pnpm@10.29.2
+RUN npm install --global pnpm@11.21.0
 WORKDIR /app
 
 # 复制所有 workspace 包的 package.json（pnpm workspace 需要完整结构）

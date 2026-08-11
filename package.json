@@ -16,10 +16,10 @@
   "keywords": [],
   "author": "",
   "license": "AGPL-3.0",
-  "packageManager": "pnpm@10.29.2",
+  "packageManager": "pnpm@11.21.0",
   "engines": {
     "node": ">=22.22.0",
-    "pnpm": ">=10"
+    "pnpm": ">=11"
   },
   "devDependencies": {
     "concurrently": "^10.0.4",
