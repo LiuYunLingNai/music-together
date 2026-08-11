@@ -45,7 +45,7 @@ AUTO_FALLBACK_ENABLED
 
 ## Docker 多阶段构建
 
-- `deps`：锁定 pnpm 10.29.2 并执行 frozen install。
+- `deps`：锁定 pnpm 11.21.0 并执行 frozen install。
 - `build`：构建 shared、server 和 client。
 - `production`：只安装服务端生产依赖链，复制构建产物。
 - 运行时使用非 root `node` 用户。
