@@ -28,10 +28,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil3.compose.AsyncImage
 import io.github.yueby.musictogether.model.RoomMember
 import io.github.yueby.musictogether.model.RoomState
 
@@ -75,17 +77,28 @@ internal fun MembersPane(room: RoomState, userId: String?) {
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Box(Modifier.size(22.dp)) {
-                        Icon(
-                            Icons.Default.AccountCircle,
-                            contentDescription = null,
-                            modifier = Modifier.size(22.dp),
-                            tint = if (member.id == room.creatorId) {
-                                Color(0xFFFFC857)
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        )
+                    Box(Modifier.size(40.dp)) {
+                        if (member.avatarUrl.isNullOrBlank()) {
+                            Icon(
+                                Icons.Default.AccountCircle,
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize(),
+                                tint = if (member.id == room.creatorId) {
+                                    Color(0xFFFFC857)
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        } else {
+                            AsyncImage(
+                                model = member.avatarUrl,
+                                contentDescription = "${member.nickname}头像",
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(CircleShape),
+                                contentScale = ContentScale.Crop,
+                            )
+                        }
                         Box(
                             modifier = Modifier
                                 .align(Alignment.BottomEnd)

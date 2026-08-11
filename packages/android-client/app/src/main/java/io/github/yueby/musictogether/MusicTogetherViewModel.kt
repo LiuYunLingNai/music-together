@@ -1537,7 +1537,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 refreshAccount(showError = false)
             }
             Events.ROOM_STATE -> {
-                val room = (data as? JSONObject)?.toRoomState() ?: return
+                val room = (data as? JSONObject)?.toRoomState()?.let(::resolveRoomAvatarUrls) ?: return
                 handleCurrentTrackChanged(room.currentTrack?.id)
                 val isJoinSnapshot = waitingForJoinRoomState
                 waitingForJoinRoomState = false
@@ -1609,7 +1609,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 }
             }
             Events.ROOM_USER_JOINED -> {
-                val user = (data as? JSONObject)?.toUser() ?: return
+                val user = (data as? JSONObject)?.toUser()?.let(::resolveUserAvatarUrl) ?: return
                 val now = System.currentTimeMillis()
                 updateRoom { room ->
                     val members = room.members
@@ -2354,6 +2354,20 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         val room = _state.value.room ?: return
         _state.value = _state.value.copy(room = transform(room))
     }
+
+    private fun resolveRoomAvatarUrls(room: io.github.yueby.musictogether.model.RoomState) = room.copy(
+        users = room.users.map(::resolveUserAvatarUrl),
+        members = room.members.map { member ->
+            member.copy(avatarUrl = resolveAvatarUrl(member.avatarUrl))
+        },
+    )
+
+    private fun resolveUserAvatarUrl(user: io.github.yueby.musictogether.model.User) = user.copy(
+        avatarUrl = resolveAvatarUrl(user.avatarUrl),
+    )
+
+    private fun resolveAvatarUrl(avatarUrl: String?): String? =
+        activeServer?.let { api.resolveResource(it, avatarUrl) } ?: avatarUrl
 
     private fun controlOrVote(event: String, voteAction: String) {
         if (canControl()) socket.emit(event) else startVote(voteAction)

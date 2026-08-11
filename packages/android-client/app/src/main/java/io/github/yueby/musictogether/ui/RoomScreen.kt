@@ -190,6 +190,7 @@ fun RoomScreen(
                     viewModel = viewModel,
                     safeContentPadding = outerPadding,
                     onDismiss = { activeOverlay = null },
+                    onOpenDownload = { activeOverlay = RoomOverlay.Download },
                 )
             } else {
                 ModalBottomSheet(
@@ -209,7 +210,11 @@ fun RoomScreen(
                             ),
                     ) {
                         when (overlay) {
-                            RoomOverlay.Queue -> QueuePane(room, viewModel)
+                            RoomOverlay.Queue -> QueuePane(
+                                room = room,
+                                viewModel = viewModel,
+                                onDownloadCurrent = { activeOverlay = RoomOverlay.Download },
+                            )
                             RoomOverlay.Search -> SearchPane(appState, viewModel)
                             RoomOverlay.Recommendations -> RecommendationsPane(appState, viewModel)
                             RoomOverlay.Download -> MusicDownloadPane(appState, viewModel)

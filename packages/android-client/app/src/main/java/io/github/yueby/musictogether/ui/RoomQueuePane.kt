@@ -59,6 +59,7 @@ internal fun QueuePane(
     room: RoomState,
     viewModel: MusicTogetherViewModel,
     onClose: (() -> Unit)? = null,
+    onDownloadCurrent: (() -> Unit)? = null,
 ) {
     var confirmClear by remember { mutableStateOf(false) }
     val currentIndex = room.queue.indexOfFirst { it.id == room.currentTrack?.id }
@@ -158,7 +159,9 @@ internal fun QueuePane(
                     secondaryAction = if (canReorder) null else ({ viewModel.removeTrack(track) }),
                     primaryIcon = Icons.Default.PlayArrow,
                     secondaryIcon = Icons.Default.Delete,
-                    extraAction = { viewModel.downloadTrack(track) },
+                    extraAction = {
+                        if (isCurrent && onDownloadCurrent != null) onDownloadCurrent() else viewModel.downloadTrack(track)
+                    },
                     extraIcon = Icons.Default.Download,
                     extraContentDescription = "下载歌曲",
                     onClick = { viewModel.playTrack(track) },
@@ -176,7 +179,9 @@ internal fun QueuePane(
                                 onMoveDown = { viewModel.moveTrack(track, 1) },
                                 onPin = { viewModel.pinTrack(track) },
                                 onRemove = { viewModel.removeTrack(track) },
-                                onDownload = { viewModel.downloadTrack(track) },
+                                onDownload = {
+                                    if (isCurrent && onDownloadCurrent != null) onDownloadCurrent() else viewModel.downloadTrack(track)
+                                },
                                 onReselectMetadata =
                                     track.takeIf { it.source == "bilibili" }?.let { video ->
                                         { viewModel.reselectBilibiliMetadata(video) }

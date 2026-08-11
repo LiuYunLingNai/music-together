@@ -303,6 +303,7 @@ internal fun LandscapeRoomSidePanel(
     viewModel: MusicTogetherViewModel,
     safeContentPadding: PaddingValues,
     onDismiss: () -> Unit,
+    onOpenDownload: () -> Unit,
 ) {
     val layoutDirection = LocalLayoutDirection.current
     val safeTop = safeContentPadding.calculateTopPadding()
@@ -342,7 +343,12 @@ internal fun LandscapeRoomSidePanel(
             shadowElevation = 18.dp,
         ) {
             when (overlay) {
-                RoomOverlay.Queue -> QueuePane(room, viewModel, onClose = onDismiss)
+                RoomOverlay.Queue -> QueuePane(
+                    room = room,
+                    viewModel = viewModel,
+                    onClose = onDismiss,
+                    onDownloadCurrent = onOpenDownload,
+                )
                 RoomOverlay.Chat -> ChatPane(messages, viewModel, onClose = onDismiss)
                 else -> Unit
             }
