@@ -11,7 +11,5 @@ export function registerPendingPlayCancel(cancel: () => void): () => void {
 
 /** Cancel a scheduled track load superseded by pause/resume/seek/new play. */
 export function cancelScheduledPlay(): void {
-  const cancel = cancelPendingPlay
-  cancelPendingPlay = null
-  cancel?.()
+  cancelPendingPlay?.()
 }

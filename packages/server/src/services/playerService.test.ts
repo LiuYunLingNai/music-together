@@ -1,6 +1,7 @@
 import type { Track } from '@music-together/shared'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { roomRepo } from '../repositories/roomRepository.js'
+import { toPublicRoomState } from '../utils/roomUtils.js'
 import type { RoomData } from '../repositories/types.js'
 import {
   autoPlayIfEmpty,
@@ -12,6 +13,7 @@ import {
   seekTrack,
   setCurrentTrack,
   stopPlayback,
+  syncPlaybackToSocket,
   validateConductorReport,
 } from './playerService.js'
 
@@ -159,6 +161,16 @@ describe('playerService state transitions', () => {
     expect(data.pendingPlayback?.playState.currentTime).toBe(0)
   })
 
+  it('includes pending execution time in public room state for route recovery', () => {
+    const data = room()
+    roomRepo.set('ROOM01', data)
+    const { io } = ioMock()
+
+    pauseTrack(io as never, 'ROOM01')
+
+    expect(toPublicRoomState(data).serverTimeToExecute).toBe(data.pendingPlayback?.playState.serverTimeToExecute)
+  })
+
   it('keeps committed state unchanged until pause execution and then commits it once', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-01-01T00:00:10Z'))
@@ -252,9 +264,31 @@ describe('playerService state transitions', () => {
     })
   })
 
-  it('force accepts a conductor report after consecutive drift rejections', () => {
+  it('never accepts a conductor report that would roll playback back by seconds', () => {
     expect(validateConductorReport('ROOM01', 1, 10)).toBe(false)
-    expect(validateConductorReport('ROOM01', 1, 10)).toBe(true)
+    expect(validateConductorReport('ROOM01', 1, 10)).toBe(false)
     expect(validateConductorReport('ROOM01', 9, 10)).toBe(true)
+  })
+
+  it('clamps a joining client scheduled position to the track duration', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-01-01T00:00:10Z'))
+    const data = room()
+    data.currentTrack = { ...track, duration: 120 }
+    data.playState = { isPlaying: true, currentTime: 120, serverTimestamp: Date.now(), revision: 3 }
+    data.users.push({ id: 'member', nickname: 'Member', role: 'member' })
+    roomRepo.set('ROOM01', data)
+    const emit = vi.fn()
+    const socket = { emit }
+    const { io } = ioMock()
+
+    await syncPlaybackToSocket(io as never, socket as never, 'ROOM01', data)
+
+    expect(emit).toHaveBeenCalledWith(
+      'player:play',
+      expect.objectContaining({
+        playState: expect.objectContaining({ currentTime: 120 }),
+      }),
+    )
   })
 })

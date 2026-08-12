@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- Node.js 22.22.0 or newer
+- Node.js 24.15.0 or newer
 - pnpm 11 or newer
 
 ## Setup

@@ -604,12 +604,16 @@ export async function syncPlaybackToSocket(
       ? Math.max(getScheduleTime(roomId), snapshotTimestamp + joinCalibrationDelayMs)
       : snapshotTimestamp
     const delaySec = shouldAutoPlay ? Math.max(0, (scheduleTime - snapshotTimestamp) / 1000) : 0
+    const scheduledCurrentTime = Math.min(
+      room.currentTrack.duration > 0 ? room.currentTrack.duration : Number.POSITIVE_INFINITY,
+      snapshotCurrentTime + delaySec,
+    )
 
     socket.emit(EVENTS.PLAYER_PLAY, {
       track: room.currentTrack,
       playState: {
         isPlaying: shouldAutoPlay,
-        currentTime: snapshotCurrentTime + delaySec,
+        currentTime: scheduledCurrentTime,
         serverTimestamp: scheduleTime,
         serverTimeToExecute: scheduleTime,
         revision: room.playState.revision,
@@ -629,43 +633,20 @@ export async function syncPlaybackToSocket(
 /** Debounce repeated skip actions without blocking an immediate direction reversal. */
 const lastSkipTimestamp = new Map<string, { action: 'next' | 'prev'; timestamp: number }>()
 
-/** Track consecutive rejected conductor reports per room to break deadlocks */
-const conductorRejectCount = new Map<string, number>()
-
-/** Force-accept a conductor report after this many consecutive rejections */
-const CONDUCTOR_REJECT_FORCE_ACCEPT_COUNT = 2
-
-/** Max allowed drift (seconds) between conductor-reported time and server estimate */
+/** Max allowed backward drift (seconds) between conductor report and server estimate. */
 const CONDUCTOR_REJECT_DRIFT_THRESHOLD_S = 3
 
 /** Remove per-room entries for a deleted room */
 export function cleanupRoom(roomId: string): void {
   lastSkipTimestamp.delete(roomId)
-  conductorRejectCount.delete(roomId)
   playMutexes.delete(roomId)
   const room = roomRepo.get(roomId)
   if (room) cancelPendingPlayback(room)
 }
 
-/**
- * Validate a conductor sync report against the server estimate.
- * Returns true if the report should be ACCEPTED, false if rejected (stale).
- * Automatically force-accepts after CONDUCTOR_REJECT_FORCE_ACCEPT_COUNT consecutive
- * rejections to break deadlocks when the server estimate has diverged.
- */
-export function validateConductorReport(roomId: string, reportedTime: number, estimatedTime: number): boolean {
-  if (estimatedTime - reportedTime > CONDUCTOR_REJECT_DRIFT_THRESHOLD_S) {
-    const count = (conductorRejectCount.get(roomId) ?? 0) + 1
-    conductorRejectCount.set(roomId, count)
-    if (count < CONDUCTOR_REJECT_FORCE_ACCEPT_COUNT) {
-      return false // reject
-    }
-    // Too many consecutive rejections — force accept to break deadlock
-    logger.warn(`Force-accepting conductor report after ${count} consecutive rejections`, { roomId })
-  }
-  // Accepted — reset counter
-  conductorRejectCount.delete(roomId)
-  return true
+/** Reject reports that would move the authoritative room position backwards by seconds. */
+export function validateConductorReport(_roomId: string, reportedTime: number, estimatedTime: number): boolean {
+  return estimatedTime - reportedTime <= CONDUCTOR_REJECT_DRIFT_THRESHOLD_S
 }
 
 /** Debounce only duplicate NEXT or duplicate PREV actions for a room. */

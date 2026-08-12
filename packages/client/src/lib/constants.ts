@@ -5,12 +5,6 @@
 /** Deduplication window for PLAYER_PLAY events */
 export const PLAYER_PLAY_DEDUP_MS = 2000
 
-/** Unmute delay after seeking during track load */
-export const HOWL_UNMUTE_DELAY_SEEK_MS = 400
-
-/** Unmute delay when starting from the beginning */
-export const HOWL_UNMUTE_DELAY_DEFAULT_MS = 100
-
 /** Throttle interval for currentTime store updates */
 export const CURRENT_TIME_THROTTLE_MS = 100
 
@@ -26,10 +20,15 @@ export const CONDUCTOR_REPORT_FAST_DURATION_MS = 10_000
 /** Interval for client-initiated sync requests (drift correction) */
 export const SYNC_REQUEST_INTERVAL_MS = 2_000
 
-/** Drift threshold (ms) before hard-seeking to correct position */
-export const DRIFT_SEEK_THRESHOLD_MS = 200
+/** Drift threshold (ms) before hard-seeking to correct position.
+ * Native HTML5 media seeks may flush decoder buffers on mobile, so only
+ * clearly disruptive drift should use this path. */
+export const DRIFT_SEEK_THRESHOLD_MS = 500
 
-/** Dead zone (ms) — below this drift we restore rate to 1.0 (no correction) */
+/** Dead zone (ms) — below this drift we restore uninterrupted 1.0x audio.
+ * Keep this small: soft rate correction is continuous and non-seeking, so it
+ * must remain active for ordinary clock-rate drift instead of letting errors
+ * accumulate toward the hard-seek threshold. */
 export const DRIFT_DEAD_ZONE_MS = 30
 
 /** Proportional gain for drift correction: rate = 1 - clamp(drift * Kp) */
@@ -44,23 +43,20 @@ export const MAX_RATE_ADJUSTMENT = 0.02
  *  Lowered from 0.3 to 0.2 for more noise suppression on high-latency links. */
 export const DRIFT_SMOOTH_ALPHA = 0.2
 
-/** Fallback seek threshold (ms) when rate correction is disabled by plugin */
-export const DRIFT_PLUGIN_SEEK_THRESHOLD_MS = 30
-
 /** Grace period (ms) after new track before drift correction activates.
  *  Allows at least one conductor report to correct estimateCurrentTime. */
 export const DRIFT_GRACE_PERIOD_MS = 3_000
 
-/** Extra margin (ms) added to the median RTT when computing the adaptive
- *  hard-seek threshold.  Final threshold = max(DRIFT_SEEK_THRESHOLD_MS,
- *  medianRTT + DRIFT_SEEK_RTT_MARGIN_MS).  This prevents high-latency
- *  NTP jitter from repeatedly triggering hard seeks. */
+/** Extra margin (ms) added to the estimated one-way delay when computing
+ *  the adaptive hard-seek threshold. Final threshold = max(
+ *  DRIFT_SEEK_THRESHOLD_MS, medianRTT / 2 + DRIFT_SEEK_RTT_MARGIN_MS).
+ *  NTP offset uncertainty is bounded by one-way delay, not the full RTT. */
 export const DRIFT_SEEK_RTT_MARGIN_MS = 100
 
-/** Number of consecutive sync responses whose smoothed drift exceeds
- *  the hard-seek threshold before actually seeking.  Prevents a single
- *  noisy measurement from causing an audible jump. */
-export const HARD_SEEK_CONFIRM_COUNT = 2
+/** Number of consecutive warm-EMA sync responses whose smoothed drift
+ * exceeds the hard-seek threshold before seeking. This also prevents a
+ * stable browser media-clock bias from causing a seek every sync interval. */
+export const HARD_SEEK_CONFIRM_COUNT = 3
 
 /** Safety clamp for network delay estimation (seconds) — prevents clock-skew outliers */
 export const MAX_NETWORK_DELAY_S = 5

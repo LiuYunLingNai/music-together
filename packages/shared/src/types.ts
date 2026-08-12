@@ -70,6 +70,8 @@ export interface RoomState {
   name: string
   creatorId: string
   hostId: string
+  /** 唯一承担权威播放进度上报的 Socket；用于区分同一身份的多个标签页。 */
+  conductorSocketId: string | null
   hasPassword: boolean
   /** 密码明文（仅 owner 可见；普通成员和临时管理员只收到 hasPassword） */
   password?: string | null
@@ -78,6 +80,8 @@ export interface RoomState {
   queue: Track[]
   currentTrack: Track | null
   playState: PlayState
+  /** Present when playState describes a future pending playback action. */
+  serverTimeToExecute?: number
   playMode: PlayMode
 }
 
