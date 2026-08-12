@@ -111,12 +111,13 @@ describe('roomService role and host reconciliation', () => {
   it('moves conductor ownership to the newest socket for the host identity', () => {
     const room = createTestRoom()
 
-    joinRoom('socket-owner-new', ROOM_ID, 'Owner New Socket', 'owner')
+    const result = joinRoom('socket-owner-new', ROOM_ID, 'Owner New Socket', 'owner')
 
+    expect(result?.hostChanged).toBe(true)
     expect(room.conductorSocketId).toBe('socket-owner-new')
   })
 
-  it('ignores a stale socket disconnect when the same user has a newer socket', () => {
+  it('ignores a stale non-conductor socket disconnect when the same user has a newer socket', () => {
     const room = createTestRoom()
     joinRoom('socket-owner-new', ROOM_ID, 'Owner New Socket', 'owner')
 
@@ -127,5 +128,16 @@ describe('roomService role and host reconciliation', () => {
     expect(room.hostId).toBe('owner')
     expect(room.users).toHaveLength(1)
     expect(room.users[0]).toMatchObject({ id: 'owner', role: 'owner' })
+  })
+
+  it('reports a conductor change when the newest host socket disconnects', () => {
+    const room = createTestRoom()
+    joinRoom('socket-owner-new', ROOM_ID, 'Owner New Socket', 'owner')
+
+    const result = leaveRoom('socket-owner-new')
+
+    expect(result?.staleSocketOnly).toBe(true)
+    expect(result?.hostChanged).toBe(true)
+    expect(room.conductorSocketId).toBe('socket-owner')
   })
 })

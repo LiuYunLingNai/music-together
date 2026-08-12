@@ -17,13 +17,25 @@ export function useClockSync(): void {
   const switchedRef = useRef(false)
 
   useEffect(() => {
-    // Reset on fresh connection
-    resetClockSync()
-    switchedRef.current = false
+    const clearPingInterval = () => {
+      if (intervalRef.current !== null) {
+        clearInterval(intervalRef.current)
+        intervalRef.current = null
+      }
+    }
+
+    const startCalibration = () => {
+      resetClockSync()
+      switchedRef.current = false
+      clearPingInterval()
+      sendPing()
+      intervalRef.current = setInterval(sendPing, NTP.INITIAL_INTERVAL_MS)
+    }
 
     // --- Pong handler ---
     const onPong = (data: { clientPingId: number; serverTime: number }) => {
-      processPong(data.clientPingId, data.serverTime)
+      const rtt = processPong(data.clientPingId, data.serverTime)
+      if (rtt === null) return
 
       // Switch from fast to slow interval once — only on first calibration
       if (!switchedRef.current && isCalibrated() && intervalRef.current !== null) {
@@ -33,25 +45,31 @@ export function useClockSync(): void {
       }
     }
 
-    socket.on(EVENTS.NTP_PONG, onPong)
-
     // --- Ping sender (includes last measured RTT for server-side scheduling) ---
-    const sendPing = () => {
+    function sendPing() {
       const id = recordPing()
       const rtt = getMedianRTT()
       socket.emit(EVENTS.NTP_PING, { clientPingId: id, lastRttMs: rtt > 0 ? rtt : undefined })
     }
 
-    // Start with fast interval
-    sendPing() // first ping immediately
-    intervalRef.current = setInterval(sendPing, NTP.INITIAL_INTERVAL_MS)
+    const onConnect = () => startCalibration()
+    const onDisconnect = () => {
+      clearPingInterval()
+      resetClockSync()
+      switchedRef.current = false
+    }
+
+    socket.on(EVENTS.NTP_PONG, onPong)
+    socket.on('connect', onConnect)
+    socket.on('disconnect', onDisconnect)
+
+    startCalibration()
 
     return () => {
       socket.off(EVENTS.NTP_PONG, onPong)
-      if (intervalRef.current !== null) {
-        clearInterval(intervalRef.current)
-        intervalRef.current = null
-      }
+      socket.off('connect', onConnect)
+      socket.off('disconnect', onDisconnect)
+      clearPingInterval()
       resetClockSync()
     }
   }, [socket])

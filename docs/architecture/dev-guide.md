@@ -2,7 +2,7 @@
 
 ## 环境要求
 
-- Node.js >= 22.22.0（React Router 8 的最低运行时要求）
+- Node.js >= 24.15.0（同时满足 React Router 8、Vite 8 与 jsdom 30 的运行时要求）
 - pnpm >= 11（仓库锁定 `pnpm@11.21.0`）
 
 ## 快速启动

@@ -5,10 +5,10 @@
   "description": "Online music listening together platform",
   "scripts": {
     "predev": "kill-port 3001 --silent || true",
-    "dev": "concurrently --kill-others --names server,client --prefix-colors blue,green \"pnpm run dev:server\" \"pnpm run dev:client\"",
-    "dev:client": "pnpm --filter @music-together/client dev",
-    "dev:server": "pnpm --filter @music-together/server dev",
-    "build": "pnpm -r run build",
+    "dev": "concurrently --kill-others --names server,client --prefix-colors blue,green \"corepack pnpm@11.21.0 run dev:server\" \"corepack pnpm@11.21.0 run dev:client\"",
+    "dev:client": "corepack pnpm@11.21.0 --filter @music-together/client dev",
+    "dev:server": "corepack pnpm@11.21.0 --filter @music-together/server dev",
+    "build": "corepack pnpm@11.21.0 -r run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "format": "prettier --write \"packages/*/src/**/*.{ts,tsx}\" \"packages/shared/src/**/*.ts\""
@@ -18,7 +18,7 @@
   "license": "AGPL-3.0",
   "packageManager": "pnpm@11.21.0",
   "engines": {
-    "node": ">=22.22.0",
+    "node": ">=24.15.0",
     "pnpm": ">=11"
   },
   "devDependencies": {

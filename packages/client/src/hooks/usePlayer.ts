@@ -1,7 +1,7 @@
 import { getServerTime, isCalibrated } from '@/lib/clockSync'
 import { PLAYER_PLAY_DEDUP_MS } from '@/lib/constants'
-import { storage } from '@/lib/storage'
 import { lyricPlayerBridge } from '@/lib/lyricPlayerBridge'
+import { getScheduledPlaybackPosition } from '@/lib/playbackSync'
 import { registerPendingPlayCancel } from '@/lib/scheduledPlayback'
 import { useSocketContext } from '@/providers/SocketProvider'
 import { usePlayerStore } from '@/stores/playerStore'
@@ -26,7 +26,12 @@ import { usePlayerSync } from './usePlayerSync'
  */
 export function usePlayer() {
   const { socket } = useSocketContext()
-  const loadingRef = useRef<{ trackId: string; ts: number; serverTimestamp: number } | null>(null)
+  const loadingRef = useRef<{
+    trackId: string
+    revision: number
+    ts: number
+    serverTimestamp: number
+  } | null>(null)
   // Set by recovery effect to signal onPlayerPlay that this track was already
   // loaded by reconnect recovery — the subsequent PLAYER_PLAY from
   // syncPlaybackToSocket should be skipped to avoid a double-load.
@@ -39,17 +44,14 @@ export function usePlayer() {
   // Other clients silently wait to prevent duplicate PLAYER_NEXT events.
   const autoNext = useCallback(() => {
     const { room } = useRoomStore.getState()
-    const myId = storage.getUserId()
-    if (room?.hostId === myId) {
-      socket.emit(EVENTS.PLAYER_NEXT)
-    }
+    if (room?.conductorSocketId === socket.id) socket.emit(EVENTS.PLAYER_NEXT)
   }, [socket])
 
-  const { howlRef, soundIdRef, loadTrack, setDesiredPlayback } = useHowl(autoNext)
+  const { howlRef, soundIdRef, loadTrack, setDesiredPlayback, setScheduledPlayback, startPlayback } = useHowl(autoNext)
   const { fetchLyric } = useLyric()
 
   // Connect sync (handles SEEK, PAUSE, RESUME + conductor reporting)
-  usePlayerSync(howlRef, soundIdRef, setDesiredPlayback)
+  usePlayerSync(howlRef, soundIdRef, setDesiredPlayback, setScheduledPlayback)
 
   // Reset dedup ref on disconnect so reconnect PLAYER_PLAY is never blocked
   useEffect(() => {
@@ -87,10 +89,12 @@ export function usePlayer() {
       const now = Date.now()
       if (
         loadingRef.current?.trackId === data.track.id &&
-        loadingRef.current.serverTimestamp === data.playState.serverTimestamp &&
-        now - loadingRef.current.ts < PLAYER_PLAY_DEDUP_MS
+        loadingRef.current.revision === data.playState.revision &&
+        loadingRef.current.serverTimestamp === data.playState.serverTimestamp
       ) {
-        return
+        // Keep the same action idempotent while its Howl still exists. The
+        // short window remains only as protection during synchronous setup.
+        if (howlRef.current || now - loadingRef.current.ts < PLAYER_PLAY_DEDUP_MS) return
       }
       // Recovery already loaded this track (reconnect: ROOM_STATE → recovery
       // loadTrack → PLAYER_PLAY from syncPlaybackToSocket).  The serverTimestamp
@@ -98,9 +102,13 @@ export function usePlayer() {
       // dedup above doesn't catch it.  Skip the redundant load but update
       // roomStore with the authoritative scheduled playState.
       if (recoveredTrackIdRef.current?.trackId === data.track.id) {
-        const recovery = recoveredTrackIdRef.current
         recoveredTrackIdRef.current = null
-        loadingRef.current = { trackId: data.track.id, ts: now, serverTimestamp: data.playState.serverTimestamp }
+        loadingRef.current = {
+          trackId: data.track.id,
+          revision: data.playState.revision,
+          ts: now,
+          serverTimestamp: data.playState.serverTimestamp,
+        }
         useRoomStore.getState().updateRoom({
           currentTrack: data.track,
           playState: {
@@ -112,24 +120,34 @@ export function usePlayer() {
         })
         // Recovery may have preloaded this track paused. Apply the authoritative
         // scheduled transition instead of discarding it solely by track ID.
-        const delay = Math.max(0, data.playState.serverTimeToExecute - (isCalibrated() ? getServerTime() : Date.now()))
+        const delay = isCalibrated()
+          ? Math.max(0, data.playState.serverTimeToExecute - getServerTime())
+          : 0
         if (playTimerRef.current) clearTimeout(playTimerRef.current)
         playTimerRef.current = setTimeout(() => {
           playTimerRef.current = null
-          if (!howlRef.current) return
-          howlRef.current.seek(data.playState.currentTime)
-          if (data.playState.isPlaying && !recovery.autoPlay) {
-            soundIdRef.current =
-              soundIdRef.current !== undefined
-                ? howlRef.current.play(soundIdRef.current)
-                : howlRef.current.play()
-          } else if (!data.playState.isPlaying && howlRef.current.playing()) {
+          if (data.playState.isPlaying) {
+            startPlayback(() => {
+              const currentServerTime = isCalibrated() ? getServerTime() : Date.now()
+              return getScheduledPlaybackPosition(
+                data.playState.currentTime,
+                data.playState.serverTimeToExecute,
+                currentServerTime,
+              )
+            })
+          } else if (howlRef.current?.playing()) {
+            setDesiredPlayback(false)
             howlRef.current.pause(soundIdRef.current)
           }
         }, delay)
         return
       }
-      loadingRef.current = { trackId: data.track.id, ts: now, serverTimestamp: data.playState.serverTimestamp }
+      loadingRef.current = {
+        trackId: data.track.id,
+        revision: data.playState.revision,
+        ts: now,
+        serverTimestamp: data.playState.serverTimestamp,
+      }
 
       // Keep roomStore in sync so recovery effect sees the correct currentTrack
       useRoomStore.getState().updateRoom({
@@ -143,37 +161,26 @@ export function usePlayer() {
       })
 
       const ct = data.playState.currentTime
-      const executeDelay = Math.max(
-        0,
-        data.playState.serverTimeToExecute - (isCalibrated() ? getServerTime() : Date.now()),
-      )
+      const executeDelay = isCalibrated()
+        ? Math.max(0, data.playState.serverTimeToExecute - getServerTime())
+        : 0
 
-      if (ct > 0 && data.playState.isPlaying && executeDelay > 0) {
+      if (data.playState.isPlaying && data.playState.serverTimeToExecute) {
+        // Start loading immediately so slower mobile decoders are ready before
+        // the shared execution time. If loading finishes late, begin at the
+        // elapsed authoritative position instead of starting behind at `ct`.
+        loadTrack(data.track, ct, false)
+        fetchLyric(data.track)
         if (playTimerRef.current) clearTimeout(playTimerRef.current)
         playTimerRef.current = setTimeout(() => {
           playTimerRef.current = null
-          loadTrack(data.track, ct, data.playState.isPlaying)
-          fetchLyric(data.track)
+          startPlayback(() => {
+            const currentServerTime = isCalibrated() ? getServerTime() : Date.now()
+            return getScheduledPlaybackPosition(ct, data.playState.serverTimeToExecute, currentServerTime)
+          })
         }, executeDelay)
-        return
-      }
-
-      if (ct === 0 && data.playState.serverTimeToExecute) {
-        // New track from position 0: schedule load so playback begins at
-        // the coordinated server-time.  We load with autoPlay=true and let
-        // the scheduling delay account for buffering.
-        // When NTP is not yet calibrated, execute immediately (delay=0) to
-        // avoid wildly inaccurate scheduling from uncorrected local clocks.
-        const delay = isCalibrated() ? Math.max(0, data.playState.serverTimeToExecute - getServerTime()) : 0
-        if (playTimerRef.current) clearTimeout(playTimerRef.current)
-        playTimerRef.current = setTimeout(() => {
-          playTimerRef.current = null
-          loadTrack(data.track, 0, data.playState.isPlaying)
-          fetchLyric(data.track)
-        }, delay)
       } else {
-        // Mid-song join or currentTime > 0: load immediately and seek to
-        // the expected position at the scheduled execution time.
+        // Paused track or legacy payload without a scheduled execution time.
         const elapsed = data.playState.isPlaying
           ? Math.max(0, (getServerTime() - data.playState.serverTimestamp) / 1000)
           : 0
@@ -193,29 +200,32 @@ export function usePlayer() {
         playTimerRef.current = null
       }
     }
-  }, [socket, loadTrack, fetchLyric, howlRef, soundIdRef])
+  }, [socket, loadTrack, fetchLyric, howlRef, soundIdRef, setDesiredPlayback, startPlayback])
 
   // Recovery: auto-sync player state from room state when desync is detected
-  // (e.g. after HMR resets stores, or reconnection where PLAYER_PLAY was missed)
+  // (e.g. after HMR resets stores, or PLAYER_PLAY arrived before this route's
+  // listener mounted). Defer the initial check one macrotask so a PLAYER_PLAY
+  // already queued behind ROOM_STATE gets a chance to run first.
   useEffect(() => {
-    let hasRecovered = false
+    let recoveredKey: string | null = null
 
     const recover = () => {
       const { room } = useRoomStore.getState()
 
-      // When room becomes null (disconnect), reset flag so next reconnect can recover
+      // When room becomes null (disconnect), reset recovery generation.
       if (!room) {
-        hasRecovered = false
+        recoveredKey = null
         return
       }
 
-      if (hasRecovered) return
       const playerTrack = usePlayerStore.getState().currentTrack
       const roomTrack = room.currentTrack
+      const recoveryKey = roomTrack ? `${roomTrack.id}:${room.playState.revision}` : `empty:${room.playState.revision}`
 
       // Server has cleared the track (queue empty / cleared) — reset client
       if (!roomTrack && playerTrack) {
-        hasRecovered = true
+        if (recoveredKey === recoveryKey) return
+        recoveredKey = recoveryKey
         if (howlRef.current) {
           try {
             howlRef.current.unload()
@@ -235,11 +245,18 @@ export function usePlayer() {
         // call triggers this subscription synchronously before loadTrack runs,
         // so playerTrack/howlRef are still stale. Checking loadingRef avoids
         // a redundant double-load.
-        // However, if howlRef is null despite loadingRef pointing to this track,
-        // the previous loadTrack failed (e.g. !streamUrl) and we should retry.
-        if (loadingRef.current?.trackId === roomTrack.id && howlRef.current) return
+        // loadingRef is set before updateRoom(), so this subscription can run
+        // synchronously before loadTrack() creates the Howl. Never start a
+        // second load for an event that is already being handled.
+        if (
+          loadingRef.current?.trackId === roomTrack.id &&
+          loadingRef.current.revision === room.playState.revision
+        ) {
+          return
+        }
+        if (recoveredKey === recoveryKey) return
 
-        hasRecovered = true
+        recoveredKey = recoveryKey
         // Cancel any pending scheduled load from onPlayerPlay to prevent
         // a second loadTrack call when the timer fires after recovery.
         if (playTimerRef.current) {
@@ -247,20 +264,39 @@ export function usePlayer() {
           playTimerRef.current = null
         }
         const ps = room.playState
-        const isFuturePlayback = ps.isPlaying && ps.serverTimestamp > getServerTime()
+        const scheduledExecution = room.serverTimeToExecute
+        const isFuturePlayback =
+          ps.isPlaying && scheduledExecution !== undefined && scheduledExecution > getServerTime()
         const elapsed = ps.isPlaying && !isFuturePlayback ? (getServerTime() - ps.serverTimestamp) / 1000 : 0
-        recoveredTrackIdRef.current = { trackId: roomTrack.id, autoPlay: ps.isPlaying && !isFuturePlayback }
-        loadTrack(roomTrack, ps.currentTime + Math.max(0, elapsed), ps.isPlaying && !isFuturePlayback)
+        const autoPlay = ps.isPlaying && !isFuturePlayback
+        recoveredTrackIdRef.current = { trackId: roomTrack.id, autoPlay }
+        loadTrack(roomTrack, ps.currentTime + Math.max(0, elapsed), autoPlay)
         fetchLyric(roomTrack)
+
+        if (ps.isPlaying && scheduledExecution !== undefined) {
+          const delay = isCalibrated() ? Math.max(0, scheduledExecution - getServerTime()) : 0
+          playTimerRef.current = setTimeout(() => {
+            playTimerRef.current = null
+            startPlayback(() =>
+              getScheduledPlaybackPosition(
+                ps.currentTime,
+                scheduledExecution,
+                isCalibrated() ? getServerTime() : Date.now(),
+              ),
+            )
+          }, delay)
+        }
       }
     }
 
-    // Check immediately (covers HMR where roomStore already has data)
-    recover()
+    const initialRecoveryTimer = setTimeout(recover, 0)
 
     // Subscribe for future changes (covers reconnect where ROOM_STATE arrives later)
     const unsubscribe = useRoomStore.subscribe(recover)
-    return unsubscribe
+    return () => {
+      clearTimeout(initialRecoveryTimer)
+      unsubscribe()
+    }
     // `socket` intentionally excluded — effect subscribes to roomStore, not socket directly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadTrack, fetchLyric])

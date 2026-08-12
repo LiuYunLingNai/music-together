@@ -89,6 +89,7 @@ function electConductor(room: RoomData, preferredSocketId?: string): boolean {
     room.users.find((u) => u.role === 'owner') ?? room.users.find((u) => u.role === 'admin') ?? room.users[0]
   room.hostId = candidate?.id ?? room.hostId
 
+  const previousConductorSocketId = room.conductorSocketId
   const preferredMapping = preferredSocketId ? roomRepo.getSocketMapping(preferredSocketId) : undefined
   if (preferredMapping?.roomId === room.id && preferredMapping.userId === room.hostId) {
     room.conductorSocketId = preferredSocketId!
@@ -99,6 +100,7 @@ function electConductor(room: RoomData, preferredSocketId?: string): boolean {
     }
   }
 
+  const conductorChanged = room.conductorSocketId !== previousConductorSocketId
   if (room.hostId !== prev) {
     if (room.playState.isPlaying) {
       room.playState = {
@@ -110,7 +112,7 @@ function electConductor(room: RoomData, preferredSocketId?: string): boolean {
     }
     return true
   }
-  return false
+  return conductorChanged
 }
 
 // ---------------------------------------------------------------------------
@@ -233,11 +235,12 @@ export function leaveRoom(
   // only clean up the stale mapping without removing the user from the room.
   if (roomRepo.hasOtherSocketForUser(roomId, userId, socketId)) {
     roomRepo.deleteSocketMapping(socketId)
-    if (room.conductorSocketId === socketId) {
+    const conductorChanged = room.conductorSocketId === socketId
+    if (conductorChanged) {
       room.conductorSocketId = roomRepo.getSocketIdForUser(roomId, userId)
     }
     logger.info(`Stale disconnect for user ${userId} in room ${roomId} — newer socket exists`, { roomId })
-    return { roomId, user, room, hostChanged: false, roleChanged: false, staleSocketOnly: true }
+    return { roomId, user, room, hostChanged: conductorChanged, roleChanged: false, staleSocketOnly: true }
   }
 
   room.users = room.users.filter((u) => u.id !== userId)

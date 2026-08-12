@@ -1,4 +1,6 @@
-import 'dotenv/config'
+import { config as loadEnv } from 'dotenv'
+
+loadEnv({ quiet: true })
 import * as z from 'zod/v4'
 import { TIMING } from '@music-together/shared'
 import { readFileSync } from 'node:fs'

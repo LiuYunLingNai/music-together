@@ -6,6 +6,7 @@ import { checkSocketRateLimit } from '../middleware/socketRateLimiter.js'
 import { roomRepo } from '../repositories/roomRepository.js'
 import * as playerService from '../services/playerService.js'
 import * as roomService from '../services/roomService.js'
+import { resolveConductorSampleTimestamp } from '../services/conductorSample.js'
 import { estimateCurrentTime } from '../services/syncService.js'
 import { logger } from '../utils/logger.js'
 
@@ -136,18 +137,17 @@ export function registerPlayerController(io: TypedServer, socket: TypedSocket) {
         }
       }
 
-      // Prefer hostServerTime (NTP-calibrated) to eliminate Host→Server
-      // one-way network delay (~RTT/2) from estimateCurrentTime.
-      // Fall back to Date.now() if missing or unreasonably far from server clock.
+      // Keep the media sample and its timestamp on the same time axis. The
+      // conductor sampled currentTime at hostServerTime; anchoring that older
+      // position at server receive time introduces a fixed follower lag. Do
+      // not add the timestamp delta to currentTime either — retain the exact
+      // historical zero-drift model and let estimateCurrentTime advance it.
       const serverNow = Date.now()
-      const timestamp =
-        parsed.data.hostServerTime && Math.abs(parsed.data.hostServerTime - serverNow) < 10_000
-          ? parsed.data.hostServerTime
-          : serverNow
+      const sampleTimestamp = resolveConductorSampleTimestamp(parsed.data.hostServerTime, serverNow)
       room.playState = {
         ...room.playState,
         currentTime,
-        serverTimestamp: timestamp,
+        serverTimestamp: sampleTimestamp,
       }
     } catch (err) {
       // Sync is best-effort; log but don't emit error to avoid noise

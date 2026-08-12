@@ -76,7 +76,7 @@ if (fs.existsSync(indexHtml)) {
     }),
   )
   // SPA fallback: 所有非 API 的 GET -> index.html
-  app.get('*', (_req, res) => {
+  app.get('/{*splat}', (_req, res) => {
     res.setHeader('Cache-Control', 'no-cache, must-revalidate')
     res.sendFile(indexHtml)
   })

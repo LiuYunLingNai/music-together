@@ -10,7 +10,7 @@
 | UI | radix-ui / shadcn/ui | ^1.6.7 / — | 无障碍 UI 原语与项目组件 |
 | 样式 | tailwindcss / @tailwindcss/vite | ^4.3.3 | 原子化 CSS 与 Vite 集成 |
 | 状态 | zustand | ^5.0.14 | 客户端状态管理 |
-| 路由 | react-router | ^8.3.0 | 客户端路由（v8 ESM，要求 Node >=22.22.0） |
+| 路由 | react-router | ^8.3.0 | 客户端路由（v8 ESM；仓库统一使用 Node >=24.15.0） |
 | 实时通信 | socket.io-client | ^4.8.3 | Socket.IO 客户端 |
 | 音频 | howler | ^2.2.4 | 音频播放引擎 |
 | 歌词 | @applemusic-like-lyrics/core / react / lyric | ^0.5.2 / ^0.5.2 / ^1.0.2 | AMLL 歌词解析、逐词动画与动态背景 |
