@@ -38,11 +38,9 @@ export function LyricDisplay() {
   const enableBlur = useSettingsStore((s) => s.lyricEnableBlur)
   const enableScale = useSettingsStore((s) => s.lyricEnableScale)
   const hidePassedLines = useSettingsStore((s) => s.lyricHidePassedLines)
-  const showBottomLine = useSettingsStore((s) => s.lyricShowBottomLine)
   const maskObsceneWordsMode = useSettingsStore((s) => s.lyricMaskObsceneWordsMode)
   const maskObsceneWordChar = useSettingsStore((s) => s.lyricMaskObsceneWordChar)
   const wordFadeWidth = useSettingsStore((s) => s.lyricWordFadeWidth)
-  const currentTrack = usePlayerStore((s) => s.currentTrack)
   const fontWeight = useSettingsStore((s) => s.lyricFontWeight)
   const fontSize = useSettingsStore((s) => s.lyricFontSize)
   const translationFontSize = useSettingsStore((s) => s.lyricTranslationFontSize)
@@ -66,16 +64,6 @@ export function LyricDisplay() {
     if (!player) return
     return lyricPlayerBridge.attach(player)
   }, [player])
-
-  const bottomLine = useMemo(
-    () =>
-      showBottomLine && currentTrack ? (
-        <div className="pb-8 text-sm text-white/45">
-          {currentTrack.title} · {currentTrack.artist.join(' / ')}
-        </div>
-      ) : undefined,
-    [currentTrack, showBottomLine],
-  )
 
   if (!hasLyrics) {
     return (
@@ -111,10 +99,8 @@ export function LyricDisplay() {
         maskObsceneWordsMode={maskObsceneWordsMode}
         maskObsceneWordChar={maskObsceneWordChar}
         wordFadeWidth={wordFadeWidth}
-        bottomLine={bottomLine}
         style={FULL_SIZE_STYLE}
       />
     </div>
   )
 }
-

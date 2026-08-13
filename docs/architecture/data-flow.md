@@ -173,7 +173,7 @@ interface ChatMessage {
 
 ## Layer 3：周期性比例漂移校正（EMA + Proportional Rate + Hard Seek）
 
-**非 conductor 客户端**每 `SYNC_REQUEST_INTERVAL_MS`（2s）向服务端发送 `PLAYER_SYNC_REQUEST`（conductor 跳过，因为 conductor 是权威播放源，不应被 server 估算值反向校正），服务端通过 `estimateCurrentTime()` 计算当前预期位置后回复 `PLAYER_SYNC_RESPONSE`。客户端利用 NTP 校准时钟补偿网络延迟，计算原始漂移量后经 **EMA 低通滤波**（alpha=0.2）得到 `smoothedDrift`，再进入比例控制器：
+**非 conductor 客户端**向服务端发送 `PLAYER_SYNC_REQUEST`（conductor 跳过，因为 conductor 是权威播放源，不应被 server 估算值反向校正），服务端通过 `estimateCurrentTime()` 计算当前预期位置后回复 `PLAYER_SYNC_RESPONSE`。请求频率**自适应**：默认 `SYNC_REQUEST_INTERVAL_MS`（2s），连续 `SYNC_REQUEST_SLOWDOWN_CONFIRM_COUNT`（2）次漂移进入死区后降为 `SYNC_REQUEST_IDLE_INTERVAL_MS`（5s），任何漂移回升或暂停/新曲立即恢复 2s（滞后设计，避免硬 seek 确认被拖慢）。响应携带 `trackId`，客户端丢弃与当前曲目不匹配的在途响应（旧服务端无该字段时容忍）。客户端利用 NTP 校准时钟补偿网络延迟，计算原始漂移量后经 **EMA 低通滤波**（alpha=0.2）得到 `smoothedDrift`，再进入比例控制器：
 
 - **新曲 Grace Period**：新曲加载后 `DRIFT_GRACE_PERIOD_MS`（3s）内跳过 rate 微调；超过 hard-seek 阈值两倍的明显冷启动错误仍可立即修正
 - **EMA 平滑**：`smoothed = alpha * rawDrift + (1 - alpha) * prevSmoothed`，消除测量噪声导致的正负跳动
@@ -190,8 +190,8 @@ interface ChatMessage {
 
 Conductor（当前 `hostId` 对应用户）**自适应频率**上报当前播放位置到服务端：新曲开始后前 10 秒高频上报（每 2 秒，`CONDUCTOR_REPORT_FAST_INTERVAL_MS`），之后回到正常频率（每 5 秒，`CONDUCTOR_REPORT_INTERVAL_MS`），使用动态 `setTimeout` 链实现。仅用于维护 `room.playState` 的准确性（供 mid-song join、reconnect recovery 和漂移校正使用），**不会转发给其他客户端**。Conductor 标签页从后台恢复时（`visibilitychange` → visible），立即补偿上报一次当前位置，避免 `setTimeout` 被浏览器节流后 `playState` 过时。
 
-- conductor 上报附带采样时的 `hostServerTime`、当前 `revision` 和 `trackId`；服务端仅在 Socket、revision、trackId 与当前已提交状态匹配且没有 pending action 时接受。`currentTime` 与 `hostServerTime` 是同一采样时刻，服务端原样保存该位置并以 `hostServerTime` 作为时间锚点；不能把旧位置锚定到服务端接收时刻，也不能把两者差值直接加进位置
-- 服务端通过 `playerService.validateConductorReport()` 校验 conductor 上报位置与 `estimateCurrentTime()` 预估值的偏差；超过 3 秒的向后回滚报告始终拒绝，不再连续拒绝后强制接受。`lastNextTimestamp`、`playMutexes` 在 `playerService.cleanupRoom()` 中清理。Conductor 切换时自动刷新 `playState.serverTimestamp` 和 `currentTime`，确保新 conductor 的首个报告不会被误拒
+- conductor 上报附带采样时的 `hostServerTime`、当前 `revision` 和 `trackId`；服务端仅在 Socket、revision、trackId 与当前已提交状态匹配且没有 pending action 时接受。`currentTime` 与 `hostServerTime` 是同一采样时刻，服务端原样保存该位置并以 `hostServerTime` 作为时间锚点；不能把旧位置锚定到服务端接收时刻，也不能把两者差值直接加进位置。`hostServerTime` 仅在 NTP 校准完成后（`isCalibrated()`）附带；未校准时省略该字段，服务端回退到接收时刻锚点（偏差约等于单向延迟，由漂移校正收敛）。服务端接受窗为 ±3s（`conductorSample.MAX_HOST_SERVER_TIME_SKEW_MS`），超出窗口视为未校准/陈旧样本并回退接收时刻
+- 服务端通过 `playerService.validateConductorReport()` 校验 conductor 上报位置与 `estimateCurrentTime()` 预估值的偏差；超过 3 秒的向后回滚报告始终拒绝，不再连续拒绝后强制接受。`lastSkipTimestamp`、`playMutexes` 在 `playerService.cleanupRoom()` 中清理。Conductor 切换（`hostId` 或 `conductorSocketId` 变化）时自动刷新 `playState.serverTimestamp` 和 `currentTime`，确保新 conductor 的首个报告不会被误拒；仅换 Socket（同 host 多标签页/多设备）时保持 `revision` 不变，`hostId` 变更才递增 `revision`
 - `syncService.estimateCurrentTime()` 基于 conductor 上报的位置 + 经过时间估算当前位置，对 `elapsed` 做 `Math.max(0, ...)` 防护（`serverTimestamp` 可能是未来的 `scheduleTime`），且 clamp 到曲目时长上界（`room.currentTrack.duration`），防止 conductor 断线后估算值无限增长
 - 新用户加入时，通过 `ROOM_STATE` 获取 `playState` 并计算应跳转到的位置
 - 断线重连时，`usePlayer` 的 recovery 机制自动检测 desync 并重新加载音轨。Recovery 通过检查 `loadingRef` 避免与 `onPlayerPlay` 双重 `loadTrack`，且在加载前清理 `playTimerRef` 防止定时器重复触发

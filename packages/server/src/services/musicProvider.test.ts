@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as tencentAuth from './tencentAuthService.js'
-import { musicProvider } from './musicProvider.js'
+import { deriveThumbnailCoverUrl, musicProvider, normalizeKugouTemplateCoverUrl, normalizeNeteaseCoverUrl } from './musicProvider.js'
 
 const tencentSong = {
   id: 410316279,
@@ -46,6 +46,8 @@ describe('Tencent music search', () => {
       title: 'Blank Space',
       artist: ['Taylor Swift'],
       duration: 231,
+      cover: 'https://y.gtimg.cn/music/photo_new/T002R800x800M000000MkMni19ClKG.jpg',
+      thumbnailCover: 'https://y.gtimg.cn/music/photo_new/T002R120x120M000000MkMni19ClKG.jpg',
       vip: true,
     })
   })
@@ -63,5 +65,30 @@ describe('Tencent music search', () => {
     vi.spyOn(tencentAuth, 'requestSignedApi').mockRejectedValue(new Error('upstream unavailable'))
 
     await expect(musicProvider.search('tencent', 'failure test fixture', 20, 1)).resolves.toEqual([])
+  })
+})
+
+describe('provider cover URL normalization', () => {
+  it('removes NetEase size params while preserving other query parameters', () => {
+    expect(normalizeNeteaseCoverUrl('https://music.163.com/a.jpg?foo=bar&param=100y100&param=200y200')).toBe(
+      'https://music.163.com/a.jpg?foo=bar',
+    )
+    expect(normalizeNeteaseCoverUrl('https://music.163.com/a.jpg?foo=bar')).toBe('https://music.163.com/a.jpg?foo=bar')
+  })
+
+  it('converts documented Kugou size templates to the CDN-safe maximum request', () => {
+    expect(normalizeKugouTemplateCoverUrl('http://img.kugou.com/{size}/abc.jpg')).toBe('http://img.kugou.com/5000/abc.jpg')
+    expect(normalizeKugouTemplateCoverUrl('http://img.kugou.com/400/abc.jpg')).toBe('http://img.kugou.com/400/abc.jpg')
+  })
+
+  it('derives safe provider-specific 120px thumbnail URLs', () => {
+    expect(deriveThumbnailCoverUrl('netease', 'https://music.163.com/a.jpg?foo=bar&param=800y800')).toBe(
+      'https://music.163.com/a.jpg?foo=bar&param=120y120',
+    )
+    expect(deriveThumbnailCoverUrl('tencent', 'https://y.gtimg.cn/music/photo_new/T002R800x800M000abc.jpg')).toBe(
+      'https://y.gtimg.cn/music/photo_new/T002R120x120M000abc.jpg',
+    )
+    expect(deriveThumbnailCoverUrl('kugou', 'http://img.kugou.com/{size}/abc.jpg')).toBe('http://img.kugou.com/120/abc.jpg')
+    expect(deriveThumbnailCoverUrl('kugou', 'https://example.com/5000/abc.jpg')).toBe('https://example.com/5000/abc.jpg')
   })
 })

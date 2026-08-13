@@ -166,6 +166,8 @@ export function registerPlayerController(io: TypedServer, socket: TypedSocket) {
         currentTime: estimateCurrentTime(mapping.roomId),
         isPlaying: room.playState.isPlaying,
         serverTimestamp: Date.now(),
+        // Lets the client drop in-flight responses that raced a track change.
+        trackId: room.currentTrack?.id ?? null,
       })
     } catch (err) {
       logger.error('PLAYER_SYNC_REQUEST handler error', err, {

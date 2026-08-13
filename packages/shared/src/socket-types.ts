@@ -40,7 +40,13 @@ export interface ServerToClientEvents {
   [EVENTS.PLAYER_PAUSE]: (data: { playState: ScheduledPlayState }) => void
   [EVENTS.PLAYER_RESUME]: (data: { playState: ScheduledPlayState }) => void
   [EVENTS.PLAYER_SEEK]: (data: { playState: ScheduledPlayState }) => void
-  [EVENTS.PLAYER_SYNC_RESPONSE]: (data: { currentTime: number; isPlaying: boolean; serverTimestamp: number }) => void
+  [EVENTS.PLAYER_SYNC_RESPONSE]: (data: {
+    currentTime: number
+    isPlaying: boolean
+    serverTimestamp: number
+    /** Current track the estimate was computed for; null when no track is loaded. */
+    trackId: string | null
+  }) => void
 
   // NTP clock sync
   [EVENTS.NTP_PONG]: (data: { clientPingId: number; serverTime: number }) => void

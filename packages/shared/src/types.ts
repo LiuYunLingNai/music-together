@@ -52,6 +52,8 @@ export interface Track {
   album: string
   duration: number
   cover: string
+  /** Stable 120px artwork URL for list/search rendering. */
+  thumbnailCover?: string
   source: MusicSource
   sourceId: string
   urlId: string
@@ -166,6 +168,8 @@ export interface Playlist {
   id: string
   name: string
   cover: string
+  /** Stable 120px artwork URL for list/search rendering. */
+  thumbnailCover?: string
   trackCount: number
   source: MusicSource
   creator?: string

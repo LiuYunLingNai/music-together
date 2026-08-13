@@ -36,8 +36,8 @@ export const TrackListItem = memo(function TrackListItem({
       <span className="w-6 shrink-0 text-center text-xs tabular-nums text-muted-foreground">{index + 1}</span>
 
       {/* Cover thumbnail */}
-      {track.cover ? (
-        <img src={track.cover} alt="" className="h-10 w-10 shrink-0 rounded object-cover" loading="lazy" />
+      {track.thumbnailCover ?? track.cover ? (
+        <img src={track.thumbnailCover ?? track.cover} alt="" className="h-10 w-10 shrink-0 rounded object-cover" loading="lazy" />
       ) : (
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-muted">
           <Music2 className="h-4 w-4 text-muted-foreground" />

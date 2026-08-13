@@ -168,6 +168,79 @@ const PLAYLIST_PATHS: Record<MusicSource, string> = {
 const HOUR = 60 * 60 * 1000
 const MINUTE = 60 * 1000
 
+/** Remove NetEase's size restriction without disturbing other URL parameters. */
+export function normalizeNeteaseCoverUrl(url: string): string {
+  if (!url) return url
+  try {
+    const parsed = new URL(url)
+    parsed.searchParams.delete('param')
+    return parsed.toString()
+  } catch {
+    return url
+  }
+}
+
+/** Kugou only documents the `{size}` artwork template; leave other forms alone. */
+export function normalizeKugouTemplateCoverUrl(url: string): string {
+  return url.replace('{size}', '5000')
+}
+
+/**
+ * Derive a separately cacheable 120px artwork URL without changing the
+ * maximum-quality URL used for playback/detail views.
+ */
+export function deriveThumbnailCoverUrl(source: MusicSource, url: string): string {
+  if (!url) return url
+
+  if (source === 'netease') {
+    try {
+      const parsed = new URL(url)
+      parsed.searchParams.delete('param')
+      parsed.searchParams.set('param', '120y120')
+      return parsed.toString()
+    } catch {
+      return url
+    }
+  }
+
+  if (source === 'tencent') {
+    return url.replace(/T002R\d+x\d+M000/i, 'T002R120x120M000')
+  }
+
+  // Kugou documents {size} templates. Numeric size segments are only
+  // rewritten on the known artwork CDN path; arbitrary direct URLs are left
+  // untouched rather than guessing what a path segment means.
+  if (source === 'kugou') {
+    if (url.includes('{size}')) return url.replaceAll('{size}', '120')
+    try {
+      const parsed = new URL(url)
+      if (!/(^|\.)kugou\.com$/i.test(parsed.hostname)) return url
+      const knownSizes = new Set(['100', '120', '150', '200', '240', '300', '320', '400', '480', '500', '600', '800', '1000', '1200', '2000', '3000', '5000'])
+      const segments = parsed.pathname.split('/')
+      const sizeIndex = segments.findIndex((segment) => knownSizes.has(segment))
+      if (sizeIndex < 0) return url
+      segments[sizeIndex] = '120'
+      parsed.pathname = segments.join('/')
+      return parsed.toString()
+    } catch {
+      return url
+    }
+  }
+
+  return url
+}
+
+/** Meting's providers do not share a useful maximum artwork request size. */
+const COVER_REQUEST_SIZES: Record<MusicSource, number> = {
+  netease: 800,
+  tencent: 800,
+  kugou: 5000,
+}
+
+function getCoverRequestSize(source: MusicSource, size?: number): number {
+  return size ?? COVER_REQUEST_SIZES[source]
+}
+
 // ---------------------------------------------------------------------------
 // TrackMeta — Track without per-instance fields (id, requestedBy)
 // ---------------------------------------------------------------------------
@@ -237,10 +310,14 @@ class MusicProvider {
       const key = `${t.source}:${t.sourceId}`
       const existing = this.trackRegistry.get(key)
       const { id: _id, requestedBy: _rb, ...meta } = t
+      if (meta.cover) meta.thumbnailCover = deriveThumbnailCoverUrl(meta.source, meta.cover)
       if (existing) {
         const merged: TrackMeta = {
           ...existing,
           cover: existing.cover || meta.cover,
+          thumbnailCover: existing.cover
+            ? deriveThumbnailCoverUrl(existing.source, existing.cover)
+            : meta.thumbnailCover,
           duration: existing.duration || meta.duration,
           vip: existing.vip || meta.vip,
         }
@@ -260,6 +337,7 @@ class MusicProvider {
     const cached = this.trackRegistry.get(`${track.source}:${track.sourceId}`)
     if (!cached) return
     if (!track.cover && cached.cover) track.cover = cached.cover
+    if (track.cover) track.thumbnailCover = deriveThumbnailCoverUrl(track.source, track.cover)
     if (!track.duration && cached.duration) track.duration = cached.duration
     if (!track.vip && cached.vip) track.vip = cached.vip
   }
@@ -275,7 +353,9 @@ class MusicProvider {
     for (const sourceId of ids) {
       const meta = this.trackRegistry.get(`${source}:${sourceId}`)
       if (!meta) return null
-      tracks.push({ ...meta, id: nanoid() })
+       const track = { ...meta, id: nanoid() }
+       if (track.cover) track.thumbnailCover = deriveThumbnailCoverUrl(source, track.cover)
+       tracks.push(track)
     }
     return tracks
   }
@@ -332,7 +412,10 @@ class MusicProvider {
         artist: song.singer?.map((s) => s.name).filter(Boolean) || ['Unknown'],
         album: song.album?.name || '',
         duration: song.interval || 0, // already in seconds
-        cover: song.album?.pmid ? `https://y.gtimg.cn/music/photo_new/T002R300x300M000${song.album.pmid}.jpg` : '',
+         cover: song.album?.pmid ? `https://y.gtimg.cn/music/photo_new/T002R800x800M000${song.album.pmid}.jpg` : '',
+         thumbnailCover: song.album?.pmid
+           ? deriveThumbnailCoverUrl('tencent', `https://y.gtimg.cn/music/photo_new/T002R800x800M000${song.album.pmid}.jpg`)
+           : '',
         urlId: song.mid,
         lyricId: song.mid,
         picId: song.album?.mid || '',
@@ -395,7 +478,8 @@ class MusicProvider {
         return result.data.body.album.list.map((album: any) => ({
           id: String(album.albumMID || album.albumID),
           name: album.albumName || 'Unknown Album',
-          cover: album.albumPic || '',
+           cover: album.albumPic || '',
+           thumbnailCover: deriveThumbnailCoverUrl('tencent', album.albumPic || ''),
           trackCount: album.song_count || 0,
           source: 'tencent',
           creator: album.singerName || '',
@@ -411,7 +495,8 @@ class MusicProvider {
         return response.data.info.map((album: any) => ({
           id: String(album.albumid),
           name: album.albumname || 'Unknown Album',
-          cover: (album.imgurl || '').replace('{size}', '400'),
+           cover: normalizeKugouTemplateCoverUrl(album.imgurl || ''),
+           thumbnailCover: deriveThumbnailCoverUrl('kugou', album.imgurl || ''),
           trackCount: album.songcount || 0,
           source: 'kugou',
           creator: album.singername || '',
@@ -437,7 +522,8 @@ class MusicProvider {
         return albums.map((album: any) => ({
           id: String(album.id),
           name: album.name || 'Unknown Album',
-          cover: album.picUrl || album.blurPicUrl || '',
+           cover: normalizeNeteaseCoverUrl(album.picUrl || album.blurPicUrl || ''),
+           thumbnailCover: deriveThumbnailCoverUrl('netease', album.picUrl || album.blurPicUrl || ''),
           trackCount: album.size || 0,
           source: 'netease',
           creator: album.artist?.name || '',
@@ -490,7 +576,8 @@ class MusicProvider {
         return result.data.body.songlist.list.map((playlist: any) => ({
           id: String(playlist.dissid),
           name: playlist.dissname || 'Unknown Playlist',
-          cover: playlist.imgurl || '',
+           cover: playlist.imgurl || '',
+           thumbnailCover: deriveThumbnailCoverUrl('tencent', playlist.imgurl || ''),
           trackCount: playlist.song_count || 0,
           source: 'tencent',
           creator: playlist.creator?.name || '',
@@ -507,7 +594,8 @@ class MusicProvider {
         return response.data.info.map((playlist: any) => ({
           id: String(playlist.specialid),
           name: playlist.specialname || 'Unknown Playlist',
-          cover: (playlist.imgurl || '').replace('{size}', '400'),
+           cover: normalizeKugouTemplateCoverUrl(playlist.imgurl || ''),
+           thumbnailCover: deriveThumbnailCoverUrl('kugou', playlist.imgurl || ''),
           trackCount: playlist.songcount || 0,
           source: 'kugou',
           creator: playlist.nickname || '',
@@ -534,7 +622,8 @@ class MusicProvider {
         return playlists.map((playlist: any) => ({
           id: String(playlist.id),
           name: playlist.name || 'Unknown Playlist',
-          cover: playlist.coverImgUrl || playlist.picUrl || '',
+           cover: normalizeNeteaseCoverUrl(playlist.coverImgUrl || playlist.picUrl || ''),
+           thumbnailCover: deriveThumbnailCoverUrl('netease', playlist.coverImgUrl || playlist.picUrl || ''),
           trackCount: playlist.trackCount || 0,
           source: 'netease',
           creator: playlist.creator?.nickname || '',
@@ -773,8 +862,9 @@ class MusicProvider {
     }
   }
 
-  async getCover(source: MusicSource, picId: string, size = 300): Promise<string> {
-    const cacheKey = `${source}:${picId}:${size}`
+  async getCover(source: MusicSource, picId: string, size?: number): Promise<string> {
+    const requestSize = getCoverRequestSize(source, size)
+    const cacheKey = `${source}:${picId}:${requestSize}`
     const cached = this.coverCache.get(cacheKey)
     if (cached !== undefined) {
       return cached
@@ -782,7 +872,7 @@ class MusicProvider {
 
     try {
       const meting = this.getInstance(source)
-      const raw = await withTimeout(meting.pic(picId, size))
+      const raw = await withTimeout(meting.pic(picId, requestSize))
       if (raw === null || raw === undefined) {
         logger.warn(`Cover fetch timeout for ${source}: ${picId}`)
         return ''
@@ -793,7 +883,13 @@ class MusicProvider {
       } catch {
         return ''
       }
-      const url = (data.url as string) || ''
+      const rawUrl = (data.url as string) || ''
+      const url =
+        source === 'netease'
+          ? normalizeNeteaseCoverUrl(rawUrl)
+          : source === 'kugou'
+            ? normalizeKugouTemplateCoverUrl(rawUrl)
+            : rawUrl
 
       this.coverCache.set(cacheKey, url)
       return url
@@ -1191,6 +1287,10 @@ class MusicProvider {
     // Resolve covers for this page only (tracks with cover already set are skipped)
     await this.batchResolveCover(tracks, source)
 
+    for (const track of tracks) {
+      if (track.cover) track.thumbnailCover = deriveThumbnailCoverUrl(source, track.cover)
+    }
+
     // Write newly resolved covers back to registry for cross-page / cross-context reuse
     this.registerTracks(tracks)
 
@@ -1315,7 +1415,8 @@ class MusicProvider {
       toResolve.map((track) =>
         limit(async () => {
           // Check cover cache first
-          const cacheKey = `${source}:${track.picId!}:300`
+           const requestSize = getCoverRequestSize(source)
+           const cacheKey = `${source}:${track.picId!}:${requestSize}`
           const cached = this.coverCache.get(cacheKey)
           if (cached !== undefined) {
             track.cover = cached
@@ -1325,11 +1426,17 @@ class MusicProvider {
           try {
             // Fresh instance per call to avoid shared state race conditions
             const instance = new Meting(source)
-            const raw = await instance.pic(track.picId!, 300)
+             const raw = await instance.pic(track.picId!, requestSize)
             const data = JSON.parse(raw)
-            if (data.url) {
-              track.cover = data.url
-              this.coverCache.set(cacheKey, data.url)
+             if (typeof data.url === 'string' && data.url) {
+               const coverUrl =
+                 source === 'netease'
+                   ? normalizeNeteaseCoverUrl(data.url)
+                   : source === 'kugou'
+                     ? normalizeKugouTemplateCoverUrl(data.url)
+                     : data.url
+               track.cover = coverUrl
+               this.coverCache.set(cacheKey, coverUrl)
             }
           } catch {
             // Leave cover empty — frontend shows placeholder

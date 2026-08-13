@@ -10,6 +10,8 @@ import {
   CONDUCTOR_REPORT_FAST_DURATION_MS,
   MAX_NETWORK_DELAY_S,
   SYNC_REQUEST_INTERVAL_MS,
+  SYNC_REQUEST_IDLE_INTERVAL_MS,
+  SYNC_REQUEST_SLOWDOWN_CONFIRM_COUNT,
   DRIFT_GRACE_PERIOD_MS,
   DRIFT_SEEK_RTT_MARGIN_MS,
   HARD_SEEK_CONFIRM_COUNT,
@@ -20,12 +22,15 @@ import {
   getHardSeekThresholdMs,
   getScheduledPlaybackPosition,
   getSyncExpectedPosition,
+  getSyncRequestIntervalMs,
+  isDriftSettled,
+  shouldRearmSyncRequest,
 } from '@/lib/playbackSync'
 import { cancelScheduledPlay } from '@/lib/scheduledPlayback'
 import { useSocketContext } from '@/providers/SocketProvider'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
-import type { ScheduledPlayState } from '@music-together/shared'
+import type { ScheduledPlayState, ServerToClientEvents } from '@music-together/shared'
 import { EVENTS } from '@music-together/shared'
 import type { Howl } from 'howler'
 import { useEffect, useRef, type RefObject } from 'react'
@@ -98,6 +103,11 @@ export function usePlayerSync(
   const trackStartTimeRef = useRef(0)
   // Consecutive hard-seek triggers — require HARD_SEEK_CONFIRM_COUNT before actually seeking
   const hardSeekCountRef = useRef(0)
+  // Consecutive in-dead-zone sync responses — gates the adaptive request slowdown
+  const lowDriftStreakRef = useRef(0)
+  // The sync-request effect owns the timer; the response handler can use this
+  // callback to replace a previously scheduled slow poll after fresh drift.
+  const rearmSyncRequestRef = useRef<(() => void) | null>(null)
 
   const isStaleAction = (playState: ScheduledPlayState) =>
     playState.revision < (useRoomStore.getState().room?.playState.revision ?? -1)
@@ -262,16 +272,25 @@ export function usePlayerSync(
       cancelScheduledPlay()
       clearScheduled()
       ++actionIdRef.current // invalidate any pending stale callbacks
+      // A new track resets the rate; cancel any pending plugin-override check
+      // that captured a stale target rate from the previous track.
+      if (rateCheckTimerRef.current) {
+        clearTimeout(rateCheckTimerRef.current)
+        rateCheckTimerRef.current = null
+      }
       rateDisabledRef.current = false
       rateOverrideCountRef.current = 0
       hardSeekCountRef.current = 0
+      // A new track has unknown drift — re-arm the fast request interval.
+      lowDriftStreakRef.current = 0
       smoothedDriftRef.current = 0
       emaColdStartRef.current = true
       trackStartTimeRef.current = Date.now()
     }
 
     // -- SYNC RESPONSE (proportional drift correction + EMA smoothing) ------
-    const onSyncResponse = (data: { currentTime: number; isPlaying: boolean; serverTimestamp: number }) => {
+    type SyncResponse = Parameters<ServerToClientEvents[typeof EVENTS.PLAYER_SYNC_RESPONSE]>[0]
+    const onSyncResponse = (data: SyncResponse) => {
       if (!howlRef.current) return
       if (!howlRef.current.playing()) return
 
@@ -279,6 +298,12 @@ export function usePlayerSync(
       // share the same identity remain followers and must still self-correct.
       const { room: syncRoom } = useRoomStore.getState()
       if (syncRoom?.conductorSocketId === socket.id) return
+
+      // Drop responses computed for a different track — an in-flight response
+      // can race a track change (request sent for track A, room switched to B
+      // before the server answered). Missing trackId (older server) is tolerated.
+      const currentTrackId = syncRoom?.currentTrack?.id
+      if (data.trackId != null && data.trackId !== currentTrackId) return
 
       // Grace period after new track: skip rate micro-adjustments
       // (estimateCurrentTime is unreliable until conductor submits at least
@@ -309,6 +334,14 @@ export function usePlayerSync(
       const sd = smoothedDriftRef.current
       const absDrift = Math.abs(sd)
 
+      // Adaptive sync-request frequency: only consecutive settled readings may
+      // slow the request loop; any fresh drift re-arms the fast interval.
+      const settled = isDriftSettled(absDrift, DRIFT_DEAD_ZONE_MS)
+      const wasLowDrift = lowDriftStreakRef.current >= SYNC_REQUEST_SLOWDOWN_CONFIRM_COUNT
+      if (settled) lowDriftStreakRef.current++
+      else lowDriftStreakRef.current = 0
+      if (shouldRearmSyncRequest(wasLowDrift, settled)) rearmSyncRequestRef.current?.()
+
       // Update store with smoothed value so UI shows stable drift reading
       usePlayerStore.getState().setSyncDrift(sd)
 
@@ -332,6 +365,12 @@ export function usePlayerSync(
         hardSeekCountRef.current = 0
         setHowlPosition(howlRef.current, expectedTime, soundIdRef.current)
         if (howlRef.current.rate() !== 1) howlRef.current.rate(1)
+        // A hard seek resets the rate — cancel any pending plugin-override
+        // check that captured a stale target rate from a proportional step.
+        if (rateCheckTimerRef.current) {
+          clearTimeout(rateCheckTimerRef.current)
+          rateCheckTimerRef.current = null
+        }
         smoothedDriftRef.current = 0
         // A hard seek is itself a valid synchronization sample. Keep the EMA
         // warm so a persistent media-clock bias cannot trigger another seek on
@@ -403,14 +442,39 @@ export function usePlayerSync(
   // -----------------------------------------------------------------------
   // Periodic sync request (client-initiated drift correction).
   // Host skips: it is the authoritative source and reports its own position.
+  // Adaptive frequency: fast while drift is unsettled or the media is paused;
+  // consecutive settled responses slow the loop to SYNC_REQUEST_IDLE_INTERVAL_MS.
   // -----------------------------------------------------------------------
   useEffect(() => {
-    const interval = setInterval(() => {
+    let timerId: ReturnType<typeof setTimeout> | null = null
+
+    const scheduleNext = (delay: number) => {
+      if (timerId) clearTimeout(timerId)
+      timerId = setTimeout(request, delay)
+    }
+
+    const request = () => {
       const { room: r2 } = useRoomStore.getState()
-      if (r2?.conductorSocketId !== socket.id) socket.emit(EVENTS.PLAYER_SYNC_REQUEST)
-    }, SYNC_REQUEST_INTERVAL_MS)
-    return () => clearInterval(interval)
-  }, [socket])
+      // Skip entirely outside a room; followers (incl. non-elected tabs of the
+      // conductor identity) request drift correction, the conductor does not.
+      if (r2 && r2.conductorSocketId !== socket.id) socket.emit(EVENTS.PLAYER_SYNC_REQUEST)
+      const isPlaying = howlRef.current?.playing() ?? false
+      scheduleNext(getSyncRequestIntervalMs(
+          isPlaying,
+          lowDriftStreakRef.current,
+          SYNC_REQUEST_INTERVAL_MS,
+          SYNC_REQUEST_IDLE_INTERVAL_MS,
+          SYNC_REQUEST_SLOWDOWN_CONFIRM_COUNT,
+        ))
+    }
+
+    rearmSyncRequestRef.current = () => scheduleNext(SYNC_REQUEST_INTERVAL_MS)
+    scheduleNext(SYNC_REQUEST_INTERVAL_MS)
+    return () => {
+      if (timerId) clearTimeout(timerId)
+      rearmSyncRequestRef.current = null
+    }
+  }, [socket, howlRef])
 
   // -----------------------------------------------------------------------
   // Conductor progress reporting (keeps server-side playState accurate for
@@ -426,16 +490,24 @@ export function usePlayerSync(
       if (room && room.conductorSocketId === socket.id && room.currentTrack && howlRef.current?.playing()) {
         socket.emit(EVENTS.PLAYER_SYNC, {
           currentTime: howlRef.current.seek() as number,
-          hostServerTime: getServerTime(),
+          // Only attach a calibrated server-time anchor. While NTP is still
+          // converging, omit it so the server falls back to its receive-time
+          // anchor (bounded by one-way latency) instead of a skewed wall clock.
+          hostServerTime: isCalibrated() ? getServerTime() : undefined,
           revision: room.playState.revision,
           trackId: room.currentTrack.id,
         })
+        // Schedule next report — fast if within the initial window, slow otherwise
+        const elapsed = Date.now() - trackStartTimeRef.current
+        const interval =
+          elapsed < CONDUCTOR_REPORT_FAST_DURATION_MS ? CONDUCTOR_REPORT_FAST_INTERVAL_MS : CONDUCTOR_REPORT_INTERVAL_MS
+        timerId = setTimeout(report, interval)
+      } else {
+        // Not reporting right now (outside a room / not the elected conductor /
+        // media paused): keep a slow heartbeat so the chain re-engages when the
+        // role or playback state changes, without spinning at the fast interval.
+        timerId = setTimeout(report, CONDUCTOR_REPORT_INTERVAL_MS)
       }
-      // Schedule next report — fast if within the initial window, slow otherwise
-      const elapsed = Date.now() - trackStartTimeRef.current
-      const interval =
-        elapsed < CONDUCTOR_REPORT_FAST_DURATION_MS ? CONDUCTOR_REPORT_FAST_INTERVAL_MS : CONDUCTOR_REPORT_INTERVAL_MS
-      timerId = setTimeout(report, interval)
     }
 
     // When the tab returns from background, immediately send a conductor report
@@ -446,7 +518,7 @@ export function usePlayerSync(
       if (r && r.conductorSocketId === socket.id && r.currentTrack && howlRef.current?.playing()) {
         socket.emit(EVENTS.PLAYER_SYNC, {
           currentTime: howlRef.current.seek() as number,
-          hostServerTime: getServerTime(),
+          hostServerTime: isCalibrated() ? getServerTime() : undefined,
           revision: r.playState.revision,
           trackId: r.currentTrack.id,
         })

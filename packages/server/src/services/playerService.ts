@@ -402,13 +402,17 @@ export function pauseTrack(io: TypedServer, roomId: string, _initiatorSocket?: T
 }
 
 export function seekTrack(io: TypedServer, roomId: string, currentTime: number, _initiatorSocket?: TypedSocket): void {
+  if (!Number.isFinite(currentTime) || currentTime < 0) return
   const room = roomRepo.get(roomId)
   if (!room) return
 
   const latest = getLatestPlayback(room)
   if (!latest.track) return
   const scheduleTime = getScheduleTime(roomId)
-  const clampedTime = Math.min(Math.max(0, currentTime), latest.track.duration > 0 ? latest.track.duration : currentTime)
+  // Duration metadata can be missing (0) for some sources; retain finite,
+  // non-negative validation without imposing an arbitrary upper bound.
+  const seekCap = latest.track.duration > 0 ? latest.track.duration : Number.POSITIVE_INFINITY
+  const clampedTime = Math.min(Math.max(0, currentTime), seekCap)
   const playState = scheduled(
     {
       ...latest.playState,
