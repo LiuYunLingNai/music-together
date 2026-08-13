@@ -144,6 +144,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             playbackTempoSyncEnabled = playbackSyncSettings.tempoEnabled,
             playbackHardSeekSyncEnabled = playbackSyncSettings.hardSeekEnabled,
             allowAudioMixing = appPreferences.allowAudioMixing(),
+            hapticFeedbackEnabled = appPreferences.hapticFeedbackEnabled(),
             syncPacketIntervalSeconds = appPreferences.syncPacketInterval(
                 defaultValue = DEFAULT_SYNC_PACKET_INTERVAL_SECONDS,
                 range = MIN_SYNC_PACKET_INTERVAL_SECONDS..MAX_SYNC_PACKET_INTERVAL_SECONDS,
@@ -324,6 +325,11 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         appPreferences.setAllowAudioMixing(enabled)
         _state.value = _state.value.copy(allowAudioMixing = enabled)
         PlaybackCommandBridge.setAudioFocusEnabled(!enabled)
+    }
+
+    fun updateHapticFeedbackEnabled(enabled: Boolean) {
+        appPreferences.setHapticFeedbackEnabled(enabled)
+        _state.value = _state.value.copy(hapticFeedbackEnabled = enabled)
     }
 
     fun updateSyncPacketInterval(seconds: Int) {

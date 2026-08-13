@@ -128,14 +128,11 @@ fun LobbyScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        IconButton(
+                        HapticIconButton(
                             onClick = viewModel::refreshRooms,
                             enabled = state.servers.any { it.status == ConnectionStatus.Connected },
                         ) {
                             Icon(Icons.Default.Refresh, contentDescription = "刷新房间")
-                        }
-                        IconButton(onClick = { connectionSettingsOpen = true }) {
-                            Icon(Icons.Default.Dns, contentDescription = "添加或管理服务器")
                         }
                     }
                 }
@@ -167,15 +164,6 @@ fun LobbyScreen(
                             onClick = { joinDialogOpen = true },
                             modifier = Modifier.weight(1f),
                         )
-                    }
-                    TextButton(
-                        onClick = { connectionSettingsOpen = true },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 2.dp),
-                    ) {
-                        Icon(Icons.Default.Dns, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Text("添加或管理服务器", modifier = Modifier.padding(start = 8.dp))
                     }
                 }
                 item {
@@ -249,17 +237,12 @@ fun LobbyScreen(
                     viewModel = viewModel,
                     onBack = { selectedTab = LobbyTab.Home },
                 )
-                LobbyTab.Recommendations -> RecommendationsPane(state, viewModel)
-                LobbyTab.Settings -> Column(Modifier.fillMaxSize()) {
-                    LobbyTabHeader(
-                        title = "设置",
-                        onBack = { selectedTab = LobbyTab.Home },
-                        onAction = { connectionSettingsOpen = true },
-                    )
-                    Box(Modifier.weight(1f)) {
-                        AccountSettingsPane(state, viewModel)
-                    }
-                }
+                LobbyTab.Recommendations -> LobbyRecommendationsPane(state, viewModel)
+                LobbyTab.Settings -> LobbySettingsPane(
+                    state = state,
+                    viewModel = viewModel,
+                    onOpenConnectionSettings = { connectionSettingsOpen = true },
+                )
                 LobbyTab.Home -> Unit
             }
         }
@@ -340,8 +323,9 @@ private fun LobbyActionCard(
     modifier: Modifier = Modifier,
 ) {
     val shape = RoundedCornerShape(16.dp)
+    val onHapticClick = rememberHapticClick(onClick)
     Card(
-        onClick = onClick,
+        onClick = onHapticClick,
         modifier = modifier
             .height(112.dp)
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.48f), shape),
@@ -381,8 +365,9 @@ private fun LobbyActionCard(
 @Composable
 private fun TrackResumeCard(track: Track, onClick: (() -> Unit)?) {
     val shape = RoundedCornerShape(16.dp)
+    val onHapticClick = if (onClick != null) rememberHapticClick(onClick) else ({})
     Card(
-        onClick = onClick ?: {},
+        onClick = onHapticClick,
         enabled = onClick != null,
         modifier = Modifier
             .fillMaxWidth()
@@ -444,7 +429,7 @@ private fun TrackResumeCard(track: Track, onClick: (() -> Unit)?) {
 }
 
 @Composable
-private fun LobbyTabHeader(
+internal fun LobbyTabHeader(
     title: String,
     onBack: () -> Unit,
     onAction: (() -> Unit)? = null,
@@ -641,8 +626,9 @@ private fun ServerHeader(
 @Composable
 private fun RoomCard(room: RoomListItem, onClick: () -> Unit) {
     val shape = RoundedCornerShape(12.dp)
+    val onHapticClick = rememberHapticClick(onClick)
     Card(
-        onClick = onClick,
+        onClick = onHapticClick,
         modifier = Modifier
             .fillMaxWidth()
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.38f), shape),

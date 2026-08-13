@@ -74,30 +74,71 @@ internal fun RecommendationsPane(state: AppState, viewModel: MusicTogetherViewMo
         PlaylistDetailPane(state, playlist, viewModel)
         return
     }
+    val platforms = recommendationPlatforms(state.recommendations)
+    var selectedPlatform by remember(room.id) { mutableStateOf<String?>(null) }
+    val selectedRecommendation = state.recommendations.firstOrNull { it.platform == selectedPlatform }
+
+    LaunchedEffect(room.id, state.recommendationsLoaded, state.recommendationsLoading) {
+        if (!state.recommendationsLoaded && !state.recommendationsLoading) viewModel.loadRecommendations()
+    }
+    LaunchedEffect(platforms) {
+        if (selectedPlatform !in platforms) selectedPlatform = platforms.firstOrNull()
+    }
+
+    Column(Modifier.fillMaxSize().padding(12.dp)) {
+        RecommendationPaneHeader(state, viewModel)
+
+        when {
+            state.recommendationsLoading && state.recommendations.isEmpty() -> RecommendationStatus(
+                text = "正在加载推荐",
+                loading = true,
+            )
+            state.recommendationsError != null && state.recommendations.isEmpty() -> RecommendationStatus(
+                text = state.recommendationsError,
+                action = viewModel::loadRecommendations,
+            )
+            state.recommendations.isEmpty() -> RecommendationStatus(
+                text = "请先在音源账号中登录音乐平台，再查看平台推荐",
+            )
+            else -> {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    platforms.forEach { platform ->
+                        AssistChip(
+                            onClick = { selectedPlatform = platform },
+                            label = { Text(platformLabel(platform)) },
+                            leadingIcon = if (selectedPlatform == platform) {
+                                { Icon(Icons.Default.AutoAwesome, null, Modifier.size(16.dp)) }
+                            } else {
+                                null
+                            },
+                        )
+                    }
+                }
+                RecommendationContent(selectedRecommendation, state, viewModel)
+            }
+        }
+    }
+}
+
+@Composable
+internal fun LobbyRecommendationsPane(state: AppState, viewModel: MusicTogetherViewModel) {
+    val room = state.room ?: return
+    state.platformHub.selectedPlaylist?.let { playlist ->
+        PlaylistDetailPane(state, playlist, viewModel)
+        return
+    }
     LaunchedEffect(room.id, state.recommendationsLoaded, state.recommendationsLoading) {
         if (!state.recommendationsLoaded && !state.recommendationsLoading) viewModel.loadRecommendations()
     }
 
     Column(Modifier.fillMaxSize().padding(12.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("推荐点歌", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Text(
-                    "展示当前账号在平台上的原生推荐内容",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            IconButton(
-                onClick = viewModel::loadRecommendations,
-                enabled = !state.recommendationsLoading && !state.recommendationsLoadingMore,
-            ) {
-                Icon(Icons.Default.Refresh, "刷新推荐")
-            }
-        }
+        RecommendationPaneHeader(state, viewModel)
 
         Box(Modifier.weight(1f)) {
             when {
@@ -118,6 +159,29 @@ internal fun RecommendationsPane(state: AppState, viewModel: MusicTogetherViewMo
                     viewModel = viewModel,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun RecommendationPaneHeader(state: AppState, viewModel: MusicTogetherViewModel) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("推荐点歌", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(
+                "展示当前账号在平台上的原生推荐内容",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        IconButton(
+            onClick = viewModel::loadRecommendations,
+            enabled = !state.recommendationsLoading && !state.recommendationsLoadingMore,
+        ) {
+            Icon(Icons.Default.Refresh, "刷新推荐")
         }
     }
 }

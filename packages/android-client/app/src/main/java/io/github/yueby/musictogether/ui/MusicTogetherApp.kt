@@ -60,6 +60,10 @@ fun MusicTogetherApp(viewModel: MusicTogetherViewModel) {
         }
     }
 
+    LaunchedEffect(state.hapticFeedbackEnabled) {
+        syncHapticFeedbackSetting(state.hapticFeedbackEnabled)
+    }
+
     Scaffold { padding ->
         Box(Modifier.fillMaxSize()) {
             val showHome = state.room == null || playerMinimized

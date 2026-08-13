@@ -243,7 +243,7 @@ jobs:
               "$GITHUB_SHA" 2>/dev/null || true
           )"
           notes_file="$RUNNER_TEMP/android-release-notes.md"
-          release_notes="docs/releases/${VERSION}.md"
+          release_notes="$GITHUB_WORKSPACE/docs/releases/${VERSION}.md"
 
           if [ -f "$release_notes" ]; then
             cp "$release_notes" "$notes_file"

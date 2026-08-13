@@ -106,6 +106,12 @@ internal class AppPreferences(context: Context) {
         preferences.edit().putBoolean(ALLOW_AUDIO_MIXING_KEY, enabled).apply()
     }
 
+    fun hapticFeedbackEnabled(): Boolean = preferences.getBoolean(HAPTIC_FEEDBACK_ENABLED_KEY, true)
+
+    fun setHapticFeedbackEnabled(enabled: Boolean) {
+        preferences.edit().putBoolean(HAPTIC_FEEDBACK_ENABLED_KEY, enabled).apply()
+    }
+
     fun loadLyricOffsets(): Map<String, Int> {
         val raw = preferences.getString(LYRIC_OFFSETS_KEY, null) ?: return emptyMap()
         val json = runCatching { JSONObject(raw) }.getOrNull() ?: return emptyMap()
@@ -182,6 +188,7 @@ internal class AppPreferences(context: Context) {
         const val PLAYBACK_TEMPO_SYNC_KEY = "playback_tempo_sync_enabled"
         const val PLAYBACK_HARD_SEEK_SYNC_KEY = "playback_hard_seek_sync_enabled"
         const val ALLOW_AUDIO_MIXING_KEY = "allow_audio_mixing"
+        const val HAPTIC_FEEDBACK_ENABLED_KEY = "haptic_feedback_enabled"
         const val PLAYBACK_SETTINGS_SCHEMA_KEY = "playback_settings_schema_version"
         const val PLAYBACK_SETTINGS_SCHEMA_VERSION = 2
         const val SYNC_PACKET_INTERVAL_KEY = "sync_packet_interval_seconds"

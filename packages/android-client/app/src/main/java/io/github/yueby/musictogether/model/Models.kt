@@ -411,6 +411,7 @@ data class AppState(
     val playbackTempoSyncEnabled: Boolean = false,
     val playbackHardSeekSyncEnabled: Boolean = false,
     val allowAudioMixing: Boolean = false,
+    val hapticFeedbackEnabled: Boolean = true,
     val syncPacketIntervalSeconds: Int = 3,
     val syncDriftSeconds: Double = 0.0,
     val pingMs: Long? = null,

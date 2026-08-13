@@ -26,8 +26,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoorBack
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -65,55 +63,20 @@ import io.github.yueby.musictogether.model.AdminRoom
 import io.github.yueby.musictogether.model.AdminUser
 import io.github.yueby.musictogether.model.AppState
 
-private enum class SettingsSection { Account, App, Admin }
 private enum class AdminSection { Users, Rooms, Proxy }
 
 @Composable
-fun AccountSettingsPane(state: AppState, viewModel: MusicTogetherViewModel) {
-    var section by remember { mutableStateOf(SettingsSection.Account) }
-    val isAdmin = state.accountProfile?.role == "admin"
+fun AccountSettingsPane(
+    state: AppState,
+    viewModel: MusicTogetherViewModel,
+) {
+    AccountSection(state, viewModel)
+}
 
-    LaunchedEffect(isAdmin) {
-        if (!isAdmin && section == SettingsSection.Admin) section = SettingsSection.Account
-    }
-    LaunchedEffect(section, isAdmin) {
-        if (section == SettingsSection.Admin && isAdmin) viewModel.loadAdminData()
-    }
-
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            FilterChip(
-                selected = section == SettingsSection.Account,
-                onClick = { section = SettingsSection.Account },
-                label = { Text("账号") },
-                leadingIcon = { Icon(Icons.Default.AccountCircle, null, Modifier.size(18.dp)) },
-            )
-            FilterChip(
-                selected = section == SettingsSection.App,
-                onClick = { section = SettingsSection.App },
-                label = { Text("应用") },
-                leadingIcon = { Icon(Icons.Default.SystemUpdate, null, Modifier.size(18.dp)) },
-            )
-            if (isAdmin) {
-                FilterChip(
-                    selected = section == SettingsSection.Admin,
-                    onClick = { section = SettingsSection.Admin },
-                    label = { Text("服务器管理") },
-                    leadingIcon = { Icon(Icons.Default.Shield, null, Modifier.size(18.dp)) },
-                )
-            }
-        }
-        HorizontalDivider()
-        when (section) {
-            SettingsSection.Account -> AccountSection(state, viewModel)
-            SettingsSection.App -> AppUpdatePane(state, viewModel)
-            SettingsSection.Admin -> AdminSection(state, viewModel)
-        }
-    }
+@Composable
+internal fun ServerAdminSettingsPane(state: AppState, viewModel: MusicTogetherViewModel) {
+    LaunchedEffect(Unit) { viewModel.loadAdminData() }
+    AdminSection(state, viewModel)
 }
 
 @Composable

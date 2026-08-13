@@ -51,9 +51,10 @@ internal fun LobbyBottomNavigation(
         tonalElevation = 0.dp,
     ) {
         tabs.forEach { tab ->
+            val onHapticTabSelected = rememberHapticClick { onTabSelected(tab) }
             NavigationBarItem(
                 selected = tab == selectedTab,
-                onClick = { onTabSelected(tab) },
+                onClick = onHapticTabSelected,
                 icon = {
                     Icon(
                         imageVector = when (tab) {
