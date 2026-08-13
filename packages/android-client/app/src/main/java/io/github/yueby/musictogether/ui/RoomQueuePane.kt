@@ -52,6 +52,8 @@ import androidx.compose.ui.unit.sp
 import io.github.yueby.musictogether.MusicTogetherViewModel
 import io.github.yueby.musictogether.model.RoomState
 import io.github.yueby.musictogether.model.Track
+import io.github.yueby.musictogether.ui.player.DropdownMenu as AppDropdownMenu
+import io.github.yueby.musictogether.ui.player.DropdownMenuItem as AppDropdownMenuItem
 import kotlinx.coroutines.delay
 
 @Composable
@@ -279,43 +281,43 @@ private fun QueueControlMenu(
     var expanded by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { expanded = true }) { Icon(Icons.Default.MoreVert, "队列操作") }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(
+        AppDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            AppDropdownMenuItem(
                 text = { Text("播放") },
                 leadingIcon = { Icon(Icons.Default.PlayArrow, null) },
                 onClick = { expanded = false; onPlay() },
             )
             onReselectMetadata?.let { reselect ->
-                DropdownMenuItem(
+                AppDropdownMenuItem(
                     text = { Text("重选歌词和封面") },
                     leadingIcon = { Icon(Icons.Default.Refresh, null) },
                     onClick = { expanded = false; reselect() },
                 )
             }
-            DropdownMenuItem(
+            AppDropdownMenuItem(
                 text = { Text("上移") },
                 leadingIcon = { Icon(Icons.Default.KeyboardArrowUp, null) },
                 enabled = canMoveUp,
                 onClick = { expanded = false; onMoveUp() },
             )
-            DropdownMenuItem(
+            AppDropdownMenuItem(
                 text = { Text("下移") },
                 leadingIcon = { Icon(Icons.Default.KeyboardArrowDown, null) },
                 enabled = canMoveDown,
                 onClick = { expanded = false; onMoveDown() },
             )
-            DropdownMenuItem(
+            AppDropdownMenuItem(
                 text = { Text("置顶到当前播放下方") },
                 leadingIcon = { Icon(Icons.Default.VerticalAlignTop, null) },
                 enabled = canPin,
                 onClick = { expanded = false; onPin() },
             )
-            DropdownMenuItem(
+            AppDropdownMenuItem(
                 text = { Text("下载") },
                 leadingIcon = { Icon(Icons.Default.Download, null) },
                 onClick = { expanded = false; onDownload() },
             )
-            DropdownMenuItem(
+            AppDropdownMenuItem(
                 text = { Text("移除") },
                 leadingIcon = { Icon(Icons.Default.Delete, null) },
                 onClick = { expanded = false; onRemove() },

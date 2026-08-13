@@ -8,10 +8,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -50,11 +55,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import io.github.yueby.musictogether.MusicTogetherViewModel
@@ -62,6 +67,22 @@ import io.github.yueby.musictogether.model.AppState
 import io.github.yueby.musictogether.model.ConnectionStatus
 import io.github.yueby.musictogether.model.RoomListItem
 import io.github.yueby.musictogether.model.Track
+import io.github.yueby.musictogether.model.UiStyle
+import io.github.yueby.musictogether.model.usesFloatingBottomBar
+import io.github.yueby.musictogether.ui.designsystem.LocalAppBlurEnabled
+import io.github.yueby.musictogether.ui.designsystem.LocalBottomBarStyle
+import io.github.yueby.musictogether.ui.designsystem.LocalGlassBottomBarEnabled
+import io.github.yueby.musictogether.ui.designsystem.LocalAppPageBackground
+import io.github.yueby.musictogether.ui.designsystem.LocalUiStyle
+import io.github.yueby.musictogether.ui.designsystem.rememberAppBlurBackdrop
+import top.yukonga.miuix.kmp.blur.LayerBackdrop
+import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.basic.Card as MiuixCard
+import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
+import top.yukonga.miuix.kmp.basic.IconButton as MiuixIconButton
+import top.yukonga.miuix.kmp.basic.Text as MiuixText
+import top.yukonga.miuix.kmp.basic.TextButton as MiuixTextButton
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 private data class RoomTarget(val serverUrl: String, val room: RoomListItem)
 
@@ -79,17 +100,40 @@ fun LobbyScreen(
     state: AppState,
     contentPadding: PaddingValues,
     viewModel: MusicTogetherViewModel,
-    bottomContentPadding: Dp = 0.dp,
     onOpenPlayer: (() -> Unit)? = null,
+    bottomAccessory: (@Composable (LayerBackdrop?, Boolean) -> Unit)? = null,
 ) {
     var createDialog by remember { mutableStateOf(false) }
     var joinTarget by remember { mutableStateOf<RoomTarget?>(null) }
     var directRoomId by remember { mutableStateOf("") }
     var joinDialogOpen by remember { mutableStateOf(false) }
-    var connectionSettingsOpen by remember { mutableStateOf(false) }
     var selectedTab by rememberSaveable { mutableStateOf(LobbyTab.Home) }
+    var settingsNested by rememberSaveable { mutableStateOf(false) }
+    var requestedSettingsDestination by rememberSaveable { mutableStateOf<SettingsDestination?>(null) }
     val connectedServerCount = state.servers.count { it.status == ConnectionStatus.Connected }
     val roomCount = state.servers.sumOf { it.rooms.size }
+    val layoutDirection = LocalLayoutDirection.current
+    val floatingBar = LocalUiStyle.current.usesFloatingBottomBar(LocalBottomBarStyle.current)
+    val navigationBarInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val blurBackdrop = rememberAppBlurBackdrop(
+        enabled = LocalUiStyle.current == UiStyle.Miuix &&
+            floatingBar &&
+            LocalAppBlurEnabled.current &&
+            LocalGlassBottomBarEnabled.current,
+    )
+    val showDock = selectedTab != LobbyTab.Settings || !settingsNested
+    val sideBySideDock = showDock && floatingBar && bottomAccessory != null
+    val dockHeight = if (showDock) bottomDockContentHeight(
+        floating = floatingBar,
+        hasAccessory = bottomAccessory != null,
+        sideBySideAccessory = sideBySideDock,
+        navigationBarInset = navigationBarInset,
+        scaffoldBottomInset = contentPadding.calculateBottomPadding(),
+    ) else 0.dp
+
+    LaunchedEffect(selectedTab) {
+        if (selectedTab != LobbyTab.Settings) settingsNested = false
+    }
 
     LaunchedEffect(state.room?.id) {
         if (state.room == null && selectedTab == LobbyTab.Recommendations) {
@@ -97,17 +141,30 @@ fun LobbyScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize()) {
-        if (selectedTab == LobbyTab.Home) {
+    BackHandler(enabled = selectedTab != LobbyTab.Home) { selectedTab = LobbyTab.Home }
+
+    Box(Modifier.fillMaxSize().background(LocalAppPageBackground.current)) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .then(if (blurBackdrop != null) Modifier.layerBackdrop(blurBackdrop) else Modifier),
+        ) {
+        Box(Modifier.weight(1f)) {
+        val visibleTab = selectedTab
+        if (visibleTab == LobbyTab.Home) {
             LazyColumn(
                 modifier = Modifier
-                    .weight(1f)
-                    .padding(contentPadding),
+                    .fillMaxSize()
+                    .padding(
+                        start = contentPadding.calculateLeftPadding(layoutDirection),
+                        top = contentPadding.calculateTopPadding(),
+                        end = contentPadding.calculateRightPadding(layoutDirection),
+                    ),
                 contentPadding = PaddingValues(
                     start = 20.dp,
                     top = 18.dp,
                     end = 20.dp,
-                    bottom = 24.dp + bottomContentPadding,
+                    bottom = 24.dp + dockHeight,
                 ),
                 verticalArrangement = Arrangement.spacedBy(24.dp),
             ) {
@@ -117,22 +174,16 @@ fun LobbyScreen(
                         verticalAlignment = Alignment.Top,
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text(
-                                text = "Music Together",
-                                style = MaterialTheme.typography.displaySmall,
-                                fontWeight = FontWeight.Bold,
-                            )
-                            Text(
-                                text = "$connectedServerCount/${state.servers.size} 台服务器在线",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            LobbyHeading(
+                                title = "Music Together",
+                                summary = "$connectedServerCount/${state.servers.size} 台服务器在线",
                             )
                         }
-                        HapticIconButton(
+                        LobbyIconButton(
                             onClick = viewModel::refreshRooms,
                             enabled = state.servers.any { it.status == ConnectionStatus.Connected },
                         ) {
-                            Icon(Icons.Default.Refresh, contentDescription = "刷新房间")
+                            LobbyIcon(Icons.Default.Refresh, contentDescription = "刷新房间")
                         }
                     }
                 }
@@ -172,18 +223,17 @@ fun LobbyScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text("公开房间", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                            Text(
-                                text = "$roomCount 个房间 · ${state.servers.size} 台服务器",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            LobbyHeading(
+                                title = "公开房间",
+                                summary = "$roomCount 个房间 · ${state.servers.size} 台服务器",
+                                compact = true,
                             )
                         }
-                        IconButton(
+                        LobbyIconButton(
                             onClick = viewModel::refreshRooms,
                             enabled = state.servers.any { it.status == ConnectionStatus.Connected },
                         ) {
-                            Icon(Icons.Default.Refresh, contentDescription = "刷新房间")
+                            LobbyIcon(Icons.Default.Refresh, contentDescription = "刷新房间")
                         }
                     }
                 }
@@ -220,17 +270,28 @@ fun LobbyScreen(
                 }
             }
     } else {
-        BackHandler { selectedTab = LobbyTab.Home }
         Column(
             modifier = Modifier
-                .weight(1f)
-                .padding(top = contentPadding.calculateTopPadding()),
+                .fillMaxSize()
+                .padding(bottom = dockHeight)
+                .padding(
+                    top = if (visibleTab == LobbyTab.Settings && LocalUiStyle.current == UiStyle.Miuix) {
+                        0.dp
+                    } else {
+                        contentPadding.calculateTopPadding()
+                    },
+                ),
         ) {
-            when (selectedTab) {
+            when (visibleTab) {
                 LobbyTab.Search -> if (state.connectionStatus == ConnectionStatus.Connected) {
                     SearchPane(state, viewModel)
                 } else {
-                    LobbySearchUnavailablePane(onOpenSettings = { connectionSettingsOpen = true })
+                    LobbySearchUnavailablePane(
+                        onOpenSettings = {
+                            requestedSettingsDestination = SettingsDestination.Server
+                            selectedTab = LobbyTab.Settings
+                        },
+                    )
                 }
                 LobbyTab.Library -> LocalMusicPane(
                     state = state,
@@ -241,29 +302,75 @@ fun LobbyScreen(
                 LobbyTab.Settings -> LobbySettingsPane(
                     state = state,
                     viewModel = viewModel,
-                    onOpenConnectionSettings = { connectionSettingsOpen = true },
+                    requestedDestination = requestedSettingsDestination,
+                    onRequestedDestinationConsumed = { requestedSettingsDestination = null },
+                    onNavigationDepthChanged = { settingsNested = it },
                 )
                 LobbyTab.Home -> Unit
             }
         }
     }
 
-    LobbyBottomNavigation(
-        selectedTab = selectedTab,
-        onTabSelected = { selectedTab = it },
-        showRecommendations = state.room != null,
-        modifier = Modifier.padding(bottom = contentPadding.calculateBottomPadding()),
-    )
+        }
 
+        }
+
+        if (showDock) Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(dockHeight),
+        ) {
+            if (sideBySideDock) {
+                val compactAccessory = requireNotNull(bottomAccessory)
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(
+                            start = 12.dp,
+                            end = 12.dp,
+                            bottom = floatingNavigationBottomPadding(navigationBarInset),
+                        )
+                        .height(LobbyNavigationDefaults.FloatingHeight),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.weight(1f).fillMaxHeight()) {
+                        compactAccessory(blurBackdrop, true)
+                    }
+                    LobbyBottomNavigation(
+                        selectedTab = selectedTab,
+                        onTabSelected = { selectedTab = it },
+                        showRecommendations = state.room != null,
+                        modifier = Modifier.weight(1f),
+                        blurBackdrop = blurBackdrop,
+                        compact = true,
+                    )
+                }
+            } else Column(
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+            ) {
+                bottomAccessory?.let { accessory ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(LobbyNavigationDefaults.AccessoryHeight),
+                    ) {
+                        accessory(blurBackdrop, false)
+                    }
+                    Spacer(Modifier.height(LobbyNavigationDefaults.AccessorySpacing))
+                }
+                LobbyBottomNavigation(
+                    selectedTab = selectedTab,
+                    onTabSelected = { selectedTab = it },
+                    showRecommendations = state.room != null,
+                    blurBackdrop = blurBackdrop,
+                )
+            }
+        }
     }
 
-    if (connectionSettingsOpen) {
-        ConnectionSettingsDialog(
-            state = state,
-            viewModel = viewModel,
-            onDismiss = { connectionSettingsOpen = false },
-        )
-    }
     if (joinDialogOpen) {
         JoinRoomDialog(
             initialValue = directRoomId,
@@ -295,22 +402,107 @@ fun LobbyScreen(
 }
 
 @Composable
+private fun LobbyHeading(
+    title: String,
+    summary: String,
+    compact: Boolean = false,
+) {
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        MiuixText(
+            text = title,
+            style = if (compact) MiuixTheme.textStyles.title2 else MiuixTheme.textStyles.title1,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        MiuixText(
+            text = summary,
+            style = if (compact) MiuixTheme.textStyles.footnote1 else MiuixTheme.textStyles.body2,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    } else {
+        Text(
+            text = title,
+            style = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.displaySmall,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            text = summary,
+            style = if (compact) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun LobbyIconButton(
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    content: @Composable () -> Unit,
+) {
+    val onHapticClick = rememberHapticClick(onClick)
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        MiuixIconButton(onClick = onHapticClick, enabled = enabled, content = content)
+    } else {
+        IconButton(onClick = onHapticClick, enabled = enabled, content = content)
+    }
+}
+
+@Composable
+private fun LobbyIcon(
+    imageVector: ImageVector,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+) {
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        MiuixIcon(
+            imageVector = imageVector,
+            contentDescription = contentDescription,
+            modifier = modifier,
+            tint = MiuixTheme.colorScheme.onSurface,
+        )
+    } else {
+        Icon(
+            imageVector = imageVector,
+            contentDescription = contentDescription,
+            modifier = modifier,
+        )
+    }
+}
+
+@Composable
 private fun LobbySectionTitle(title: String, icon: ImageVector) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            modifier = Modifier.size(26.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-        )
+        if (LocalUiStyle.current == UiStyle.Miuix) {
+            MiuixIcon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(26.dp),
+                tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
+            )
+            MiuixText(
+                text = title,
+                style = MiuixTheme.textStyles.title2,
+                fontWeight = FontWeight.Bold,
+            )
+        } else {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(26.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+            )
+        }
     }
 }
 
@@ -322,37 +514,69 @@ private fun LobbyActionCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val shape = RoundedCornerShape(16.dp)
     val onHapticClick = rememberHapticClick(onClick)
-    Card(
-        onClick = onHapticClick,
-        modifier = modifier
-            .height(112.dp)
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.48f), shape),
-        shape = shape,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.78f),
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        MiuixCard(
+            modifier = modifier.height(112.dp),
+            onClick = onHapticClick,
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier.size(24.dp),
-                tint = MaterialTheme.colorScheme.primary,
+            LobbyActionCardContent(icon, title, subtitle, miuix = true)
+        }
+    } else {
+        val shape = RoundedCornerShape(16.dp)
+        Card(
+            onClick = onHapticClick,
+            modifier = modifier
+                .height(112.dp)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.48f), shape),
+            shape = shape,
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.78f),
+            ),
+        ) {
+            LobbyActionCardContent(icon, title, subtitle, miuix = false)
+        }
+    }
+}
+
+@Composable
+private fun LobbyActionCardContent(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    miuix: Boolean,
+) {
+    Column(
+        modifier = Modifier.padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (miuix) {
+            MiuixIcon(icon, null, Modifier.size(24.dp), tint = MiuixTheme.colorScheme.primary)
+            MiuixText(
+                title,
+                style = MiuixTheme.textStyles.title4,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
+            MiuixText(
+                subtitle,
+                style = MiuixTheme.textStyles.footnote2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        } else {
+            Icon(icon, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
             Text(
-                text = title,
+                title,
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = subtitle,
+                subtitle,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -364,20 +588,8 @@ private fun LobbyActionCard(
 
 @Composable
 private fun TrackResumeCard(track: Track, onClick: (() -> Unit)?) {
-    val shape = RoundedCornerShape(16.dp)
     val onHapticClick = if (onClick != null) rememberHapticClick(onClick) else ({})
-    Card(
-        onClick = onHapticClick,
-        enabled = onClick != null,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 10.dp)
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.48f), shape),
-        shape = shape,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.78f),
-        ),
-    ) {
+    val content: @Composable () -> Unit = {
         Row(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -397,34 +609,85 @@ private fun TrackResumeCard(track: Track, onClick: (() -> Unit)?) {
                     modifier = Modifier
                         .size(68.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(MaterialTheme.colorScheme.primaryContainer),
+                        .background(
+                            if (LocalUiStyle.current == UiStyle.Miuix) {
+                                MiuixTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.primaryContainer
+                            },
+                        ),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.Default.MusicNote, contentDescription = null)
+                    LobbyIcon(Icons.Default.MusicNote, contentDescription = null)
                 }
             }
             Column(Modifier.weight(1f)) {
-                Text(
-                    text = track.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                if (LocalUiStyle.current == UiStyle.Miuix) {
+                    MiuixText(
+                        track.title,
+                        style = MiuixTheme.textStyles.title3,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    MiuixText(
+                        track.artist.joinToString(" / "),
+                        style = MiuixTheme.textStyles.body2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                } else {
+                    Text(
+                        track.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        track.artist.joinToString(" / "),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            if (LocalUiStyle.current == UiStyle.Miuix) {
+                MiuixIcon(
+                    Icons.AutoMirrored.Filled.ArrowForward,
+                    "打开播放器",
+                    tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
                 )
-                Text(
-                    text = track.artist.joinToString(" / "),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+            } else {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowForward,
+                    "打开播放器",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                contentDescription = "打开播放器",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
+    }
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        MiuixCard(
+            modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+            onClick = if (onClick != null) onHapticClick else null,
+        ) { content() }
+    } else {
+        val shape = RoundedCornerShape(16.dp)
+        Card(
+            onClick = onHapticClick,
+            enabled = onClick != null,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 10.dp)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.48f), shape),
+            shape = shape,
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.78f),
+            ),
+        ) { content() }
     }
 }
 
@@ -440,18 +703,27 @@ internal fun LobbyTabHeader(
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onBack) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回首页")
+        LobbyIconButton(onClick = onBack) {
+            LobbyIcon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回首页")
         }
-        Text(
-            title,
-            modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-        )
+        if (LocalUiStyle.current == UiStyle.Miuix) {
+            MiuixText(
+                title,
+                modifier = Modifier.weight(1f),
+                style = MiuixTheme.textStyles.title2,
+                fontWeight = FontWeight.Bold,
+            )
+        } else {
+            Text(
+                title,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+            )
+        }
         onAction?.let { action ->
-            IconButton(onClick = action) {
-                Icon(Icons.Default.Settings, contentDescription = "服务器设置")
+            LobbyIconButton(onClick = action) {
+                LobbyIcon(Icons.Default.Settings, contentDescription = "服务器设置")
             }
         }
     }
@@ -625,18 +897,8 @@ private fun ServerHeader(
 
 @Composable
 private fun RoomCard(room: RoomListItem, onClick: () -> Unit) {
-    val shape = RoundedCornerShape(12.dp)
     val onHapticClick = rememberHapticClick(onClick)
-    Card(
-        onClick = onHapticClick,
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.38f), shape),
-        shape = shape,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.74f),
-        ),
-    ) {
+    val content: @Composable () -> Unit = {
         Column(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -699,5 +961,24 @@ private fun RoomCard(room: RoomListItem, onClick: () -> Unit) {
                 }
             }
         }
+    }
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        MiuixCard(
+            modifier = Modifier.fillMaxWidth(),
+            insideMargin = PaddingValues(0.dp),
+            onClick = onHapticClick,
+        ) { content() }
+    } else {
+        val shape = RoundedCornerShape(12.dp)
+        Card(
+            onClick = onHapticClick,
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.38f), shape),
+            shape = shape,
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.74f),
+            ),
+        ) { content() }
     }
 }

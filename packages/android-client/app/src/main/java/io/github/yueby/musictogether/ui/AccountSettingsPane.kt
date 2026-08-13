@@ -26,7 +26,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoorBack
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -62,6 +61,10 @@ import io.github.yueby.musictogether.MusicTogetherViewModel
 import io.github.yueby.musictogether.model.AdminRoom
 import io.github.yueby.musictogether.model.AdminUser
 import io.github.yueby.musictogether.model.AppState
+import io.github.yueby.musictogether.ui.designsystem.AppDialog
+import io.github.yueby.musictogether.ui.designsystem.LocalAppWindowSheet
+import io.github.yueby.musictogether.ui.designsystem.AppButton
+import io.github.yueby.musictogether.ui.designsystem.AppTextField
 
 private enum class AdminSection { Users, Rooms, Proxy }
 
@@ -76,11 +79,11 @@ fun AccountSettingsPane(
 @Composable
 internal fun ServerAdminSettingsPane(state: AppState, viewModel: MusicTogetherViewModel) {
     LaunchedEffect(Unit) { viewModel.loadAdminData() }
-    AdminSection(state, viewModel)
+    AdminManagementSection(state, viewModel)
 }
 
 @Composable
-private fun AccountSection(state: AppState, viewModel: MusicTogetherViewModel) {
+internal fun AccountSection(state: AppState, viewModel: MusicTogetherViewModel) {
     val profile = state.accountProfile
     val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri?.let(viewModel::uploadAvatar)
@@ -88,7 +91,11 @@ private fun AccountSection(state: AppState, viewModel: MusicTogetherViewModel) {
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(20.dp),
+        contentPadding = if (LocalAppWindowSheet.current) {
+            PaddingValues(vertical = 8.dp)
+        } else {
+            PaddingValues(20.dp)
+        },
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         item {
@@ -140,17 +147,17 @@ private fun AccountSection(state: AppState, viewModel: MusicTogetherViewModel) {
             SettingsTitle("个人资料")
             Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
+                AppTextField(
                     value = state.nickname,
                     onValueChange = viewModel::updateNickname,
                     modifier = Modifier.weight(1f),
-                    label = { Text("昵称") },
-                    singleLine = true,
+                    label = "昵称",
                 )
-                Button(
+                AppButton(
+                    text = "保存",
                     onClick = viewModel::saveNickname,
                     enabled = !state.accountBusy && state.nickname.isNotBlank() && state.nickname.trim() != profile?.nickname,
-                ) { Text("保存") }
+                )
             }
             if (profile == null) {
                 Text(
@@ -184,29 +191,27 @@ private fun AccountIdEditor(state: AppState, viewModel: MusicTogetherViewModel) 
 
     SettingsTitle("账号 ID")
     Spacer(Modifier.height(10.dp))
-    OutlinedTextField(
+    AppTextField(
         value = accountId,
         onValueChange = { accountId = it.lowercase().take(32) },
         modifier = Modifier.fillMaxWidth(),
-        label = { Text("账号 ID") },
-        supportingText = { Text("3-32 位小写字母、数字、_ 或 -") },
-        singleLine = true,
+        label = "账号 ID（3-32 位小写字母、数字、_ 或 -）",
     )
     if (profile.hasPassword) {
-        OutlinedTextField(
+        AppTextField(
             value = currentPassword,
             onValueChange = { currentPassword = it.take(128) },
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            label = { Text("当前密码") },
-            singleLine = true,
+            label = "当前密码",
             visualTransformation = PasswordVisualTransformation(),
         )
     }
-    Button(
+    AppButton(
+        text = "保存账号 ID",
         onClick = { viewModel.updateAccountId(normalized, currentPassword.takeIf { it.isNotBlank() }) },
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
         enabled = !state.accountBusy && valid && normalized != profile.id && (!profile.hasPassword || currentPassword.isNotBlank()),
-    ) { Text("保存账号 ID") }
+    )
 }
 
 @Composable
@@ -236,19 +241,19 @@ private fun AccountAccessControls(state: AppState, viewModel: MusicTogetherViewM
     }
 
     if (profile != null) {
-        OutlinedTextField(
+        AppTextField(
             value = newPassword,
             onValueChange = { newPassword = it.take(128) },
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("设置密码（至少 8 位）") },
-            singleLine = true,
+            label = "设置密码（至少 8 位）",
             visualTransformation = PasswordVisualTransformation(),
         )
-        Button(
+        AppButton(
+            text = "保护当前账号",
             onClick = { viewModel.setInitialPassword(newPassword) },
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             enabled = !state.accountBusy && newPassword.length >= 8,
-        ) { Text("保护当前账号") }
+        )
         HorizontalDivider(Modifier.padding(vertical = 18.dp))
     }
 
@@ -256,30 +261,29 @@ private fun AccountAccessControls(state: AppState, viewModel: MusicTogetherViewM
         Icon(Icons.AutoMirrored.Filled.Login, null)
         Text("登录已有账号", fontWeight = FontWeight.SemiBold)
     }
-    OutlinedTextField(
+    AppTextField(
         value = loginId,
         onValueChange = { loginId = it.take(128) },
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-        label = { Text("账号 ID") },
-        singleLine = true,
+        label = "账号 ID",
     )
-    OutlinedTextField(
+    AppTextField(
         value = loginPassword,
         onValueChange = { loginPassword = it.take(128) },
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-        label = { Text("密码") },
-        singleLine = true,
+        label = "密码",
         visualTransformation = PasswordVisualTransformation(),
     )
-    Button(
+    AppButton(
+        text = "登录",
         onClick = { viewModel.loginIdentity(loginId, loginPassword) },
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
         enabled = !state.accountBusy && loginId.isNotBlank() && loginPassword.isNotBlank(),
-    ) { Text("登录") }
+    )
 }
 
 @Composable
-private fun AdminSection(state: AppState, viewModel: MusicTogetherViewModel) {
+internal fun AdminManagementSection(state: AppState, viewModel: MusicTogetherViewModel) {
     var section by remember { mutableStateOf(AdminSection.Users) }
     var confirmation by remember { mutableStateOf<AdminConfirmation?>(null) }
     val passwords = remember { mutableStateMapOf<String, String>() }
@@ -357,21 +361,18 @@ private fun AdminSection(state: AppState, viewModel: MusicTogetherViewModel) {
     }
 
     confirmation?.let { action ->
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { confirmation = null },
-            title = { Text(if (action is AdminConfirmation.DeleteUser) "删除账号" else "解散房间") },
-            text = { Text(action.message) },
-            confirmButton = {
-                Button(onClick = {
-                    when (action) {
-                        is AdminConfirmation.DeleteUser -> viewModel.deleteAdminUser(action.user.id)
-                        is AdminConfirmation.DissolveRoom -> viewModel.dissolveAdminRoom(action.room.id)
-                    }
-                    confirmation = null
-                }) { Text("确认") }
+            title = if (action is AdminConfirmation.DeleteUser) "删除账号" else "解散房间",
+            confirmText = "确认",
+            onConfirm = {
+                when (action) {
+                    is AdminConfirmation.DeleteUser -> viewModel.deleteAdminUser(action.user.id)
+                    is AdminConfirmation.DissolveRoom -> viewModel.dissolveAdminRoom(action.room.id)
+                }
+                confirmation = null
             },
-            dismissButton = { TextButton(onClick = { confirmation = null }) { Text("取消") } },
-        )
+        ) { Text(action.message) }
     }
 }
 

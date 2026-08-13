@@ -15,15 +15,17 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
+import io.github.yueby.musictogether.ui.designsystem.AppModalBottomSheet
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -39,12 +41,29 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.yueby.musictogether.MusicTogetherViewModel
 import io.github.yueby.musictogether.model.AppState
+import io.github.yueby.musictogether.model.UiStyle
+import io.github.yueby.musictogether.ui.designsystem.LocalUiStyle
 import io.github.yueby.musictogether.ui.player.PlayerPane
 import kotlinx.coroutines.delay
+import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
+import top.yukonga.miuix.kmp.basic.IconButton as MiuixIconButton
 
 internal enum class RoomOverlay {
     Queue, Search, Recommendations, Download, Chat, Members, Accounts, AccountSettings, RoomSettings
 }
+
+private val RoomOverlay.title: String
+    get() = when (this) {
+        RoomOverlay.Queue -> "播放队列"
+        RoomOverlay.Search -> "搜索点歌"
+        RoomOverlay.Recommendations -> "推荐点歌"
+        RoomOverlay.Download -> "下载歌曲"
+        RoomOverlay.Chat -> "房间聊天"
+        RoomOverlay.Members -> "房间成员"
+        RoomOverlay.Accounts -> "平台账号与歌单"
+        RoomOverlay.AccountSettings -> "个人账号"
+        RoomOverlay.RoomSettings -> "房间与音质"
+    }
 
 internal enum class RoomBackAction {
     DismissOverlay,
@@ -193,10 +212,31 @@ fun RoomScreen(
                     onOpenDownload = { activeOverlay = RoomOverlay.Download },
                 )
             } else {
-                ModalBottomSheet(
-                    onDismissRequest = { activeOverlay = null },
+                val navigateUpFromOverlay = {
+                    if (overlay == RoomOverlay.Accounts && appState.platformHub.selectedPlaylist != null) {
+                        viewModel.closePlaylist()
+                    } else {
+                        activeOverlay = null
+                    }
+                }
+                AppModalBottomSheet(
+                    onDismissRequest = navigateUpFromOverlay,
                     sheetState = overlaySheetState,
-                    containerColor = MaterialTheme.colorScheme.surface,
+                    title = if (overlay == RoomOverlay.Accounts) {
+                        appState.platformHub.selectedPlaylist?.name ?: overlay.title
+                    } else {
+                        overlay.title
+                    },
+                    startAction = if (LocalUiStyle.current == UiStyle.Miuix) {
+                        {
+                            MiuixIconButton(onClick = navigateUpFromOverlay) {
+                                MiuixIcon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "返回播放器",
+                                )
+                            }
+                        }
+                    } else null,
                 ) {
                     Box(
                         Modifier

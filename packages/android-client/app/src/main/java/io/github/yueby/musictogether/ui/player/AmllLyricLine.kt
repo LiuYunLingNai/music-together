@@ -19,6 +19,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
@@ -33,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.yueby.musictogether.lyrics.AmllLyricGroup
 import io.github.yueby.musictogether.model.LyricLine
+import io.github.yueby.musictogether.ui.designsystem.LocalPlayerDisplaySettings
 
 @Composable
 internal fun AmllLineGroup(
@@ -47,6 +49,7 @@ internal fun AmllLineGroup(
     typography: AmllLineTypography,
     motion: AmllLineMotion,
 ) {
+    val displaySettings = LocalPlayerDisplaySettings.current
     val line = group.main
     var retainedPositionMs by remember(line) {
         mutableFloatStateOf(line.startTimeMs.toFloat())
@@ -67,13 +70,17 @@ internal fun AmllLineGroup(
     )
     val scale by animateFloatAsState(
         targetValue = when {
-            readingMode || active -> 1f
+            !displaySettings.lyricScaleEffect || readingMode || active -> 1f
             else -> AmllInactiveScale
         },
-        animationSpec = spring(
-            dampingRatio = AmllMainScaleDampingRatio,
-            stiffness = AmllMainScaleStiffness,
-        ),
+        animationSpec = if (displaySettings.lyricSpringAnimation) {
+            spring(
+                dampingRatio = AmllMainScaleDampingRatio,
+                stiffness = AmllMainScaleStiffness,
+            )
+        } else {
+            tween(durationMillis = 220, easing = AmllCssEase)
+        },
         label = "amllLineScale",
     )
     val background = group.background
@@ -89,10 +96,14 @@ internal fun AmllLineGroup(
     )
     val backgroundSlideProgress by animateFloatAsState(
         targetValue = if (backgroundRevealed) 1f else 0f,
-        animationSpec = spring(
-            dampingRatio = motion.positionSpringDampingRatio,
-            stiffness = motion.positionSpringStiffness,
-        ),
+        animationSpec = if (displaySettings.lyricSpringAnimation) {
+            spring(
+                dampingRatio = motion.positionSpringDampingRatio,
+                stiffness = motion.positionSpringStiffness,
+            )
+        } else {
+            tween(durationMillis = 260, easing = AmllCssEase)
+        },
         label = "amllBackgroundSlide",
     )
     val backgroundAlphaProgress by animateFloatAsState(
@@ -101,11 +112,15 @@ internal fun AmllLineGroup(
         label = "amllBackgroundAlpha",
     )
     val backgroundLineScale by animateFloatAsState(
-        targetValue = if (backgroundRevealed) 1f else 0.75f,
-        animationSpec = spring(
-            dampingRatio = AmllBackgroundScaleDampingRatio,
-            stiffness = AmllBackgroundScaleStiffness,
-        ),
+        targetValue = if (!displaySettings.lyricScaleEffect || backgroundRevealed) 1f else 0.75f,
+        animationSpec = if (displaySettings.lyricSpringAnimation) {
+            spring(
+                dampingRatio = AmllBackgroundScaleDampingRatio,
+                stiffness = AmllBackgroundScaleStiffness,
+            )
+        } else {
+            tween(durationMillis = 260, easing = AmllCssEase)
+        },
         label = "amllBackgroundLineScale",
     )
     val groupAlpha by animateFloatAsState(
@@ -125,6 +140,13 @@ internal fun AmllLineGroup(
             .graphicsLayer {
                 alpha = groupAlpha
             }
+            .blur(
+                radius = if (displaySettings.lyricBlurEffect && !active && !readingMode) {
+                    1.4.dp
+                } else {
+                    0.dp
+                },
+            )
             .then(
                 if (onClick != null) {
                     Modifier.clickable(
@@ -262,6 +284,7 @@ internal fun AmllMainLine(
     translationFontSize: Float,
     romanFontSize: Float,
 ) {
+    val displaySettings = LocalPlayerDisplaySettings.current
     val textAlign = if (line.isDuet) TextAlign.End else TextAlign.Start
     Column(
         modifier = Modifier
@@ -282,9 +305,11 @@ internal fun AmllMainLine(
             wordAnimationEnabled = wordAnimationEnabled,
             readingMode = readingMode,
             fontSize = mainFontSize,
-            fontWeight = FontWeight.SemiBold,
+            fontWeight = FontWeight(displaySettings.lyricFontWeight),
         )
-        line.translatedLyric.takeIf(String::isNotBlank)?.let { translated ->
+        line.translatedLyric.takeIf {
+            displaySettings.showTranslation && it.isNotBlank()
+        }?.let { translated ->
             Text(
                 text = translated,
                 modifier = Modifier.fillMaxWidth(),
@@ -298,7 +323,8 @@ internal fun AmllMainLine(
         }
         line.romanLyric
             .takeIf {
-                it.isNotBlank() && line.words.none { word -> word.romanText.isNotBlank() }
+                displaySettings.showRomanization &&
+                    it.isNotBlank() && line.words.none { word -> word.romanText.isNotBlank() }
             }
             ?.let { roman ->
                 Text(
@@ -329,6 +355,7 @@ internal fun AmllBackgroundLine(
     placeBeforeMain: Boolean,
     fontSize: Float,
 ) {
+    val displaySettings = LocalPlayerDisplaySettings.current
     val wrapperScale = 0.8f + revealProgress * 0.2f
     val backgroundTransformOrigin =
         if (line.isDuet) {
@@ -375,7 +402,7 @@ internal fun AmllBackgroundLine(
                 wordAnimationEnabled = wordAnimationEnabled,
                 readingMode = readingMode,
                 fontSize = fontSize,
-                fontWeight = FontWeight.SemiBold,
+                fontWeight = FontWeight(displaySettings.lyricFontWeight),
                 isBackground = true,
             )
         }

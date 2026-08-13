@@ -51,7 +51,13 @@ import io.github.yueby.musictogether.MusicTogetherViewModel
 import io.github.yueby.musictogether.model.AppState
 import io.github.yueby.musictogether.model.Playlist
 import io.github.yueby.musictogether.model.Track
+import io.github.yueby.musictogether.model.UiStyle
 import io.github.yueby.musictogether.model.queueIdentity
+import io.github.yueby.musictogether.ui.designsystem.AppButton
+import io.github.yueby.musictogether.ui.designsystem.LocalAppWindowSheet
+import io.github.yueby.musictogether.ui.designsystem.LocalUiStyle
+import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
+import top.yukonga.miuix.kmp.basic.IconButton as MiuixIconButton
 
 private val platformOptions = listOf(
     "netease" to "网易云",
@@ -109,13 +115,23 @@ internal fun PlaylistDetailPane(state: AppState, playlist: Playlist, viewModel: 
         if (shouldLoadMore) viewModel.loadMorePlaylistTracks()
     }
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 8.dp)) {
+    Column(
+        Modifier.fillMaxSize().padding(horizontal = if (LocalAppWindowSheet.current) 0.dp else 8.dp),
+    ) {
         Row(
             Modifier.fillMaxWidth().padding(vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = viewModel::closePlaylist) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回歌单列表")
+            if (!LocalAppWindowSheet.current) {
+                if (LocalUiStyle.current == UiStyle.Miuix) {
+                    MiuixIconButton(onClick = viewModel::closePlaylist) {
+                        MiuixIcon(Icons.AutoMirrored.Filled.ArrowBack, "返回歌单列表")
+                    }
+                } else {
+                    IconButton(onClick = viewModel::closePlaylist) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回歌单列表")
+                    }
+                }
             }
             Column(Modifier.weight(1f)) {
                 Text(playlist.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold)
@@ -129,10 +145,24 @@ internal fun PlaylistDetailPane(state: AppState, playlist: Playlist, viewModel: 
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            FilledTonalButton(
+            val addAllEnabled = !hub.playlistLoading && !hub.playlistLoadingMore && !hub.playlistAddingAll &&
+                availableCount > 0 && (hub.playlistHasMore || addableCount > 0)
+            val addAllLabel = when {
+                hub.playlistAddingAll -> "加载全部"
+                availableCount <= 0 -> "队列已满"
+                hub.playlistHasMore -> "添加全部"
+                addableCount > 0 -> "添加 $addableCount 首"
+                else -> "已添加"
+            }
+            if (LocalUiStyle.current == UiStyle.Miuix) {
+                AppButton(
+                    text = addAllLabel,
+                    onClick = { viewModel.addPlaylistTracksToQueue(playlist) },
+                    enabled = addAllEnabled,
+                )
+            } else FilledTonalButton(
                 onClick = { viewModel.addPlaylistTracksToQueue(playlist) },
-                enabled = !hub.playlistLoading && !hub.playlistLoadingMore && !hub.playlistAddingAll &&
-                    availableCount > 0 && (hub.playlistHasMore || addableCount > 0),
+                enabled = addAllEnabled,
             ) {
                 if (hub.playlistAddingAll) {
                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -140,15 +170,7 @@ internal fun PlaylistDetailPane(state: AppState, playlist: Playlist, viewModel: 
                     Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null, Modifier.size(18.dp))
                 }
                 Spacer(Modifier.width(4.dp))
-                Text(
-                    when {
-                        hub.playlistAddingAll -> "加载全部"
-                        availableCount <= 0 -> "队列已满"
-                        hub.playlistHasMore -> "添加全部"
-                        addableCount > 0 -> "添加 $addableCount 首"
-                        else -> "已添加"
-                    },
-                )
+                Text(addAllLabel)
             }
         }
         HorizontalDivider()

@@ -15,19 +15,24 @@ import io.github.yueby.musictogether.model.AppState
 import io.github.yueby.musictogether.model.AudioProxyPolicy
 import io.github.yueby.musictogether.model.BilibiliMetadataMatchState
 import io.github.yueby.musictogether.model.BilibiliCollectionState
+import io.github.yueby.musictogether.model.BottomBarStyle
 import io.github.yueby.musictogether.model.ConnectionStatus
 import io.github.yueby.musictogether.model.OfflineDownloadState
 import io.github.yueby.musictogether.model.OfflineLibraryState
 import io.github.yueby.musictogether.model.LyricsState
 import io.github.yueby.musictogether.model.MusicDownloadState
 import io.github.yueby.musictogether.model.nextChatUnreadCount
+import io.github.yueby.musictogether.model.normalized
 import io.github.yueby.musictogether.model.PlatformHubState
+import io.github.yueby.musictogether.model.PlayerDisplaySettings
 import io.github.yueby.musictogether.model.Playlist
 import io.github.yueby.musictogether.model.QrLoginState
 import io.github.yueby.musictogether.model.PlayState
 import io.github.yueby.musictogether.model.RoomMember
 import io.github.yueby.musictogether.model.ServerConnection
 import io.github.yueby.musictogether.model.Track
+import io.github.yueby.musictogether.model.ThemeMode
+import io.github.yueby.musictogether.model.UiStyle
 import io.github.yueby.musictogether.model.UiNotice
 import io.github.yueby.musictogether.model.UpdateDownloadSource
 import io.github.yueby.musictogether.model.queueIdentity
@@ -145,6 +150,14 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             playbackHardSeekSyncEnabled = playbackSyncSettings.hardSeekEnabled,
             allowAudioMixing = appPreferences.allowAudioMixing(),
             hapticFeedbackEnabled = appPreferences.hapticFeedbackEnabled(),
+            uiStyle = appPreferences.uiStyle(),
+            themeMode = appPreferences.themeMode(),
+            pureBlackBackground = appPreferences.pureBlackBackground(),
+            dynamicColor = appPreferences.dynamicColor(),
+            appBlurEnabled = appPreferences.appBlurEnabled(),
+            bottomBarStyle = appPreferences.bottomBarStyle(),
+            glassBottomBar = appPreferences.glassBottomBar(),
+            playerDisplaySettings = appPreferences.playerDisplaySettings(),
             syncPacketIntervalSeconds = appPreferences.syncPacketInterval(
                 defaultValue = DEFAULT_SYNC_PACKET_INTERVAL_SECONDS,
                 range = MIN_SYNC_PACKET_INTERVAL_SECONDS..MAX_SYNC_PACKET_INTERVAL_SECONDS,
@@ -330,6 +343,49 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     fun updateHapticFeedbackEnabled(enabled: Boolean) {
         appPreferences.setHapticFeedbackEnabled(enabled)
         _state.value = _state.value.copy(hapticFeedbackEnabled = enabled)
+    }
+
+    fun updateUiStyle(style: UiStyle) {
+        if (style == _state.value.uiStyle) return
+        appPreferences.setUiStyle(style)
+        _state.value = _state.value.copy(uiStyle = style)
+    }
+
+    fun updateThemeMode(mode: ThemeMode) {
+        if (mode == _state.value.themeMode) return
+        appPreferences.setThemeMode(mode)
+        _state.value = _state.value.copy(themeMode = mode)
+    }
+
+    fun updatePureBlackBackground(enabled: Boolean) {
+        appPreferences.setPureBlackBackground(enabled)
+        _state.value = _state.value.copy(pureBlackBackground = enabled)
+    }
+
+    fun updateDynamicColor(enabled: Boolean) {
+        appPreferences.setDynamicColor(enabled)
+        _state.value = _state.value.copy(dynamicColor = enabled)
+    }
+
+    fun updateAppBlur(enabled: Boolean) {
+        appPreferences.setAppBlurEnabled(enabled)
+        _state.value = _state.value.copy(appBlurEnabled = enabled)
+    }
+
+    fun updateBottomBarStyle(style: BottomBarStyle) {
+        appPreferences.setBottomBarStyle(style)
+        _state.value = _state.value.copy(bottomBarStyle = style)
+    }
+
+    fun updateGlassBottomBar(enabled: Boolean) {
+        appPreferences.setGlassBottomBar(enabled)
+        _state.value = _state.value.copy(glassBottomBar = enabled)
+    }
+
+    fun updatePlayerDisplaySettings(transform: (PlayerDisplaySettings) -> PlayerDisplaySettings) {
+        val updated = transform(_state.value.playerDisplaySettings).normalized()
+        appPreferences.setPlayerDisplaySettings(updated)
+        _state.value = _state.value.copy(playerDisplaySettings = updated)
     }
 
     fun updateSyncPacketInterval(seconds: Int) {

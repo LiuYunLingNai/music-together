@@ -26,6 +26,7 @@ import io.github.yueby.musictogether.lyrics.AmllWordChunk
 import io.github.yueby.musictogether.lyrics.amllContinuousWordMaskProgresses
 import io.github.yueby.musictogether.lyrics.chunkAmllWords
 import io.github.yueby.musictogether.model.LyricLine
+import io.github.yueby.musictogether.ui.designsystem.LocalPlayerDisplaySettings
 
 internal fun amllBaselineTransformOrigin(
     firstBaselinePx: Int,
@@ -206,7 +207,8 @@ internal fun AmllWordLine(
     } else {
         emptyList()
     }
-    val hasRomanWords = line.words.any { it.romanText.isNotBlank() }
+    val hasRomanWords = LocalPlayerDisplaySettings.current.showRomanization &&
+        line.words.any { it.romanText.isNotBlank() }
     val hasRubyWords = line.words.any { it.ruby.isNotEmpty() }
     val density = LocalDensity.current
     val wrappedLineGap = with(density) { (fontSize * 0.12f).sp.roundToPx() }

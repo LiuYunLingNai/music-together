@@ -4,6 +4,63 @@ import androidx.compose.runtime.Immutable
 
 const val DEFAULT_MUSIC_DOWNLOAD_DIRECTORY = "/storage/emulated/0/Download/music-together"
 
+enum class UiStyle(val preferenceValue: String) {
+    Material3("material3"),
+    Miuix("miuix");
+
+    companion object {
+        fun fromPreferenceValue(value: String?): UiStyle =
+            entries.firstOrNull { style -> style.preferenceValue == value }
+                ?: Material3
+    }
+}
+
+enum class ThemeMode(val preferenceValue: String) {
+    System("system"),
+    Light("light"),
+    Dark("dark"),
+    Amoled("amoled");
+
+    companion object {
+        fun fromPreferenceValue(value: String?): ThemeMode =
+            entries.firstOrNull { it.preferenceValue == value } ?: System
+    }
+}
+
+enum class BottomBarStyle(val preferenceValue: String) {
+    Standard("standard"),
+    Floating("floating");
+
+    companion object {
+        fun fromPreferenceValue(value: String?): BottomBarStyle =
+            entries.firstOrNull { it.preferenceValue == value } ?: Floating
+    }
+}
+
+fun UiStyle.usesFloatingBottomBar(bottomBarStyle: BottomBarStyle): Boolean =
+    this == UiStyle.Miuix && bottomBarStyle == BottomBarStyle.Floating
+
+@Immutable
+data class PlayerDisplaySettings(
+    val showTranslation: Boolean = true,
+    val showRomanization: Boolean = true,
+    val lyricFontScale: Float = 1f,
+    val lyricFontWeight: Int = 600,
+    val lyricAlignPosition: Float = 0.10f,
+    val lyricSpringAnimation: Boolean = true,
+    val lyricScaleEffect: Boolean = true,
+    val lyricBlurEffect: Boolean = false,
+    val backgroundMotion: Boolean = true,
+    val backgroundMotionStrength: Float = 1f,
+)
+
+fun PlayerDisplaySettings.normalized(): PlayerDisplaySettings = copy(
+    lyricFontScale = lyricFontScale.coerceIn(0.8f, 1.3f),
+    lyricFontWeight = lyricFontWeight.coerceIn(400, 800),
+    lyricAlignPosition = lyricAlignPosition.coerceIn(0.05f, 0.45f),
+    backgroundMotionStrength = backgroundMotionStrength.coerceIn(0.5f, 1.5f),
+)
+
 @Immutable
 data class User(
     val id: String,
@@ -412,6 +469,14 @@ data class AppState(
     val playbackHardSeekSyncEnabled: Boolean = false,
     val allowAudioMixing: Boolean = false,
     val hapticFeedbackEnabled: Boolean = true,
+    val uiStyle: UiStyle = UiStyle.Material3,
+    val themeMode: ThemeMode = ThemeMode.System,
+    val pureBlackBackground: Boolean = false,
+    val dynamicColor: Boolean = true,
+    val appBlurEnabled: Boolean = true,
+    val bottomBarStyle: BottomBarStyle = BottomBarStyle.Floating,
+    val glassBottomBar: Boolean = true,
+    val playerDisplaySettings: PlayerDisplaySettings = PlayerDisplaySettings(),
     val syncPacketIntervalSeconds: Int = 3,
     val syncDriftSeconds: Double = 0.0,
     val pingMs: Long? = null,

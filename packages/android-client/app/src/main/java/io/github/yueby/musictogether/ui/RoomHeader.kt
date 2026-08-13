@@ -40,7 +40,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import io.github.yueby.musictogether.ui.designsystem.AppModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -64,6 +64,13 @@ import io.github.yueby.musictogether.logging.AppLogger
 import io.github.yueby.musictogether.model.ChatMessage
 import io.github.yueby.musictogether.model.ConnectionStatus
 import io.github.yueby.musictogether.model.RoomState
+import io.github.yueby.musictogether.model.UiStyle
+import io.github.yueby.musictogether.ui.designsystem.LocalUiStyle
+import top.yukonga.miuix.kmp.basic.HorizontalDivider as MiuixHorizontalDivider
+import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
+import top.yukonga.miuix.kmp.basic.SmallTitle as MiuixSmallTitle
+import top.yukonga.miuix.kmp.preference.ArrowPreference
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -210,18 +217,15 @@ internal fun RoomHeader(
     }
 
     if (menuExpanded) {
-        ModalBottomSheet(onDismissRequest = { onMenuExpandedChange(false) }) {
+        AppModalBottomSheet(
+            onDismissRequest = { onMenuExpandedChange(false) },
+            title = "更多操作",
+        ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(bottom = 16.dp),
             ) {
-                Text(
-                    text = "更多操作",
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
                 RoomMenuAction(Icons.Default.AccountCircle, "个人账号") {
                     onMenuExpandedChange(false)
                     onOpenOverlay(RoomOverlay.AccountSettings)
@@ -245,13 +249,8 @@ internal fun RoomHeader(
                     }
                 }
                 if (BuildConfig.DEBUG) {
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
-                    Text(
-                        text = "调试",
-                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    RoomMenuDivider()
+                    RoomMenuSectionTitle("调试")
                     RoomMenuAction(Icons.Default.BugReport, "导出日志") {
                         onMenuExpandedChange(false)
                         AppLogger.export(context)
@@ -261,11 +260,11 @@ internal fun RoomHeader(
                         viewModel.clearLogs()
                     }
                 }
-                HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
+                RoomMenuDivider()
                 RoomMenuAction(
                     icon = Icons.AutoMirrored.Filled.Logout,
                     label = "离开房间",
-                    color = MaterialTheme.colorScheme.error,
+                    color = if (LocalUiStyle.current == UiStyle.Miuix) MiuixTheme.colorScheme.error else MaterialTheme.colorScheme.error,
                 ) {
                     onMenuExpandedChange(false)
                     viewModel.leaveRoom()
@@ -279,9 +278,21 @@ internal fun RoomHeader(
 private fun RoomMenuAction(
     icon: ImageVector,
     label: String,
-    color: Color = MaterialTheme.colorScheme.onSurface,
+    color: Color? = null,
     onClick: () -> Unit,
 ) {
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        val resolvedColor = color ?: MiuixTheme.colorScheme.onSurface
+        ArrowPreference(
+            title = label,
+            startAction = {
+                MiuixIcon(icon, contentDescription = null, tint = resolvedColor)
+            },
+            onClick = onClick,
+        )
+        return
+    }
+    val resolvedColor = color ?: MaterialTheme.colorScheme.onSurface
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -290,8 +301,31 @@ private fun RoomMenuAction(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp), tint = color)
-        Text(text = label, style = MaterialTheme.typography.bodyLarge, color = color)
+        Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp), tint = resolvedColor)
+        Text(text = label, style = MaterialTheme.typography.bodyLarge, color = resolvedColor)
+    }
+}
+
+@Composable
+private fun RoomMenuDivider() {
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        MiuixHorizontalDivider(Modifier.padding(vertical = 6.dp))
+    } else {
+        HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
+    }
+}
+
+@Composable
+private fun RoomMenuSectionTitle(title: String) {
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        MiuixSmallTitle(text = title)
+    } else {
+        Text(
+            text = title,
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

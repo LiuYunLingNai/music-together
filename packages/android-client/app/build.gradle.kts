@@ -2,7 +2,6 @@ import java.util.Properties
 
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
@@ -15,7 +14,7 @@ val keystoreProperties = Properties().apply {
 
 android {
     namespace = "io.github.yueby.musictogether"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "io.github.yueby.musictogether"
@@ -23,6 +22,7 @@ android {
         targetSdk = 36
         versionCode = 26
         versionName = "3.0.2"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     flavorDimensions += "distribution"
@@ -83,8 +83,9 @@ kotlin {
 val unicodeSafeUnitTestClasses by tasks.registering(Jar::class) {
     archiveClassifier.set("unit-test-classes")
     destinationDirectory.set(gradle.gradleUserHomeDir.resolve("caches/music-together-test-classes/${rootProject.name}"))
-    from(layout.buildDirectory.dir("tmp/kotlin-classes/standardDebug"))
-    from(layout.buildDirectory.dir("tmp/kotlin-classes/standardDebugUnitTest"))
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from(layout.buildDirectory.dir("intermediates/built_in_kotlinc/standardDebug/compileStandardDebugKotlin/classes"))
+    from(layout.buildDirectory.dir("intermediates/built_in_kotlinc/standardDebugUnitTest/compileStandardDebugUnitTestKotlin/classes"))
     dependsOn("compileStandardDebugKotlin", "compileStandardDebugUnitTestKotlin")
 }
 
@@ -96,19 +97,28 @@ tasks.withType<Test>().matching { it.name.contains("StandardDebug") }.configureE
 }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2025.06.01")
+    val composeBom = platform("androidx.compose:compose-bom:2026.06.01")
     implementation(composeBom)
     androidTestImplementation(composeBom)
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 
-    implementation("androidx.activity:activity-compose:1.10.1")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.1")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.1")
-    implementation("androidx.compose.material3:material3")
+    implementation("androidx.activity:activity-compose:1.13.0")
+    implementation("androidx.concurrent:concurrent-futures:1.2.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
+    implementation("androidx.navigationevent:navigationevent-compose:1.1.2")
+    implementation("androidx.compose.material3:material3:1.5.0-alpha24")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     debugImplementation("androidx.compose.ui:ui-tooling")
     implementation("androidx.palette:palette-ktx:1.0.0")
+    implementation("top.yukonga.miuix.kmp:miuix-ui-android:0.9.3")
+    implementation("top.yukonga.miuix.kmp:miuix-preference-android:0.9.3")
+    implementation("top.yukonga.miuix.kmp:miuix-blur-android:0.9.3")
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.media3:media3-exoplayer:1.7.1")

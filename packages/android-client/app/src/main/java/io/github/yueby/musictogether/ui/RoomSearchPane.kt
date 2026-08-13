@@ -26,7 +26,6 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.VerticalAlignTop
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -61,6 +60,9 @@ import io.github.yueby.musictogether.model.Track
 import io.github.yueby.musictogether.model.queueIdentity
 import io.github.yueby.musictogether.model.offlineDownloadKey
 import io.github.yueby.musictogether.network.searchInputMaxLength
+import io.github.yueby.musictogether.ui.designsystem.AppButton
+import io.github.yueby.musictogether.ui.designsystem.AppDialog
+import io.github.yueby.musictogether.ui.designsystem.AppTextField
 
 @Composable
 internal fun SearchPane(state: AppState, viewModel: MusicTogetherViewModel) {
@@ -196,16 +198,12 @@ internal fun BilibiliCollectionDialog(
     viewModel: MusicTogetherViewModel,
 ) {
     if (collection.track == null) return
-    AlertDialog(
+    AppDialog(
         onDismissRequest = viewModel::dismissBilibiliCollection,
-        title = {
-            Text(
-                if (collection.loading) "正在读取视频分集" else "选择视频：${collection.title}",
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        },
-        text = {
+        title = if (collection.loading) "正在读取视频分集" else "选择视频：${collection.title}",
+        confirmText = "按当前视频播放",
+        onConfirm = viewModel::skipBilibiliCollection,
+    ) {
             when {
                 collection.loading -> Box(
                     Modifier.fillMaxWidth().padding(28.dp),
@@ -235,16 +233,7 @@ internal fun BilibiliCollectionDialog(
                     }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = viewModel::skipBilibiliCollection) {
-                Text("按当前视频播放")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = viewModel::dismissBilibiliCollection) { Text("取消") }
-        },
-    )
+        }
 }
 
 @Composable
@@ -254,10 +243,12 @@ internal fun BilibiliMetadataDialog(
 ) {
     val track = match.track ?: return
     var keyword by remember(track.id) { mutableStateOf(match.keyword) }
-    AlertDialog(
+    AppDialog(
         onDismissRequest = viewModel::dismissBilibiliMetadata,
-        title = { Text("选择歌词和封面") },
-        text = {
+        title = "选择歌词和封面",
+        confirmText = "直接播放视频",
+        onConfirm = viewModel::skipBilibiliMetadata,
+    ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(
                     Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -280,21 +271,17 @@ internal fun BilibiliMetadataDialog(
                         )
                     }
                 }
-                OutlinedTextField(
+                AppTextField(
                     value = keyword,
                     onValueChange = { keyword = it.take(100) },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("搜索歌曲或歌手") },
-                    singleLine = true,
-                    trailingIcon = {
-                        IconButton(onClick = { viewModel.searchBilibiliMetadata(keyword, match.source) }) {
-                            Icon(Icons.Default.Search, "搜索")
-                        }
-                    },
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(
-                        onSearch = { viewModel.searchBilibiliMetadata(keyword, match.source) },
-                    ),
+                    label = "搜索歌曲或歌手",
+                )
+                AppButton(
+                    text = "搜索",
+                    onClick = { viewModel.searchBilibiliMetadata(keyword, match.source) },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = keyword.isNotBlank(),
                 )
                 when {
                     match.loading -> Box(Modifier.fillMaxWidth().padding(28.dp), contentAlignment = Alignment.Center) {
@@ -325,14 +312,7 @@ internal fun BilibiliMetadataDialog(
                     }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = viewModel::skipBilibiliMetadata) { Text("直接播放视频") }
-        },
-        dismissButton = {
-            TextButton(onClick = viewModel::dismissBilibiliMetadata) { Text("取消") }
-        },
-    )
+        }
 }
 
 @Composable

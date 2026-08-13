@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.sp
 import io.github.yueby.musictogether.lyrics.amllLineSpringParameters
 import io.github.yueby.musictogether.lyrics.prepareAmllLyricGroups
 import io.github.yueby.musictogether.model.LyricsState
+import io.github.yueby.musictogether.ui.designsystem.LocalPlayerDisplaySettings
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
@@ -54,6 +55,7 @@ internal fun LyricsPanel(
     onSeek: ((Double) -> Unit)? = null,
     alignToTop: Boolean = false,
 ) {
+    val displaySettings = LocalPlayerDisplaySettings.current
     val rawPositionMs = (positionSeconds * 1_000.0 - lyricOffsetMs).toFloat().coerceAtLeast(0f)
     val wordAnimationEnabled = remember(lyrics.source) {
         shouldUseAmllWordAnimation(lyrics.source)
@@ -149,10 +151,10 @@ internal fun LyricsPanel(
 
         else -> BoxWithConstraints(Modifier.fillMaxSize()) {
             val alignPosition =
-                if (alignToTop) AmllPortraitAlignPosition else AmllCenteredAlignPosition
+                if (alignToTop) displaySettings.lyricAlignPosition else AmllCenteredAlignPosition
             val mainFontSize = (
                 minOf(maxHeight.value * 0.05f, maxWidth.value * 0.07f) *
-                    AmllMainFontScale
+                    AmllMainFontScale * displaySettings.lyricFontScale
                 ).coerceIn(16f, 80f)
             val translationFontSize = mainFontSize * AmllTranslationFontScale
             val romanFontSize = mainFontSize * AmllRomanFontScale
@@ -357,7 +359,7 @@ internal fun LyricsPanel(
                         )
                         val aligned = listState.scrollFocusedItemToAdaptiveAnchor(
                             index = focusedListIndex,
-                            animate = true,
+                            animate = displaySettings.lyricSpringAnimation,
                             alignPosition = alignPosition,
                             alignToTop = alignToTop,
                             scrollMotion = scrollMotion,

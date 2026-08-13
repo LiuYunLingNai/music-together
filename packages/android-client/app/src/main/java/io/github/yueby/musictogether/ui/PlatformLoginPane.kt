@@ -48,6 +48,15 @@ import io.github.yueby.musictogether.MusicTogetherViewModel
 import io.github.yueby.musictogether.model.MyPlatformAuth
 import io.github.yueby.musictogether.model.PlatformAuthStatus
 import io.github.yueby.musictogether.model.QrLoginState
+import io.github.yueby.musictogether.model.UiStyle
+import io.github.yueby.musictogether.ui.designsystem.LocalUiStyle
+import io.github.yueby.musictogether.ui.designsystem.AppDialog
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
+import top.yukonga.miuix.kmp.basic.Card as MiuixCard
+import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
+import top.yukonga.miuix.kmp.basic.TextButton as MiuixTextButton
+import top.yukonga.miuix.kmp.preference.ArrowPreference
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 private val platformOptions = listOf(
     "netease" to "网易云",
@@ -72,6 +81,24 @@ internal fun PlatformLoginCard(
     val loggedIn = myAuth?.loggedIn == true
     val displayedVipType = if (loggedIn) myAuth.vipType else roomAuth?.maxVipType ?: 0
     val displayedVipLabel = if (loggedIn) myAuth?.vipLabel else roomAuth?.maxVipLabel
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        MiuixPlatformLoginCard(
+            platform = platform,
+            myAuth = myAuth,
+            roomAuth = roomAuth,
+            statusLoaded = statusLoaded,
+            loggedIn = loggedIn,
+            displayedVipType = displayedVipType,
+            displayedVipLabel = displayedVipLabel,
+            compactLabel = compactLabel,
+            onQrLogin = onQrLogin,
+            onCookieLogin = onCookieLogin,
+            onLogout = onLogout,
+            onClaimConceptVip = onClaimConceptVip,
+            isClaimingConceptVip = isClaimingConceptVip,
+        )
+        return
+    }
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -149,6 +176,76 @@ internal fun PlatformLoginCard(
     }
 }
 
+@Composable
+private fun MiuixPlatformLoginCard(
+    platform: String,
+    myAuth: MyPlatformAuth?,
+    roomAuth: PlatformAuthStatus?,
+    statusLoaded: Boolean,
+    loggedIn: Boolean,
+    displayedVipType: Int,
+    displayedVipLabel: String?,
+    compactLabel: String?,
+    onQrLogin: () -> Unit,
+    onCookieLogin: () -> Unit,
+    onLogout: () -> Unit,
+    onClaimConceptVip: (() -> Unit)?,
+    isClaimingConceptVip: Boolean,
+) {
+    val title = compactLabel?.let { "$it · " }.orEmpty() + when {
+        loggedIn -> myAuth?.nickname ?: "已登录"
+        !statusLoaded -> "验证登录中…"
+        else -> "未登录"
+    }
+    val roomSummary = if ((roomAuth?.loggedInCount ?: 0) > 0) {
+        "房间内 ${roomAuth?.loggedInCount} 人已登录${if (roomAuth?.hasVip == true) "，VIP 可用" else ""}"
+    } else {
+        "房间暂无人登录${platformLabel(platform)}"
+    }
+    MiuixCard(Modifier.fillMaxWidth()) {
+        ArrowPreference(
+            title = title,
+            summary = if (displayedVipType > 0) "$roomSummary · ${vipLabel(displayedVipType, displayedVipLabel)}" else roomSummary,
+            startAction = {
+                MiuixIcon(
+                    imageVector = if (loggedIn) Icons.Default.Star else Icons.Default.Key,
+                    contentDescription = null,
+                    tint = MiuixTheme.colorScheme.primary,
+                )
+            },
+        )
+        if (loggedIn) {
+            if (onClaimConceptVip != null) {
+                MiuixTextButton(
+                    text = if (isClaimingConceptVip) "领取中…" else "领取每日畅听权益",
+                    onClick = onClaimConceptVip,
+                    enabled = !isClaimingConceptVip,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                    colors = ButtonDefaults.textButtonColorsPrimary(),
+                )
+            }
+            MiuixTextButton(
+                text = "退出登录",
+                onClick = onLogout,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+            )
+        } else if (statusLoaded) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                MiuixTextButton(
+                    text = "扫码登录",
+                    onClick = onQrLogin,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.textButtonColorsPrimary(),
+                )
+                MiuixTextButton(text = "Cookie", onClick = onCookieLogin, modifier = Modifier.weight(1f))
+            }
+        }
+    }
+}
+
 
 @Composable
 internal fun QrLoginDialog(qr: QrLoginState, viewModel: MusicTogetherViewModel) {
@@ -160,10 +257,14 @@ internal fun QrLoginDialog(qr: QrLoginState, viewModel: MusicTogetherViewModel) 
         803 -> "登录成功"
         else -> qr.message ?: if (qr.loading) "正在生成二维码…" else "二维码生成失败"
     }
-    AlertDialog(
+    val canRefresh = qr.status == 800 || (!qr.loading && qr.imageData == null)
+    AppDialog(
         onDismissRequest = viewModel::closeQrLogin,
-        title = { Text("${platformLabel(qr.platform)}扫码登录") },
-        text = {
+        title = "${platformLabel(qr.platform)}扫码登录",
+        confirmText = if (canRefresh) "重新获取" else "关闭",
+        onConfirm = if (canRefresh) ({ viewModel.requestQrLogin(qr.platform) }) else viewModel::closeQrLogin,
+        dismissText = if (canRefresh) "关闭" else null,
+    ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
                     if (qr.platform == "tencent") "使用手机 QQ 扫描二维码" else "使用${platformLabel(qr.platform)} App 扫描二维码",
@@ -199,18 +300,7 @@ internal fun QrLoginDialog(qr: QrLoginState, viewModel: MusicTogetherViewModel) 
                     fontWeight = FontWeight.SemiBold,
                 )
             }
-        },
-        confirmButton = {
-            if (qr.status == 800 || (!qr.loading && qr.imageData == null)) {
-                Button(onClick = { viewModel.requestQrLogin(qr.platform) }) {
-                    Icon(Icons.Default.Refresh, null)
-                    Spacer(Modifier.width(4.dp))
-                    Text("重新获取")
-                }
-            }
-        },
-        dismissButton = { TextButton(onClick = viewModel::closeQrLogin) { Text("关闭") } },
-    )
+    }
 }
 
 private fun decodeDataImage(value: String): androidx.compose.ui.graphics.ImageBitmap? = runCatching {

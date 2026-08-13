@@ -5,24 +5,21 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.yueby.musictogether.MusicTogetherViewModel
+import io.github.yueby.musictogether.ui.designsystem.AppScaffold
+import io.github.yueby.musictogether.ui.designsystem.AppModalBottomSheet
 import io.github.yueby.musictogether.ui.player.MinimizedPlayerBar
 import io.github.yueby.musictogether.ui.player.PlayerMinimizeTransitionHost
 
@@ -64,7 +61,7 @@ fun MusicTogetherApp(viewModel: MusicTogetherViewModel) {
         syncHapticFeedbackSetting(state.hapticFeedbackEnabled)
     }
 
-    Scaffold { padding ->
+    AppScaffold { padding ->
         Box(Modifier.fillMaxSize()) {
             val showHome = state.room == null || playerMinimized
             val room = state.room
@@ -79,23 +76,21 @@ fun MusicTogetherApp(viewModel: MusicTogetherViewModel) {
                             state = state,
                             contentPadding = padding,
                             viewModel = viewModel,
-                            bottomContentPadding = if (playerMinimized) 76.dp else 0.dp,
                             onOpenPlayer = { playerMinimized = false },
+                            bottomAccessory = room?.takeIf { playerMinimized }?.let { activeRoom ->
+                                { blurBackdrop, compact ->
+                                    MinimizedPlayerBar(
+                                        track = player.track ?: activeRoom.currentTrack,
+                                        player = player,
+                                        viewModel = viewModel,
+                                        onExpand = { playerMinimized = false },
+                                        onOpenQueue = { homeQueueVisible = true },
+                                        blurBackdrop = blurBackdrop,
+                                        compact = compact,
+                                    )
+                                }
+                            },
                         )
-                        room?.takeIf { playerMinimized }?.let { activeRoom ->
-                            MinimizedPlayerBar(
-                                track = player.track ?: activeRoom.currentTrack,
-                                player = player,
-                                viewModel = viewModel,
-                                onExpand = { playerMinimized = false },
-                                onOpenQueue = { homeQueueVisible = true },
-                                modifier = Modifier
-                                    .align(Alignment.BottomCenter)
-                                    .padding(
-                                        bottom = padding.calculateBottomPadding() + LobbyNavigationDefaults.Height,
-                                    ),
-                            )
-                        }
                     }
                 },
                 playerContent = {
@@ -114,7 +109,7 @@ fun MusicTogetherApp(viewModel: MusicTogetherViewModel) {
             )
 
             state.room?.takeIf { playerMinimized && homeQueueVisible }?.let { room ->
-                ModalBottomSheet(onDismissRequest = { homeQueueVisible = false }) {
+                AppModalBottomSheet(onDismissRequest = { homeQueueVisible = false }) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()

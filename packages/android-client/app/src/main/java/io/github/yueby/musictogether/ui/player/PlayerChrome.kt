@@ -7,6 +7,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,12 +21,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -175,13 +172,42 @@ internal fun PlayerVotePrompt(
                     )
                 }
             } else {
-                TextButton(onClick = { onCastVote(false) }) {
-                    Text("反对", color = Color.White.copy(alpha = 0.68f), fontSize = 12.sp)
-                }
-                FilledTonalButton(onClick = { onCastVote(true) }) {
-                    Text("同意", fontSize = 12.sp)
-                }
+                PlayerVoteActionButton(
+                    label = "反对",
+                    primary = false,
+                    onClick = { onCastVote(false) },
+                )
+                PlayerVoteActionButton(
+                    label = "同意",
+                    primary = true,
+                    onClick = { onCastVote(true) },
+                )
             }
         }
+    }
+}
+
+@Composable
+private fun PlayerVoteActionButton(
+    label: String,
+    primary: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                if (primary) Color.White.copy(alpha = 0.92f) else Color.White.copy(alpha = 0.08f),
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 9.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            color = if (primary) Color.Black else Color.White.copy(alpha = 0.76f),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
     }
 }

@@ -48,11 +48,12 @@ internal fun LocalMusicPane(
     state: AppState,
     viewModel: MusicTogetherViewModel,
     onBack: () -> Unit,
+    showHeader: Boolean = true,
 ) {
     val player by viewModel.playerState.collectAsStateWithLifecycle()
     val library = state.offlineLibrary
     Column(Modifier.fillMaxSize()) {
-        Row(
+        if (showHeader) Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {

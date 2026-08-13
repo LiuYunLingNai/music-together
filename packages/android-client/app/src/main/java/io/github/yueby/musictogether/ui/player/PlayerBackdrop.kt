@@ -35,6 +35,7 @@ import androidx.palette.graphics.Palette
 import coil3.BitmapImage
 import coil3.compose.AsyncImage
 import io.github.yueby.musictogether.ui.rememberBackdropImageRequest
+import io.github.yueby.musictogether.ui.designsystem.LocalPlayerDisplaySettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -58,6 +59,7 @@ internal fun PlayerBackdrop(
     shortestSide: Dp,
     modifier: Modifier = Modifier,
 ) {
+    val displaySettings = LocalPlayerDisplaySettings.current
     val context = LocalContext.current
     val activityManager = remember(context) {
         context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
@@ -65,7 +67,7 @@ internal fun PlayerBackdrop(
     val powerManager = remember(context) {
         context.getSystemService(Context.POWER_SERVICE) as PowerManager
     }
-    val motionEnabled =
+    val motionEnabled = displaySettings.backgroundMotion &&
         ValueAnimator.areAnimatorsEnabled() &&
             !activityManager.isLowRamDevice &&
             !powerManager.isPowerSaveMode
@@ -76,7 +78,7 @@ internal fun PlayerBackdrop(
         label = "player-backdrop-scale",
     )
     val driftDistancePx = with(LocalDensity.current) {
-        (shortestSide * 0.035f).toPx()
+        (shortestSide * 0.035f * displaySettings.backgroundMotionStrength).toPx()
     }
 
     LaunchedEffect(playing, motionEnabled, motionAllowed) {
@@ -106,6 +108,7 @@ internal fun PlayerBackdrop(
             drift = { drift.value },
             driftDistancePx = driftDistancePx,
             scale = { backgroundScale.value },
+            motionStrength = displaySettings.backgroundMotionStrength,
         )
     }
 }
@@ -116,6 +119,7 @@ private fun BackdropLayer(
     drift: () -> Float,
     driftDistancePx: Float,
     scale: () -> Float,
+    motionStrength: Float,
 ) {
     var colors by remember(coverUrl) { mutableStateOf(DefaultBackdropColors) }
     val paletteScope = rememberCoroutineScope()
@@ -148,7 +152,7 @@ private fun BackdropLayer(
                         scaleY = currentScale + kotlin.math.abs(currentDrift) * 0.025f
                         translationX = currentDrift * driftDistancePx
                         translationY = -currentDrift * driftDistancePx * 0.62f
-                        rotationZ = currentDrift * 0.10f
+                        rotationZ = currentDrift * 0.10f * motionStrength
                         alpha = 0.58f
                     }
                     .blur(30.dp),

@@ -112,7 +112,7 @@
 
 ## 5. 本地验证
 
-构建需要 JDK 17 至 21 和 Android SDK 36。常用命令如下：
+构建需要 JDK 17 至 21 和 Android SDK 37.0。应用仍以 Android 16（API 36）为目标版本；较高的编译 SDK 用于满足 MIUIX 组件的构建要求，不代表提高运行门槛。常用命令如下：
 
 ```powershell
 cd packages/android-client

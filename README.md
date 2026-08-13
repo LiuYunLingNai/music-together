@@ -13,10 +13,12 @@ Music Together 的原生 Android 客户端，使用 Kotlin、Jetpack Compose、O
 - 网易云音乐、QQ 音乐、酷狗音乐搜索、歌单与平台账号
 - 服务器账号、头像、密码和管理员功能
 - 逐词歌词、横竖屏布局和 Android 媒体通知
+- Material 3 / MIUIX 双视觉体系与分级设置页；MIUIX 可选实时模糊悬浮底栏，Material 3 保持标准导航
+- 可调歌词字号、字重、焦点位置、翻译/音译、动画效果与流体背景强度
 
 ## 构建
 
-需要 JDK 17-21（推荐 Android Studio 内置 JBR）和 Android SDK 36。
+需要 JDK 17-21（推荐 Android Studio 内置 JBR）和 Android SDK 37.0。应用的 `targetSdk` 仍为 36。
 
 ```powershell
 cd packages/android-client
