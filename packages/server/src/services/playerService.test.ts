@@ -45,6 +45,7 @@ function room(): RoomData {
     queue: [track],
     currentTrack: track,
     playState: { isPlaying: true, currentTime: 10, serverTimestamp: Date.now(), revision: 0 },
+    pendingPlayback: null,
     playMode: 'loop-all',
   }
 }
@@ -268,6 +269,29 @@ describe('playerService state transitions', () => {
     expect(validateConductorReport('ROOM01', 1, 10)).toBe(false)
     expect(validateConductorReport('ROOM01', 1, 10)).toBe(false)
     expect(validateConductorReport('ROOM01', 9, 10)).toBe(true)
+  })
+
+  it('allows legitimate long seeks when track duration metadata is missing', () => {
+    const data = room()
+    data.currentTrack = { ...track, duration: 0 }
+    roomRepo.set('ROOM01', data)
+    const { io } = ioMock()
+
+    seekTrack(io as never, 'ROOM01', 7_200)
+
+    expect(data.pendingPlayback?.playState.currentTime).toBe(7_200)
+  })
+
+  it('ignores non-finite or negative seeks', () => {
+    const data = room()
+    roomRepo.set('ROOM01', data)
+    const { io } = ioMock()
+
+    seekTrack(io as never, 'ROOM01', Number.NaN)
+    seekTrack(io as never, 'ROOM01', Number.POSITIVE_INFINITY)
+    seekTrack(io as never, 'ROOM01', -1)
+
+    expect(data.pendingPlayback).toBeNull()
   })
 
   it('clamps a joining client scheduled position to the track duration', async () => {

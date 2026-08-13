@@ -78,9 +78,25 @@ function reconcileRoomRoles(room: RoomData): boolean {
 }
 
 /**
+ * Re-anchor the committed playback state to the server clock so that a newly
+ * elected conductor's first progress report is validated against a fresh
+ * estimate instead of the previous conductor's (possibly skewed) time axis.
+ * Only mutates the time anchor — `revision` is an action generation marker and
+ * must stay unchanged when the conductor socket changes without a new action.
+ */
+function refreshPlaybackAnchor(room: RoomData): void {
+  if (!room.playState.isPlaying) return
+  room.playState = {
+    ...room.playState,
+    currentTime: estimateCurrentTime(room.id),
+    serverTimestamp: Date.now(),
+  }
+}
+
+/**
  * 从在线用户中选出当前房主（同时承担播放同步 conductor 职责）。
  * 优先级：owner > admin（含临时接管者）> member（按加入顺序）。
- * 若当前房主变更且正在播放，刷新 playState 时间戳以确保
+ * 若当前房主或 conductor Socket 变更且正在播放，刷新 playState 时间戳以确保
  * 新 conductor 的首次 report 不被 validateConductorReport 拒绝。
  */
 function electConductor(room: RoomData, preferredSocketId?: string): boolean {
@@ -111,6 +127,12 @@ function electConductor(room: RoomData, preferredSocketId?: string): boolean {
       }
     }
     return true
+  }
+  if (conductorChanged) {
+    // Same host, different socket (tab / device switch): the anchor must move
+    // to the server clock for the new conductor's reports, without bumping
+    // revision — no new action was scheduled.
+    refreshPlaybackAnchor(room)
   }
   return conductorChanged
 }
@@ -238,6 +260,10 @@ export function leaveRoom(
     const conductorChanged = room.conductorSocketId === socketId
     if (conductorChanged) {
       room.conductorSocketId = roomRepo.getSocketIdForUser(roomId, userId)
+      // The successor socket takes over the conductor role immediately —
+      // refresh the playback anchor so its first report is not rejected
+      // against an estimate anchored on the departed socket's time axis.
+      refreshPlaybackAnchor(room)
     }
     logger.info(`Stale disconnect for user ${userId} in room ${roomId} — newer socket exists`, { roomId })
     return { roomId, user, room, hostChanged: conductorChanged, roleChanged: false, staleSocketOnly: true }

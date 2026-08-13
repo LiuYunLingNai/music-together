@@ -27,3 +27,32 @@ export function getSyncExpectedPosition(
   )
   return currentTime + networkDelaySeconds
 }
+
+/** Whether a drift reading (seconds) is inside the dead zone, i.e. settled. */
+export function isDriftSettled(driftAbsSeconds: number, deadZoneMs: number): boolean {
+  return driftAbsSeconds < deadZoneMs / 1000
+}
+
+/**
+ * Adaptive sync-request interval with hysteresis: the slow interval is only
+ * used while media is playing AND several consecutive settled readings were
+ * observed; a pause or any fresh drift re-arms the fast interval.
+ */
+export function getSyncRequestIntervalMs(
+  isPlaying: boolean,
+  lowDriftStreak: number,
+  fastIntervalMs: number,
+  idleIntervalMs: number,
+  slowdownConfirmCount: number,
+): number {
+  if (!isPlaying || lowDriftStreak < slowdownConfirmCount) return fastIntervalMs
+  return idleIntervalMs
+}
+
+/** Whether a fresh unsettled reading invalidates an already scheduled slow poll. */
+export function shouldRearmSyncRequest(
+  wasLowDrift: boolean,
+  isSettled: boolean,
+): boolean {
+  return wasLowDrift && !isSettled
+}

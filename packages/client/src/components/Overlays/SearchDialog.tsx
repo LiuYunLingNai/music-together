@@ -294,9 +294,9 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                             className="hover:bg-accent flex w-full min-w-0 items-center gap-3 overflow-hidden rounded-lg p-2 text-left transition-colors"
                             onClick={() => handleSelectAlbum(album)}
                           >
-                            {album.cover ? (
+                            {album.thumbnailCover ?? album.cover ? (
                               <img
-                                src={album.cover}
+                                src={album.thumbnailCover ?? album.cover}
                                 alt={album.name}
                                 className="h-12 w-12 shrink-0 rounded-md object-cover"
                                 loading="lazy"

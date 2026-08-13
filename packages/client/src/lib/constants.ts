@@ -17,8 +17,14 @@ export const CONDUCTOR_REPORT_FAST_INTERVAL_MS = 2_000
 /** Duration (ms) of the fast conductor reporting phase after a new track starts */
 export const CONDUCTOR_REPORT_FAST_DURATION_MS = 10_000
 
-/** Interval for client-initiated sync requests (drift correction) */
+/** Interval for client-initiated sync requests (drift correction) — fast */
 export const SYNC_REQUEST_INTERVAL_MS = 2_000
+
+/** Slow sync-request interval (ms) used while drift is consistently settled */
+export const SYNC_REQUEST_IDLE_INTERVAL_MS = 5_000
+
+/** Consecutive in-dead-zone sync responses required before slowing requests */
+export const SYNC_REQUEST_SLOWDOWN_CONFIRM_COUNT = 2
 
 /** Drift threshold (ms) before hard-seeking to correct position.
  * Native HTML5 media seeks may flush decoder buffers on mobile, so only
