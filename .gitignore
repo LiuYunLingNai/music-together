@@ -13,3 +13,5 @@ Thumbs.db
 .trae
 /.sanshu-memory
 /packages/server/data/
+/data/
+/backups/

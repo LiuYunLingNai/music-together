@@ -27,6 +27,14 @@ export interface AudioProxyPolicy {
   kugouForceProxy: boolean
 }
 
+/** Server administrator-managed automatic backup schedule. */
+export interface BackupSettings {
+  enabled: boolean
+  cleanupEnabled: boolean
+  intervalHours: number
+  retentionDays: number
+}
+
 export type ColorPreset = 'gold' | 'ocean' | 'rose' | 'violet' | 'sunset' | 'mint' | 'mono'
 
 /** Administrator-managed background shared by the lobby and every room page. */

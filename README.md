@@ -190,7 +190,8 @@ docker run -d --name music-together --restart unless-stopped \
   -e SERVER_ADMIN_IDS=服务器管理员ID(多个用英文逗号分隔) \
   -e QQ_MUSIC_API_KEY='你的 QQ_MUSIC_API_KEY' \
   -e QQ_MUSIC_API_URL='API url' \
-  -v 填入本地存放数据路径:/app/data \
+  -v 本地存放数据目录:/app/data \
+  -v 本地备份目录:/app/backups \
   ghcr.io/liuyunlingnai/music-together:latest
 ```
 
@@ -202,11 +203,12 @@ docker run -d --name music-together --restart unless-stopped \
   -e SERVER_ADMIN_IDS=服务器管理员ID(多个用英文逗号分隔) \
   -e QQ_MUSIC_API_KEY='你的 QQ_MUSIC_API_KEY' \
   -e QQ_MUSIC_API_URL='API url' \
-  -v 填入本地存放数据路径:/app/data \
+  -v 本地存放数据目录:/app/data \
+  -v 本地备份目录:/app/backups \
   ghcr.nju.edu.cn/liuyunlingnai/music-together:latest
 ```
 
-> 本地数据存放路径主要用于存放账号等内容，如果未映射路径则容器重启后数据会丢失
+> 将 `/srv/music-together` 替换为宿主机实际路径。`data/` 保存数据库、头像和背景图，`backups/` 保存自动备份；两个目录都需要挂载，否则容器替换后对应内容会丢失。
 
 > `QQ_MUSIC_API_URL` 为QQ音乐搜索功能的API，如果未填写则使用原生搜索方式(可能会存在风控可能)
 
@@ -220,6 +222,8 @@ docker run -d --name music-together --restart unless-stopped \
 docker run -d --name music-together --restart unless-stopped \
   -p 3001:3001 \
   -e CLIENT_URL=https://music.example.com \
+  -v 本地存放数据目录:/app/data \
+  -v 本地备份目录:/app/backups \
   ghcr.io/liuyunlingnai/music-together:latest
 ```
 
@@ -255,6 +259,12 @@ codex/windows-native-client
 - [服务端与 Web 架构文档](docs/PROJECT_ARCHITECTURE.md)
 - [Android 客户端 README](https://github.com/LiuYunLingNai/music-together/tree/codex/android-native-client/packages/android-client)
 - [Windows 桌面客户端 README](https://github.com/LiuYunLingNai/music-together/tree/codex/windows-native-client)
+
+## 自动备份
+
+启用自动备份后，服务启动时会立即创建一份备份，之后默认每 24 小时再次备份。新安装默认关闭自动备份；每份备份包含根目录 `.env`、在线 SQLite 数据库快照，以及数据库数据目录里的其他文件。备份写入 `backups/`，并自动删除 7 天前的备份。
+
+服务器管理员可在“设置 -> 服务器管理 -> 备份”中直接修改开关、备份间隔、保留天数和定期清理开关，保存后即时生效，无需修改环境变量或重启。关闭定期清理后仍会创建备份，但不会自动删除旧备份。备份目录固定为项目根目录的 `backups/`；Docker 部署时，也应将该目录挂载到宿主机，否则替换容器后备份会丢失。
 
 ## 协议
 

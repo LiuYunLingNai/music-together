@@ -9,8 +9,8 @@ import { useSocketEvent } from '@/hooks/useSocketEvent'
 import { requestJson } from '@/lib/identityAuth'
 import { useAccountStore } from '@/stores/accountStore'
 import { SERVER_URL } from '@/lib/config'
-import { EVENTS, type AudioProxyPolicy, type ColorPreset, type GlobalBackgroundSettings } from '@music-together/shared'
-import { DoorClosed, ImagePlus, Link2, Loader2, Network, RefreshCw, Trash2, Upload, Users, X } from 'lucide-react'
+import { EVENTS, type AudioProxyPolicy, type BackupSettings, type ColorPreset, type GlobalBackgroundSettings } from '@music-together/shared'
+import { Archive, DoorClosed, ImagePlus, Link2, Loader2, Network, RefreshCw, Trash2, Upload, Users, X } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { SettingRow } from './SettingRow'
@@ -44,6 +44,12 @@ export function AdminSection() {
   const [audioProxyPolicy, setAudioProxyPolicy] = useState<AudioProxyPolicy>({
     kugouForceProxy: true,
   })
+  const [backupSettings, setBackupSettings] = useState<BackupSettings>({
+    enabled: false,
+    cleanupEnabled: true,
+    intervalHours: 24,
+    retentionDays: 7,
+  })
   const [globalBackground, setGlobalBackground] = useState<GlobalBackgroundSettings>({
     backgroundUrl: null,
     glassOverlay: false,
@@ -55,22 +61,25 @@ export function AdminSection() {
   const [loading, setLoading] = useState(true)
   const [workingId, setWorkingId] = useState<string | null>(null)
   const [updatingProxyPolicy, setUpdatingProxyPolicy] = useState(false)
+  const [updatingBackupSettings, setUpdatingBackupSettings] = useState(false)
   const [updatingBackground, setUpdatingBackground] = useState(false)
   const [backgroundUrlInput, setBackgroundUrlInput] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [userData, roomData, proxyPolicy, background] = await Promise.all([
+      const [userData, roomData, proxyPolicy, background, backups] = await Promise.all([
         requestJson<{ users: AdminUser[] }>('/api/admin/users'),
         requestJson<{ rooms: AdminRoom[] }>('/api/admin/rooms'),
         requestJson<AudioProxyPolicy>('/api/admin/audio-proxy-policy'),
         requestJson<GlobalBackgroundSettings>('/api/admin/background'),
+        requestJson<BackupSettings>('/api/admin/backup-settings'),
       ])
       setUsers(userData.users)
       setRooms(roomData.rooms)
       setAudioProxyPolicy(proxyPolicy)
       setGlobalBackground(background)
+      setBackupSettings(backups)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '管理员数据加载失败')
     } finally {
@@ -97,6 +106,23 @@ export function AdminSection() {
       toast.error(error instanceof Error ? error.message : '音频代理策略更新失败')
     } finally {
       setUpdatingProxyPolicy(false)
+    }
+  }
+
+  const updateBackupSettings = async (patch: Partial<BackupSettings>) => {
+    setUpdatingBackupSettings(true)
+    try {
+      const settings = await requestJson<BackupSettings>('/api/admin/backup-settings', {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      })
+      setBackupSettings(settings)
+      toast.success('备份设置已更新')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '备份设置更新失败')
+      await load()
+    } finally {
+      setUpdatingBackupSettings(false)
     }
   }
 
@@ -304,7 +330,7 @@ export function AdminSection() {
       </div>
 
       <Tabs defaultValue="users">
-        <TabsList className="w-full">
+      <TabsList className="w-full overflow-x-auto">
           <TabsTrigger value="users">
             <Users />
             账号
@@ -320,6 +346,10 @@ export function AdminSection() {
           <TabsTrigger value="proxy">
             <Network />
             代理
+          </TabsTrigger>
+          <TabsTrigger value="backup">
+            <Archive />
+            备份
           </TabsTrigger>
         </TabsList>
 
@@ -594,6 +624,72 @@ export function AdminSection() {
                 </SettingRow>
               </div>
             </>
+          )}
+        </TabsContent>
+
+        <TabsContent value="backup" className="rounded-md border">
+          {loading ? (
+            <div className="flex h-24 items-center justify-center">
+              <Loader2 className="h-5 w-5 animate-spin" />
+            </div>
+          ) : (
+            <div className="divide-y px-3">
+              <SettingRow label="自动备份" description="服务器启动后立即备份，随后按设定间隔继续执行。">
+                <Switch
+                  checked={backupSettings.enabled}
+                  disabled={updatingBackupSettings}
+                  onCheckedChange={(enabled) => void updateBackupSettings({ enabled })}
+                  aria-label="自动备份"
+                />
+              </SettingRow>
+              <SettingRow label="备份间隔" description="每隔多少小时创建一次备份。">
+                <Input
+                  type="number"
+                  min={1}
+                  max={24 * 365}
+                  className="h-8 w-24 text-right tabular-nums"
+                  value={backupSettings.intervalHours}
+                  disabled={updatingBackupSettings}
+                  onChange={(event) => {
+                    const value = event.currentTarget.valueAsNumber
+                    if (Number.isFinite(value)) {
+                      setBackupSettings((current) => ({ ...current, intervalHours: Math.min(24 * 365, Math.max(1, value)) }))
+                    }
+                  }}
+                  onBlur={() => void updateBackupSettings({ intervalHours: backupSettings.intervalHours })}
+                  aria-label="备份间隔（小时）"
+                />
+              </SettingRow>
+              <SettingRow label="保留天数" description="超过此天数的备份会自动删除。">
+                <Input
+                  type="number"
+                  min={1}
+                  max={3650}
+                  className="h-8 w-24 text-right tabular-nums"
+                  value={backupSettings.retentionDays}
+                  disabled={updatingBackupSettings}
+                  onChange={(event) => {
+                    const value = event.currentTarget.valueAsNumber
+                    if (Number.isFinite(value)) {
+                      setBackupSettings((current) => ({ ...current, retentionDays: Math.min(3650, Math.max(1, value)) }))
+                    }
+                  }}
+                  onBlur={() => void updateBackupSettings({ retentionDays: backupSettings.retentionDays })}
+                  aria-label="备份保留天数"
+                />
+              </SettingRow>
+              <SettingRow label="定期清理备份" description="关闭后仍会创建备份，但不会自动删除旧备份。">
+                <Switch
+                  checked={backupSettings.cleanupEnabled}
+                  disabled={updatingBackupSettings}
+                  onCheckedChange={(cleanupEnabled) => void updateBackupSettings({ cleanupEnabled })}
+                  aria-label="定期清理备份"
+                />
+              </SettingRow>
+              <p className="py-3 text-xs leading-relaxed text-muted-foreground">
+                备份保存到服务器项目根目录的 backups 文件夹，包含 .env、数据库快照和附件文件。
+              </p>
+            </div>
           )}
         </TabsContent>
       </Tabs>

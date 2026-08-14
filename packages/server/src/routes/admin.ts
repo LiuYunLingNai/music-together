@@ -8,9 +8,11 @@ import type { TypedServer } from '../middleware/types.js'
 import { roomRepo } from '../repositories/roomRepository.js'
 import { userRepo } from '../repositories/userRepository.js'
 import { audioProxyPolicyRepo } from '../repositories/audioProxyPolicyRepository.js'
+import { backupSettingsRepo } from '../repositories/backupSettingsRepository.js'
 import { globalBackgroundRepo } from '../repositories/globalBackgroundRepository.js'
 import { databasePath } from '../repositories/database.js'
 import { destroyRoom } from '../services/roomLifecycleService.js'
+import { refreshBackupScheduler } from '../services/backupService.js'
 import { logger } from '../utils/logger.js'
 import { EVENTS } from '@music-together/shared'
 
@@ -42,6 +44,22 @@ const resetPasswordSchema = z.object({
 const audioProxyPolicyPatchSchema = z.object({
   kugouForceProxy: z.boolean(),
 })
+
+const backupSettingsPatchSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    cleanupEnabled: z.boolean().optional(),
+    intervalHours: z.number().int().min(1).max(24 * 365).optional(),
+    retentionDays: z.number().int().min(1).max(3650).optional(),
+  })
+  .refine(
+    (value) =>
+      value.enabled !== undefined ||
+      value.cleanupEnabled !== undefined ||
+      value.intervalHours !== undefined ||
+      value.retentionDays !== undefined,
+    { message: 'No backup setting was provided' },
+  )
 
 const backgroundSourceSchema = z
   .object({
@@ -97,6 +115,33 @@ export function createAdminRoutes(io: TypedServer): Router {
       ...policy,
     })
     res.json(policy)
+  })
+
+  router.get('/backup-settings', (req, res) => {
+    const settings = backupSettingsRepo.get()
+    logger.info('Server administrator viewed backup settings', {
+      event: 'admin.backup_settings_viewed',
+      ...auditContext(req),
+    })
+    res.json(settings)
+  })
+
+  router.patch('/backup-settings', (req, res) => {
+    const parsed = backupSettingsPatchSchema.safeParse(req.body)
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid backup settings' })
+      return
+    }
+
+    const previous = backupSettingsRepo.get()
+    const settings = backupSettingsRepo.update(parsed.data)
+    refreshBackupScheduler(!previous.enabled && settings.enabled)
+    logger.info('Server administrator updated backup settings', {
+      event: 'admin.backup_settings_updated',
+      ...auditContext(req),
+      ...settings,
+    })
+    res.json(settings)
   })
 
   router.get('/background', (req, res) => {

@@ -55,7 +55,11 @@ Docker 容器 (:3001)
 
 ```bash
 # 启动应用容器
-docker run -d --name music-together --restart unless-stopped -p 3001:3001 ghcr.io/<owner>/music-together:latest
+docker run -d --name music-together --restart unless-stopped \
+  -p 3001:3001 \
+  -v /srv/music-together/data:/app/data \
+  -v /srv/music-together/backups:/app/backups \
+  ghcr.io/<owner>/music-together:latest
 
 # 启动 Watchtower 自动更新
 docker run -d --name watchtower --restart unless-stopped \
@@ -63,5 +67,11 @@ docker run -d --name watchtower --restart unless-stopped \
   -e WATCHTOWER_CLEANUP=true \
   containrrr/watchtower --interval 300 music-together
 ```
+
+## 自动备份
+
+启用自动备份后，服务进程启动时立即创建一份在线 SQLite 快照，并在运行期间按配置继续定时备份。新安装默认关闭自动备份；每份备份包含根目录 `.env`、数据库快照和数据库同级的其他数据文件，默认写入 `backups/` 并保留 7 天。
+
+服务器管理员可在“设置 -> 服务器管理 -> 备份”中更改开关、间隔、保留天数和定期清理开关，保存后立即生效，无需设置环境变量或重启进程。关闭定期清理后仍会创建备份，但不会自动删除旧备份。备份目录固定为项目根目录的 `backups/`。Docker 部署时，需要将该目录挂载到宿主机。
 
 如使用 1Panel，创建反向代理网站指向 `127.0.0.1:3001`，启用 WebSocket 和 HTTPS。

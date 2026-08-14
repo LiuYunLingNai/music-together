@@ -23,6 +23,7 @@ import {
   startTencentCredentialRefreshScheduler,
   stopTencentCredentialRefreshScheduler,
 } from './services/tencentCredentialRefreshService.js'
+import { startBackupScheduler, stopBackupScheduler } from './services/backupService.js'
 import { logger } from './utils/logger.js'
 import { databasePath } from './repositories/database.js'
 
@@ -116,6 +117,7 @@ httpServer.on('error', (err: NodeJS.ErrnoException) => {
 })
 
 httpServer.listen(config.port, () => {
+  startBackupScheduler()
   logger.info(`服务器已启动，监听端口 ${config.port}`, {
     event: 'server.started',
     port: config.port,
@@ -134,6 +136,7 @@ function shutdown(signal: string) {
   logger.info(`收到 ${signal} 信号，正在安全关闭服务器……`)
   clearInterval(playbackPersistenceTimer)
   stopTencentCredentialRefreshScheduler(tencentCredentialRefreshTimer)
+  stopBackupScheduler()
   playerService.persistPlaybackSnapshots()
   clearAllTimers()
   io.close(() => {
