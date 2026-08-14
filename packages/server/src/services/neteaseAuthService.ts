@@ -3,6 +3,22 @@ import type { Playlist } from '@music-together/shared'
 import type { GetUserInfoResult } from './authProvider.js'
 import { logger } from '../utils/logger.js'
 
+const NETEASE_TIMEOUT_MS = 15_000
+
+async function withTimeout<T>(promise: Promise<T>): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), NETEASE_TIMEOUT_MS)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 interface NeteaseVipInfoApi {
   vip_info_v2(params: { uid: number; cookie: string; timestamp: number }): Promise<{
     body?: { data?: Record<string, unknown> }
@@ -65,14 +81,14 @@ export function parseNeteaseMembership(
  */
 export async function generateQrCode(): Promise<{ key: string; qrimg: string } | null> {
   try {
-    const keyRes = await ncmApi.login_qr_key({ timestamp: Date.now() })
+    const keyRes = await withTimeout(ncmApi.login_qr_key({ timestamp: Date.now() }))
     const key = keyRes?.body?.data?.unikey
     if (!key) {
       logger.error('Netease QR: failed to get unikey', keyRes?.body)
       return null
     }
 
-    const qrRes = await ncmApi.login_qr_create({ key, qrimg: true, timestamp: Date.now() })
+    const qrRes = await withTimeout(ncmApi.login_qr_create({ key, qrimg: true, timestamp: Date.now() }))
     const qrimg = qrRes?.body?.data?.qrimg
     if (!qrimg) {
       logger.error('Netease QR: failed to generate QR image', qrRes?.body)
@@ -97,7 +113,7 @@ export async function checkQrStatus(key: string): Promise<{
   cookie?: string
 }> {
   try {
-    const res = await ncmApi.login_qr_check({ key, timestamp: Date.now() })
+    const res = await withTimeout(ncmApi.login_qr_check({ key, timestamp: Date.now() }))
     const code = res?.body?.code ?? 800
     const cookie = res?.body?.cookie
 
@@ -129,7 +145,11 @@ export async function checkQrStatus(key: string): Promise<{
  */
 export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
   try {
-    const res = await ncmApi.login_status({ cookie, timestamp: Date.now() })
+    const res = await withTimeout(ncmApi.login_status({ cookie, timestamp: Date.now() }))
+    if (!res) {
+      logger.warn('Netease cookie validation timed out')
+      return { ok: false, reason: 'error' }
+    }
     const profile = res?.body?.data?.profile
 
     if (!profile) {
@@ -141,7 +161,9 @@ export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
     let vipData: Record<string, unknown> | undefined
     try {
       const vipInfoApi = ncmApi as unknown as NeteaseVipInfoApi
-      const vipRes = await vipInfoApi.vip_info_v2({ uid: Number(profile.userId ?? 0), cookie, timestamp: Date.now() })
+      const vipRes = await withTimeout(
+        vipInfoApi.vip_info_v2({ uid: Number(profile.userId ?? 0), cookie, timestamp: Date.now() }),
+      )
       vipData = vipRes?.body?.data
     } catch (err) {
       // Membership detail failure must not invalidate an otherwise valid login.
@@ -182,13 +204,15 @@ export async function getUserPlaylists(cookie: string): Promise<Playlist[]> {
 
     const userInfo = result.data
 
-    const res = await ncmApi.user_playlist({
-      uid: userInfo.userId,
-      limit: 50,
-      offset: 0,
-      cookie,
-      timestamp: Date.now(),
-    })
+    const res = await withTimeout(
+      ncmApi.user_playlist({
+        uid: userInfo.userId,
+        limit: 50,
+        offset: 0,
+        cookie,
+        timestamp: Date.now(),
+      }),
+    )
 
     const playlists = res?.body?.playlist
     if (!Array.isArray(playlists)) {

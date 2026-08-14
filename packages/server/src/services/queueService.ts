@@ -1,6 +1,7 @@
 import type { PlayMode, Track } from '@music-together/shared'
 import { LIMITS } from '@music-together/shared'
 import { roomRepo } from '../repositories/roomRepository.js'
+import { getSuccessorAfterRemovalFromQueue } from './queueNavigation.js'
 
 export function addTrack(roomId: string, track: Track): boolean {
   const room = roomRepo.get(roomId)
@@ -50,6 +51,13 @@ export function removeTrack(roomId: string, trackId: string): void {
     room.queue = room.queue.filter((t) => t.id !== trackId)
     roomRepo.persist(roomId)
   }
+}
+
+/** Select the successor before removing the current entry, so its index is not lost. */
+export function getSuccessorAfterRemoval(roomId: string, trackId: string, playMode?: PlayMode): Track | null {
+  const room = roomRepo.get(roomId)
+  if (!room) return null
+  return getSuccessorAfterRemovalFromQueue(room.queue, trackId, playMode ?? room.playMode)
 }
 
 export function clearQueue(roomId: string): void {

@@ -1,6 +1,4 @@
 import Meting from '@meting/core'
-import { get as kugouLrcGet, Format } from '@s4p/kugou-lrc'
-import type { KrcInfo } from '@s4p/kugou-lrc'
 import type {
   AudioQuality,
   BilibiliStreamFormat,
@@ -31,6 +29,8 @@ import { config } from '../config.js'
 import { parseCookieString } from '../utils/cookieUtils.js'
 import { logger } from '../utils/logger.js'
 import { parseNeteaseRecommendedPlaylistPage } from './recommendationParsers.js'
+import { getCoverArtwork, normalizeHighQualityCoverUrl } from './coverArtwork.js'
+import { getKrcByHash, type KrcInfo } from './kugouLyricService.js'
 import crypto from 'node:crypto'
 import { createRequire } from 'node:module'
 
@@ -531,6 +531,7 @@ class MusicProvider {
    */
   private registerTracks(tracks: Track[]): void {
     for (const t of tracks) {
+      if (t.cover) Object.assign(t, getCoverArtwork(t.source, t.cover))
       const key = `${t.source}:${t.sourceId}`
       const existing = this.trackRegistry.get(key)
       const { id: _id, requestedBy: _rb, ...meta } = t
@@ -538,6 +539,7 @@ class MusicProvider {
         const merged: TrackMeta = {
           ...existing,
           cover: existing.cover || meta.cover,
+          thumbnailCover: existing.thumbnailCover || meta.thumbnailCover,
           duration: existing.duration || meta.duration,
           vip: existing.vip || meta.vip,
           lyricId: meta.lyricId ?? existing.lyricId,
@@ -560,6 +562,7 @@ class MusicProvider {
     const cached = this.trackRegistry.get(`${track.source}:${track.sourceId}`)
     if (!cached) return
     if (!track.cover && cached.cover) track.cover = cached.cover
+    if (track.cover) Object.assign(track, getCoverArtwork(track.source, track.cover))
     if (!track.duration && cached.duration) track.duration = cached.duration
     if (!track.vip && cached.vip) track.vip = cached.vip
   }
@@ -1398,7 +1401,7 @@ class MusicProvider {
         return result.data.body.album.list.map((album: any) => ({
           id: String(album.albumMID || album.albumID),
           name: album.albumName || 'Unknown Album',
-          cover: album.albumPic || '',
+          ...getCoverArtwork('tencent', album.albumPic || ''),
           trackCount: album.song_count || 0,
           source: 'tencent',
           creator: album.singerName || '',
@@ -1414,7 +1417,7 @@ class MusicProvider {
         return response.data.info.map((album: any) => ({
           id: String(album.albumid),
           name: album.albumname || 'Unknown Album',
-          cover: normalizeKugouCoverUrl(album.imgurl, 400),
+          ...getCoverArtwork('kugou', normalizeKugouCoverUrl(album.imgurl, 400)),
           trackCount: album.songcount || 0,
           source: 'kugou',
           creator: album.singername || '',
@@ -1440,7 +1443,7 @@ class MusicProvider {
         return albums.map((album: any) => ({
           id: String(album.id),
           name: album.name || 'Unknown Album',
-          cover: album.picUrl || album.blurPicUrl || '',
+          ...getCoverArtwork('netease', album.picUrl || album.blurPicUrl || ''),
           trackCount: album.size || 0,
           source: 'netease',
           creator: album.artist?.name || '',
@@ -1505,7 +1508,7 @@ class MusicProvider {
         return result.data.body.songlist.list.map((playlist: any) => ({
           id: String(playlist.dissid),
           name: playlist.dissname || 'Unknown Playlist',
-          cover: playlist.imgurl || '',
+          ...getCoverArtwork('tencent', playlist.imgurl || ''),
           trackCount: playlist.song_count || 0,
           source: 'tencent',
           creator: playlist.creator?.name || '',
@@ -1522,7 +1525,7 @@ class MusicProvider {
         return response.data.info.map((playlist: any) => ({
           id: String(playlist.specialid),
           name: playlist.specialname || 'Unknown Playlist',
-          cover: normalizeKugouCoverUrl(playlist.imgurl, 400),
+          ...getCoverArtwork('kugou', normalizeKugouCoverUrl(playlist.imgurl, 400)),
           trackCount: playlist.songcount || 0,
           source: 'kugou',
           creator: playlist.nickname || '',
@@ -1549,7 +1552,7 @@ class MusicProvider {
         return playlists.map((playlist: any) => ({
           id: String(playlist.id),
           name: playlist.name || 'Unknown Playlist',
-          cover: playlist.coverImgUrl || playlist.picUrl || '',
+          ...getCoverArtwork('netease', playlist.coverImgUrl || playlist.picUrl || ''),
           trackCount: playlist.trackCount || 0,
           source: 'netease',
           creator: playlist.creator?.nickname || '',
@@ -2580,7 +2583,7 @@ class MusicProvider {
         }
         // 尝试获取 KRC 逐字歌词
         try {
-          const krcInfo = await withTimeout(kugouLrcGet({ hash: lyricId, fmt: Format.krc }))
+          const krcInfo = await withTimeout(getKrcByHash(lyricId))
           if (krcInfo?.items?.length) {
             result.wordByWord = krcToAmllLines(krcInfo)
             logger.debug('已获取酷狗逐字歌词', { source: 'kugou', lyricId })
@@ -2617,8 +2620,9 @@ class MusicProvider {
     }
   }
 
-  async getCover(source: MusicSource, picId: string, size = 300): Promise<string> {
-    const cacheKey = `${source}:${picId}:${size}`
+  async getCover(source: MusicSource, picId: string, size?: number): Promise<string> {
+    const requestSize = size ?? (source === 'kugou' || source === 'kugou_concept' ? 5000 : 800)
+    const cacheKey = `${source}:${picId}:${requestSize}`
     const cached = this.coverCache.get(cacheKey)
     if (cached !== undefined) {
       return cached
@@ -2631,7 +2635,7 @@ class MusicProvider {
         return view?.cover ?? ''
       }
       const meting = this.getInstance(source === 'kugou_concept' ? 'kugou' : source)
-      const raw = await withTimeout(meting.pic(picId, size))
+      const raw = await withTimeout(meting.pic(picId, requestSize))
       if (raw === null || raw === undefined) {
         logger.warn(`Cover fetch timeout for ${source}: ${picId}`)
         return ''
@@ -2642,7 +2646,7 @@ class MusicProvider {
       } catch {
         return ''
       }
-      const url = (data.url as string) || ''
+      const url = normalizeHighQualityCoverUrl(source, (data.url as string) || '')
 
       this.coverCache.set(cacheKey, url)
       return url
@@ -3217,18 +3221,22 @@ class MusicProvider {
    * Each pic() call uses a fresh Meting instance to avoid race conditions.
    */
   private async batchResolveCover(tracks: Track[], source: MusicSource): Promise<void> {
+    for (const track of tracks) {
+      if (track.cover) Object.assign(track, getCoverArtwork(source, track.cover))
+    }
     const toResolve = tracks.filter((t) => !t.cover && t.picId)
     if (toResolve.length === 0) return
 
     // For platforms that need API calls, limit concurrency
-    const needsApiCall = source === 'kugou'
+    const needsApiCall = source === 'kugou' || source === 'kugou_concept'
     const limit = pLimit(needsApiCall ? 3 : toResolve.length)
+    const requestSize = source === 'kugou' || source === 'kugou_concept' ? 5000 : 800
 
     await Promise.allSettled(
       toResolve.map((track) =>
         limit(async () => {
           // Check cover cache first
-          const cacheKey = `${source}:${track.picId!}:300`
+          const cacheKey = `${source}:${track.picId!}:${requestSize}`
           const cached = this.coverCache.get(cacheKey)
           if (cached !== undefined) {
             track.cover = cached
@@ -3237,12 +3245,13 @@ class MusicProvider {
 
           try {
             // Fresh instance per call to avoid shared state race conditions
-            const instance = new Meting(source)
-            const raw = await instance.pic(track.picId!, 300)
+            const providerSource = source === 'kugou_concept' ? 'kugou' : source
+            const instance = new Meting(providerSource)
+            const raw = await instance.pic(track.picId!, requestSize)
             const data = JSON.parse(raw)
             if (data.url) {
-              track.cover = data.url
-              this.coverCache.set(cacheKey, data.url)
+              Object.assign(track, getCoverArtwork(source, data.url))
+              this.coverCache.set(cacheKey, track.cover)
             }
           } catch {
             // Leave cover empty — frontend shows placeholder

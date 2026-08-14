@@ -9,6 +9,10 @@ import { toast } from 'sonner'
 import { getServerTime } from '@/lib/clockSync'
 import { SERVER_URL } from '@/lib/config'
 import { attachTimeStretch, prepareDirectStreamForTimeStretch, type TimeStretchController } from '@/lib/timeStretch'
+import { setHowlPosition } from '@/lib/howlPosition'
+import { registerActivePlaybackStop } from '@/lib/audioPlaybackLifecycle'
+import { lyricPlayerBridge } from '@/lib/lyricPlayerBridge'
+import { getScheduledPlaybackPosition } from '@/lib/playbackSync'
 
 /** Max wait (ms) for Howler `unlock` event before giving up and skipping */
 const PLAY_ERROR_TIMEOUT_MS = 3000
@@ -77,9 +81,10 @@ export function useHowl(onTrackEnd: () => void) {
     const update = () => {
       if (howlRef.current && howlRef.current.playing()) {
         const now = performance.now()
+        const seekVal = howlRef.current.seek() as number
+        lyricPlayerBridge.setCurrentTime(seekVal)
         if (now - lastTimeUpdateRef.current >= CURRENT_TIME_THROTTLE_MS) {
           lastTimeUpdateRef.current = now
-          const seekVal = howlRef.current.seek() as number
           usePlayerStore.getState().setCurrentTime(seekVal)
 
           // Stalled detection: if currentTime hasn't moved for STALLED_TIMEOUT_MS
@@ -286,10 +291,13 @@ export function useHowl(onTrackEnd: () => void) {
 
           const scheduledStart = scheduledStartRef.current
           if (scheduledStart?.howl === howl) {
-            const lateBy = Math.max(0, (getServerTime() - scheduledStart.executeAt) / 1000)
-            const alignedTime = scheduledStart.targetTime + lateBy
+            const alignedTime = getScheduledPlaybackPosition(
+              scheduledStart.targetTime,
+              scheduledStart.executeAt,
+              getServerTime(),
+            )
             howl.volume(0, soundId)
-            howl.seek(alignedTime, soundId)
+            setHowlPosition(howl, alignedTime, soundId)
             usePlayerStore.getState().setCurrentTrack(track)
             usePlayerStore.getState().setCurrentTime(alignedTime)
             const duration = howl.duration()
@@ -426,6 +434,8 @@ export function useHowl(onTrackEnd: () => void) {
       }
     }
   }, [stopPlayback])
+
+  useEffect(() => registerActivePlaybackStop(stopPlayback), [stopPlayback])
 
   const setPlaybackTempo = useCallback((tempo: number) => {
     stretchRef.current?.setTempo(tempo)

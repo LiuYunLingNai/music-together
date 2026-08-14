@@ -8,13 +8,14 @@
 Docker 容器 (:3001)
 ├── / 静态文件        → client/dist（Vite 产物）
 ├── /api/*           → REST API
-└── /socket.io/*     → WebSocket
+└── /ws              → 原生 WebSocket JSON 事件协议
 ```
 
 ## CI/CD 流程
 
-1. **push 到 main** → GitHub Actions 构建 Docker 镜像 → 推送到 GHCR（`ghcr.io`）
-2. **服务器上** Watchtower 每 5 分钟检查镜像更新 → 自动拉取并重启容器
+1. **Pull Request / push** → 安装冻结依赖、运行服务端与 Vitest 测试、shared/client 类型检查、lint、完整构建和生产依赖审计
+2. **仅 main push 且验证通过** → 构建 Docker 镜像并推送到 GHCR（`ghcr.io`）
+3. **服务器上** Watchtower 每 5 分钟检查镜像更新 → 自动拉取并重启容器
 
 零人工干预，GitHub 零额外 Secrets（使用自带的 `GITHUB_TOKEN`）。
 
@@ -23,6 +24,8 @@ Docker 容器 (:3001)
 - **阶段 1（deps）**：`pnpm install --frozen-lockfile` 安装全部依赖
 - **阶段 2（build）**：分别构建 shared、server（tsc）、client（vite build）
 - **阶段 3（production）**：仅安装 server 生产依赖（`--filter @music-together/server...`），复制构建产物
+
+生产阶段的入口脚本会先修正 `/app/data` 的属主，再通过 `su-exec` 以非 root `node` 用户启动应用。这同时兼容新建命名卷和历史上由 root 创建的绑定目录；容器通过 `/api/health` 执行健康检查。
 
 ## CORS 策略
 

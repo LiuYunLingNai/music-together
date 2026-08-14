@@ -61,10 +61,7 @@ export function GlobalBackground() {
   const resolvedUrl = resolveBackgroundUrl(backgroundUrl)
 
   useEffect(() => {
-    if (!autoTint || !resolvedUrl) {
-      setTint(null)
-      return
-    }
+    if (!autoTint || !resolvedUrl) return
 
     let cancelled = false
     const image = new Image()
@@ -111,11 +108,13 @@ export function GlobalBackground() {
     <div
       className={glassOverlay ? 'mt-global-background mt-global-background-glass' : 'mt-global-background'}
       aria-hidden="true"
-      style={{
-        backgroundImage: `url("${resolvedUrl}")`,
-        '--mt-background-brightness': backgroundBrightness / 100,
-        '--mt-auto-tint': tint ?? 'transparent',
-      } as CSSProperties}
+      style={
+        {
+          backgroundImage: `url("${resolvedUrl}")`,
+          '--mt-background-brightness': backgroundBrightness / 100,
+          '--mt-auto-tint': autoTint ? (tint ?? 'transparent') : 'transparent',
+        } as CSSProperties
+      }
     />
   )
 }

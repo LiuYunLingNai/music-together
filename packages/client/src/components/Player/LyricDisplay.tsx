@@ -1,10 +1,11 @@
 import { usePlayerStore } from '@/stores/playerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { getLyricOffsetKey } from '@/lib/lyricOffset'
+import { lyricPlayerBridge } from '@/lib/lyricPlayerBridge'
 import type { LyricLine as AMLLLyricLine } from '@applemusic-like-lyrics/core'
 import '@applemusic-like-lyrics/core/style.css'
-import { LyricPlayer } from '@applemusic-like-lyrics/react'
-import { useMemo } from 'react'
+import { LyricPlayer, type LyricPlayerRef } from '@applemusic-like-lyrics/react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 const FULL_SIZE_STYLE = { width: '100%', height: '100%' } as const
 
@@ -111,6 +112,11 @@ export function LyricDisplay() {
   const enableSpring = useSettingsStore((s) => s.lyricEnableSpring)
   const enableBlur = useSettingsStore((s) => s.lyricEnableBlur)
   const enableScale = useSettingsStore((s) => s.lyricEnableScale)
+  const hidePassedLines = useSettingsStore((s) => s.lyricHidePassedLines)
+  const showBottomLine = useSettingsStore((s) => s.lyricShowBottomLine)
+  const maskObsceneWordsMode = useSettingsStore((s) => s.lyricMaskObsceneWordsMode)
+  const maskObsceneWordChar = useSettingsStore((s) => s.lyricMaskObsceneWordChar)
+  const wordFadeWidth = useSettingsStore((s) => s.lyricWordFadeWidth)
   const fontWeight = useSettingsStore((s) => s.lyricFontWeight)
   const fontSize = useSettingsStore((s) => s.lyricFontSize)
   const translationFontSize = useSettingsStore((s) => s.lyricTranslationFontSize)
@@ -120,14 +126,58 @@ export function LyricDisplay() {
   const savedLyricOffsetMs = lyricOffsets[lyricOffsetKey ?? ''] ?? 0
   const isCalibrating = lyricOffsetPreview?.key === lyricOffsetKey
   const lyricOffsetMs = isCalibrating ? lyricOffsetPreview.offsetMs : savedLyricOffsetMs
+  const playerRef = useRef<LyricPlayerRef>(null)
+  const [lyricPlayer, setLyricPlayer] = useState<LyricPlayerRef['lyricPlayer']>()
 
   // LRC 解析（仅在没有 TTML 时使用）
   const lrcLines = useMemo(() => mergeLyrics(lyric, tlyric), [lyric, tlyric])
   const lrcAmllLines = useMemo(() => toAMLLLines(lrcLines), [lrcLines])
 
   // TTML 优先，LRC 回退
-  const amllLines = ttmlLines ?? lrcAmllLines
+  const amllLines = useMemo(() => {
+    const lines = ttmlLines ?? lrcAmllLines
+    if (!showBottomLine || !currentTrack || lines.length === 0) return lines
+
+    const lastEndTime = lines.at(-1)?.endTime ?? 0
+    const startTime = Math.max(lastEndTime + 1_200, Math.round(currentTrack.duration * 1000))
+    const endTime = startTime + 6_000
+    return [
+      ...lines,
+      {
+        words: [
+          {
+            word: currentTrack.title,
+            startTime,
+            endTime,
+            romanWord: '',
+            obscene: false,
+          },
+        ],
+        translatedLyric: currentTrack.artist.filter(Boolean).join(' / '),
+        romanLyric: '',
+        startTime,
+        endTime,
+        isBG: false,
+        isDuet: false,
+      },
+    ] satisfies AMLLLyricLine[]
+  }, [currentTrack, lrcAmllLines, showBottomLine, ttmlLines])
   const hasLyrics = ttmlLines ? ttmlLines.length > 0 : lrcLines.length > 0
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setLyricPlayer(playerRef.current?.lyricPlayer))
+    return () => cancelAnimationFrame(frame)
+  }, [hasLyrics])
+
+  useEffect(() => {
+    if (!lyricPlayer) return
+    return lyricPlayerBridge.attach(lyricPlayer)
+  }, [lyricPlayer])
+
+  useEffect(() => {
+    lyricPlayerBridge.setOffset(lyricOffsetMs)
+    lyricPlayerBridge.setCurrentTime(currentTime, isCalibrating)
+  }, [currentTime, isCalibrating, lyricOffsetMs, lyricPlayer])
 
   if (!hasLyrics) {
     return (
@@ -150,6 +200,7 @@ export function LyricDisplay() {
       }
     >
       <LyricPlayer
+        ref={playerRef}
         lyricLines={amllLines}
         currentTime={Math.max(0, Math.round(currentTime * 1000 - lyricOffsetMs))}
         playing={isPlaying}
@@ -159,6 +210,10 @@ export function LyricDisplay() {
         enableSpring={enableSpring && !isCalibrating}
         enableBlur={enableBlur}
         enableScale={enableScale}
+        hidePassedLines={hidePassedLines}
+        maskObsceneWordsMode={maskObsceneWordsMode}
+        maskObsceneWordChar={maskObsceneWordChar}
+        wordFadeWidth={wordFadeWidth}
         style={FULL_SIZE_STYLE}
       />
     </div>

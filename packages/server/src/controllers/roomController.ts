@@ -11,6 +11,7 @@ import { createWithOwnerOnly } from '../middleware/withControl.js'
 import { createWithRoom } from '../middleware/withRoom.js'
 import { cleanupSocketRateLimit } from '../middleware/socketRateLimiter.js'
 import { roomRepo } from '../repositories/roomRepository.js'
+import type { RoomData } from '../repositories/types.js'
 import { userRepo } from '../repositories/userRepository.js'
 import * as chatService from '../services/chatService.js'
 import * as authService from '../services/authService.js'
@@ -18,7 +19,30 @@ import * as playerService from '../services/playerService.js'
 import { issueRejoinTicket, revokeRejoinTickets } from '../services/rejoinTicketService.js'
 import * as roomService from '../services/roomService.js'
 import * as voteService from '../services/voteService.js'
+import { executeVoteAction } from '../services/voteActionService.js'
 import { logger } from '../utils/logger.js'
+
+async function reconcileAndBroadcastVote(io: TypedServer, roomId: string, room: RoomData): Promise<void> {
+  const result = voteService.reconcileVote(
+    roomId,
+    room.users.map((user) => user.id),
+    room.hostId,
+  )
+  if (!result) return
+  if (!result.decided) {
+    io.to(roomId).emit(EVENTS.VOTE_STARTED, voteService.toVoteState(result.vote))
+    return
+  }
+
+  const claimedVote = voteService.claimVote(roomId, result.vote.id)
+  if (!claimedVote) return
+  const executed = result.passed ? await executeVoteAction(io, roomId, claimedVote.action, claimedVote.payload) : false
+  io.to(roomId).emit(EVENTS.VOTE_RESULT, {
+    passed: result.passed && executed,
+    action: claimedVote.action,
+    reason: result.passed && !executed ? 'action_failed' : result.reason,
+  })
+}
 
 export function registerRoomController(io: TypedServer, socket: TypedSocket) {
   const withRoom = createWithRoom(io)
@@ -164,6 +188,8 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
       playerService.syncPlaybackToSocket(io, socket, roomId, updatedRoom).catch((err) => {
         logger.error('syncPlaybackToSocket failed', err, { roomId })
       })
+
+      await reconcileAndBroadcastVote(io, roomId, updatedRoom)
 
       // Send active vote state if one is in progress
       const activeVote = voteService.getActiveVote(roomId)
@@ -407,10 +433,7 @@ function handleLeave(io: TypedServer, socket: TypedSocket, reason?: string, revo
 
   // Broadcast updated vote state after threshold recalculation
   if (voteUpdated) {
-    const activeVote = voteService.getActiveVote(roomId)
-    if (activeVote) {
-      io.to(roomId).emit(EVENTS.VOTE_STARTED, voteService.toVoteState(activeVote))
-    }
+    if (room) void reconcileAndBroadcastVote(io, roomId, room)
   }
 
   // 更新大厅房间列表

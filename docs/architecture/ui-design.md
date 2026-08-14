@@ -94,7 +94,7 @@ import { Play, Pause, SkipForward, Volume2 } from 'lucide-react'
 
 ## 歌词渲染
 
-- **AMLL** (`@applemusic-like-lyrics/react`)：Apple Music 风格逐行歌词动画
+- **AMLL** (`@applemusic-like-lyrics/react`)：Apple Music 风格逐行/逐词歌词动画；歌词设置可控制渐变宽度、已播放行隐藏、敏感词遮罩和末尾歌曲信息，同时保留逐曲时间偏移校准
 - **逐词来源**：TTML 在线库（网易云/QQ）、平台原生 YRC（网易云）、平台原生 KRC（酷狗，服务端解析后以 `wordByWord` 返回）
 - **PixiJS 背景**：`BackgroundRender` 组件使用 PixiJS 渲染动态专辑封面背景
 - 歌词设置可调：对齐锚点、弹簧动画、模糊效果、缩放效果、字重、字体大小、翻译字体大小

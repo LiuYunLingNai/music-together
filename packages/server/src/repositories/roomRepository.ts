@@ -104,12 +104,14 @@ function withoutStreamUrl(track: Track): Track {
 function restorePlayState(state: PersistedRoomState): RoomData['playState'] {
   const persisted = state.playState
   const currentTime = Number(persisted?.currentTime)
+  const revision = Number(persisted?.revision)
   return {
     // A server restart cannot keep an audio stream playing. Mark the room
     // paused until the first member joins and the URL is refreshed.
     isPlaying: false,
     currentTime: Number.isFinite(currentTime) && currentTime >= 0 ? currentTime : 0,
     serverTimestamp: Date.now(),
+    revision: Number.isSafeInteger(revision) && revision >= 0 ? revision : 0,
   }
 }
 

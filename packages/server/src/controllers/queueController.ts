@@ -166,6 +166,9 @@ export function registerQueueController(io: TypedServer, socket: TypedSocket) {
       const { trackId } = parsed.data
       const removedTrack = ctx.room.queue.find((track) => track.id === trackId)
       const isCurrentTrack = ctx.room.currentTrack?.id === trackId
+      const successor = isCurrentTrack
+        ? queueService.getSuccessorAfterRemoval(ctx.roomId, trackId, ctx.room.playMode)
+        : null
 
       queueService.removeTrack(ctx.roomId, trackId)
       io.to(ctx.roomId).emit(EVENTS.QUEUE_UPDATED, { queue: ctx.room.queue })
@@ -174,7 +177,8 @@ export function registerQueueController(io: TypedServer, socket: TypedSocket) {
       // skipDebounce: removing current track must always advance, regardless
       // of how recently the last NEXT was triggered.
       if (isCurrentTrack) {
-        await playerService.playNextTrackInRoom(io, ctx.roomId, ctx.room.playMode, { skipDebounce: true })
+        if (successor) await playerService.playTrackInRoom(io, ctx.roomId, successor)
+        else playerService.stopPlayback(io, ctx.roomId)
       }
 
       logger.info(`已从播放队列移除《${removedTrack?.title ?? trackId}》`, {

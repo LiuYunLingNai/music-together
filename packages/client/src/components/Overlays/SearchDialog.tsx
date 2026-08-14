@@ -66,9 +66,9 @@ function PlaylistList({ playlists, onSelect, hasMore, loadingMore, onLoadMore }:
             className="hover:bg-accent flex w-full min-w-0 items-center gap-3 overflow-hidden rounded-lg p-2 text-left transition-colors"
             onClick={() => onSelect(playlist)}
           >
-            {playlist.cover ? (
+            {(playlist.thumbnailCover ?? playlist.cover) ? (
               <img
-                src={playlist.cover}
+                src={playlist.thumbnailCover ?? playlist.cover}
                 alt={playlist.name}
                 referrerPolicy="no-referrer"
                 className="h-12 w-12 shrink-0 rounded-md object-cover"
@@ -302,6 +302,7 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
         lyricId: metadataTrack.lyricId,
         picId: metadataTrack.picId,
         cover: metadataTrack.cover || bilibiliMatch.track.cover,
+        thumbnailCover: metadataTrack.thumbnailCover || bilibiliMatch.track.thumbnailCover,
       }
       if (bilibiliMatch.action === 'insert') {
         onInsertAfterCurrent(track)

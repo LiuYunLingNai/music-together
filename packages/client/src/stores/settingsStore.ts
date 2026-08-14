@@ -36,6 +36,11 @@ type SettingsStore = ResettableFields<'playbackTempoSyncEnabled', boolean> &
   ResettableFields<'lyricEnableSpring', boolean> &
   ResettableFields<'lyricEnableBlur', boolean> &
   ResettableFields<'lyricEnableScale', boolean> &
+  ResettableFields<'lyricHidePassedLines', boolean> &
+  ResettableFields<'lyricShowBottomLine', boolean> &
+  ResettableFields<'lyricMaskObsceneWordsMode', '' | 'full-mask' | 'partial-mask'> &
+  ResettableFields<'lyricMaskObsceneWordChar', string> &
+  ResettableFields<'lyricWordFadeWidth', number> &
   ResettableFields<'lyricFontWeight', number> &
   ResettableFields<'lyricFontSize', number> &
   ResettableFields<'lyricTranslationFontSize', number> &
@@ -105,6 +110,15 @@ export const useSettingsStore = create<SettingsStore>((set) => {
     ...resettable('lyricEnableSpring', storage.getLyricEnableSpring, storage.setLyricEnableSpring),
     ...resettable('lyricEnableBlur', storage.getLyricEnableBlur, storage.setLyricEnableBlur),
     ...resettable('lyricEnableScale', storage.getLyricEnableScale, storage.setLyricEnableScale),
+    ...resettable('lyricHidePassedLines', storage.getLyricHidePassedLines, storage.setLyricHidePassedLines),
+    ...resettable('lyricShowBottomLine', storage.getLyricShowBottomLine, storage.setLyricShowBottomLine),
+    ...resettable(
+      'lyricMaskObsceneWordsMode',
+      storage.getLyricMaskObsceneWordsMode,
+      storage.setLyricMaskObsceneWordsMode,
+    ),
+    ...resettable('lyricMaskObsceneWordChar', storage.getLyricMaskObsceneWordChar, storage.setLyricMaskObsceneWordChar),
+    ...resettable('lyricWordFadeWidth', storage.getLyricWordFadeWidth, storage.setLyricWordFadeWidth),
     ...resettable('lyricFontWeight', storage.getLyricFontWeight, storage.setLyricFontWeight),
     ...resettable('lyricFontSize', storage.getLyricFontSize, storage.setLyricFontSize),
     ...resettable('lyricTranslationFontSize', storage.getLyricTranslationFontSize, storage.setLyricTranslationFontSize),

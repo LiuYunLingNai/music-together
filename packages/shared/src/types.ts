@@ -91,6 +91,8 @@ export interface Track {
   album: string
   duration: number
   cover: string
+  /** Stable small artwork URL for search, queue and playlist rows. */
+  thumbnailCover?: string
   /** Original Bilibili video cover, retained when third-party metadata is selected. */
   bilibiliCover?: string
   source: MusicSource
@@ -182,6 +184,11 @@ export interface PlayState {
   isPlaying: boolean
   currentTime: number
   serverTimestamp: number
+  /**
+   * Monotonic playback action generation. Optional for backward compatibility
+   * with native clients and persisted rooms created before this field existed.
+   */
+  revision?: number
 }
 
 /**
@@ -274,6 +281,8 @@ export interface Playlist {
   id: string
   name: string
   cover: string
+  /** Stable small artwork URL for list rendering. */
+  thumbnailCover?: string
   trackCount: number
   source: MusicSource
   creator?: string

@@ -99,7 +99,7 @@ Web 客户端在默认自动模式下会连接当前访问来源对应的服务�
 
 ### 本地构建运行（不使用 Docker）
 
-需要 Node.js 24 或更高版本。构建完成后，Node.js 服务端会自动托管 Web 静态文件、API 和 WebSocket，只需开放一个端口（默认 `3001`）。
+需要 Node.js 22 或更高版本。构建完成后，Node.js 服务端会自动托管 Web 静态文件、API 和 WebSocket，只需开放一个端口（默认 `3001`）。
 
 ```powershell
 git clone https://github.com/LiuYunLingNai/music-together.git

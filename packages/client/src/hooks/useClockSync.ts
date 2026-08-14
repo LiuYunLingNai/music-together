@@ -41,7 +41,8 @@ export function useClockSync(): void {
     }
 
     const onPong = (data: { clientPingId: number; serverTime: number }) => {
-      processPong(data.clientPingId, data.serverTime)
+      const rtt = processPong(data.clientPingId, data.serverTime)
+      if (rtt === null) return
       if (!switchedRef.current && isCalibrated() && intervalRef.current !== null) {
         switchedRef.current = true
         startSteadyHeartbeat()

@@ -122,6 +122,7 @@ export function registerPlayerController(io: TypedServer, socket: TypedSocket) {
         currentTime: estimateCurrentTimeAt(mapping.roomId, serverTimestamp),
         isPlaying: room.playState.isPlaying,
         serverTimestamp,
+        trackId: room.currentTrack?.id ?? null,
       })
     } catch (err) {
       logger.error('PLAYER_SYNC_REQUEST handler error', err, {

@@ -7,6 +7,7 @@ import * as tencentAuth from '../services/tencentAuthService.js'
 import { roomRepo } from '../repositories/roomRepository.js'
 import { logger } from '../utils/logger.js'
 import type { TypedServer, TypedSocket } from '../middleware/types.js'
+import { checkAuthRateLimit } from '../middleware/socketRateLimiter.js'
 
 /** 获取 socket 对应的房间映射（roomId + persistent userId） */
 function getSocketMapping(socketId: string) {
@@ -31,6 +32,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
   // -------------------------------------------------------------------------
 
   socket.on(EVENTS.AUTH_REQUEST_QR, async (data) => {
+    if (!(await checkAuthRateLimit(socket))) return
     qrSuccessHandled = false
     activeQr = null
     const requestVersion = ++qrRequestVersion
@@ -62,6 +64,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
   })
 
   socket.on(EVENTS.AUTH_CHECK_QR, async (data) => {
+    if (!(await checkAuthRateLimit(socket))) return
     try {
       if (!data?.key) {
         socket.emit(EVENTS.AUTH_QR_STATUS, { status: QR_STATUS.EXPIRED, message: '缺少二维码 key' })
@@ -194,6 +197,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
   // -------------------------------------------------------------------------
 
   socket.on(EVENTS.AUTH_SET_COOKIE, async (data) => {
+    if (!(await checkAuthRateLimit(socket))) return
     try {
       if (
         !data?.platform ||

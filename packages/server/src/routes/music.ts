@@ -32,6 +32,7 @@ import {
 } from '../services/kugouAudioUrl.js'
 import { BILIBILI_BVID_PATTERN, BILIBILI_STREAM_ID_PATTERN } from '../services/bilibiliInput.js'
 import { MusicDownloadError, resolveDownloadOptions, streamDownload } from '../services/musicDownloadService.js'
+import { coverProxyRateLimit, musicMetadataRateLimit } from '../middleware/httpRateLimiter.js'
 
 const router: RouterType = Router()
 
@@ -61,6 +62,7 @@ function validated<T>(
 
 router.get(
   '/search',
+  musicMetadataRateLimit,
   validated(searchQuerySchema, 'Search', async (data, _req, res) => {
     const { source, keyword, limit: pageSize, page: pageNum, type, roomId } = data
 
@@ -88,7 +90,7 @@ router.get(
   }),
 )
 
-router.get('/bilibili-collection', async (req: Request, res: Response) => {
+router.get('/bilibili-collection', musicMetadataRateLimit, async (req: Request, res: Response) => {
   const bvid = typeof req.query.bvid === 'string' ? req.query.bvid.trim() : ''
   if (!BILIBILI_BVID_PATTERN.test(bvid)) {
     res.status(400).json({ error: 'Invalid Bilibili video id' })
@@ -106,6 +108,7 @@ router.get('/bilibili-collection', async (req: Request, res: Response) => {
 
 router.get(
   '/recommendations',
+  musicMetadataRateLimit,
   validated(
     recommendationsQuerySchema,
     'Get recommendations',
@@ -162,6 +165,7 @@ router.get(
 
 router.get(
   '/url',
+  musicMetadataRateLimit,
   validated(urlQuerySchema, 'Get stream URL', async (data, _req, res) => {
     const { source, urlId, bitrate } = data
     const url = await musicProvider.getStreamUrl(source, urlId, bitrate)
@@ -189,6 +193,7 @@ function getAuthorizedCurrentTrack(roomId: string, trackId: string, req: Request
 
 router.get(
   '/download-options',
+  musicMetadataRateLimit,
   validated(downloadOptionsQuerySchema, 'Get download options', async ({ roomId, trackId }, req, res) => {
     const track = getAuthorizedCurrentTrack(roomId, trackId, req, res)
     if (!track) return
@@ -230,6 +235,7 @@ router.get('/download', async (req: Request, res: Response) => {
 
 router.get(
   '/lyric',
+  musicMetadataRateLimit,
   validated(lyricQuerySchema, 'Get lyric', async (data, _req, res) => {
     const { source, lyricId } = data
     const result = await musicProvider.getLyric(source, lyricId)
@@ -239,6 +245,7 @@ router.get(
 
 router.get(
   '/cover',
+  musicMetadataRateLimit,
   validated(coverQuerySchema, 'Get cover', async (data, _req, res) => {
     const { source, picId, size } = data
     const url = await musicProvider.getCover(source, picId, size)
@@ -248,6 +255,7 @@ router.get(
 
 router.get(
   '/playlist',
+  musicMetadataRateLimit,
   validated(playlistQuerySchema, 'Get playlist', async (data, _req, res) => {
     const { source, id, limit, offset, total, roomId, type } = data
 
@@ -284,9 +292,43 @@ const ALLOWED_COVER_HOSTS = [
   'imgessl.kugou.com',
 ]
 
+const MAX_COVER_BYTES = 10 * 1024 * 1024
+const MAX_COVER_REDIRECTS = 3
+
 const BILIBILI_AUDIO_HOST_SUFFIXES = ['bilivideo.com', 'bilivideo.cn']
 const KUGOU_AUDIO_HOST_SUFFIXES = ['kugou.com', 'kugou.net']
 const KUGOU_UPSTREAM_CONNECT_TIMEOUT_MS = 15_000
+
+function isAllowedCoverUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    return (
+      url.protocol === 'https:' &&
+      (!url.port || url.port === '443') &&
+      ALLOWED_COVER_HOSTS.includes(url.hostname.toLowerCase())
+    )
+  } catch {
+    return false
+  }
+}
+
+async function fetchAllowedCover(initialUrl: string): Promise<globalThis.Response | null> {
+  let currentUrl = initialUrl
+  for (let redirectCount = 0; redirectCount <= MAX_COVER_REDIRECTS; redirectCount += 1) {
+    if (!isAllowedCoverUrl(currentUrl)) return null
+    const response = await fetch(currentUrl, {
+      redirect: 'manual',
+      signal: AbortSignal.timeout(10_000),
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+    })
+    if (response.status < 300 || response.status >= 400) return response
+
+    const location = response.headers.get('location')
+    if (!location || redirectCount === MAX_COVER_REDIRECTS) return null
+    currentUrl = new URL(location, currentUrl).toString()
+  }
+  return null
+}
 
 function isAllowedBilibiliAudioUrl(value: string): boolean {
   try {
@@ -311,7 +353,7 @@ function isAllowedKugouAudioUrl(value: string): boolean {
   }
 }
 
-router.get('/cover-proxy', async (req: Request, res: Response) => {
+router.get('/cover-proxy', coverProxyRateLimit, async (req: Request, res: Response) => {
   const imageUrl = req.query.url as string | undefined
   if (!imageUrl) {
     res.status(400).json({ error: 'Missing url parameter' })
@@ -319,21 +361,30 @@ router.get('/cover-proxy', async (req: Request, res: Response) => {
   }
 
   try {
-    const parsed = new URL(imageUrl)
-    if (!ALLOWED_COVER_HOSTS.includes(parsed.hostname)) {
+    if (!isAllowedCoverUrl(imageUrl)) {
       res.status(403).json({ error: 'Host not allowed' })
       return
     }
 
-    const response = await fetch(imageUrl, {
-      signal: AbortSignal.timeout(10_000),
-      headers: {
-        'User-Agent': 'Mozilla/5.0',
-      },
-    })
+    const response = await fetchAllowedCover(imageUrl)
+    if (!response) {
+      res.status(403).json({ error: 'Redirect host not allowed' })
+      return
+    }
 
     if (!response.ok) {
       res.status(response.status).json({ error: 'Upstream fetch failed' })
+      return
+    }
+
+    const contentType = response.headers.get('content-type') || ''
+    const contentLength = Number(response.headers.get('content-length') ?? 0)
+    if (!contentType.toLowerCase().startsWith('image/')) {
+      res.status(415).json({ error: 'Upstream response is not an image' })
+      return
+    }
+    if (Number.isFinite(contentLength) && contentLength > MAX_COVER_BYTES) {
+      res.status(413).json({ error: 'Image is too large' })
       return
     }
 
@@ -341,10 +392,13 @@ router.get('/cover-proxy', async (req: Request, res: Response) => {
     // 上游 CDN 超时/中断时，Readable 的异步 error 可能逃出当前 try/catch，导致 Node 进程崩溃。
     // 封面图体积小，直接读成 buffer 更稳，失败也会在当前 await 中被 catch。
     const arrayBuffer = await response.arrayBuffer()
+    if (arrayBuffer.byteLength > MAX_COVER_BYTES) {
+      res.status(413).json({ error: 'Image is too large' })
+      return
+    }
     const buffer = Buffer.from(arrayBuffer)
 
     // 透传 content-type，设置缓存（封面图不会频繁变化）
-    const contentType = response.headers.get('content-type') || 'image/jpeg'
     res.setHeader('Content-Type', contentType)
     res.setHeader('Content-Length', String(buffer.length))
     res.setHeader('Cache-Control', 'public, max-age=86400') // 24h 缓存

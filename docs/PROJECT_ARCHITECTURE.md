@@ -14,16 +14,16 @@
 | 多音源搜索 | 网易云、QQ音乐、酷狗                                                                                                                 |
 | 同步播放   | 房间内播放进度实时同步                                                                                                               |
 | 实时聊天   | 房间内文字聊天                                                                                                                       |
-| 权限控制   | RBAC 三级权限（owner > admin > member）基于 @casl/ability，hostId 为自动选举的播放主持（conductor）                                  |
+| 权限控制   | RBAC 三级权限（owner > admin > member）基于 @casl/ability；`hostId` 为兼容性的播放主持标识，不承担权威进度上报                       |
 | 播放模式   | 顺序播放、列表循环、单曲循环、随机播放（Owner/Admin 直接切换，Member 投票切换）                                                      |
 | 投票系统   | 普通成员通过投票控制播放（暂停/恢复/切歌/切换播放模式/指定播放/移除歌曲）                                                            |
 | VIP 认证   | 平台账号登录（网易云/QQ/酷狗），房间级 Cookie 池（VIP 播放共享）+ 用户级歌单（私有）                                                 |
-| 歌词展示   | Apple Music 风格歌词动画 (AMLL)，四级优先级：TTML 在线逐词（网易云/QQ，可配置）> 平台原生逐词（网易云 YRC / 酷狗 KRC）> LRC 行级歌词 |
+| 歌词展示   | Apple Music 风格歌词动画 (AMLL)，支持逐词渐变、隐藏已播放行、敏感词遮罩、歌曲底栏和逐曲校准；TTML > YRC/KRC > LRC                    |
 
 ### 技术栈
 
 - **前端**: React 19 + Vite 7 + TypeScript 5.9 + Tailwind CSS v4 + shadcn/ui + Zustand
-- **后端**: Node.js + Express 4 + Socket.IO 4 + @meting/core
+- **后端**: Node.js 22 + Express 4 + 原生 `ws` JSON 事件协议 + SQLite + @meting/core
 - **Monorepo**: pnpm workspaces（3 个包：`client`、`server`、`shared`）
 
 ---
@@ -36,6 +36,7 @@
 | --------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------------- |
 | 2. 目录结构     | [directory-structure.md](architecture/directory-structure.md) | client / server / shared 三包目录树                                               |
 | 3. 架构与数据流 | [data-flow.md](architecture/data-flow.md)                     | 分层架构、Socket 事件清单、核心类型定义、NTP 同步、播放同步、播放模式、音频质量等 |
+| 上游同步策略 | [upstream-sync.md](architecture/upstream-sync.md) | 上游能力迁移范围、fork 不可破坏能力和有意保留的版本差异 |
 | 4. 第三方库依赖 | [dependencies.md](architecture/dependencies.md)               | 前端/后端/共享/开发依赖清单                                                       |
 | 5. 设计模式     | [design-patterns.md](architecture/design-patterns.md)         | Zustand Store、Hook 组合、Dialog、Provider、分层架构、Repository 等               |
 | 6. 代码规范     | [coding-standards.md](architecture/coding-standards.md)       | 语言模块、路径别名、状态更新、错误处理                                            |

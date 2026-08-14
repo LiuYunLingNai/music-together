@@ -278,9 +278,9 @@ export function QueueDrawer({
 
                       {/* Cover + source badge */}
                       <div className="relative shrink-0">
-                        {track.cover ? (
+                        {(track.thumbnailCover ?? track.cover) ? (
                           <img
-                            src={getProxiedCoverUrl(track.cover)}
+                            src={getProxiedCoverUrl(track.thumbnailCover ?? track.cover)}
                             alt={track.title}
                             referrerPolicy="no-referrer"
                             className="h-9 w-9 rounded object-cover"
@@ -293,7 +293,7 @@ export function QueueDrawer({
                         <div
                           className={cn(
                             'flex h-9 w-9 items-center justify-center rounded bg-muted',
-                            track.cover && 'hidden',
+                            (track.thumbnailCover ?? track.cover) && 'hidden',
                           )}
                         >
                           <Music className="h-4 w-4 text-muted-foreground" />

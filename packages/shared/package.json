@@ -12,13 +12,14 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json"
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
     "typescript": "~5.9.3"
   },
   "dependencies": {
     "@casl/ability": "^6.8.0",
-    "zod": "^4.3.6"
+    "zod": "^4.4.3"
   }
 }

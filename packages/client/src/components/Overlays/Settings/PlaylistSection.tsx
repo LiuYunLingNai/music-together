@@ -76,9 +76,9 @@ export function PlaylistSection({
                   className="hover:bg-accent flex w-full min-w-0 items-center gap-3 overflow-hidden rounded-lg p-2 text-left transition-colors"
                   onClick={() => onSelectPlaylist(pl)}
                 >
-                  {pl.cover ? (
+                  {(pl.thumbnailCover ?? pl.cover) ? (
                     <img
-                      src={pl.cover}
+                      src={pl.thumbnailCover ?? pl.cover}
                       alt={pl.name}
                       referrerPolicy="no-referrer"
                       className="h-12 w-12 shrink-0 rounded-md object-cover"

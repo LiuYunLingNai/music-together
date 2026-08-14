@@ -1,11 +1,11 @@
-import { getServerTime } from '@/lib/clockSync'
+import { getServerTime, isCalibrated } from '@/lib/clockSync'
 import { PLAYER_PLAY_DEDUP_MS } from '@/lib/constants'
 import { storage } from '@/lib/storage'
 import { useSocketContext } from '@/providers/socket-context'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
 import type { ScheduledPlayState, Track } from '@music-together/shared'
-import { EVENTS } from '@music-together/shared'
+import { EVENTS, getPlaybackRevision, isStalePlaybackAction } from '@music-together/shared'
 import { useCallback, useEffect, useRef } from 'react'
 import { useHowl } from './useHowl'
 import { useLyric } from './useLyric'
@@ -24,7 +24,7 @@ import { usePlayerSync } from './usePlayerSync'
  */
 export function usePlayer() {
   const { socket } = useSocketContext()
-  const loadingRef = useRef<{ trackId: string; ts: number; serverTimestamp: number } | null>(null)
+  const loadingRef = useRef<{ trackId: string; revision: number; ts: number; serverTimestamp: number } | null>(null)
   // Set by recovery effect to signal onPlayerPlay that this track was already
   // loaded by reconnect recovery — the subsequent PLAYER_PLAY from
   // syncPlaybackToSocket should be skipped to avoid a double-load.
@@ -73,6 +73,10 @@ export function usePlayer() {
   // Listen for PLAYER_PLAY events (new track load)
   useEffect(() => {
     const onPlayerPlay = (data: { track: Track; playState: ScheduledPlayState }) => {
+      const currentPlayState = useRoomStore.getState().room?.playState
+      const incomingRevision = getPlaybackRevision(data.playState)
+      const currentRevision = currentPlayState ? getPlaybackRevision(currentPlayState) : 0
+      if (currentPlayState && isStalePlaybackAction(data.playState, currentPlayState)) return
       // Deduplicate: ignore if the same track with the same serverTimestamp
       // was requested within the dedup window.  Comparing serverTimestamp
       // ensures that a legitimate replay of the same track (e.g. loop mode)
@@ -80,6 +84,7 @@ export function usePlayer() {
       const now = Date.now()
       if (
         loadingRef.current?.trackId === data.track.id &&
+        loadingRef.current.revision === incomingRevision &&
         loadingRef.current.serverTimestamp === data.playState.serverTimestamp &&
         now - loadingRef.current.ts < PLAYER_PLAY_DEDUP_MS
       ) {
@@ -92,13 +97,19 @@ export function usePlayer() {
       // roomStore with the authoritative scheduled playState.
       if (recoveredTrackIdRef.current === data.track.id) {
         recoveredTrackIdRef.current = null
-        loadingRef.current = { trackId: data.track.id, ts: now, serverTimestamp: data.playState.serverTimestamp }
+        loadingRef.current = {
+          trackId: data.track.id,
+          revision: incomingRevision,
+          ts: now,
+          serverTimestamp: data.playState.serverTimestamp,
+        }
         useRoomStore.getState().updateRoom({
           currentTrack: data.track,
           playState: {
             isPlaying: data.playState.isPlaying,
             currentTime: data.playState.currentTime,
             serverTimestamp: data.playState.serverTimestamp,
+            revision: data.playState.revision ?? currentRevision,
           },
         })
         if (data.playState.isPlaying) {
@@ -108,7 +119,12 @@ export function usePlayer() {
         }
         return
       }
-      loadingRef.current = { trackId: data.track.id, ts: now, serverTimestamp: data.playState.serverTimestamp }
+      loadingRef.current = {
+        trackId: data.track.id,
+        revision: incomingRevision,
+        ts: now,
+        serverTimestamp: data.playState.serverTimestamp,
+      }
 
       // Keep roomStore in sync so recovery effect sees the correct currentTrack
       useRoomStore.getState().updateRoom({
@@ -117,6 +133,7 @@ export function usePlayer() {
           isPlaying: data.playState.isPlaying,
           currentTime: data.playState.currentTime,
           serverTimestamp: data.playState.serverTimestamp,
+          revision: data.playState.revision ?? currentRevision,
         },
       })
 
@@ -156,24 +173,26 @@ export function usePlayer() {
   // Recovery: auto-sync player state from room state when desync is detected
   // (e.g. after HMR resets stores, or reconnection where PLAYER_PLAY was missed)
   useEffect(() => {
-    let hasRecovered = false
+    let recoveredKey: string | null = null
 
     const recover = () => {
       const { room } = useRoomStore.getState()
 
       // When room becomes null (disconnect), reset flag so next reconnect can recover
       if (!room) {
-        hasRecovered = false
+        recoveredKey = null
         return
       }
-
-      if (hasRecovered) return
       const playerTrack = usePlayerStore.getState().currentTrack
       const roomTrack = room.currentTrack
+      const recoveryKey = roomTrack
+        ? `${roomTrack.id}:${room.playState.revision ?? room.playState.serverTimestamp}`
+        : `empty:${room.playState.revision ?? room.playState.serverTimestamp}`
 
       // Server has cleared the track (queue empty / cleared) — reset client
       if (!roomTrack && playerTrack) {
-        hasRecovered = true
+        if (recoveredKey === recoveryKey) return
+        recoveredKey = recoveryKey
         stopPlayback()
         usePlayerStore.getState().reset()
         return
@@ -187,11 +206,18 @@ export function usePlayer() {
         // a redundant double-load.
         // However, if howlRef is null despite loadingRef pointing to this track,
         // the previous loadTrack failed (e.g. !streamUrl) and we should retry.
-        if (loadingRef.current?.trackId === roomTrack.id && howlRef.current) return
+        if (
+          loadingRef.current?.trackId === roomTrack.id &&
+          loadingRef.current.revision === (room.playState.revision ?? 0) &&
+          howlRef.current
+        ) {
+          return
+        }
 
-        hasRecovered = true
+        if (recoveredKey === recoveryKey) return
+        recoveredKey = recoveryKey
         const ps = room.playState
-        const elapsed = ps.isPlaying ? (getServerTime() - ps.serverTimestamp) / 1000 : 0
+        const elapsed = ps.isPlaying && isCalibrated() ? (getServerTime() - ps.serverTimestamp) / 1000 : 0
         const recoveredTime = ps.currentTime + Math.max(0, elapsed)
         recoveredTrackIdRef.current = roomTrack.id
         loadTrack(roomTrack, recoveredTime, ps.isPlaying)

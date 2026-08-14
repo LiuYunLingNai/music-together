@@ -10,16 +10,32 @@
     "dev:server": "pnpm --filter @music-together/server dev",
     "build": "pnpm -r run build && node scripts/prepare-production.mjs",
     "start": "node packages/server/dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "pnpm -r run typecheck",
     "format": "prettier --write \"packages/*/src/**/*.{ts,tsx}\" \"packages/shared/src/**/*.ts\""
   },
   "keywords": [],
   "author": "",
   "license": "AGPL-3.0",
   "packageManager": "pnpm@10.29.2",
+  "pnpm": {
+    "overrides": {
+      "basic-ftp": "5.3.1",
+      "body-parser": "2.3.0",
+      "form-data": "4.0.6",
+      "ip-address": "10.3.1",
+      "qs": "6.15.2",
+      "express@4.22.2>path-to-regexp": "0.1.13",
+      "router>path-to-regexp": "8.4.0"
+    }
+  },
   "devDependencies": {
     "concurrently": "^9.2.1",
     "kill-port": "^2.0.1",
-    "prettier": "^3.8.1"
+    "jsdom": "^30.0.1",
+    "prettier": "^3.9.6",
+    "vitest": "^4.1.10"
   },
   "workspaces": [
     "packages/*"

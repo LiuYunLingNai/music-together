@@ -18,6 +18,8 @@ import { nanoid } from 'nanoid'
 import { WebSocket, WebSocketServer, type RawData, type AddressInfo } from 'ws'
 import { logger } from './utils/logger.js'
 
+const MAX_WEBSOCKET_PAYLOAD_BYTES = 1024 * 1024
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -210,12 +212,14 @@ export class TypedServer<
   private sockets = new Set<TypedSocket<ClientToServerEvents, ServerToClientEvents, SocketData>>()
   private roomMap = new Map<string, Set<TypedSocket<ClientToServerEvents, ServerToClientEvents, SocketData>>>()
   private middlewares: MiddlewareFn<SocketData>[] = []
-  private connectionHandlers: ((socket: TypedSocket<ClientToServerEvents, ServerToClientEvents, SocketData>) => void)[] = []
+  private connectionHandlers: ((
+    socket: TypedSocket<ClientToServerEvents, ServerToClientEvents, SocketData>,
+  ) => void)[] = []
   private heartbeatTimer: ReturnType<typeof setInterval>
   private aliveSockets = new Map<WebSocket, boolean>()
 
   constructor(httpServer: HttpServer) {
-    this.wss = new WebSocketServer({ noServer: true })
+    this.wss = new WebSocketServer({ noServer: true, maxPayload: MAX_WEBSOCKET_PAYLOAD_BYTES })
 
     httpServer.on('upgrade', (request, socket, head) => {
       const pathname = new URL(request.url || '', `http://${request.headers.host}`).pathname
@@ -259,7 +263,10 @@ export class TypedServer<
 
   // -- Connection event -----------------------------------------------------
 
-  on(event: 'connection', handler: (socket: TypedSocket<ClientToServerEvents, ServerToClientEvents, SocketData>) => void): this {
+  on(
+    event: 'connection',
+    handler: (socket: TypedSocket<ClientToServerEvents, ServerToClientEvents, SocketData>) => void,
+  ): this {
     this.connectionHandlers.push(handler)
     return this
   }
@@ -290,7 +297,10 @@ export class TypedServer<
   }
 
   /** @internal */
-  removeSocketFromRoom(room: string, socket: TypedSocket<ClientToServerEvents, ServerToClientEvents, SocketData>): void {
+  removeSocketFromRoom(
+    room: string,
+    socket: TypedSocket<ClientToServerEvents, ServerToClientEvents, SocketData>,
+  ): void {
     const set = this.roomMap.get(room)
     if (!set) return
     set.delete(socket)

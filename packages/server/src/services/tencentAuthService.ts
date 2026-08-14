@@ -511,8 +511,16 @@ export async function getRadarRecommendations(cookie: string, page = 1): Promise
 // QR Code 登录
 // ---------------------------------------------------------------------------
 
-/** 服务端缓存 qrsig → 完整 cookie 的映射 */
-const qrSessionMap = new Map<string, string>()
+/** 服务端缓存 qrsig → 完整 cookie 与创建时间的映射。 */
+const qrSessionMap = new Map<string, { cookie: string; createdAt: number }>()
+const QR_SESSION_TTL_MS = 5 * 60 * 1000
+
+function pruneQrSessions(now = Date.now()): void {
+  const threshold = now - QR_SESSION_TTL_MS
+  for (const [key, session] of qrSessionMap) {
+    if (session.createdAt < threshold) qrSessionMap.delete(key)
+  }
+}
 /** 正在处理登录的 qrsig 集合（防止重复轮询覆盖 803 状态） */
 const qrProcessingSet = new Set<string>()
 
@@ -522,6 +530,7 @@ const qrProcessingSet = new Set<string>()
  */
 export async function generateQrCode(): Promise<{ key: string; qrimg: string } | null> {
   try {
+    pruneQrSessions()
     const params = new URLSearchParams({
       appid: APPID,
       e: '2',
@@ -587,7 +596,7 @@ export async function generateQrCode(): Promise<{ key: string; qrimg: string } |
 
     // 缓存完整 cookie 字符串（供 checkQrStatus 使用）
     const fullCookie = cookieParts.join('; ')
-    qrSessionMap.set(qrsig, fullCookie)
+    qrSessionMap.set(qrsig, { cookie: fullCookie, createdAt: Date.now() })
     logger.debug('QQ 音乐扫码登录会话已缓存', { cookieParts: cookieParts.length })
 
     // 将二维码图片转为 base64
@@ -631,7 +640,8 @@ export async function checkQrStatus(qrsig: string): Promise<{
     const ptqrtoken = hash33(qrsig)
 
     // 恢复完整 session cookie
-    const sessionCookie = qrSessionMap.get(qrsig) ?? `qrsig=${qrsig}`
+    pruneQrSessions()
+    const sessionCookie = qrSessionMap.get(qrsig)?.cookie ?? `qrsig=${qrsig}`
 
     const action = `0-0-${Date.now()}`
 
@@ -815,8 +825,16 @@ export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
       signal: AbortSignal.timeout(10_000),
     })
 
-    const body = (await response.json()) as { data?: ProfileData }
-    const creator = body?.data?.creator || {}
+    if (!response.ok) {
+      throw new Error(`QQ profile HTTP ${response.status}`)
+    }
+
+    const body = (await response.json()) as { code?: number; data?: ProfileData }
+    if (body.code !== undefined && body.code !== 0) {
+      throw new Error(`QQ profile response code ${body.code}`)
+    }
+    const creator = body?.data?.creator
+    if (!creator) return { ok: false, reason: 'expired' }
 
     // 尝试提取昵称，因为 QQ 返回的可能是 Base64 编码的昵称
     let rawNick = creator.nick || creator.name || `QQ用户${uin}`

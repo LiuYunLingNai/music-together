@@ -75,7 +75,7 @@ interface DialogProps {
 
 ## Context Provider 模式
 
-`SocketProvider` 通过 React Context 提供 Socket.IO 实例和连接状态，并内置断线/重连 Toast 提示：
+`SocketProvider` 通过 React Context 提供原生 WebSocket 类型化客户端和连接状态，并内置断线/重连 Toast 提示：
 
 ```typescript
 const { socket, isConnected } = useSocketContext()
@@ -121,7 +121,7 @@ Controller → Service → Repository / Utils
   - `roomService`：房间 CRUD + 角色管理 + 临时管理员协调（`reconcileRoomRoles`）+ conductor 选举（`electConductor`）+ 加入校验（`validateJoinRequest`）。Re-export `toPublicRoomState` 和 `broadcastRoomList` 以保持控制器调用方式不变。
   - `roomLifecycleService`：房间空置删除定时器 + 防抖广播。不依赖 `roomService`，消除循环依赖。API：`scheduleDeletion`、`cancelDeletionTimer`、`broadcastRoomList`、`clearAllTimers`。角色宽限期已移除（conductor 自动选举，无需 grace period）。
   - `playerService`：播放状态管理 + 流 URL 解析 + 切歌防抖 + 加入播放同步（`syncPlaybackToSocket`）+ 房间清理（`cleanupRoom`）。`playTrackInRoom` 通过 per-room Promise 链互斥锁防止并发竞态。`playNextTrackInRoom` / `playPrevTrackInRoom` 将 debounce + 队列导航 + 播放统一封装在 mutex 内部。`autoPlayIfEmpty` 在 mutex 内重新检查 `room.currentTrack`，防止并发 QUEUE_ADD 双重自动播放。
-- **Repository**：数据存取（当前为内存 Map，接口抽象，可替换为数据库）
+- **Repository**：运行时房间状态使用内存 Map；账号、永久房间、离线成员、平台凭据和服务器设置按职责持久化到 SQLite
 - **Utils**：纯函数工具（`toPublicRoomState` 等），无状态，可被任意层引用
 
 ## Repository 模式
@@ -138,9 +138,9 @@ interface RoomRepository {
 }
 ```
 
-当前实现为 `InMemoryRoomRepository`（`Map<string, RoomData>`），未来可替换为 Redis/数据库实现。
+`roomRepository` 以 `Map<string, RoomData>` 维护活跃房间，并通过永久房间仓库把需要跨重启保留的快照写入 SQLite；不要把短期 `streamUrl` 直接持久化。
 
-## Socket.IO 中间件链
+## WebSocket 中间件链
 
 ```
 withPermission(action, subject)  →  withRoom(io)  →  Handler
@@ -150,8 +150,12 @@ withOwnerOnly(io)                →  withRoom(io)  →  Handler
 - `withRoom`：校验 Socket 是否在房间中，构建 `HandlerContext`（io, socket, roomId, room, user）
 - `withPermission`：在 `withRoom` 基础上用 CASL `defineAbilityFor(role)` 检查 `(action, subject)` 权限
 - `withOwnerOnly`：在 `withRoom` 基础上仅允许房主（`user.role === 'owner'`），用于设置和角色管理
+- `socketRateLimiter`：按持久化用户身份限制关键控制事件，并为 QR/Cookie 认证使用独立额度；匿名连接才在断开时立即删除条目，身份级条目由 TTL 清理，避免多标签页绕过或互相重置限流
+- `httpRateLimiter`：按身份 Cookie（无身份时按 IP）分别限制音乐元数据请求和封面代理字节请求
 
 错误统一通过 `ROOM_ERROR` 事件回传给客户端，错误码使用 `ERROR_CODE` 枚举（`shared/types.ts`），包括：`NOT_IN_ROOM`、`ROOM_NOT_FOUND`、`NO_PERMISSION`、`INVALID_DATA`、`QUEUE_FULL`、`RATE_LIMITED`、`INTERNAL` 等。
+
+`wss.ts` 在握手后只接受 `{ event, data }` JSON 信封，单条 WebSocket 消息上限为 1 MiB；事件负载继续由 shared Zod schema 和控制器权限层验证。
 
 ## 结构化日志（pino）
 
@@ -173,7 +177,7 @@ logger.error('Failed to resolve stream URL', err, { roomId, trackId })
 ## 构建优化
 
 - **路由级懒加载**：`RoomPage` 和 `NotFoundPage` 使用 `React.lazy` + `Suspense`（`HomePage` 保持同步加载以保证首屏速度）
-- **Vite manualChunks 分包**：react、socket.io、motion、radix-ui、pixi.js 分别打包为独立 chunk，利用浏览器长期缓存
+- **Vite manualChunks 分包**：react、motion、radix-ui、pixi.js 等大型依赖分别打包，利用浏览器长期缓存
 - **React.memo**：列表项组件（`RoomCard`、`ChatMessage`、`TrackListItem`）和高频更新组件（`PlayerControls`）均使用 `React.memo` 避免不必要的 re-render
 - **Zustand 细粒度 selector**：避免 `useRoomStore((s) => s.room)` 的粗粒度订阅，改用 `s.room?.name` 等精确字段
 

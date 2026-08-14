@@ -12,6 +12,9 @@ music-together/
 ├── package.json         # 根 package（工作区编排）
 ├── pnpm-workspace.yaml  # pnpm 工作区定义
 ├── pnpm-lock.yaml
+├── .node-version        # CI 与本地统一使用 Node.js 22
+├── Dockerfile           # 三阶段生产镜像
+├── docker-entrypoint.sh # 兼容历史数据目录权限并降权启动
 ├── README.md
 └── .gitignore
 ```
@@ -65,7 +68,7 @@ src/
 │   ├── Player/
 │   │   ├── constants.ts        #     共享动画常量（SPRING / LAYOUT_TRANSITION），NowPlaying 和 SongInfoBar 统一导入
 │   │   ├── AudioPlayer.tsx     #     主播放器布局（桌面：左右分栏；移动：双模式封面/歌词切换）
-│   │   ├── LyricDisplay.tsx    #     AMLL 歌词渲染（LRC 正则支持 [mm:ss] / [mm:ss.x] / [mm:ss.xx] / [mm:ss.xxx]）
+│   │   ├── LyricDisplay.tsx    #     AMLL 歌词渲染、逐词效果、歌词校准和可配置底栏
 │   │   ├── NowPlaying.tsx      #     当前曲目展示（支持 compact 小封面横排模式 + layoutId 共享动画）
 │   │   ├── SongInfoBar.tsx     #     歌曲信息栏（标题/艺术家 + 音量/聊天按钮，竖屏模式自适应缩放）
 │   │   └── PlayerControls.tsx  #     进度条+播放控制+播放模式切换
@@ -103,7 +106,7 @@ src/
 │   ├── usePlayer.ts            #   播放器主 hook（组合 useHowl + useLyric + usePlayerSync）
 │   ├── useHowl.ts              #   Howler.js 音频实例管理
 │   ├── useLyric.ts             #   歌词加载（TTML → 平台逐词 YRC/KRC → LRC）
-│   ├── usePlayerSync.ts        #   播放同步（Scheduled Execution + conductor 上报 + 周期性漂移校正）
+│   ├── usePlayerSync.ts        #   播放同步（Scheduled Execution + 服务端权威时间轴 + 自适应漂移校正）
 │   ├── useClockSync.ts         #   NTP 时钟同步 hook（校准客户端时钟与服务器对齐）
 │   ├── useRoom.ts              #   房间组合 hook（编排 5 个子 hook，对外 API 不变）
 │   ├── room/                   #   useRoom 子 hook（按职责拆分）
@@ -131,15 +134,19 @@ src/
 │   └── settingsStore.ts        #   设置（歌词参数、背景参数，持久化到 localStorage）
 │
 ├── providers/                  # React Context Provider
-│   ├── SocketProvider.tsx      #   Socket.IO 连接管理，提供 socket + isConnected + 断线/重连 Toast
+│   ├── SocketProvider.tsx      #   原生 WebSocket 连接管理，提供 socket + isConnected + 断线/重连 Toast
 │   └── AbilityProvider.tsx     #   CASL 权限上下文（基于 currentUser.role）
 │
 └── lib/                        # 工具库
     ├── config.ts               #   配置常量（SERVER_URL）
     ├── constants.ts            #   命名常量（定时器、阈值、布局尺寸）
     ├── clockSync.ts            #   NTP 时钟同步引擎（采样、offset 计算、getServerTime）
+    ├── howlPosition.ts         #   HTML5 Howl 低延迟定位与安全回退
+    ├── lyricPlayerBridge.ts    #   音频逐帧时钟到 AMLL 的桥接（含歌词偏移）
+    ├── audioPlaybackLifecycle.ts #  断线时停止当前活动音频
+    ├── playbackSync.ts         #   漂移阈值、计划位置和自适应同步纯函数
     ├── resetStores.ts          #   全局 store 重置工具
-    ├── socket.ts               #   Socket.IO 客户端实例
+    ├── socket.ts               #   原生 WebSocket 类型化客户端实例
     ├── storage.ts              #   localStorage 封装（带类型校验）
     ├── platform.ts             #   平台常量（PLATFORM_LABELS / PLATFORM_SHORT_LABELS / PLATFORM_COLORS / VIP_LABELS / 状态查找函数）
     ├── format.ts               #   格式化工具（时间、文本等）
@@ -151,7 +158,8 @@ src/
 
 ```
 src/
-├── index.ts                    # 入口：Express + HTTP + Socket.IO 服务启动与优雅关闭
+├── index.ts                    # 入口：Express + HTTP + 原生 WebSocket 服务启动与优雅关闭
+├── wss.ts                      # ws 类型化事件、房间广播和中间件兼容封装
 ├── config.ts                   # 环境变量配置（PORT, CLIENT_URL, CORS）
 │
 ├── controllers/                # 控制器：注册 Socket 事件处理器（薄编排层，不含业务逻辑）
@@ -168,16 +176,20 @@ src/
 │   ├── roomService.ts          #   房间 CRUD + 角色管理 + 加入校验（validateJoinRequest）
 │   ├── roomLifecycleService.ts #   房间生命周期定时器（空置删除）+ 防抖广播
 │   ├── playerService.ts        #   播放状态管理 + 流 URL 解析 + 切歌防抖 + 加入播放同步
-│   ├── queueService.ts         #   队列操作（reorder 保留未包含曲目防丢歌，getNextTrack 支持 4 种播放模式，clearQueue 清空，addBatchTracks 批量添加）
+│   ├── queueService.ts         #   队列操作（含删除当前曲目前的后继选择）
+│   ├── queueNavigation.ts      #   无仓储副作用的队列导航算法
 │   ├── chatService.ts          #   聊天消息处理 + HTML 转义（含系统消息）
 │   ├── syncService.ts          #   播放位置估算工具（estimateCurrentTime）
 │   ├── musicProvider.ts        #   音乐数据聚合（3 层引用式 LRU 缓存 + 外部 API 超时保护 + 歌单分页获取；Netease 歌单使用 ncmApi.playlist_track_all 分块请求突破 1000 首限制，Kugou 用户歌单使用原生 API (get_other_list_file_nofilt) + Meting fallback，Tencent 使用 Meting 原始模式保留 VIP/时长字段）
+│   ├── coverArtwork.ts         #   高分辨率封面规范化与列表缩略图派生
+│   ├── kugouLyricService.ts    #   基于原生 fetch/zlib 的 KRC 获取、解密与逐字解析
 │   ├── authService.ts          #   Cookie 池管理（房间级作用域；getAnyCookie 用于 VIP 播放共享，getUserCookie 用于歌单等用户私有操作）
 │   ├── authProvider.ts         #   统一认证接口（AuthProvider 接口定义 + GetUserInfoResult/UserInfoData 共享类型 + AUTH_PROVIDERS 策略映射表）
 │   ├── neteaseAuthService.ts   #   网易云 API 认证（QR / Cookie 验证 / 用户信息 / 用户歌单列表；getUserInfo 返回 { ok, data? } | { ok: false, reason: 'expired' | 'error' } 区分过期与临时故障）
 │   ├── kugouAuthService.ts    #   酷狗 API 认证（QR 扫码登录 + VIP 检查 + 用户昵称(RSA) + 用户歌单列表 + 歌单歌曲获取；kugouRequest 含 HTTP 状态检查与 JSON 安全解析；自包含签名实现，状态码归一化为 800-803 与网易云统一）
 │   ├── tencentAuthService.ts  #   QQ 音乐认证（5 步 OAuth QR 扫码登录：ptqrshow/ptqrlogin/check_sig/authorize/QQLogin 换取 musickey；zzc 签名防风控；getUserInfo 获取昵称 + VIP 状态；getUserPlaylists 获取自建 + 收藏歌单；getPlaylistTracks 分页获取歌单歌曲）
-│   └── voteService.ts          #   投票状态管理
+│   ├── voteService.ts          #   投票状态、成员重算与原子领取
+│   └── voteActionService.ts    #   已通过投票的播放器/队列动作执行
 │
 ├── repositories/               # 数据仓库：内存状态与 SQLite 持久化
 │   ├── types.ts                #   接口定义（RoomRepository, ChatRepository）
@@ -185,11 +197,12 @@ src/
 │   ├── chatRepository.ts       #   聊天记录（内存最多 200 条；永久房间同步持久化到 SQLite）
 │   └── audioProxyPolicyRepository.ts # 全局酷狗音频代理策略（SQLite server_settings）
 │
-├── middleware/                  # Socket.IO 中间件
+├── middleware/                  # WebSocket 事件中间件
 │   ├── types.ts                #   TypedServer, TypedSocket, HandlerContext
 │   ├── withRoom.ts             #   房间成员身份校验
 │   ├── withControl.ts          #   操作权限校验（包装 withRoom）
-│   └── socketRateLimiter.ts    #   Socket 事件速率限制（per-socket，10次/5秒）+ 断连清理（cleanupSocketRateLimit）
+│   ├── socketRateLimiter.ts    #   普通事件与认证事件分桶限流；身份级条目按 TTL 清理
+│   └── httpRateLimiter.ts      #   音乐元数据与封面代理的身份/IP 分桶限流
 │
 ├── routes/                     # Express REST 路由
 │   ├── music.ts                #   GET /api/music/search|url|lyric|cover|playlist|ttml（统一 validated() 路由包装器消除重复 try/catch + Zod 模式）
@@ -210,7 +223,7 @@ src/
 ├── index.ts           # 统一导出（re-export 所有模块）
 ├── types.ts           # 核心类型：ERROR_CODE, Track, RoomState, PlayState, ScheduledPlayState, PlayMode, AudioQuality, User, ChatMessage, VoteAction (incl. play-track, remove-track), VoteState, RoomListItem, Playlist
 ├── events.ts          # 事件常量：EVENTS 对象（room:*, player:*, queue:*, chat:*, auth:*, ntp:*, playlist:*）
-├── socket-types.ts    # Socket.IO 类型：ServerToClientEvents, ClientToServerEvents
+├── socket-types.ts    # WebSocket 事件类型：ServerToClientEvents, ClientToServerEvents
 ├── constants.ts       # 业务常量：LIMITS（长度/数量限制）, TIMING（同步间隔/宽限期）, NTP（时钟同步参数）, QR_STATUS（扫码状态码）, QR_TIMING（轮询间隔）
 ├── schemas.ts         # Zod 验证 schema
 └── abilities.ts       # CASL 权限定义（Actions incl. set-mode, Subjects, defineAbilityFor）

@@ -1,5 +1,5 @@
 import type { AudioQuality, MusicSource, PlayMode, PlayState, ScheduledPlayState, Track } from '@music-together/shared'
-import { EVENTS, ERROR_CODE, NTP, TIMING } from '@music-together/shared'
+import { EVENTS, ERROR_CODE, NTP, TIMING, clampPlaybackPosition, nextPlaybackRevision } from '@music-together/shared'
 import { roomRepo } from '../repositories/roomRepository.js'
 import { nanoid } from 'nanoid'
 import { musicProvider } from './musicProvider.js'
@@ -413,6 +413,7 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
     isPlaying: true,
     currentTime: 0,
     serverTimestamp: scheduleTime,
+    revision: nextPlaybackRevision(room.playState),
   }
   roomRepo.persist(roomId)
 
@@ -464,7 +465,12 @@ export function resumeTrack(io: TypedServer, roomId: string, _initiatorSocket?: 
   if (!room || !room.currentTrack) return
 
   const scheduleTime = getScheduleTime(roomId)
-  room.playState = { ...room.playState, isPlaying: true, serverTimestamp: scheduleTime }
+  room.playState = {
+    ...room.playState,
+    isPlaying: true,
+    serverTimestamp: scheduleTime,
+    revision: nextPlaybackRevision(room.playState),
+  }
   roomRepo.persist(roomId)
   // All clients (including initiator) must execute at the same scheduled moment
   io.to(roomId).emit(EVENTS.PLAYER_RESUME, { playState: scheduled(room.playState, roomId, scheduleTime) })
@@ -477,7 +483,12 @@ export function pauseTrack(io: TypedServer, roomId: string, _initiatorSocket?: T
   // Snapshot estimated position before pausing so resume starts from the correct point
   const scheduleTime = getScheduleTime(roomId)
   const snapshotTime = estimateCurrentTimeAt(roomId, scheduleTime)
-  room.playState = { isPlaying: false, currentTime: snapshotTime, serverTimestamp: scheduleTime }
+  room.playState = {
+    isPlaying: false,
+    currentTime: snapshotTime,
+    serverTimestamp: scheduleTime,
+    revision: nextPlaybackRevision(room.playState),
+  }
   roomRepo.persist(roomId)
   // All clients must pause at the same scheduled moment
   io.to(roomId).emit(EVENTS.PLAYER_PAUSE, { playState: scheduled(room.playState, roomId, scheduleTime) })
@@ -493,6 +504,7 @@ export function seekTrack(io: TypedServer, roomId: string, currentTime: number, 
     ...room.playState,
     currentTime,
     serverTimestamp: room.playState.isPlaying ? scheduleTime : Date.now(),
+    revision: nextPlaybackRevision(room.playState),
   }
   roomRepo.persist(roomId)
   // All clients must seek at the same scheduled moment
@@ -516,6 +528,7 @@ export function setCurrentTrack(roomId: string, track: Track | null): void {
       isPlaying: track !== null,
       currentTime: 0,
       serverTimestamp: Date.now(),
+      revision: nextPlaybackRevision(room.playState),
     }
     roomRepo.persist(roomId)
   }
@@ -528,10 +541,16 @@ export function setCurrentTrack(roomId: string, track: Track | null): void {
  */
 export function stopPlayback(io: TypedServer, roomId: string): void {
   setCurrentTrack(roomId, null)
-  io.to(roomId).emit(EVENTS.PLAYER_PAUSE, {
-    playState: { isPlaying: false, currentTime: 0, serverTimestamp: Date.now(), serverTimeToExecute: Date.now() },
-  })
   const room = roomRepo.get(roomId)
+  const stoppedState = room?.playState ?? {
+    isPlaying: false,
+    currentTime: 0,
+    serverTimestamp: Date.now(),
+    revision: 0,
+  }
+  io.to(roomId).emit(EVENTS.PLAYER_PAUSE, {
+    playState: { ...stoppedState, serverTimeToExecute: stoppedState.serverTimestamp },
+  })
   if (room) {
     io.to(roomId).emit(EVENTS.ROOM_STATE, toPublicRoomState(room))
   }
@@ -567,8 +586,8 @@ export function playNextTrackInRoom(
   return withPlayMutex(roomId, async () => {
     if (options?.skipDebounce) {
       // Still update the timestamp so a normal NEXT right after is debounced
-      lastNextTimestamp.set(roomId, Date.now())
-    } else if (_isNextDebounced(roomId)) {
+      lastSkipTimestamp.set(roomId, { action: 'next', timestamp: Date.now() })
+    } else if (_isSkipDebounced(roomId, 'next')) {
       return
     }
 
@@ -588,7 +607,7 @@ export function playNextTrackInRoom(
     // Without this, a second PLAYER_NEXT waiting on the mutex could pass
     // the debounce check if _playTrackInRoom took longer than 500ms (e.g.
     // stream URL resolution), causing a double-skip.
-    lastNextTimestamp.set(roomId, Date.now())
+    lastSkipTimestamp.set(roomId, { action: 'next', timestamp: Date.now() })
   })
 }
 
@@ -602,8 +621,8 @@ export function playPrevTrackInRoom(
 ): Promise<void> {
   return withPlayMutex(roomId, async () => {
     if (options?.skipDebounce) {
-      lastNextTimestamp.set(roomId, Date.now())
-    } else if (_isNextDebounced(roomId)) {
+      lastSkipTimestamp.set(roomId, { action: 'prev', timestamp: Date.now() })
+    } else if (_isSkipDebounced(roomId, 'prev')) {
       return
     }
 
@@ -617,7 +636,7 @@ export function playPrevTrackInRoom(
     }
 
     // Refresh debounce timestamp after async work (same rationale as playNextTrackInRoom)
-    lastNextTimestamp.set(roomId, Date.now())
+    lastSkipTimestamp.set(roomId, { action: 'prev', timestamp: Date.now() })
   })
 }
 
@@ -708,6 +727,7 @@ export function preparePlaybackForJoiningRoom(roomId: string, room: RoomData): v
     ...room.playState,
     isPlaying: true,
     serverTimestamp: Date.now(),
+    revision: nextPlaybackRevision(room.playState),
   }
   roomRepo.persist(roomId)
 }
@@ -735,9 +755,10 @@ export async function syncPlaybackToSocket(
     const scheduleTime = shouldAutoPlay
       ? Math.max(getScheduleTime(roomId), snapshotTimestamp + joinCalibrationDelayMs)
       : snapshotTimestamp
-    const snapshotCurrentTime = shouldAutoPlay
-      ? estimateCurrentTimeAt(roomId, scheduleTime)
-      : estimateCurrentTime(roomId)
+    const snapshotCurrentTime = clampPlaybackPosition(
+      shouldAutoPlay ? estimateCurrentTimeAt(roomId, scheduleTime) : estimateCurrentTime(roomId),
+      room.currentTrack.duration,
+    )
 
     socket.emit(EVENTS.PLAYER_PLAY, {
       track: room.currentTrack,
@@ -746,6 +767,7 @@ export async function syncPlaybackToSocket(
         currentTime: snapshotCurrentTime,
         serverTimestamp: scheduleTime,
         serverTimeToExecute: scheduleTime,
+        revision: room.playState.revision ?? 0,
       },
     })
   } else if (isAloneInRoom && !room.currentTrack && room.queue.length > 0) {
@@ -759,12 +781,12 @@ export async function syncPlaybackToSocket(
 // Room cleanup and debounce
 // ---------------------------------------------------------------------------
 
-/** Debounce tracking for PLAYER_NEXT per room */
-const lastNextTimestamp = new Map<string, number>()
+/** Debounce duplicate skips without blocking an immediate direction reversal. */
+const lastSkipTimestamp = new Map<string, { action: 'next' | 'prev'; timestamp: number }>()
 
 /** Remove per-room entries for a deleted room */
 export function cleanupRoom(roomId: string): void {
-  lastNextTimestamp.delete(roomId)
+  lastSkipTimestamp.delete(roomId)
   lastStreamUrlRefreshAt.delete(roomId)
   playMutexes.delete(roomId)
 }
@@ -774,10 +796,10 @@ export function cleanupRoom(roomId: string): void {
  * Returns true if the action should be SKIPPED (too soon), false if allowed.
  * Internal: called inside mutex to prevent same-tick race conditions.
  */
-function _isNextDebounced(roomId: string): boolean {
+function _isSkipDebounced(roomId: string, action: 'next' | 'prev'): boolean {
   const now = Date.now()
-  const lastNext = lastNextTimestamp.get(roomId) ?? 0
-  if (now - lastNext < config.player.nextDebounceMs) return true
-  lastNextTimestamp.set(roomId, now)
+  const last = lastSkipTimestamp.get(roomId)
+  if (last?.action === action && now - last.timestamp < config.player.nextDebounceMs) return true
+  lastSkipTimestamp.set(roomId, { action, timestamp: now })
   return false
 }

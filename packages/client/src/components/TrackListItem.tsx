@@ -28,7 +28,8 @@ export const TrackListItem = memo(function TrackListItem({
   style,
   className,
 }: TrackListItemProps) {
-  const coverUrl = track.cover ? getProxiedCoverUrl(track.cover) : ''
+  const listCover = track.thumbnailCover ?? track.cover
+  const coverUrl = listCover ? getProxiedCoverUrl(listCover) : ''
   return (
     <div
       style={style}

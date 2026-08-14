@@ -14,9 +14,18 @@ import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import type { ScheduledPlayState } from '@music-together/shared'
-import { EVENTS } from '@music-together/shared'
+import { EVENTS, isStalePlaybackAction } from '@music-together/shared'
 import type { Howl } from 'howler'
 import { useEffect, useRef, type RefObject } from 'react'
+import {
+  getHardSeekThresholdMs,
+  getScheduledPlaybackPosition,
+  getSyncExpectedPosition,
+  getSyncRequestIntervalMs,
+  isDriftSettled,
+} from '@/lib/playbackSync'
+import { setHowlPosition } from '@/lib/howlPosition'
+import { lyricPlayerBridge } from '@/lib/lyricPlayerBridge'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -75,6 +84,8 @@ export function usePlayerSync(
   const emaColdStartRef = useRef(true)
   // Consecutive hard-seek triggers — require HARD_SEEK_CONFIRM_COUNT before actually seeking
   const hardSeekCountRef = useRef(0)
+  const lowDriftStreakRef = useRef(0)
+  const rearmSyncTimerRef = useRef<(() => void) | null>(null)
 
   const clearScheduled = () => {
     if (scheduledTimerRef.current) {
@@ -89,6 +100,8 @@ export function usePlayerSync(
   useEffect(() => {
     // -- SEEK ---------------------------------------------------------------
     const onSeek = (data: { playState: ScheduledPlayState }) => {
+      const roomPlayState = useRoomStore.getState().room?.playState
+      if (roomPlayState && isStalePlaybackAction(data.playState, roomPlayState)) return
       clearScheduled()
       const id = ++actionIdRef.current
       const delay = scheduleDelay(data.playState.serverTimeToExecute)
@@ -96,9 +109,17 @@ export function usePlayerSync(
       scheduledTimerRef.current = setTimeout(() => {
         if (actionIdRef.current !== id) return // stale callback
         if (howlRef.current) {
-          howlRef.current.seek(data.playState.currentTime)
+          const targetTime = data.playState.isPlaying
+            ? getScheduledPlaybackPosition(
+                data.playState.currentTime,
+                data.playState.serverTimeToExecute,
+                getServerTime(),
+              )
+            : data.playState.currentTime
+          setHowlPosition(howlRef.current, targetTime, soundIdRef.current)
+          setCurrentTime(targetTime)
+          lyricPlayerBridge.seek(targetTime)
         }
-        setCurrentTime(data.playState.currentTime)
         setPlaybackTempo(1)
         smoothedDriftRef.current = 0
         emaColdStartRef.current = true
@@ -108,6 +129,7 @@ export function usePlayerSync(
             isPlaying: data.playState.isPlaying,
             currentTime: data.playState.currentTime,
             serverTimestamp: data.playState.serverTimestamp,
+            revision: data.playState.revision ?? useRoomStore.getState().room?.playState.revision,
           },
         })
       }, delay)
@@ -115,6 +137,8 @@ export function usePlayerSync(
 
     // -- PAUSE --------------------------------------------------------------
     const onPause = (data: { playState: ScheduledPlayState }) => {
+      const roomPlayState = useRoomStore.getState().room?.playState
+      if (roomPlayState && isStalePlaybackAction(data.playState, roomPlayState)) return
       clearScheduled()
       cancelScheduledPlayback()
       const id = ++actionIdRef.current
@@ -125,6 +149,7 @@ export function usePlayerSync(
         if (howlRef.current) {
           pausePlayback(data.playState.currentTime)
           setCurrentTime(data.playState.currentTime)
+          lyricPlayerBridge.seek(data.playState.currentTime)
         }
         // Reset drift state — paused means no drift
         smoothedDriftRef.current = 0
@@ -137,6 +162,7 @@ export function usePlayerSync(
             isPlaying: data.playState.isPlaying,
             currentTime: data.playState.currentTime,
             serverTimestamp: data.playState.serverTimestamp,
+            revision: data.playState.revision ?? useRoomStore.getState().room?.playState.revision,
           },
         })
       }, delay)
@@ -144,6 +170,8 @@ export function usePlayerSync(
 
     // -- RESUME -------------------------------------------------------------
     const onResume = (data: { playState: ScheduledPlayState }) => {
+      const roomPlayState = useRoomStore.getState().room?.playState
+      if (roomPlayState && isStalePlaybackAction(data.playState, roomPlayState)) return
       clearScheduled()
       const id = ++actionIdRef.current
       const delay = scheduleDelay(data.playState.serverTimeToExecute)
@@ -164,6 +192,7 @@ export function usePlayerSync(
             isPlaying: data.playState.isPlaying,
             currentTime: data.playState.currentTime,
             serverTimestamp: data.playState.serverTimestamp,
+            revision: data.playState.revision ?? useRoomStore.getState().room?.playState.revision,
           },
         })
       }, delay)
@@ -172,27 +201,38 @@ export function usePlayerSync(
     // -- NEW TRACK (PLAYER_PLAY) ---------------------------------------------
     // When a new track loads, cancel any pending action from the previous track
     // so it doesn't accidentally seek/pause/resume the new Howl instance.
-    const onPlay = () => {
+    const onPlay = (data: { playState: ScheduledPlayState }) => {
+      const roomPlayState = useRoomStore.getState().room?.playState
+      if (roomPlayState && isStalePlaybackAction(data.playState, roomPlayState)) return
       clearScheduled()
       ++actionIdRef.current // invalidate any pending stale callbacks
       hardSeekCountRef.current = 0
+      lowDriftStreakRef.current = 0
       smoothedDriftRef.current = 0
       emaColdStartRef.current = true
       setPlaybackTempo(1)
     }
 
     // -- SYNC RESPONSE (proportional drift correction + EMA smoothing) ------
-    const onSyncResponse = (data: { currentTime: number; isPlaying: boolean; serverTimestamp: number }) => {
+    const onSyncResponse = (data: {
+      currentTime: number
+      isPlaying: boolean
+      serverTimestamp: number
+      trackId?: string | null
+    }) => {
       if (!howlRef.current) return
       if (!howlRef.current.playing()) return
       if (!isCalibrated()) return
+      const currentTrackId = usePlayerStore.getState().currentTrack?.id
+      if (data.trackId && data.trackId !== currentTrackId) return
 
-      // Use NTP-calibrated server time for accurate delay estimation
-      const networkDelaySec = Math.max(
-        0,
-        Math.min(MAX_NETWORK_DELAY_S, (getServerTime() - data.serverTimestamp) / 1000),
+      const expectedTime = getSyncExpectedPosition(
+        data.currentTime,
+        data.isPlaying,
+        data.serverTimestamp,
+        getServerTime(),
+        MAX_NETWORK_DELAY_S,
       )
-      const expectedTime = data.currentTime + (data.isPlaying ? networkDelaySec : 0)
 
       const currentSeek = howlRef.current.seek() as number
       const rawDrift = currentSeek - expectedTime
@@ -208,6 +248,12 @@ export function usePlayerSync(
       }
       const sd = smoothedDriftRef.current
       const absDrift = Math.abs(sd)
+      const wasSettled = lowDriftStreakRef.current >= 3
+      if (isDriftSettled(absDrift, DRIFT_DEAD_ZONE_MS)) lowDriftStreakRef.current += 1
+      else {
+        lowDriftStreakRef.current = 0
+        if (wasSettled) rearmSyncTimerRef.current?.()
+      }
 
       // Update store with smoothed value so UI shows stable drift reading
       usePlayerStore.getState().setSyncDrift(sd)
@@ -216,8 +262,8 @@ export function usePlayerSync(
       // error (asymmetric routing) and extrapolation jitter can trigger
       // unnecessary backward jumps on a static threshold.
       // Raising the threshold proportionally to the observed RTT avoids this.
-      const rttBasedThreshold = (getMedianRTT() + DRIFT_SEEK_RTT_MARGIN_MS) / 1000
-      const hardSeekThreshold = Math.max(DRIFT_SEEK_THRESHOLD_MS / 1000, rttBasedThreshold)
+      const hardSeekThreshold =
+        getHardSeekThresholdMs(DRIFT_SEEK_THRESHOLD_MS, getMedianRTT(), DRIFT_SEEK_RTT_MARGIN_MS) / 1000
       const { playbackTempoSyncEnabled, playbackHardSeekSyncEnabled } = useSettingsStore.getState()
       const hardSeekEnabled = playbackTempoSyncEnabled || playbackHardSeekSyncEnabled
 
@@ -243,11 +289,11 @@ export function usePlayerSync(
         // volume 0 when playback is temporarily reported as paused or the
         // callback is cancelled. Seek directly and always restore the latest
         // user volume so a correction can never leave the track muted.
-        if (soundId === undefined) howl.seek(expectedTime)
-        else howl.seek(expectedTime, soundId)
+        setHowlPosition(howl, expectedTime, soundId)
         if (soundId === undefined) howl.volume(restoreVolume)
         else howl.volume(restoreVolume, soundId)
         setCurrentTime(expectedTime)
+        lyricPlayerBridge.seek(expectedTime)
         smoothedDriftRef.current = 0
         emaColdStartRef.current = true
       } else if (absDrift > DRIFT_DEAD_ZONE_MS / 1000) {
@@ -299,17 +345,44 @@ export function usePlayerSync(
     }
 
     let visibilityFollowUp: ReturnType<typeof setTimeout> | null = null
+    let syncTimer: ReturnType<typeof setTimeout> | null = null
+    let disposed = false
+
+    const baseIntervalMs = syncPacketIntervalSeconds * 1000
+    const settledIntervalMs = Math.min(60_000, Math.round(baseIntervalMs * 2.5))
+    const scheduleNext = (forceFast = false) => {
+      if (disposed) return
+      if (syncTimer) clearTimeout(syncTimer)
+      const delay = forceFast
+        ? baseIntervalMs
+        : getSyncRequestIntervalMs(
+            Boolean(howlRef.current?.playing()),
+            lowDriftStreakRef.current,
+            baseIntervalMs,
+            settledIntervalMs,
+            3,
+          )
+      syncTimer = setTimeout(() => {
+        requestSyncIfPlaying()
+        scheduleNext()
+      }, delay)
+    }
+
+    rearmSyncTimerRef.current = () => scheduleNext(true)
     const onVisibilityChange = () => {
       if (document.visibilityState !== 'visible') return
       requestSyncIfPlaying()
       // A second close sample confirms a real post-background drift without
       // returning to the old constant one-request-per-second traffic pattern.
       visibilityFollowUp = setTimeout(requestSyncIfPlaying, 250)
+      scheduleNext(true)
     }
-    const interval = setInterval(requestSyncIfPlaying, syncPacketIntervalSeconds * 1000)
+    scheduleNext()
     document.addEventListener('visibilitychange', onVisibilityChange)
     return () => {
-      clearInterval(interval)
+      disposed = true
+      rearmSyncTimerRef.current = null
+      if (syncTimer) clearTimeout(syncTimer)
       if (visibilityFollowUp) clearTimeout(visibilityFollowUp)
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }

@@ -21,7 +21,7 @@ RUN pnpm --filter @music-together/client run build
 # ---- 阶段 3: 生产镜像 ----
 FROM node:22-alpine AS production
 RUN corepack enable
-RUN apk add --no-cache python3 make g++ vips
+RUN apk add --no-cache python3 make g++ vips su-exec
 WORKDIR /app
 
 # 复制所有 workspace 包的 package.json（pnpm workspace 需要完整结构）
@@ -41,10 +41,17 @@ COPY --from=build /app/packages/shared/dist packages/shared/dist
 # 生产环境：将 shared 的 exports 从 src(TS) 切换到 dist(JS)
 RUN sed -i 's|./src/index.ts|./dist/index.js|g' packages/shared/package.json
 
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data \
+  && chown -R node:node /app
+
+COPY docker-entrypoint.sh /usr/local/bin/music-together-entrypoint
+RUN chmod 755 /usr/local/bin/music-together-entrypoint
 
 EXPOSE 3001
 ENV NODE_ENV=production
 ENV DATABASE_URL=file:/app/data/music-together.db
 VOLUME ["/app/data"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:3001/api/health >/dev/null || exit 1
+ENTRYPOINT ["music-together-entrypoint"]
 CMD ["node", "packages/server/dist/index.js"]

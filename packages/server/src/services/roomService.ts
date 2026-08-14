@@ -201,6 +201,7 @@ export function createRoom(
       isPlaying: false,
       currentTime: 0,
       serverTimestamp: Date.now(),
+      revision: 0,
     },
     playMode: 'loop-all',
   }
@@ -343,6 +344,7 @@ export function leaveRoom(
         isPlaying: false,
         currentTime: estimateCurrentTime(roomId),
         serverTimestamp: Date.now(),
+        revision: (room.playState.revision ?? 0) + 1,
       }
       roomRepo.persist(roomId)
       logger.info(`房间 ${roomId} 已无人在线，播放已自动暂停`, {

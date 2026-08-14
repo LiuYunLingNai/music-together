@@ -1,5 +1,6 @@
 import { useSocketContext } from '@/providers/socket-context'
 import { resetAllRoomState } from '@/lib/resetStores'
+import { stopActiveAudio } from '@/lib/audioPlaybackLifecycle'
 import { useEffect } from 'react'
 
 /**
@@ -11,6 +12,7 @@ export function useConnectionGuard() {
 
   useEffect(() => {
     const onDisconnect = () => {
+      stopActiveAudio()
       resetAllRoomState()
     }
 

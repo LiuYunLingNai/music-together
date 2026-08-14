@@ -27,9 +27,9 @@ export const DRIFT_SEEK_THRESHOLD_MS = 500
 /** EMA smoothing factor for drift measurements (0–1, higher = more responsive). */
 export const DRIFT_SMOOTH_ALPHA = 0.35
 
-/** Extra margin (ms) added to the median RTT when computing the adaptive
+/** Extra margin (ms) added to half the median RTT when computing the adaptive
  *  hard-seek threshold.  Final threshold = max(DRIFT_SEEK_THRESHOLD_MS,
- *  medianRTT + DRIFT_SEEK_RTT_MARGIN_MS).  This prevents high-latency
+ *  medianRTT / 2 + DRIFT_SEEK_RTT_MARGIN_MS).  This prevents high-latency
  *  NTP jitter from repeatedly triggering hard seeks. */
 export const DRIFT_SEEK_RTT_MARGIN_MS = 250
 
