@@ -18,7 +18,7 @@ Music Together 的原生 Android 客户端，使用 Kotlin、Jetpack Compose、O
 
 ## 构建
 
-需要 JDK 17-21（推荐 Android Studio 内置 JBR）和 Android SDK 37.0。应用的 `targetSdk` 仍为 36。
+需要 JDK 21（推荐兼容版本的 Android Studio 内置 JBR）和 Android SDK 37.0。应用输出字节码仍以 JVM 17 为目标，`targetSdk` 仍为 36。
 
 ```powershell
 cd packages/android-client
