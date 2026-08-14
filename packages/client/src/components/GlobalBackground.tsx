@@ -28,7 +28,7 @@ export function GlobalBackground({ roomScoped = false }: { roomScoped?: boolean 
   const setAutoTint = useGlobalBackgroundStore((state) => state.setAutoTint)
   const setCoverAutoTint = useGlobalBackgroundStore((state) => state.setCoverAutoTint)
   const [tint, setTint] = useState<string | null>(null)
-  const [coverPalette, setCoverPalette] = useState<CoverPalette | null>(null)
+  const [coverPalette, setCoverPalette] = useState<{ url: string; palette: CoverPalette | null } | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -73,11 +73,10 @@ export function GlobalBackground({ roomScoped = false }: { roomScoped?: boolean 
 
   useEffect(() => {
     if (!coverAutoTint || !coverUrl) {
-      setCoverPalette(null)
       return
     }
 
-    setCoverPalette(null)
+    const sourceUrl = coverUrl
     let cancelled = false
     const image = new Image()
     image.crossOrigin = 'anonymous'
@@ -91,19 +90,22 @@ export function GlobalBackground({ roomScoped = false }: { roomScoped?: boolean 
         if (!context) return
         context.drawImage(image, 0, 0, 32, 32)
         const palette = extractCoverPalette(context.getImageData(0, 0, 32, 32).data)
-        if (!cancelled) setCoverPalette(palette)
+        if (!cancelled) setCoverPalette({ url: sourceUrl, palette })
       } catch {
-        if (!cancelled) setCoverPalette(null)
+        if (!cancelled) setCoverPalette({ url: sourceUrl, palette: null })
       }
     }
     image.onerror = () => {
-      if (!cancelled) setCoverPalette(null)
+      if (!cancelled) setCoverPalette({ url: sourceUrl, palette: null })
     }
-    image.src = coverUrl
+    image.src = sourceUrl
     return () => {
       cancelled = true
     }
   }, [coverAutoTint, coverUrl])
+
+  const activeCoverPalette =
+    coverAutoTint && coverUrl && coverPalette?.url === coverUrl ? coverPalette.palette : null
 
   useEffect(() => {
     const root = roomScoped
@@ -118,7 +120,7 @@ export function GlobalBackground({ roomScoped = false }: { roomScoped?: boolean 
       '--mt-cover-secondary-rgb',
       '--mt-cover-border-rgb',
     ]
-    if (!coverAutoTint || !coverPalette) {
+    if (!coverAutoTint || !activeCoverPalette) {
       scopes.forEach((scope) => {
         scope.removeAttribute('data-cover-tint')
         scope.removeAttribute('data-room-cover-tint')
@@ -130,10 +132,10 @@ export function GlobalBackground({ roomScoped = false }: { roomScoped?: boolean 
     root.dataset.coverTint = 'true'
     if (portalRoot) portalRoot.dataset.roomCoverTint = 'true'
     scopes.forEach((scope) => {
-      scope.style.setProperty('--mt-cover-accent-rgb', coverPalette.accent)
-      scope.style.setProperty('--mt-cover-highlight-rgb', coverPalette.highlight)
-      scope.style.setProperty('--mt-cover-secondary-rgb', coverPalette.secondary)
-      scope.style.setProperty('--mt-cover-border-rgb', coverPalette.border)
+      scope.style.setProperty('--mt-cover-accent-rgb', activeCoverPalette.accent)
+      scope.style.setProperty('--mt-cover-highlight-rgb', activeCoverPalette.highlight)
+      scope.style.setProperty('--mt-cover-secondary-rgb', activeCoverPalette.secondary)
+      scope.style.setProperty('--mt-cover-border-rgb', activeCoverPalette.border)
     })
     return () => {
       scopes.forEach((scope) => {
@@ -142,7 +144,7 @@ export function GlobalBackground({ roomScoped = false }: { roomScoped?: boolean 
         properties.forEach((property) => scope.style.removeProperty(property))
       })
     }
-  }, [coverAutoTint, coverPalette, roomScoped])
+  }, [activeCoverPalette, coverAutoTint, roomScoped])
 
   useEffect(() => {
     if (!autoTint || !resolvedUrl) return
