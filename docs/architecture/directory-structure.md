@@ -14,7 +14,6 @@ music-together/
 ├── pnpm-lock.yaml
 ├── .node-version        # CI 与本地统一使用 Node.js 22
 ├── Dockerfile           # 三阶段生产镜像
-├── docker-entrypoint.sh # 兼容历史数据目录权限并降权启动
 ├── README.md
 └── .gitignore
 ```

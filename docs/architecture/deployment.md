@@ -25,7 +25,7 @@ Docker 容器 (:3001)
 - **阶段 2（build）**：分别构建 shared、server（tsc）、client（vite build）
 - **阶段 3（production）**：仅安装 server 生产依赖（`--filter @music-together/server...`），复制构建产物
 
-生产阶段的入口脚本会先修正 `/app/data` 的属主，再通过 `su-exec` 以非 root `node` 用户启动应用。这同时兼容新建命名卷和历史上由 root 创建的绑定目录；容器通过 `/api/health` 执行健康检查。
+生产镜像沿用旧版直接启动方式，不主动修改历史绑定目录的属主或权限；容器通过 `/api/health` 执行健康检查。
 
 ## CORS 策略
 
