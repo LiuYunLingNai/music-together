@@ -8,6 +8,7 @@ const DEFAULT_SETTINGS: GlobalBackgroundSettings = {
   colorPreset: 'gold',
   backgroundBrightness: 60,
   autoTint: false,
+  coverAutoTint: false,
 }
 
 interface ServerSettingRow {
@@ -41,7 +42,8 @@ function parseSettings(value: string | undefined): GlobalBackgroundSettings {
         typeof parsed.backgroundBrightness === 'number' && Number.isFinite(parsed.backgroundBrightness)
           ? Math.min(100, Math.max(20, Math.round(parsed.backgroundBrightness)))
           : DEFAULT_SETTINGS.backgroundBrightness,
-      autoTint: parsed.autoTint === true,
+      autoTint: parsed.autoTint === true && parsed.coverAutoTint !== true,
+      coverAutoTint: parsed.coverAutoTint === true,
     }
   } catch {
     return { ...DEFAULT_SETTINGS }
@@ -54,7 +56,10 @@ export const globalBackgroundRepo = {
   },
 
   update(patch: Partial<GlobalBackgroundSettings>): GlobalBackgroundSettings {
-    const settings = { ...this.get(), ...patch }
+    const current = this.get()
+    const settings = { ...current, ...patch }
+    if (patch.autoTint === true) settings.coverAutoTint = false
+    if (patch.coverAutoTint === true) settings.autoTint = false
     upsertBackground.run(BACKGROUND_KEY, JSON.stringify(settings), Date.now())
     return settings
   },

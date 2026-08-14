@@ -7,11 +7,13 @@ interface GlobalBackgroundStore {
   colorPreset: ColorPreset
   backgroundBrightness: number
   autoTint: boolean
+  coverAutoTint: boolean
   setBackgroundUrl: (backgroundUrl: string | null) => void
   setGlassOverlay: (glassOverlay: boolean) => void
   setColorPreset: (colorPreset: ColorPreset) => void
   setBackgroundBrightness: (backgroundBrightness: number) => void
   setAutoTint: (autoTint: boolean) => void
+  setCoverAutoTint: (coverAutoTint: boolean) => void
 }
 
 export const useGlobalBackgroundStore = create<GlobalBackgroundStore>((set) => ({
@@ -20,9 +22,11 @@ export const useGlobalBackgroundStore = create<GlobalBackgroundStore>((set) => (
   colorPreset: 'gold',
   backgroundBrightness: 60,
   autoTint: false,
+  coverAutoTint: false,
   setBackgroundUrl: (backgroundUrl) => set({ backgroundUrl }),
   setGlassOverlay: (glassOverlay) => set({ glassOverlay }),
   setColorPreset: (colorPreset) => set({ colorPreset }),
   setBackgroundBrightness: (backgroundBrightness) => set({ backgroundBrightness }),
   setAutoTint: (autoTint) => set({ autoTint }),
+  setCoverAutoTint: (coverAutoTint) => set({ coverAutoTint }),
 }))

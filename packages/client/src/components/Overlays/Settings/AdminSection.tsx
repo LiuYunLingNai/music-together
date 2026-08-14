@@ -56,6 +56,7 @@ export function AdminSection() {
     colorPreset: 'gold',
     backgroundBrightness: 60,
     autoTint: false,
+    coverAutoTint: false,
   })
   const [passwords, setPasswords] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
@@ -230,6 +231,22 @@ export function AdminSection() {
       toast.success(autoTint ? '自动适配背景色调已开启' : '自动适配背景色调已关闭')
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '自动色调设置更新失败')
+    } finally {
+      setUpdatingBackground(false)
+    }
+  }
+
+  const updateCoverAutoTint = async (coverAutoTint: boolean) => {
+    setUpdatingBackground(true)
+    try {
+      const settings = await requestJson<GlobalBackgroundSettings>('/api/admin/background', {
+        method: 'PATCH',
+        body: JSON.stringify({ coverAutoTint }),
+      })
+      setGlobalBackground(settings)
+      toast.success(coverAutoTint ? '跟随歌曲封面色调已开启' : '跟随歌曲封面色调已关闭')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '封面色调设置更新失败')
     } finally {
       setUpdatingBackground(false)
     }
@@ -574,6 +591,18 @@ export function AdminSection() {
                 <div className="min-w-0">
                   <p className="text-sm font-medium">自动适配背景色调</p>
                   <p className="text-xs text-muted-foreground">从背景图片提取平均色，叠加到背景光效中</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 rounded-md border p-2">
+                <Switch
+                  checked={globalBackground.coverAutoTint}
+                  disabled={updatingBackground}
+                  onCheckedChange={(checked) => void updateCoverAutoTint(checked)}
+                  aria-label="跟随歌曲封面色调"
+                />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">跟随歌曲封面色调</p>
+                  <p className="text-xs text-muted-foreground">根据当前播放歌曲封面实时更新全局主题色；开启后会关闭背景图自动适配。</p>
                 </div>
               </div>
               <div className="flex flex-col gap-2 sm:flex-row">

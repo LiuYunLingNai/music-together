@@ -289,8 +289,9 @@ export default function RoomPage() {
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: 0.2 }}
+        className="mt-room-page"
       >
-        <GlobalBackground />
+        <GlobalBackground roomScoped />
         <InteractionGate
           onStart={handleGateStart}
           roomName={roomInfo?.name}
@@ -309,9 +310,9 @@ export default function RoomPage() {
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: 0.2 }}
-        className="mt-page-surface"
+        className="mt-room-page mt-page-surface"
       >
-        <GlobalBackground />
+        <GlobalBackground roomScoped />
         <div className="flex h-dvh flex-col bg-transparent">
           <RoomHeader
             onOpenSearch={() => setSearchOpen(true)}

@@ -300,6 +300,41 @@
   --theme-border-rgb: 245 245 245;
 }
 
+.mt-room-page[data-cover-tint='true'],
+body[data-room-cover-tint='true'] {
+  --foreground: rgb(var(--mt-cover-highlight-rgb));
+  --card-foreground: var(--foreground);
+  --popover-foreground: var(--foreground);
+  --muted-foreground: rgb(var(--mt-cover-highlight-rgb) / 72%);
+  --background: color-mix(in srgb, rgb(var(--mt-cover-accent-rgb)) 8%, #080b12);
+  --card: color-mix(in srgb, rgb(var(--mt-cover-accent-rgb)) 12%, #141b27);
+  --popover: color-mix(in srgb, rgb(var(--mt-cover-accent-rgb)) 14%, #182131);
+  --secondary: color-mix(in srgb, rgb(var(--mt-cover-secondary-rgb)) 24%, #1d2938);
+  --muted: color-mix(in srgb, rgb(var(--mt-cover-accent-rgb)) 14%, #1a2533);
+  --accent: color-mix(in srgb, rgb(var(--mt-cover-accent-rgb)) 24%, #243545);
+  --border: rgb(var(--mt-cover-border-rgb) / 18%);
+  --input: rgb(var(--mt-cover-border-rgb) / 20%);
+  --primary: rgb(var(--mt-cover-accent-rgb));
+  --primary-foreground: #07100f;
+  --secondary-foreground: var(--foreground);
+  --accent-foreground: var(--foreground);
+  --ring: rgb(var(--mt-cover-accent-rgb));
+  --chart-1: rgb(var(--mt-cover-accent-rgb));
+  --chart-5: rgb(var(--mt-cover-highlight-rgb));
+  --sidebar: color-mix(in srgb, rgb(var(--mt-cover-accent-rgb)) 10%, #0d151d);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: rgb(var(--mt-cover-accent-rgb));
+  --sidebar-primary-foreground: #07100f;
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: rgb(var(--mt-cover-accent-rgb));
+  --theme-accent-rgb: var(--mt-cover-accent-rgb);
+  --theme-highlight-rgb: var(--mt-cover-highlight-rgb);
+  --theme-secondary-rgb: var(--mt-cover-secondary-rgb);
+  --theme-border-rgb: var(--mt-cover-border-rgb);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

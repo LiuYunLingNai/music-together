@@ -75,13 +75,15 @@ const backgroundPatchSchema = z
     colorPreset: z.enum(['gold', 'ocean', 'rose', 'violet', 'sunset', 'mint', 'mono']).optional(),
     backgroundBrightness: z.number().int().min(20).max(100).optional(),
     autoTint: z.boolean().optional(),
+    coverAutoTint: z.boolean().optional(),
   })
   .refine(
     (value) =>
       value.glassOverlay !== undefined ||
       value.colorPreset !== undefined ||
       value.backgroundBrightness !== undefined ||
-      value.autoTint !== undefined,
+      value.autoTint !== undefined ||
+      value.coverAutoTint !== undefined,
     {
     message: 'No background setting was provided',
     },

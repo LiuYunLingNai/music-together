@@ -1,6 +1,13 @@
 import { SERVER_URL } from './config'
 
-const PROXY_COVER_HOSTS = new Set(['y.gtimg.cn', 'imgessl.kugou.com'])
+const PROXY_COVER_HOSTS = new Set([
+  'y.gtimg.cn',
+  'p1.music.126.net',
+  'p2.music.126.net',
+  'p3.music.126.net',
+  'p4.music.126.net',
+  'imgessl.kugou.com',
+])
 
 export function isBilibiliCoverUrl(coverUrl: string): boolean {
   try {

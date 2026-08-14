@@ -44,6 +44,7 @@ export interface GlobalBackgroundSettings {
   colorPreset: ColorPreset
   backgroundBrightness: number
   autoTint: boolean
+  coverAutoTint: boolean
 }
 
 /** Music platforms that can supply lyrics and cover art for Bilibili videos. */
