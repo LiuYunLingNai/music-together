@@ -45,6 +45,8 @@
 import { Play, Pause, SkipForward, Volume2 } from 'lucide-react'
 ```
 
+成员列表使用浏览器、手机和桌面端图标展示服务端识别出的粗粒度连接设备；在线成员显示当前标签，离线成员显示最后一次识别到的标签。未知或无法安全识别的 User-Agent 不展示设备信息。
+
 ## 动画
 
 - **motion (Framer Motion)**：组件进入/退出动画、列表动画

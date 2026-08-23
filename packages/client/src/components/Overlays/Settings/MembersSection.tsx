@@ -3,8 +3,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator'
 import { useRoomStore } from '@/stores/roomStore'
 import { useAccountStore } from '@/stores/accountStore'
-import type { UserRole } from '@music-together/shared'
-import { Crown, Shield, ShieldCheck, User } from 'lucide-react'
+import type { User, UserRole } from '@music-together/shared'
+import { Crown, Globe2, Monitor, Shield, ShieldCheck, Smartphone, User as UserIcon } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { resolveAvatarUrl } from '@/lib/profileApi'
 
@@ -37,8 +37,14 @@ function getRoleIcon(role: UserRole) {
     case 'admin':
       return <Shield className="h-4 w-4 text-blue-400" />
     case 'member':
-      return <User className="h-4 w-4 text-muted-foreground" />
+      return <UserIcon className="h-4 w-4 text-muted-foreground" />
   }
+}
+
+function getClientIcon(kind: NonNullable<User['client']>['kind']) {
+  if (kind === 'android') return <Smartphone className="h-3.5 w-3.5" />
+  if (kind === 'windows' || kind === 'desktop') return <Monitor className="h-3.5 w-3.5" />
+  return <Globe2 className="h-3.5 w-3.5" />
 }
 
 export function MembersSection({ onSetUserRole }: MembersSectionProps) {
@@ -77,15 +83,27 @@ export function MembersSection({ onSetUserRole }: MembersSectionProps) {
                 />
               </div>
               {user.isServerAdmin ? <ShieldCheck className="h-4 w-4 text-emerald-400" /> : getRoleIcon(user.role)}
-              <span className="text-sm">{user.nickname}</span>
-              {user.id === currentUser?.id && (
-                <Badge variant="secondary" className="text-xs">
-                  你
-                </Badge>
-              )}
-              <Badge variant="outline" className="text-xs">
-                {user.isServerAdmin ? '服务器管理员' : ROLE_LABELS[user.role]}
-              </Badge>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="truncate text-sm">{user.nickname}</span>
+                  {user.id === currentUser?.id && (
+                    <Badge variant="secondary" className="text-xs">
+                      你
+                    </Badge>
+                  )}
+                  <Badge variant="outline" className="text-xs">
+                    {user.isServerAdmin ? '服务器管理员' : ROLE_LABELS[user.role]}
+                  </Badge>
+                </div>
+                {user.client && (
+                  <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+                    {getClientIcon(user.client.kind)}
+                    <span className="truncate">
+                      {user.isOnline ? user.client.label : `上次使用：${user.client.label}`}
+                    </span>
+                  </div>
+                )}
+              </div>
               {/* Owner can change other users' roles (not their own, not other owners) */}
               {isOwner &&
                 !user.isServerAdmin &&
@@ -93,7 +111,7 @@ export function MembersSection({ onSetUserRole }: MembersSectionProps) {
                 user.id !== currentUser?.id &&
                 onSetUserRole && (
                   <Select value={user.role} onValueChange={(v) => onSetUserRole(user.id, v as 'admin' | 'member')}>
-                    <SelectTrigger className="ml-auto h-7 w-24 text-xs">
+                    <SelectTrigger className="h-7 w-24 shrink-0 text-xs">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>

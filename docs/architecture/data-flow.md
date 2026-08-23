@@ -129,6 +129,7 @@ interface User {
   id: string
   nickname: string
   role: UserRole
+  client?: ClientInfo
 }
 type UserRole = 'owner' | 'admin' | 'member'
 
@@ -142,6 +143,8 @@ interface ChatMessage {
   type: 'user' | 'system'
 }
 ```
+
+`User.client` 是可选的粗粒度连接端信息。服务端根据 WebSocket 握手中的 User-Agent 和浏览器客户端提示推断浏览器、操作系统或原生客户端类型，只广播类似 `Chrome · Windows`、`Safari · iPhone`、`Android 客户端` 的标签，不广播原始 User-Agent 或版本号。旧版 Web、Android 和 Windows 客户端可安全忽略该字段。
 
 ## 播放同步机制
 

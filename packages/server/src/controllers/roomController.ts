@@ -18,6 +18,7 @@ import * as authService from '../services/authService.js'
 import * as playerService from '../services/playerService.js'
 import { issueRejoinTicket, revokeRejoinTickets } from '../services/rejoinTicketService.js'
 import * as roomService from '../services/roomService.js'
+import { getClientInfo } from '../services/clientInfoService.js'
 import * as voteService from '../services/voteService.js'
 import { executeVoteAction } from '../services/voteActionService.js'
 import { logger } from '../utils/logger.js'
@@ -79,6 +80,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         roomName,
         password,
         socket.data.identityUserId,
+        getClientInfo(socket.handshake.headers),
       )
 
       socket.leave('lobby')
@@ -134,7 +136,13 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         handleLeave(io, socket, 'auto-leave before join', true)
       }
 
-      const result = roomService.joinRoom(socket.id, roomId, nickname.trim(), socket.data.identityUserId)
+      const result = roomService.joinRoom(
+        socket.id,
+        roomId,
+        nickname.trim(),
+        socket.data.identityUserId,
+        getClientInfo(socket.handshake.headers),
+      )
       if (!result) {
         socket.emit(EVENTS.ROOM_ERROR, { code: ERROR_CODE.JOIN_FAILED, message: '加入房间失败' })
         return
@@ -175,9 +183,9 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         : roomService.toPublicRoomState(updatedRoom)
       socket.emit(EVENTS.ROOM_STATE, stateForJoiner)
 
-      // If conductor or roles changed (owner/admin returned, temporary admin cleared),
-      // broadcast to ALL OTHER clients so permissions stay in sync.
-      if (hostChanged || roleChanged) {
+      // Broadcast role/conductor changes and rejoin updates so the roster's
+      // current device label stays in sync when a member reconnects elsewhere.
+      if (hostChanged || roleChanged || validation.isRejoin) {
         socket.to(roomId).emit(EVENTS.ROOM_STATE, roomService.toPublicRoomState(updatedRoom))
       }
       socket.emit(EVENTS.ROOM_REJOIN_TOKEN, { roomId, token: rejoin.token, expiresAt: rejoin.expiresAt })

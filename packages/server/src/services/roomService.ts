@@ -1,5 +1,5 @@
 import { timingSafeEqual } from 'node:crypto'
-import type { AudioQuality, RoomListItem, RoomMember, User, UserRole } from '@music-together/shared'
+import type { AudioQuality, ClientInfo, RoomListItem, RoomMember, User, UserRole } from '@music-together/shared'
 import { nanoid } from 'nanoid'
 import type { RoomData } from '../repositories/types.js'
 import { roomRepo } from '../repositories/roomRepository.js'
@@ -45,6 +45,7 @@ function upsertRoomMember(room: RoomData, user: User, role: UserRole): RoomMembe
     existing.nickname = user.nickname
     existing.avatarUrl = user.avatarUrl
     existing.isServerAdmin = user.isServerAdmin
+    existing.client = user.client
     existing.role = role
     existing.isOnline = true
     existing.lastSeenAt = now
@@ -160,6 +161,7 @@ export function createRoom(
   roomName?: string,
   password?: string | null,
   persistentUserId?: string,
+  client?: ClientInfo,
 ): { room: RoomData; user: User } {
   const roomId = nanoid(6).toUpperCase()
   const userId = persistentUserId || socketId
@@ -171,6 +173,7 @@ export function createRoom(
     avatarUrl: profile.avatarUrl,
     role: 'owner',
     isServerAdmin: userRepo.isServerAdmin(userId),
+    client,
   }
 
   const room: RoomData = {
@@ -228,6 +231,7 @@ export function joinRoom(
   roomId: string,
   nickname: string,
   persistentUserId?: string,
+  client?: ClientInfo,
 ): { room: RoomData; user: User; hostChanged: boolean; roleChanged: boolean } | null {
   const room = roomRepo.get(roomId)
   if (!room) return null
@@ -254,6 +258,7 @@ export function joinRoom(
     existing.avatarUrl = profile.avatarUrl
     existing.role = resolveRole()
     existing.isServerAdmin = userRepo.isServerAdmin(userId)
+    existing.client = client
     upsertRoomMember(room, existing, resolveRole())
     roomRepo.setSocketMapping(socketId, roomId, userId)
     const roleChanged = reconcileRoomRoles(room)
@@ -270,6 +275,7 @@ export function joinRoom(
     avatarUrl: profile.avatarUrl,
     role,
     isServerAdmin: userRepo.isServerAdmin(userId),
+    client,
   }
   room.users.push(user)
   upsertRoomMember(room, user, role)

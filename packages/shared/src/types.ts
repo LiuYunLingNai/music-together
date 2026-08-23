@@ -216,6 +216,14 @@ export interface User {
   /** Account-level server administrator status, independent of the room role. */
   isServerAdmin: boolean
   avatarUrl?: string | null
+  /** Coarse client information inferred from the connection handshake. */
+  client?: ClientInfo
+}
+
+export interface ClientInfo {
+  kind: 'web' | 'android' | 'windows' | 'desktop'
+  /** Human-readable label without raw user-agent data or version numbers. */
+  label: string
 }
 
 /** A room roster entry. Unlike User, this stays available while offline. */
