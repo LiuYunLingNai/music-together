@@ -216,14 +216,18 @@ export interface User {
   /** Account-level server administrator status, independent of the room role. */
   isServerAdmin: boolean
   avatarUrl?: string | null
-  /** Coarse client information inferred from the connection handshake. */
+  /** Latest coarse client label, retained for older clients. */
   client?: ClientInfo
+  /** Coarse client labels for every active connection of this account. */
+  clients?: ClientInfo[]
 }
 
 export interface ClientInfo {
   kind: 'web' | 'android' | 'windows' | 'desktop'
   /** Human-readable label without raw user-agent data or version numbers. */
   label: string
+  /** Number of active connections sharing this label. */
+  count?: number
 }
 
 /** A room roster entry. Unlike User, this stays available while offline. */

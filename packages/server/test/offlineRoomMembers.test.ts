@@ -116,3 +116,69 @@ test('clears a temporary admin role when the room becomes empty before owner ret
 
   roomRepo.delete(room.id)
 })
+
+test('keeps every active client visible for an account with multiple sockets', () => {
+  const androidClient = { kind: 'android' as const, label: 'Android 客户端' }
+  const windowsClient = { kind: 'windows' as const, label: 'Windows 客户端' }
+  const { room } = roomService.createRoom(
+    'multi-android-socket',
+    'Multi-device user',
+    'Multi-device room',
+    null,
+    'multi-device-id',
+    androidClient,
+  )
+
+  const secondConnection = roomService.joinRoom(
+    'multi-windows-socket',
+    room.id,
+    'Multi-device user',
+    'multi-device-id',
+    windowsClient,
+  )
+  assert.ok(secondConnection)
+  assert.equal(room.users.length, 1)
+  assert.deepEqual(secondConnection.user.clients, [androidClient, windowsClient])
+  assert.deepEqual(room.members[0]?.clients, [androidClient, windowsClient])
+
+  const firstDisconnected = roomService.leaveRoom('multi-android-socket')
+  assert.ok(firstDisconnected)
+  assert.equal(firstDisconnected.staleSocketOnly, true)
+  assert.deepEqual(firstDisconnected.user.clients, [windowsClient])
+  assert.deepEqual(room.members[0]?.clients, [windowsClient])
+
+  const finalDisconnected = roomService.leaveRoom('multi-windows-socket')
+  assert.ok(finalDisconnected)
+  assert.equal(finalDisconnected.staleSocketOnly, false)
+  assert.deepEqual(room.members[0]?.clients, [windowsClient])
+
+  roomRepo.delete(room.id)
+})
+
+test('groups identical active client labels by connection count', () => {
+  const androidClient = { kind: 'android' as const, label: 'Android 客户端' }
+  const { room } = roomService.createRoom(
+    'duplicate-client-socket-1',
+    'Duplicate device user',
+    'Duplicate device room',
+    null,
+    'duplicate-device-id',
+    androidClient,
+  )
+
+  const secondConnection = roomService.joinRoom(
+    'duplicate-client-socket-2',
+    room.id,
+    'Duplicate device user',
+    'duplicate-device-id',
+    androidClient,
+  )
+  assert.ok(secondConnection)
+  assert.deepEqual(secondConnection.user.clients, [{ ...androidClient, count: 2 }])
+
+  roomService.leaveRoom('duplicate-client-socket-1')
+  assert.deepEqual(secondConnection.user.clients, [androidClient])
+
+  roomService.leaveRoom('duplicate-client-socket-2')
+  roomRepo.delete(room.id)
+})

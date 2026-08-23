@@ -1,6 +1,7 @@
 import type {
   AudioQuality,
   ChatMessage,
+  ClientInfo,
   PlayMode,
   PlayState,
   RoomListItem,
@@ -42,6 +43,7 @@ export interface RoomData {
 export interface SocketMapping {
   roomId: string
   userId: string
+  client?: ClientInfo
 }
 
 export interface RoomRepository {
@@ -53,12 +55,14 @@ export interface RoomRepository {
   getAllIds(): string[]
   /** Public lobby projection; hidden rooms must never be included. */
   getPublicLobbyList(): RoomListItem[]
-  setSocketMapping(socketId: string, roomId: string, userId: string): void
+  setSocketMapping(socketId: string, roomId: string, userId: string, client?: ClientInfo): void
   replaceUserId(oldUserId: string, newUserId: string): void
   getSocketMapping(socketId: string): SocketMapping | undefined
   deleteSocketMapping(socketId: string): void
   /** Check if a user has another active socket in the same room (excluding a specific socket) */
   hasOtherSocketForUser(roomId: string, userId: string, excludeSocketId: string): boolean
+  /** Return coarse client labels for every active socket owned by a room member. */
+  getClientInfosForUser(roomId: string, userId: string): ClientInfo[]
   /** 根据 roomId + userId 查找对应的 socketId（用于定向发送） */
   getSocketIdForUser(roomId: string, userId: string): string | null
   /** Store a smoothed RTT measurement for a given socket */

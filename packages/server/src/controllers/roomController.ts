@@ -413,7 +413,10 @@ function handleLeave(io: TypedServer, socket: TypedSocket, reason?: string, revo
 
   // Stale socket cleanup (e.g. page refresh) should only remove this socket
   // from the Socket.IO room; the user remains present via another socket.
-  if (staleSocketOnly) return
+  if (staleSocketOnly) {
+    if (room) io.to(roomId).emit(EVENTS.ROOM_STATE, roomService.toPublicRoomState(room))
+    return
+  }
 
   io.to(roomId).emit(EVENTS.ROOM_USER_LEFT, user)
 

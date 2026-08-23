@@ -1,4 +1,11 @@
-import { HIGHEST_AUDIO_QUALITY, LIMITS, type RoomListItem, type RoomMember, type Track } from '@music-together/shared'
+import {
+  HIGHEST_AUDIO_QUALITY,
+  LIMITS,
+  type ClientInfo,
+  type RoomListItem,
+  type RoomMember,
+  type Track,
+} from '@music-together/shared'
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto'
 import { config } from '../config.js'
 import { logger } from '../utils/logger.js'
@@ -327,7 +334,7 @@ export class InMemoryRoomRepository implements RoomRepository {
       }))
   }
 
-  setSocketMapping(socketId: string, roomId: string, userId: string): void {
+  setSocketMapping(socketId: string, roomId: string, userId: string, client?: ClientInfo): void {
     // Remove from previous room's reverse index (if socket was mapped before)
     const prev = this.socketToRoom.get(socketId)
     if (prev) {
@@ -338,7 +345,7 @@ export class InMemoryRoomRepository implements RoomRepository {
       }
     }
 
-    this.socketToRoom.set(socketId, { roomId, userId })
+    this.socketToRoom.set(socketId, { roomId, userId, client })
 
     // Add to new room's reverse index
     let socketSet = this.roomToSockets.get(roomId)
@@ -383,6 +390,19 @@ export class InMemoryRoomRepository implements RoomRepository {
       if (mapping && mapping.userId === userId && mapping.roomId === roomId) return true
     }
     return false
+  }
+
+  getClientInfosForUser(roomId: string, userId: string): ClientInfo[] {
+    const sockets = this.roomToSockets.get(roomId)
+    if (!sockets) return []
+    const clients: ClientInfo[] = []
+    for (const socketId of sockets) {
+      const mapping = this.socketToRoom.get(socketId)
+      if (mapping?.roomId === roomId && mapping.userId === userId && mapping.client) {
+        clients.push(mapping.client)
+      }
+    }
+    return clients
   }
 
   getSocketIdForUser(roomId: string, userId: string): string | null {

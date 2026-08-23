@@ -3,7 +3,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator'
 import { useRoomStore } from '@/stores/roomStore'
 import { useAccountStore } from '@/stores/accountStore'
-import type { User, UserRole } from '@music-together/shared'
+import type { ClientInfo, UserRole } from '@music-together/shared'
 import { Crown, Globe2, Monitor, Shield, ShieldCheck, Smartphone, User as UserIcon } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { resolveAvatarUrl } from '@/lib/profileApi'
@@ -41,10 +41,15 @@ function getRoleIcon(role: UserRole) {
   }
 }
 
-function getClientIcon(kind: NonNullable<User['client']>['kind']) {
+function getClientIcon(kind: ClientInfo['kind']) {
   if (kind === 'android') return <Smartphone className="h-3.5 w-3.5" />
   if (kind === 'windows' || kind === 'desktop') return <Monitor className="h-3.5 w-3.5" />
   return <Globe2 className="h-3.5 w-3.5" />
+}
+
+function getVisibleClients(user: { client?: ClientInfo; clients?: ClientInfo[] }): ClientInfo[] {
+  if (user.clients?.length) return user.clients
+  return user.client ? [user.client] : []
 }
 
 export function MembersSection({ onSetUserRole }: MembersSectionProps) {
@@ -66,62 +71,71 @@ export function MembersSection({ onSetUserRole }: MembersSectionProps) {
         <Separator className="mt-2 mb-4" />
 
         <div className="space-y-1">
-          {members.map((user) => (
-            <div key={user.id} className="flex items-center gap-2 rounded-lg px-3 py-1.5">
-              <div className="relative shrink-0">
-                <Avatar size="sm">
-                  <AvatarImage src={resolveAvatarUrl(user.avatarUrl)} alt="" />
-                  <AvatarFallback>{user.nickname.slice(0, 1).toUpperCase()}</AvatarFallback>
-                </Avatar>
-                <span
-                  aria-label={user.isOnline ? '在线' : '离线'}
-                  className={
-                    user.isOnline
-                      ? 'ring-background absolute -right-0.5 -bottom-0.5 z-10 size-2.5 rounded-full bg-emerald-500 ring-2'
-                      : 'ring-background absolute -right-0.5 -bottom-0.5 z-10 size-2.5 rounded-full bg-muted-foreground ring-2'
-                  }
-                />
-              </div>
-              {user.isServerAdmin ? <ShieldCheck className="h-4 w-4 text-emerald-400" /> : getRoleIcon(user.role)}
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="truncate text-sm">{user.nickname}</span>
-                  {user.id === currentUser?.id && (
-                    <Badge variant="secondary" className="text-xs">
-                      你
-                    </Badge>
-                  )}
-                  <Badge variant="outline" className="text-xs">
-                    {user.isServerAdmin ? '服务器管理员' : ROLE_LABELS[user.role]}
-                  </Badge>
+          {members.map((user) => {
+            const clients = getVisibleClients(user)
+            return (
+              <div key={user.id} className="flex items-center gap-2 rounded-lg px-3 py-1.5">
+                <div className="relative shrink-0">
+                  <Avatar size="sm">
+                    <AvatarImage src={resolveAvatarUrl(user.avatarUrl)} alt="" />
+                    <AvatarFallback>{user.nickname.slice(0, 1).toUpperCase()}</AvatarFallback>
+                  </Avatar>
+                  <span
+                    aria-label={user.isOnline ? '在线' : '离线'}
+                    className={
+                      user.isOnline
+                        ? 'ring-background absolute -right-0.5 -bottom-0.5 z-10 size-2.5 rounded-full bg-emerald-500 ring-2'
+                        : 'ring-background absolute -right-0.5 -bottom-0.5 z-10 size-2.5 rounded-full bg-muted-foreground ring-2'
+                    }
+                  />
                 </div>
-                {user.client && (
-                  <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-                    {getClientIcon(user.client.kind)}
-                    <span className="truncate">
-                      {user.isOnline ? user.client.label : `上次使用：${user.client.label}`}
-                    </span>
+                {user.isServerAdmin ? <ShieldCheck className="h-4 w-4 text-emerald-400" /> : getRoleIcon(user.role)}
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="truncate text-sm">{user.nickname}</span>
+                    {user.id === currentUser?.id && (
+                      <Badge variant="secondary" className="text-xs">
+                        你
+                      </Badge>
+                    )}
+                    <Badge variant="outline" className="text-xs">
+                      {user.isServerAdmin ? '服务器管理员' : ROLE_LABELS[user.role]}
+                    </Badge>
                   </div>
-                )}
+                  {clients.length > 0 && (
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                      {!user.isOnline && <span>上次使用：</span>}
+                      {clients.map((client) => (
+                        <span key={`${client.kind}:${client.label}`} className="inline-flex min-w-0 items-center gap-1">
+                          {getClientIcon(client.kind)}
+                          <span className="truncate">
+                            {client.label}
+                            {(client.count ?? 1) > 1 ? ` ×${client.count}` : ''}
+                          </span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {/* Owner can change other users' roles (not their own, not other owners) */}
+                {isOwner &&
+                  !user.isServerAdmin &&
+                  user.role !== 'owner' &&
+                  user.id !== currentUser?.id &&
+                  onSetUserRole && (
+                    <Select value={user.role} onValueChange={(v) => onSetUserRole(user.id, v as 'admin' | 'member')}>
+                      <SelectTrigger className="h-7 w-24 shrink-0 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="admin">管理员</SelectItem>
+                        <SelectItem value="member">成员</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
               </div>
-              {/* Owner can change other users' roles (not their own, not other owners) */}
-              {isOwner &&
-                !user.isServerAdmin &&
-                user.role !== 'owner' &&
-                user.id !== currentUser?.id &&
-                onSetUserRole && (
-                  <Select value={user.role} onValueChange={(v) => onSetUserRole(user.id, v as 'admin' | 'member')}>
-                    <SelectTrigger className="h-7 w-24 shrink-0 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="admin">管理员</SelectItem>
-                      <SelectItem value="member">成员</SelectItem>
-                    </SelectContent>
-                  </Select>
-                )}
-            </div>
-          ))}
+            )
+          })}
         </div>
       </div>
     </div>

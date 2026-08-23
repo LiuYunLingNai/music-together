@@ -130,6 +130,7 @@ interface User {
   nickname: string
   role: UserRole
   client?: ClientInfo
+  clients?: ClientInfo[]
 }
 type UserRole = 'owner' | 'admin' | 'member'
 
@@ -144,7 +145,7 @@ interface ChatMessage {
 }
 ```
 
-`User.client` 是可选的粗粒度连接端信息。服务端根据 WebSocket 握手中的 User-Agent 和浏览器客户端提示推断浏览器、操作系统或原生客户端类型，只广播类似 `Chrome · Windows`、`Safari · iPhone`、`Android 客户端` 的标签，不广播原始 User-Agent 或版本号。旧版 Web、Android 和 Windows 客户端可安全忽略该字段。
+`User.client` 是为旧客户端保留的最近连接端标签，`User.clients` 是同一账号当前所有 WebSocket 连接的可选粗粒度设备列表。服务端根据握手中的 User-Agent 和浏览器客户端提示推断浏览器、操作系统或原生客户端类型，只广播类似 `Chrome · Windows`、`Safari · iPhone`、`Android 客户端` 的标签，不广播原始 User-Agent 或版本号；相同标签会通过可选 `count` 聚合。旧版 Web、Android 和 Windows 客户端可安全忽略新增字段并继续读取 `client`。
 
 ## 播放同步机制
 

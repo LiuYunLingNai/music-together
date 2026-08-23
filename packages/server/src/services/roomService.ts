@@ -38,6 +38,30 @@ function setMemberRoleIfChanged(room: RoomData, userId: string, role: UserRole):
   return true
 }
 
+function aggregateClientInfos(clients: ClientInfo[]): ClientInfo[] {
+  const grouped = new Map<string, ClientInfo>()
+  for (const client of clients) {
+    const key = `${client.kind}\u0000${client.label}`
+    const existing = grouped.get(key)
+    if (existing) {
+      existing.count = (existing.count ?? 1) + 1
+    } else {
+      grouped.set(key, { ...client, count: 1 })
+    }
+  }
+  return Array.from(grouped.values()).map((client) => {
+    if (client.count !== 1) return client
+    const { count: _count, ...singleClient } = client
+    return singleClient
+  })
+}
+
+function syncActiveClients(room: RoomData, user: User): void {
+  const activeClients = roomRepo.getClientInfosForUser(room.id, user.id)
+  user.client = activeClients.at(-1)
+  user.clients = activeClients.length > 0 ? aggregateClientInfos(activeClients) : undefined
+}
+
 function upsertRoomMember(room: RoomData, user: User, role: UserRole): RoomMember {
   const now = Date.now()
   const existing = room.members.find((member) => member.id === user.id)
@@ -46,6 +70,7 @@ function upsertRoomMember(room: RoomData, user: User, role: UserRole): RoomMembe
     existing.avatarUrl = user.avatarUrl
     existing.isServerAdmin = user.isServerAdmin
     existing.client = user.client
+    existing.clients = user.clients
     existing.role = role
     existing.isOnline = true
     existing.lastSeenAt = now
@@ -211,7 +236,9 @@ export function createRoom(
 
   roomRepo.set(roomId, room)
   chatRepo.createRoom(roomId)
-  roomRepo.setSocketMapping(socketId, roomId, userId)
+  roomRepo.setSocketMapping(socketId, roomId, userId, client)
+  syncActiveClients(room, user)
+  upsertRoomMember(room, user, 'owner')
 
   logger.info(`房间已创建：${room.name}（${roomId}），房主：${nickname}`, {
     event: 'room.created',
@@ -258,9 +285,9 @@ export function joinRoom(
     existing.avatarUrl = profile.avatarUrl
     existing.role = resolveRole()
     existing.isServerAdmin = userRepo.isServerAdmin(userId)
-    existing.client = client
+    roomRepo.setSocketMapping(socketId, roomId, userId, client)
+    syncActiveClients(room, existing)
     upsertRoomMember(room, existing, resolveRole())
-    roomRepo.setSocketMapping(socketId, roomId, userId)
     const roleChanged = reconcileRoomRoles(room)
     const hostChanged = electConductor(room)
     roomRepo.persist(roomId)
@@ -278,8 +305,9 @@ export function joinRoom(
     client,
   }
   room.users.push(user)
+  roomRepo.setSocketMapping(socketId, roomId, userId, client)
+  syncActiveClients(room, user)
   upsertRoomMember(room, user, role)
-  roomRepo.setSocketMapping(socketId, roomId, userId)
 
   // Reconcile roles first so owner/admin returning clears any temporary admin.
   const roleChanged = reconcileRoomRoles(room)
@@ -326,6 +354,8 @@ export function leaveRoom(
   // only clean up the stale mapping without removing the user from the room.
   if (roomRepo.hasOtherSocketForUser(roomId, userId, socketId)) {
     roomRepo.deleteSocketMapping(socketId)
+    syncActiveClients(room, user)
+    upsertRoomMember(room, user, user.role)
     logger.debug('忽略用户旧连接的断开事件（已有新连接）', { roomId, userId, socketId })
     return { roomId, user, room, hostChanged: false, roleChanged: false, voteUpdated: false, staleSocketOnly: true }
   }
