@@ -42,6 +42,10 @@ export function useRoom() {
       permanent?: boolean
       allowTemporaryAdminTrackRemoval?: boolean
       allowTemporaryAdminQueueClear?: boolean
+      removePlayedTracks?: boolean
+      roamingEnabled?: boolean
+      roamingSource?: import('@music-together/shared').RoamingSource
+      roamingMode?: import('@music-together/shared').NeteaseRoamingMode
     }) => {
       socket.emit(EVENTS.ROOM_SETTINGS, settings)
     },

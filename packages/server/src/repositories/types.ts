@@ -8,6 +8,8 @@ import type {
   RoomMember,
   Track,
   User,
+  RoamingSource,
+  NeteaseRoamingMode,
 } from '@music-together/shared'
 
 /** 服务端内部房间数据模型 -- 含密码（仅通过 owner 专用 RoomState 发送给客户端） */
@@ -26,6 +28,13 @@ export interface RoomData {
   allowTemporaryAdminTrackRemoval: boolean
   /** Whether a temporary admin may clear the entire queue. */
   allowTemporaryAdminQueueClear: boolean
+  /** Remove the previously played queue item after a successful next-track transition. */
+  removePlayedTracks: boolean
+  /** Continue with personalized recommendations when the user queue has no successor. */
+  roamingEnabled: boolean
+  /** Logged-in platform used to fetch personalized roaming songs. */
+  roamingSource: RoamingSource
+  roamingMode: NeteaseRoamingMode
   /** Hide the room from the public lobby; direct joins remain available. */
   hidden: boolean
   /** Keep the room when empty and restore it after a server restart. */

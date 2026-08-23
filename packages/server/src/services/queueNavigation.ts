@@ -1,5 +1,13 @@
 import type { PlayMode, Track } from '@music-together/shared'
 
+export function shouldRemovePlayedTrackAfterAdvance(
+  removePlayedTracks: boolean,
+  previousTrack: Track | null,
+  currentTrack: Track | null,
+): boolean {
+  return removePlayedTracks && previousTrack !== null && currentTrack !== null && previousTrack.id !== currentTrack.id
+}
+
 export function getSuccessorAfterRemovalFromQueue(
   queue: readonly Track[],
   trackId: string,

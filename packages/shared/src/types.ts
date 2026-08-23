@@ -22,6 +22,31 @@ export type ErrorCode = (typeof ERROR_CODE)[keyof typeof ERROR_CODE]
 
 export type MusicSource = 'netease' | 'tencent' | 'kugou' | 'kugou_concept' | 'bilibili'
 
+/** Official hot-song chart providers exposed in the room sidebar. */
+export type HotSongsSource = Extract<MusicSource, 'netease' | 'tencent' | 'kugou'>
+
+/** Logged-in providers that can supply automatic room roaming tracks. */
+export type RoamingSource = Extract<MusicSource, 'netease' | 'tencent' | 'kugou' | 'kugou_concept'>
+
+export const NETEASE_ROAMING_MODES = [
+  'DEFAULT',
+  'FAMILIAR',
+  'EXPLORE',
+  'SCENE_RCMD:EXERCISE',
+  'SCENE_RCMD:FOCUS',
+  'SCENE_RCMD:NIGHT_EMO',
+  'aidj',
+] as const
+
+/** 网易云私人漫游模式；其他平台目前固定使用 DEFAULT。 */
+export type NeteaseRoamingMode = (typeof NETEASE_ROAMING_MODES)[number]
+
+export function normalizeNeteaseRoamingMode(value: unknown): NeteaseRoamingMode {
+  return NETEASE_ROAMING_MODES.includes(value as NeteaseRoamingMode)
+    ? (value as NeteaseRoamingMode)
+    : 'DEFAULT'
+}
+
 /** Server-wide Kugou transport policy. Bilibili always uses the server proxy. */
 export interface AudioProxyPolicy {
   kugouForceProxy: boolean
@@ -177,6 +202,14 @@ export interface RoomState {
   allowTemporaryAdminTrackRemoval: boolean
   /** Whether a temporary admin may clear the entire queue. */
   allowTemporaryAdminQueueClear: boolean
+  /** Remove the previously played queue item after a successful next-track transition. */
+  removePlayedTracks?: boolean
+  /** Automatically continue with personalized recommendations when no user-queued successor exists. */
+  roamingEnabled?: boolean
+  /** Provider used for personalized room roaming. */
+  roamingSource?: RoamingSource
+/** 网易云私人漫游模式；QQ/酷狗及酷狗概念版使用 DEFAULT。 */
+  roamingMode?: NeteaseRoamingMode
   /** 密码明文（仅 owner 可见；普通成员和临时管理员只收到 hasPassword） */
   password?: string | null
   audioQuality: AudioQuality

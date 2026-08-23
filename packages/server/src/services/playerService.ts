@@ -14,6 +14,8 @@ import { logger } from '../utils/logger.js'
 import type { RoomData } from '../repositories/types.js'
 import type { TypedServer, TypedSocket } from '../middleware/types.js'
 import { getEffectiveQuality, providerQualityRank, type MembershipTier } from './audioQualityPolicy.js'
+import { roamingService, shouldPreferRoamingForNext } from './roamingService.js'
+import { shouldRemovePlayedTrackAfterAdvance } from './queueNavigation.js'
 
 // ---------------------------------------------------------------------------
 // Per-room mutex for playTrackInRoom (prevents concurrent execution)
@@ -404,6 +406,19 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
     }
   }
 
+  // A stream/metadata lookup may discover artwork that was missing from the
+  // original queue entry. Keep the visible playlist row in sync with the
+  // fully resolved current track instead of showing a permanent placeholder.
+  if (resolved.cover) {
+    const updatedQueueTrack = queueService.updateTrackArtwork(roomId, resolved.id, {
+      cover: resolved.cover,
+      thumbnailCover: resolved.thumbnailCover,
+    })
+    if (updatedQueueTrack) {
+      io.to(roomId).emit(EVENTS.QUEUE_UPDATED, { queue: room.queue })
+    }
+  }
+
   // Update room state — align serverTimestamp with the scheduled execution time
   // so estimateCurrentTime() is accurate from the first scheduled frame.
   room.currentTrack = resolved
@@ -572,6 +587,14 @@ export function stopPlaybackSafe(io: TypedServer, roomId: string): Promise<void>
 // Next / Previous track (debounce + queue navigation inside mutex)
 // ---------------------------------------------------------------------------
 
+function removePreviousTrackAfterAdvance(roomId: string, previousTrack: Track | null): boolean {
+  const room = roomRepo.get(roomId)
+  if (!room || !previousTrack || !shouldRemovePlayedTrackAfterAdvance(room.removePlayedTracks, previousTrack, room.currentTrack)) {
+    return false
+  }
+  return queueService.removeTrack(roomId, previousTrack.id)
+}
+
 /**
  * Advance to the next track in the queue. Debounce check and queue navigation
  * run inside the per-room mutex so two rapid NEXT events can never both pass
@@ -591,16 +614,62 @@ export function playNextTrackInRoom(
       return
     }
 
+    const room = roomRepo.get(roomId)
+    if (!room) return
+    const previousTrack = room.currentTrack
+
+    let roamingAttempted = false
+    const tryRoaming = async (): Promise<boolean> => {
+      roamingAttempted = true
+      try {
+        const roamingTrack = await roamingService.getNextTrack(room)
+        if (roamingTrack && (await _playTrackInRoom(io, roomId, roamingTrack))) {
+          // Keep roaming songs visible in the room playlist. Add only after
+          // playback succeeds so an unplayable recommendation is not left in
+          // the queue; queue capacity still follows the normal server limit.
+          const playedRoom = roomRepo.get(roomId)
+          const playedTrack = playedRoom?.currentTrack
+          const queuedTrack = playedTrack
+            ? { ...playedTrack, streamUrl: undefined, requiresServerProxy: undefined, streamFormat: undefined }
+            : roamingTrack
+          const removedPreviousTrack = removePreviousTrackAfterAdvance(roomId, previousTrack)
+          const addedRoamingTrack = queueService.addTrack(roomId, queuedTrack)
+          const roomAfterQueue = roomRepo.get(roomId)
+          if ((removedPreviousTrack || addedRoamingTrack) && roomAfterQueue) {
+            io.to(roomId).emit(EVENTS.QUEUE_UPDATED, { queue: roomAfterQueue.queue })
+          }
+          lastSkipTimestamp.set(roomId, { action: 'next', timestamp: Date.now() })
+          return true
+        }
+      } catch (error) {
+        logger.warn('房间漫游推荐不可用', { roomId, source: room.roamingSource, error })
+      }
+      return false
+    }
+
+    // loop-all would otherwise wrap to the first queued song before roaming
+    // gets a chance. At the queue tail (and after a roaming song), request a
+    // fresh recommendation first; a failed request falls back to the normal
+    // playback mode below.
+    if (shouldPreferRoamingForNext(room, playMode) && (await tryRoaming())) {
+      return
+    }
+
     const nextTrack = queueService.getNextTrack(roomId, playMode)
     if (!nextTrack) {
+      if (!roamingAttempted && (await tryRoaming())) return
       stopPlayback(io, roomId)
       return
     }
 
-    const success = await _playTrackInRoom(io, roomId, nextTrack)
+    let success = await _playTrackInRoom(io, roomId, nextTrack)
     if (!success) {
       const skipTrack = queueService.getNextTrack(roomId, playMode)
-      if (skipTrack) await _playTrackInRoom(io, roomId, skipTrack)
+      if (skipTrack) success = await _playTrackInRoom(io, roomId, skipTrack)
+    }
+    if (success && removePreviousTrackAfterAdvance(roomId, previousTrack)) {
+      const roomAfterRemoval = roomRepo.get(roomId)
+      if (roomAfterRemoval) io.to(roomId).emit(EVENTS.QUEUE_UPDATED, { queue: roomAfterRemoval.queue })
     }
 
     // Refresh debounce timestamp after async work completes.

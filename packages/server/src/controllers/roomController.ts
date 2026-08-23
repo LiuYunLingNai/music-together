@@ -14,7 +14,6 @@ import { roomRepo } from '../repositories/roomRepository.js'
 import type { RoomData } from '../repositories/types.js'
 import { userRepo } from '../repositories/userRepository.js'
 import * as chatService from '../services/chatService.js'
-import * as authService from '../services/authService.js'
 import * as playerService from '../services/playerService.js'
 import { issueRejoinTicket, revokeRejoinTickets } from '../services/rejoinTicketService.js'
 import * as roomService from '../services/roomService.js'
@@ -22,6 +21,7 @@ import { getClientInfo } from '../services/clientInfoService.js'
 import * as voteService from '../services/voteService.js'
 import { executeVoteAction } from '../services/voteActionService.js'
 import { logger } from '../utils/logger.js'
+import * as authService from '../services/authService.js'
 
 async function reconcileAndBroadcastVote(io: TypedServer, roomId: string, room: RoomData): Promise<void> {
   const result = voteService.reconcileVote(
@@ -258,6 +258,21 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         return
       }
 
+      const nextRoamingEnabled = parsed.data.roamingEnabled ?? ctx.room.roamingEnabled
+      const nextRoamingSource = parsed.data.roamingSource ?? ctx.room.roamingSource
+      const nextRoamingMode =
+        nextRoamingSource === 'netease' ? (parsed.data.roamingMode ?? ctx.room.roamingMode) : 'DEFAULT'
+      if (
+        nextRoamingEnabled &&
+        !authService.getUserCookie(ctx.room.creatorId, nextRoamingSource, ctx.roomId)
+      ) {
+        ctx.socket.emit(EVENTS.ROOM_ERROR, {
+          code: ERROR_CODE.INVALID_INPUT,
+          message: '房主需先登录所选音乐平台，才能开启私人漫游',
+        })
+        return
+      }
+
       roomService.updateSettings(ctx.roomId, {
         name: parsed.data.name,
         password: parsed.data.password,
@@ -266,6 +281,13 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         permanent: parsed.data.permanent,
         allowTemporaryAdminTrackRemoval: parsed.data.allowTemporaryAdminTrackRemoval,
         allowTemporaryAdminQueueClear: parsed.data.allowTemporaryAdminQueueClear,
+        removePlayedTracks: parsed.data.removePlayedTracks,
+        roamingEnabled: parsed.data.roamingEnabled,
+        roamingSource: parsed.data.roamingSource,
+        roamingMode:
+          parsed.data.roamingMode !== undefined || parsed.data.roamingSource !== undefined
+            ? nextRoamingMode
+            : undefined,
       })
 
       const updatedRoom = roomRepo.get(ctx.roomId)
@@ -279,6 +301,10 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         permanent: updatedRoom.permanent,
         allowTemporaryAdminTrackRemoval: updatedRoom.allowTemporaryAdminTrackRemoval,
         allowTemporaryAdminQueueClear: updatedRoom.allowTemporaryAdminQueueClear,
+        removePlayedTracks: updatedRoom.removePlayedTracks,
+        roamingEnabled: updatedRoom.roamingEnabled,
+        roamingSource: updatedRoom.roamingSource,
+        roamingMode: updatedRoom.roamingMode,
         audioQuality: updatedRoom.audioQuality,
       }
       if (canManageAllSettings) {
@@ -304,6 +330,10 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         permanent: updatedRoom.permanent,
         allowTemporaryAdminTrackRemoval: updatedRoom.allowTemporaryAdminTrackRemoval,
         allowTemporaryAdminQueueClear: updatedRoom.allowTemporaryAdminQueueClear,
+        removePlayedTracks: updatedRoom.removePlayedTracks,
+        roamingEnabled: updatedRoom.roamingEnabled,
+        roamingSource: updatedRoom.roamingSource,
+        roamingMode: updatedRoom.roamingMode,
         changedFields,
       })
 

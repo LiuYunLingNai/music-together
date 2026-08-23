@@ -74,6 +74,15 @@ declare module '@neteasecloudmusicapienhanced/api' {
       }
     }>
 
+    personal_fm_mode(
+      params: { mode: string; submode?: string; limit?: number } & RequestBaseConfig,
+    ): Promise<{
+      body: {
+        code?: number
+        data?: Record<string, unknown>[]
+      }
+    }>
+
     recommend_resource(params: RequestBaseConfig): Promise<{
       body: {
         code?: number

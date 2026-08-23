@@ -72,6 +72,10 @@ export function useRoomState() {
       permanent: boolean
       allowTemporaryAdminTrackRemoval: boolean
       allowTemporaryAdminQueueClear: boolean
+      removePlayedTracks?: boolean
+      roamingEnabled?: boolean
+      roamingSource?: import('@music-together/shared').RoamingSource
+      roamingMode?: import('@music-together/shared').NeteaseRoamingMode
       password?: string | null
       audioQuality: AudioQuality
     }) => {

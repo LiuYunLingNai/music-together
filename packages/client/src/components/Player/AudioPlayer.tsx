@@ -1,6 +1,5 @@
 import { useContainerPortrait } from '@/hooks/useContainerPortrait'
 import { useCoverWidth } from '@/hooks/useCoverWidth'
-import { useVote } from '@/hooks/useVote'
 import { getProxiedCoverUrl } from '@/lib/cover'
 import { cn } from '@/lib/utils'
 import { usePlayerStore } from '@/stores/playerStore'
@@ -14,8 +13,15 @@ import { LyricDisplay } from './LyricDisplay'
 import { NowPlaying } from './NowPlaying'
 import { PlayerControls } from './PlayerControls'
 import { SongInfoBar } from './SongInfoBar'
+import { RoomPlaylistView } from '../Room/RoomPlaylistView'
+import type { VoteAction, VoteState } from '@music-together/shared'
+import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { ListMusic, PanelsTopLeft } from 'lucide-react'
+import { useRoomStore } from '@/stores/roomStore'
 
 const FULL_SIZE_STYLE = { width: '100%', height: '100%' } as const
+const EMPTY_QUEUE: never[] = []
 
 const MOBILE_LYRIC_AUTO_EXPAND_DELAY_MS = 900
 const SMOOTH_EASE = [0.22, 1, 0.36, 1] as const
@@ -34,6 +40,11 @@ interface AudioPlayerProps {
   onOpenChat: () => void
   onOpenQueue: () => void
   chatUnreadCount: number
+  view: 'player' | 'playlist'
+  onToggleView: () => void
+  activeVote: VoteState | null
+  onCastVote: (approve: boolean) => void
+  onStartVote: (action: VoteAction, payload?: Record<string, unknown>) => void
 }
 
 export function AudioPlayer({
@@ -45,9 +56,17 @@ export function AudioPlayer({
   onOpenChat,
   onOpenQueue,
   chatUnreadCount,
+  view,
+  onToggleView,
+  activeVote,
+  onCastVote,
+  onStartVote,
 }: AudioPlayerProps) {
   const currentTrack = usePlayerStore((s) => s.currentTrack)
-  const { activeVote, castVote, startVote } = useVote()
+  // Keep the fallback reference stable. Returning a new [] from a Zustand
+  // selector makes React see a changed snapshot on every render while the
+  // room is not yet available, which can trigger React error #185.
+  const queue = useRoomStore((s) => s.room?.queue ?? EMPTY_QUEUE)
   const bgFps = useSettingsStore((s) => s.bgFps)
   const bgFlowSpeed = useSettingsStore((s) => s.bgFlowSpeed)
   const bgRenderScale = useSettingsStore((s) => s.bgRenderScale)
@@ -97,7 +116,7 @@ export function AudioPlayer({
     onNext,
     onPrev,
     onOpenQueue,
-    onStartVote: startVote,
+    onStartVote,
   } as const
 
   const songInfoProps = {
@@ -121,8 +140,22 @@ export function AudioPlayer({
         </div>
       )}
 
+      <div className="absolute right-4 top-4 z-20">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-primary/80 hover:bg-primary/10 hover:text-primary" onClick={onToggleView} aria-label={view === 'player' ? '打开房间歌单' : '返回播放器'}>
+              {view === 'player' ? <ListMusic className="h-5 w-5" /> : <PanelsTopLeft className="h-5 w-5" />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{view === 'player' ? '打开房间歌单' : '返回播放器'}</TooltipContent>
+        </Tooltip>
+      </div>
+
       {/* Content with padding */}
       <div className="relative z-10 h-full p-5 md:p-[5%] lg:p-[5%]">
+        {view === 'playlist' ? (
+          <RoomPlaylistView queue={queue} currentTrackId={currentTrack?.id} />
+        ) : (
         <div
           ref={playerRef}
           className={cn('flex h-full', isPortrait ? 'flex-col' : 'flex-row gap-[clamp(24px,3vw,48px)]')}
@@ -174,7 +207,7 @@ export function AudioPlayer({
                 {/* Vote banner: absolute overlay at the bottom */}
                 {activeVote && (
                   <div className="absolute bottom-0 left-1/2 z-20 w-full -translate-x-1/2 px-2 pb-2">
-                    <VoteBanner vote={activeVote} onCastVote={castVote} />
+                    <VoteBanner vote={activeVote} onCastVote={onCastVote} />
                   </div>
                 )}
               </div>
@@ -204,7 +237,7 @@ export function AudioPlayer({
                 {activeVote && (
                   <div className="absolute inset-x-0 bottom-0 z-20 flex justify-center px-2 pb-2">
                     <div className="w-full">
-                      <VoteBanner vote={activeVote} onCastVote={castVote} />
+                      <VoteBanner vote={activeVote} onCastVote={onCastVote} />
                     </div>
                   </div>
                 )}
@@ -215,6 +248,7 @@ export function AudioPlayer({
             </>
           )}
         </div>
+        )}
       </div>
     </div>
   )

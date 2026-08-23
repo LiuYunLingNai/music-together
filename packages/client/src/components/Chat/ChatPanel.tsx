@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { ArrowDown, MessageSquare, PanelRightClose, Send } from 'lucide-react'
+import { ArrowDown, MessageSquare, Send, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -71,12 +71,12 @@ export function ChatPanel({ onCollapse }: ChatPanelProps) {
                 size="icon-xs"
                 className="absolute right-3"
                 onClick={onCollapse}
-                aria-label="收起聊天"
+                aria-label="关闭聊天"
               >
-                <PanelRightClose className="h-4 w-4" />
+                <X className="h-4 w-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>收起聊天</TooltipContent>
+            <TooltipContent>关闭聊天</TooltipContent>
           </Tooltip>
         )}
         <span className="text-sm font-medium">聊天</span>

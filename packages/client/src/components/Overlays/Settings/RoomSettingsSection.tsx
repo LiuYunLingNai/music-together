@@ -9,7 +9,7 @@ import { storage } from '@/lib/storage'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
 import { useAccountStore } from '@/stores/accountStore'
-import type { AudioQuality } from '@music-together/shared'
+import type { AudioQuality, NeteaseRoamingMode, RoamingSource } from '@music-together/shared'
 import { LIMITS } from '@music-together/shared'
 import { Check, Copy, Lock, LockOpen, Pencil, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
@@ -18,6 +18,23 @@ import { SettingRow } from './SettingRow'
 import { getAudioQualityLabel, getAudioQualityOptions } from '@/lib/audioQuality'
 import { updateCurrentNickname } from '@/lib/profileApi'
 import { useAuth } from '@/hooks/useAuth'
+
+const ROAMING_MODE_OPTIONS: { value: NeteaseRoamingMode; label: string; description: string }[] = [
+  { value: 'DEFAULT', label: '默认漫游', description: '综合听歌记录，常规个性化推荐' },
+  { value: 'FAMILIAR', label: '熟悉模式', description: '多推收藏、常听与相似曲风' },
+  { value: 'EXPLORE', label: '探索模式', description: '多推新歌、冷门歌，拓展曲库' },
+  { value: 'SCENE_RCMD:EXERCISE', label: '运动场景', description: '节奏明快，适合锻炼' },
+  { value: 'SCENE_RCMD:FOCUS', label: '专注场景', description: '适合工作、学习，偏轻音乐' },
+  { value: 'SCENE_RCMD:NIGHT_EMO', label: '深夜场景', description: '夜晚情绪向慢歌' },
+  { value: 'aidj', label: 'AI DJ', description: 'AI 串烧混剪，曲间带过渡衔接' },
+]
+
+const ROAMING_SOURCE_LABELS: Record<RoamingSource, string> = {
+  netease: '网易云音乐',
+  tencent: 'QQ音乐',
+  kugou: '酷狗音乐',
+  kugou_concept: '酷狗概念版',
+}
 
 interface RoomSettingsSectionProps {
   onUpdateSettings: (settings: {
@@ -28,6 +45,10 @@ interface RoomSettingsSectionProps {
     permanent?: boolean
     allowTemporaryAdminTrackRemoval?: boolean
     allowTemporaryAdminQueueClear?: boolean
+    removePlayedTracks?: boolean
+    roamingEnabled?: boolean
+    roamingSource?: RoamingSource
+    roamingMode?: NeteaseRoamingMode
   }) => void
 }
 
@@ -39,8 +60,14 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
   const isServerAdmin = useAccountStore((state) => state.profile?.role === 'admin')
   const isOwner = currentUser?.role === 'owner' || isServerAdmin
   const canAdjustAudioQuality = isOwner || currentUser?.role === 'admin'
-  const { platformStatus } = useAuth()
+  const { platformStatus, myStatus, statusLoaded } = useAuth()
   const qualityOptions = useMemo(() => getAudioQualityOptions(platformStatus), [platformStatus])
+  const roamingSource = room?.roamingSource ?? 'netease'
+  const roamingMode = room?.roamingMode ?? 'DEFAULT'
+  const roamingModeOption = ROAMING_MODE_OPTIONS.find((option) => option.value === roamingMode) ?? ROAMING_MODE_OPTIONS[0]
+  const creatorIsCurrentUser = currentUser?.id === room?.creatorId
+  const creatorLoggedInToRoamingSource =
+    creatorIsCurrentUser && myStatus.some((status) => status.platform === roamingSource && status.loggedIn)
 
   const driftDisplay = useMemo(() => {
     const ms = Math.round(syncDrift * 1000)
@@ -311,6 +338,83 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
                 toast.success(allowTemporaryAdminQueueClear ? '已允许临时管理员清空歌单' : '已限制临时管理员清空歌单')
               }}
             />
+          </SettingRow>
+
+          <SettingRow label="播放后移除歌曲" description="切换到下一首成功后，自动从房间歌单移除上一首">
+            <Switch
+              aria-label="播放后移除歌曲"
+              checked={room?.removePlayedTracks ?? false}
+              onCheckedChange={(removePlayedTracks) => {
+                onUpdateSettings({ removePlayedTracks })
+                toast.success(removePlayedTracks ? '已开启播放后自动移除' : '已关闭播放后自动移除')
+              }}
+            />
+          </SettingRow>
+
+          <SettingRow
+            label="私人漫游"
+            description={
+              creatorIsCurrentUser && statusLoaded && !creatorLoggedInToRoamingSource
+                ? `需先登录房主的${ROAMING_SOURCE_LABELS[roamingSource]}账号`
+                : '队列没有下一首时，使用房主账号继续个性化推荐'
+            }
+          >
+            <Switch
+              aria-label="私人漫游"
+              checked={room?.roamingEnabled ?? false}
+              onCheckedChange={(roamingEnabled) => {
+                if (roamingEnabled && creatorIsCurrentUser && statusLoaded && !creatorLoggedInToRoamingSource) {
+                  toast.error(`请先登录${ROAMING_SOURCE_LABELS[roamingSource]}账号`)
+                  return
+                }
+                onUpdateSettings({ roamingEnabled })
+              }}
+            />
+          </SettingRow>
+
+          <SettingRow label="漫游平台" description="个性化推荐只使用房主自己的平台账号">
+            <Select
+              value={roamingSource}
+              onValueChange={(value) => {
+                const nextSource = value as RoamingSource
+                onUpdateSettings({
+                  roamingSource: nextSource,
+                  roamingMode: nextSource === 'netease' ? roamingMode : 'DEFAULT',
+                })
+              }}
+            >
+              <SelectTrigger size="sm" className="w-[150px] max-w-[46vw]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="netease">网易云音乐</SelectItem>
+                <SelectItem value="tencent">QQ音乐</SelectItem>
+                <SelectItem value="kugou">酷狗音乐</SelectItem>
+                <SelectItem value="kugou_concept">酷狗概念版</SelectItem>
+              </SelectContent>
+            </Select>
+          </SettingRow>
+
+          <SettingRow
+            label="漫游模式"
+            description={roamingSource === 'netease' ? roamingModeOption.description : '该平台目前固定使用默认推荐'}
+          >
+            <Select
+              value={roamingSource === 'netease' ? roamingMode : 'DEFAULT'}
+              disabled={roamingSource !== 'netease'}
+              onValueChange={(value) => onUpdateSettings({ roamingMode: value as NeteaseRoamingMode })}
+            >
+              <SelectTrigger size="sm" className="w-[150px] max-w-[46vw]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ROAMING_MODE_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </SettingRow>
 
           {passwordEnabled && (

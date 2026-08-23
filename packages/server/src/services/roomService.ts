@@ -211,6 +211,10 @@ export function createRoom(
     temporaryAdminUserId: null,
     allowTemporaryAdminTrackRemoval: false,
     allowTemporaryAdminQueueClear: false,
+    removePlayedTracks: false,
+    roamingEnabled: false,
+    roamingSource: 'netease',
+    roamingMode: 'DEFAULT',
     hidden: false,
     permanent: false,
     audioQuality: 320,
@@ -438,6 +442,10 @@ export function updateSettings(
     permanent?: boolean
     allowTemporaryAdminTrackRemoval?: boolean
     allowTemporaryAdminQueueClear?: boolean
+    removePlayedTracks?: boolean
+    roamingEnabled?: boolean
+    roamingSource?: RoomData['roamingSource']
+    roamingMode?: RoomData['roamingMode']
   },
 ): void {
   const room = roomRepo.get(roomId)
@@ -470,6 +478,22 @@ export function updateSettings(
 
   if (settings.allowTemporaryAdminQueueClear !== undefined) {
     room.allowTemporaryAdminQueueClear = settings.allowTemporaryAdminQueueClear
+  }
+
+  if (settings.removePlayedTracks !== undefined) {
+    room.removePlayedTracks = settings.removePlayedTracks
+  }
+
+  if (settings.roamingEnabled !== undefined) {
+    room.roamingEnabled = settings.roamingEnabled
+  }
+
+  if (settings.roamingSource !== undefined) {
+    room.roamingSource = settings.roamingSource
+  }
+
+  if (settings.roamingMode !== undefined) {
+    room.roamingMode = settings.roamingMode
   }
 
   roomRepo.persist(roomId)

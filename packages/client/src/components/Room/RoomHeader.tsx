@@ -1,4 +1,4 @@
-import { Copy, Download, Ellipsis, LogOut, MessageSquare, Search, Settings, Users, Wifi, WifiOff } from 'lucide-react'
+import { Copy, Download, Ellipsis, Flame, LogOut, MessageSquare, Search, Settings, Users, Wifi, WifiOff } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { LyricCalibration } from '@/components/Player/LyricCalibration'
@@ -22,6 +22,7 @@ interface RoomHeaderProps {
   onOpenChat: () => void
   onOpenSettings: () => void
   onOpenMembers: () => void
+  onOpenHotSongs: () => void
   onLeaveRoom: () => void
   chatUnreadCount: number
 }
@@ -31,6 +32,7 @@ export function RoomHeader({
   onOpenChat,
   onOpenSettings,
   onOpenMembers,
+  onOpenHotSongs,
   onLeaveRoom,
   chatUnreadCount,
 }: RoomHeaderProps) {
@@ -137,9 +139,24 @@ export function RoomHeader({
             {isConnected ? `已连接 · 延迟 ${Math.round(displayedRtt)}ms` : '连接断开，正在重连...'}
           </TooltipContent>
         </Tooltip>
-      </div>
 
+      </div>
       <div className="flex items-center gap-0.5 sm:gap-1">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 lg:hidden"
+              onClick={onOpenHotSongs}
+              aria-label="热歌榜"
+            >
+              <Flame className="h-4 w-4 text-orange-400" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>热歌榜</TooltipContent>
+        </Tooltip>
+
         <Tooltip>
           <TooltipTrigger asChild>
             <Button

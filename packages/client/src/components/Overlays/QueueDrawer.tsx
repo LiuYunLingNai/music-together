@@ -3,7 +3,6 @@ import { Button } from '@/components/ui/button'
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from '@/components/ui/drawer'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { getProxiedCoverUrl } from '@/lib/cover'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
 import { useSocketContext } from '@/providers/socket-context'
@@ -19,6 +18,7 @@ import { toast } from 'sonner'
 import { MarqueeText } from '@/components/ui/marquee-text'
 import { BilibiliMetadataDialog } from './BilibiliMetadataDialog'
 import type { MusicSource } from '@music-together/shared'
+import { QueueTrackCover } from '@/components/Room/QueueTrackCover'
 
 const EMPTY_QUEUE: Track[] = []
 
@@ -278,26 +278,7 @@ export function QueueDrawer({
 
                       {/* Cover + source badge */}
                       <div className="relative shrink-0">
-                        {(track.thumbnailCover ?? track.cover) ? (
-                          <img
-                            src={getProxiedCoverUrl(track.thumbnailCover ?? track.cover)}
-                            alt={track.title}
-                            referrerPolicy="no-referrer"
-                            className="h-9 w-9 rounded object-cover"
-                            onError={(e) => {
-                              e.currentTarget.style.display = 'none'
-                              e.currentTarget.nextElementSibling?.classList.remove('hidden')
-                            }}
-                          />
-                        ) : null}
-                        <div
-                          className={cn(
-                            'flex h-9 w-9 items-center justify-center rounded bg-muted',
-                            (track.thumbnailCover ?? track.cover) && 'hidden',
-                          )}
-                        >
-                          <Music className="h-4 w-4 text-muted-foreground" />
-                        </div>
+                        <QueueTrackCover track={track} className="h-9 w-9" />
                         {track.source && SOURCE_STYLE[track.source] && (
                           <span
                             className={cn(

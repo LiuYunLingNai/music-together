@@ -45,12 +45,14 @@ export function insertAfterCurrent(roomId: string, track: Track): boolean {
   return true
 }
 
-export function removeTrack(roomId: string, trackId: string): void {
+export function removeTrack(roomId: string, trackId: string): boolean {
   const room = roomRepo.get(roomId)
-  if (room) {
-    room.queue = room.queue.filter((t) => t.id !== trackId)
-    roomRepo.persist(roomId)
-  }
+  if (!room) return false
+  const nextQueue = room.queue.filter((t) => t.id !== trackId)
+  if (nextQueue.length === room.queue.length) return false
+  room.queue = nextQueue
+  roomRepo.persist(roomId)
+  return true
 }
 
 /** Select the successor before removing the current entry, so its index is not lost. */
@@ -114,6 +116,25 @@ export function updateBilibiliMetadata(
   return updated
 }
 
+/** Keep artwork resolved during playback visible in the persisted queue row. */
+export function updateTrackArtwork(
+  roomId: string,
+  trackId: string,
+  artwork: Pick<Track, 'cover' | 'thumbnailCover'>,
+): Track | null {
+  const room = roomRepo.get(roomId)
+  if (!room) return null
+  const index = room.queue.findIndex((track) => track.id === trackId)
+  const existing = room.queue[index]
+  if (!existing) return null
+  if (existing.cover === artwork.cover && existing.thumbnailCover === artwork.thumbnailCover) return null
+
+  const updated = { ...existing, ...artwork }
+  room.queue[index] = updated
+  roomRepo.persist(roomId)
+  return updated
+}
+
 /**
  * Get the next track based on the play mode.
  *
@@ -132,8 +153,9 @@ export function getNextTrack(roomId: string, playMode?: PlayMode): Track | null 
 
   switch (mode) {
     case 'loop-one':
-      // Replay the current track; fall back to next if current is gone
-      if (room.currentTrack && currentIndex >= 0) return room.currentTrack
+      // Replay the current track, including a roaming track that is not stored
+      // in the user queue.
+      if (room.currentTrack) return room.currentTrack
       return room.queue[0] ?? null
 
     case 'loop-all': {

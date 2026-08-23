@@ -1,5 +1,6 @@
 import * as z from 'zod/v4'
 import { LIMITS } from './constants.js'
+import { NETEASE_ROAMING_MODES } from './types.js'
 
 // ---------------------------------------------------------------------------
 // Room
@@ -47,6 +48,10 @@ export const roomSettingsSchema = z.object({
   permanent: z.boolean().optional(),
   allowTemporaryAdminTrackRemoval: z.boolean().optional(),
   allowTemporaryAdminQueueClear: z.boolean().optional(),
+  removePlayedTracks: z.boolean().optional(),
+  roamingEnabled: z.boolean().optional(),
+  roamingSource: z.enum(['netease', 'tencent', 'kugou', 'kugou_concept']).optional(),
+  roamingMode: z.enum(NETEASE_ROAMING_MODES).optional(),
 })
 
 export const setRoleSchema = z.object({
@@ -147,6 +152,7 @@ export const chatMessageSchema = z.object({
 // ---------------------------------------------------------------------------
 
 const musicSourceSchema = z.enum(['netease', 'tencent', 'kugou', 'kugou_concept', 'bilibili'])
+export const hotSongsSourceSchema = z.enum(['netease', 'tencent', 'kugou'])
 
 const searchQueryCommonShape = {
   limit: z.coerce.number().int().min(1).max(LIMITS.SEARCH_PAGE_SIZE_MAX).default(20),
@@ -175,6 +181,14 @@ export const recommendationsQuerySchema = z.object({
   radarPage: z.coerce.number().int().min(1).max(10_000).default(1),
   playlistOffset: z.coerce.number().int().min(0).max(1_000_000).default(0),
   neteasePlaylistOffset: z.coerce.number().int().min(0).max(1_000_000).default(0),
+})
+
+export const hotSongsQuerySchema = z.object({
+  roomId: z.string().min(1).max(10),
+  source: hotSongsSourceSchema.default('netease'),
+  limit: z.coerce.number().int().min(1).max(30).default(30),
+  offset: z.coerce.number().int().min(0).max(500).default(0),
+  refresh: z.enum(['true', 'false']).transform((value) => value === 'true').default(false),
 })
 
 export const urlQuerySchema = z.object({

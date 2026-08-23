@@ -3,11 +3,13 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { EVENTS, ERROR_CODE } from '@music-together/shared'
 import { motion } from 'motion/react'
 import { toast } from 'sonner'
-import { Loader2, PanelRightOpen } from 'lucide-react'
+import { Loader2, PanelLeftOpen, PanelRightOpen } from 'lucide-react'
 import { InteractionGate } from '@/components/InteractionGate'
 import { GlobalBackground } from '@/components/GlobalBackground'
 import { AudioPlayer } from '@/components/Player/AudioPlayer'
+import { MiniPlayerBar } from '@/components/Player/MiniPlayerBar'
 import { ChatPanel } from '@/components/Chat/ChatPanel'
+import { HotSongsPanel } from '@/components/Room/HotSongsPanel'
 import { RoomHeader } from '@/components/Room/RoomHeader'
 import { SearchDialog } from '@/components/Overlays/SearchDialog'
 import { QueueDrawer } from '@/components/Overlays/QueueDrawer'
@@ -20,9 +22,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { isAudioUnlocked, unlockAudio } from '@/lib/audioUnlock'
 import { SERVER_URL } from '@/lib/config'
 import { useRoom } from '@/hooks/useRoom'
+import { useVote } from '@/hooks/useVote'
 import { usePlayer } from '@/hooks/usePlayer'
 import { useQueue } from '@/hooks/useQueue'
 import { useIsMobile } from '@/hooks/useIsMobile'
+import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useRoomStore } from '@/stores/roomStore'
 import { useChatStore } from '@/stores/chatStore'
 import { useSocketContext } from '@/providers/socket-context'
@@ -58,6 +62,7 @@ export default function RoomPage() {
     setChatOpen(!useChatStore.getState().isChatOpen)
   }, [setChatOpen])
   const isMobile = useIsMobile()
+  const showInlineHotSongs = useMediaQuery('(min-width: 1024px)')
 
   // --- Pre-check state ---
   const [checking, setChecking] = useState(true)
@@ -73,6 +78,16 @@ export default function RoomPage() {
   const [queueOpen, setQueueOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab | undefined>(undefined)
+  const [hotSongsOpen, setHotSongsOpen] = useState(true)
+  const [hotSongsMobileOpen, setHotSongsMobileOpen] = useState(false)
+  const [playerView, setPlayerView] = useState<'player' | 'playlist'>('player')
+  const { activeVote, startVote, castVote } = useVote()
+
+  useEffect(() => {
+    if (!showInlineHotSongs) return
+    const frame = requestAnimationFrame(() => setHotSongsMobileOpen(false))
+    return () => cancelAnimationFrame(frame)
+  }, [showInlineHotSongs])
 
   // Fallback password dialog state (edge case: password changed after pre-check)
   const [passwordNeeded, setPasswordNeeded] = useState(false)
@@ -319,13 +334,22 @@ export default function RoomPage() {
             onOpenChat={() => setChatOpen(true)}
             onOpenSettings={() => setSettingsOpen(true)}
             onOpenMembers={handleOpenMembers}
+            onOpenHotSongs={() => setHotSongsMobileOpen(true)}
             onLeaveRoom={handleLeaveRoom}
             chatUnreadCount={chatUnreadCount}
           />
 
           <div className="flex min-h-0 flex-1 overflow-hidden p-2 md:p-3 lg:p-4">
-            <div className="relative min-h-0 min-w-0 flex-1">
-              <div className="mt-player-stage h-full">
+            <div
+              className={cn(
+                'hidden h-full shrink-0 overflow-hidden transition-[width] duration-200 ease-out lg:block',
+                hotSongsOpen ? 'w-[288px] pr-3' : 'w-0',
+              )}
+            >
+              <HotSongsPanel roomId={room?.id ?? ''} onAddTrack={addTrack} onCollapse={() => setHotSongsOpen(false)} enabled={showInlineHotSongs} />
+            </div>
+            <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+              <div className="mt-player-stage min-h-0 flex-1">
                 <AudioPlayer
                   onPlay={play}
                   onPause={pause}
@@ -335,8 +359,42 @@ export default function RoomPage() {
                   onOpenChat={toggleChat}
                   onOpenQueue={() => setQueueOpen(true)}
                   chatUnreadCount={chatUnreadCount}
+                  view={playerView}
+                  onToggleView={() => setPlayerView((view) => (view === 'player' ? 'playlist' : 'player'))}
+                  activeVote={activeVote}
+                  onCastVote={castVote}
+                  onStartVote={startVote}
                 />
               </div>
+
+              {playerView === 'playlist' && (
+                <MiniPlayerBar
+                  onPlay={play}
+                  onPause={pause}
+                  onNext={next}
+                  onPrev={prev}
+                  onStartVote={startVote}
+                  onOpenPlaylist={() => setQueueOpen(true)}
+                />
+              )}
+
+              {!hotSongsOpen && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="icon"
+                      className="absolute left-3 top-1/2 z-20 hidden -translate-y-1/2 border border-border/60 bg-background/80 shadow-lg backdrop-blur-sm lg:inline-flex"
+                      onClick={() => setHotSongsOpen(true)}
+                      aria-label="展开热歌榜"
+                    >
+                      <PanelLeftOpen className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">展开热歌榜</TooltipContent>
+                </Tooltip>
+              )}
 
               {!chatOpen && (
                 <Tooltip>
@@ -374,6 +432,16 @@ export default function RoomPage() {
               </div>
             </div>
           </div>
+
+          {/* Narrow layouts: hot songs drawer from bottom */}
+          <Drawer open={hotSongsMobileOpen} onOpenChange={setHotSongsMobileOpen}>
+            <DrawerContent className="flex h-[78vh] flex-col p-0">
+              <DrawerHeader className="sr-only">
+                <DrawerTitle>热歌榜</DrawerTitle>
+              </DrawerHeader>
+              <HotSongsPanel roomId={room?.id ?? ''} onAddTrack={addTrack} onCollapse={() => setHotSongsMobileOpen(false)} enabled={!showInlineHotSongs && hotSongsMobileOpen} />
+            </DrawerContent>
+          </Drawer>
 
           {/* Mobile: chat drawer from bottom */}
           {isMobile && (

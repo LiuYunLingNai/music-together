@@ -5,6 +5,7 @@ import {
   type RoomListItem,
   type RoomMember,
   type Track,
+  normalizeNeteaseRoamingMode,
 } from '@music-together/shared'
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto'
 import { config } from '../config.js'
@@ -38,6 +39,10 @@ interface PersistedRoomState {
   allowTemporaryAdminQueueManagement?: boolean
   allowTemporaryAdminTrackRemoval?: boolean
   allowTemporaryAdminQueueClear?: boolean
+  removePlayedTracks?: boolean
+  roamingEnabled?: boolean
+  roamingSource?: RoomData['roamingSource']
+  roamingMode?: RoomData['roamingMode']
   audioQuality: RoomData['audioQuality']
   queue: RoomData['queue']
   currentTrack: RoomData['currentTrack']
@@ -230,6 +235,10 @@ export class InMemoryRoomRepository implements RoomRepository {
             state.allowTemporaryAdminTrackRemoval ?? state.allowTemporaryAdminQueueManagement ?? false,
           allowTemporaryAdminQueueClear:
             state.allowTemporaryAdminQueueClear ?? state.allowTemporaryAdminQueueManagement ?? false,
+          removePlayedTracks: state.removePlayedTracks ?? false,
+          roamingEnabled: state.roamingEnabled ?? false,
+          roamingSource: state.roamingSource ?? 'netease',
+          roamingMode: normalizeNeteaseRoamingMode(state.roamingMode),
           hidden: state.hidden ?? false,
           permanent: true,
           audioQuality: state.audioQuality,
@@ -274,6 +283,10 @@ export class InMemoryRoomRepository implements RoomRepository {
       hidden: room.hidden,
       allowTemporaryAdminTrackRemoval: room.allowTemporaryAdminTrackRemoval,
       allowTemporaryAdminQueueClear: room.allowTemporaryAdminQueueClear,
+      removePlayedTracks: room.removePlayedTracks,
+      roamingEnabled: room.roamingEnabled,
+      roamingSource: room.roamingSource,
+      roamingMode: room.roamingMode,
       audioQuality: room.audioQuality,
       queue: room.queue.map(withoutStreamUrl),
       currentTrack: room.currentTrack ? withoutStreamUrl(room.currentTrack) : null,

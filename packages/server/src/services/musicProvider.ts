@@ -3,8 +3,10 @@ import type {
   AudioQuality,
   BilibiliStreamFormat,
   MusicSource,
+  NeteaseRoamingMode,
   Playlist,
   RecommendationPagination,
+  RoamingSource,
   Track,
 } from '@music-together/shared'
 import { LRUCache } from 'lru-cache'
@@ -31,6 +33,7 @@ import { logger } from '../utils/logger.js'
 import { parseNeteaseRecommendedPlaylistPage } from './recommendationParsers.js'
 import { getCoverArtwork, normalizeHighQualityCoverUrl } from './coverArtwork.js'
 import { getKrcByHash, type KrcInfo } from './kugouLyricService.js'
+import { parseNeteaseTrack } from './neteaseTrackParser.js'
 import crypto from 'node:crypto'
 import { createRequire } from 'node:module'
 
@@ -1780,6 +1783,67 @@ class MusicProvider {
     return { tracks }
   }
 
+  /** Fetch personalized tracks for automatic room roaming. */
+  async getRoamingTracks(
+    source: RoamingSource,
+    cookie: string,
+    mode: NeteaseRoamingMode = 'DEFAULT',
+    limit = 20,
+  ): Promise<Track[]> {
+    const size = Math.max(1, Math.min(50, Math.floor(limit)))
+    let rawSongs: Record<string, unknown>[]
+
+    switch (source) {
+      case 'netease': {
+        const [neteaseMode, submode] = mode.split(':', 2)
+        const result = await withTimeout(
+          ncmApi.personal_fm_mode({
+            cookie,
+            timestamp: Date.now(),
+            mode: neteaseMode,
+            ...(submode ? { submode } : {}),
+            limit: size,
+          }),
+        )
+        const body = result?.body
+        if (body?.code !== 200 || !Array.isArray(body.data)) {
+          throw new Error('Netease roaming recommendation feed failed')
+        }
+        rawSongs = body.data
+        break
+      }
+      case 'tencent': {
+        const result = await tencentAuth.getRadarRecommendations(cookie, 1)
+        rawSongs = result.songs
+        break
+      }
+      case 'kugou':
+        rawSongs = await kugouAuth.getRecommendationSongs(cookie, size)
+        break
+      case 'kugou_concept':
+        rawSongs = await kugouAuth.getConceptRecommendationSongs(cookie, size)
+        break
+      default: {
+        const exhaustive: never = source
+        throw new Error(`Unsupported roaming source: ${exhaustive}`)
+      }
+    }
+
+    const tracks = rawSongs
+      .slice(0, size)
+      .map((song) => (
+        source === 'kugou' || source === 'kugou_concept'
+          ? this.kugouSongToTrack(song, source)
+          : this.rawToTrack(song, source)
+      ))
+      .filter((track): track is Track => track !== null)
+      .filter((track) => Boolean(track.sourceId && track.sourceId !== 'undefined' && track.sourceId !== 'null'))
+    await this.batchResolveCover(tracks, source)
+    for (const track of tracks) this.enrichFromRegistry(track)
+    this.registerTracks(tracks)
+    return tracks
+  }
+
   // ---------------------------------------------------------------------------
   // Public API — Stream URL, Lyric, Cover (unchanged from original)
   // ---------------------------------------------------------------------------
@@ -3126,22 +3190,7 @@ class MusicProvider {
     const s = song as Record<string, any>
     switch (source) {
       case 'netease': {
-        const neteaseArtists = s.ar?.map((a: Record<string, unknown>) => a.name).filter(Boolean)
-        return {
-          id: nanoid(),
-          title: s.name || 'Unknown',
-          artist: neteaseArtists?.length ? neteaseArtists : ['Unknown'],
-          album: s.al?.name || '',
-          duration: Math.round((s.dt || 0) / 1000), // ms -> seconds
-          cover: '', // resolved via pic()
-          source,
-          sourceId: String(s.id),
-          urlId: String(s.id),
-          lyricId: String(s.id),
-          picId: String(s.al?.pic_str || s.al?.pic || ''),
-          // fee: 0=免费, 1=VIP, 4=付费专辑, 8=低音质免费
-          vip: s.fee === 1 || s.fee === 4 || s.privilege?.fee === 1 || s.privilege?.fee === 4,
-        }
+        return parseNeteaseTrack(song)
       }
 
       case 'tencent': {

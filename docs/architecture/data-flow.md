@@ -210,6 +210,8 @@ interface ChatMessage {
 
 队列删除当前歌曲时，服务端会在删除前按原索引计算后继，避免删除后 `currentTrack` 在队列中失去索引而错误回到第一首；`sequential` 尾部停止，循环模式回绕，随机模式仅从剩余歌曲中选择。连续同方向切歌受防抖保护，立即反向切歌不被误拦截。
 
+房主可开启“播放后移除歌曲”。该设置默认关闭；开启后，手动下一首、投票下一首或歌曲自然结束触发下一首时，服务端只在新歌曲成功解析并开始播放后移除上一首并广播 `QUEUE_UPDATED`。切歌失败、停止播放和 `loop-one` 重播同一首不会删除当前歌曲。漫游歌曲切换时先移除上一首再把新漫游歌曲加入队列，避免队列已满导致新歌无法展示。`RoomState` 与 `room:settings` 使用可选 `removePlayedTracks` 字段，旧版 Web、Android 和 Windows 客户端可安全忽略；永久房间会持久化该设置。
+
 房间支持 4 种播放模式（`PlayMode`），由 `room.playMode` 字段控制，默认 `loop-all`：
 
 | 模式         | 说明                                   |
@@ -225,6 +227,16 @@ interface ChatMessage {
 - **投票移除**：播放列表工具栏的删除按钮对所有用户可见，Owner/Admin 直接 emit `queue:remove`；Member 通过 `vote:start { action: 'remove-track', payload: { trackId, trackTitle } }` 投票移除
 - 服务端 `queueService.getNextTrack(roomId, playMode)` 根据模式返回下一首；`getPreviousTrack` 在 `loop-all` 模式下支持尾→首回绕
 - 客户端 `PlayerControls` 提供循环切换按钮，带 `AnimatePresence` 图标过渡动画
+
+## 私人漫游
+
+房主可在房间设置中开启私人漫游，并选择网易云、QQ 音乐、酷狗或酷狗概念版。漫游请求始终使用永久房主 `creatorId` 自己保存的平台凭据，不会借用管理员或其他成员的账号；房主未登录所选平台时，服务端拒绝开启，房主退出当前漫游平台后服务端自动关闭漫游。
+
+- 顺序播放到队尾，或列表循环即将从队尾回绕时，`playerService` 会优先调用 `roamingService` 获取个性化推荐；当前歌曲已经来自漫游时，下一首会继续漫游。队列中尚有后继点歌时仍优先播放点歌，单曲循环与随机播放保持原语义；推荐或歌曲解析失败则回退原播放模式，确实没有下一首时才停止。
+- 漫游歌曲标记为 `requestedBy: '私人漫游'`，成功开始播放后追加到房间播放列表并广播 `queue:updated`；连续切歌会从当前漫游曲目继续请求推荐，有人在当前漫游曲目之后新增点歌时仍优先播放该点歌。服务端过滤当前歌曲、队列歌曲和房间最近漫游歌曲，避免重复推荐。
+- 网易云支持 `DEFAULT`、`FAMILIAR`、`EXPLORE`、运动、专注、深夜和 `aidj` 模式，通过 `personal_fm_mode` 请求；场景值拆成 `mode=SCENE_RCMD` 与 `submode=EXERCISE|FOCUS|NIGHT_EMO`。上游没有可靠的模式发现接口，因此合法列表由 shared 维护，未知或旧持久化值回退到 `DEFAULT`。
+- QQ 音乐、酷狗和酷狗概念版当前固定使用默认个性化推荐，不接受网易云模式参数；概念版使用概念版独立账号和推荐接口。
+- `RoomState` 与 `room:settings` 增加可选 `roamingEnabled`、`roamingSource`、`roamingMode` 字段，旧版 Web、Android 和 Windows 客户端可安全忽略；永久房间会持久化这些设置。
 
 ## 音频质量
 
@@ -305,6 +317,7 @@ B站没有与房间 128K、320K 完全对应的普通 DASH 音轨，因此分别
 | `/api/music/cover`              | GET   | 获取封面图                                                                                              |
 | `/api/music/cover-proxy`        | GET   | 代理受信音乐 CDN 封面；逐跳校验 HTTPS 重定向、图片类型和 10 MiB 上限                                    |
 | `/api/music/playlist`           | GET   | 获取歌单曲目列表（`source` + `id` + `limit` + `offset`），分页返回 `{ tracks, total, offset, hasMore }` |
+| `/api/music/hot`                | GET   | 获取房间内可见的官方热歌榜；校验 HTTP 身份和房间成员身份，支持 `source=netease|tencent|kugou` 及 `limit`/`offset` 分页，服务端分别缓存网易云热歌榜、QQ 热歌榜和酷狗热歌榜，`refresh=true` 可强制刷新 |
 | `/api/rooms/:roomId/check`      | GET   | 房间预检（存在性 + 是否需要密码），用于分享链接直接访问时的前置校验                                     |
 | `/api/admin/audio-proxy-policy` | GET   | 服务器管理员读取酷狗全局强制代理策略                                                                    |
 | `/api/admin/audio-proxy-policy` | PATCH | 服务器管理员部分更新代理策略并广播完整结果                                                              |

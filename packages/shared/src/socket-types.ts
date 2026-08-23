@@ -19,6 +19,8 @@ import type {
   VoteState,
   RoomAutoFallbackEvent,
   GlobalBackgroundSettings,
+  NeteaseRoamingMode,
+  RoamingSource,
 } from './types.js'
 
 /** 服务端 → 客户端 事件接口 */
@@ -40,6 +42,10 @@ export interface ServerToClientEvents {
     permanent: boolean
     allowTemporaryAdminTrackRemoval: boolean
     allowTemporaryAdminQueueClear: boolean
+    removePlayedTracks?: boolean
+    roamingEnabled?: boolean
+    roamingSource?: RoamingSource
+    roamingMode?: NeteaseRoamingMode
     password?: string | null
     audioQuality: AudioQuality
   }) => void
@@ -102,6 +108,10 @@ export interface ClientToServerEvents {
     permanent?: boolean
     allowTemporaryAdminTrackRemoval?: boolean
     allowTemporaryAdminQueueClear?: boolean
+    removePlayedTracks?: boolean
+    roamingEnabled?: boolean
+    roamingSource?: RoamingSource
+    roamingMode?: NeteaseRoamingMode
   }) => void
   [EVENTS.ROOM_SET_ROLE]: (data: { userId: string; role: 'admin' | 'member' }) => void
 

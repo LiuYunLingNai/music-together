@@ -8,6 +8,7 @@ import { roomRepo } from '../repositories/roomRepository.js'
 import { logger } from '../utils/logger.js'
 import type { TypedServer, TypedSocket } from '../middleware/types.js'
 import { checkAuthRateLimit } from '../middleware/socketRateLimiter.js'
+import * as roomService from '../services/roomService.js'
 
 /** 获取 socket 对应的房间映射（roomId + persistent userId） */
 function getSocketMapping(socketId: string) {
@@ -438,6 +439,19 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
       const mapping = getSocketMapping(socket.id)
       if (mapping) {
         authService.removeCookie(mapping.roomId, data.platform, mapping.userId)
+        const room = roomRepo.get(mapping.roomId)
+        if (
+          room?.roamingEnabled &&
+          room.creatorId === mapping.userId &&
+          room.roamingSource === data.platform &&
+          !authService.getUserCookie(room.creatorId, room.roamingSource, room.id)
+        ) {
+          room.roamingEnabled = false
+          roomRepo.persist(room.id)
+          io.to(room.id).emit(EVENTS.ROOM_STATE, {
+            ...roomService.toPublicRoomState(room),
+          })
+        }
         broadcastAuthStatus(io, socket, mapping)
       }
     } catch (err) {

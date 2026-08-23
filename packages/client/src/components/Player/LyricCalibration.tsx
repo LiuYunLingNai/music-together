@@ -44,7 +44,7 @@ export function LyricCalibration() {
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 min-h-11 min-w-11 bg-black text-white/90 hover:bg-black/80 hover:text-white sm:min-h-0 sm:min-w-0"
+              className="h-8 w-8 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0"
               disabled={!lyricOffsetKey}
               aria-label="歌词校正"
             >

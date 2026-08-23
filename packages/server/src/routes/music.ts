@@ -7,6 +7,7 @@ import {
   downloadQuerySchema,
   playlistQuerySchema,
   recommendationsQuerySchema,
+  hotSongsQuerySchema,
   type Track,
   type PlatformRecommendation,
 } from '@music-together/shared'
@@ -33,8 +34,10 @@ import {
 import { BILIBILI_BVID_PATTERN, BILIBILI_STREAM_ID_PATTERN } from '../services/bilibiliInput.js'
 import { MusicDownloadError, resolveDownloadOptions, streamDownload } from '../services/musicDownloadService.js'
 import { coverProxyRateLimit, musicMetadataRateLimit } from '../middleware/httpRateLimiter.js'
+import { createHotSongsService, hotSongsPlaylistId } from '../services/hotSongsService.js'
 
 const router: RouterType = Router()
+const hotSongsService = createHotSongsService(musicProvider)
 
 /**
  * Wrap an async route handler with validation + error handling.
@@ -161,6 +164,35 @@ router.get(
       res.json({ recommendations })
     },
   ),
+)
+
+router.get(
+  '/hot',
+  musicMetadataRateLimit,
+  validated(hotSongsQuerySchema, 'Get hot songs', async ({ roomId, source, limit, offset, refresh }, req, res) => {
+    const identityUserId = req.identityUserId
+    if (!identityUserId) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+
+    const room = roomRepo.get(roomId)
+    if (!room || !room.users.some((user) => user.id === identityUserId)) {
+      res.status(403).json({ error: 'Forbidden' })
+      return
+    }
+
+    const result = await hotSongsService.getHotSongs(source, limit, offset, refresh)
+    res.setHeader('Cache-Control', 'private, max-age=300')
+    const names = { netease: '网易云热歌榜', tencent: 'QQ 音乐热歌榜', kugou: '酷狗热歌榜' } as const
+    res.json({
+      id: source === 'netease' ? hotSongsPlaylistId : source,
+      source,
+      name: names[source],
+      ...result,
+      offset,
+    })
+  }),
 )
 
 router.get(
