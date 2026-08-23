@@ -215,6 +215,8 @@ internal fun TrackRow(
     onClick: (() -> Unit)? = null,
     highlighted: Boolean = false,
     compact: Boolean = false,
+    headlineMaxLines: Int = 1,
+    supportingMaxLines: Int = 1,
     trailingContent: (@Composable () -> Unit)? = null,
 ) {
     ListItem(
@@ -233,7 +235,7 @@ internal fun TrackRow(
         headlineContent = {
             Text(
                 track.title,
-                maxLines = 1,
+                maxLines = headlineMaxLines,
                 overflow = TextOverflow.Ellipsis,
                 fontSize = if (compact) 14.sp else 16.sp,
             )
@@ -241,7 +243,7 @@ internal fun TrackRow(
         supportingContent = {
             Text(
                 subtitle,
-                maxLines = 1,
+                maxLines = supportingMaxLines,
                 overflow = TextOverflow.Ellipsis,
                 fontSize = if (compact) 12.sp else 14.sp,
             )

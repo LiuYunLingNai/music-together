@@ -62,6 +62,23 @@ class JsonTest {
     }
 
     @Test
+    fun roomStateParsesRoamingSettingsWithLegacyFallbacks() {
+        val configured = roomJson()
+            .put("roamingEnabled", true)
+            .put("roamingSource", "kugou_concept")
+            .put("roamingMode", "DEFAULT")
+            .toRoomState()
+        val legacy = roomJson().toRoomState()
+
+        assertTrue(configured.roamingEnabled)
+        assertEquals("kugou_concept", configured.roamingSource)
+        assertEquals("DEFAULT", configured.roamingMode)
+        assertFalse(legacy.roamingEnabled)
+        assertEquals("netease", legacy.roamingSource)
+        assertEquals("DEFAULT", legacy.roamingMode)
+    }
+
+    @Test
     fun trackPreservesBilibiliMetadataFields() {
         val track = JSONObject(
             """{

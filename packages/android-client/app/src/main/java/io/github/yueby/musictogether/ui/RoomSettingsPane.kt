@@ -337,6 +337,15 @@ fun RoomSettingsPane(state: AppState, viewModel: MusicTogetherViewModel) {
             }
         }
         item {
+            MaterialRoomRoamingSettings(
+                state = state,
+                canManage = permissions.canManageAllSettings,
+                onEnabledChange = viewModel::updateRoamingEnabled,
+                onSourceChange = viewModel::updateRoamingSource,
+                onModeChange = viewModel::updateRoamingMode,
+            )
+        }
+        item {
             Row(verticalAlignment = Alignment.Top) {
                 Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.width(10.dp))
@@ -451,6 +460,16 @@ private fun MiuixRoomSettingsPane(
                     )
                 }
             }
+        }
+        item {
+            MiuixSmallTitle(text = "私人漫游")
+            MiuixRoomRoamingSettings(
+                state = state,
+                canManage = permissions.canManageAllSettings,
+                onEnabledChange = viewModel::updateRoamingEnabled,
+                onSourceChange = viewModel::updateRoamingSource,
+                onModeChange = viewModel::updateRoamingMode,
+            )
         }
     }
 }

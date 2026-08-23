@@ -118,6 +118,15 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         const val MIN_SYNC_PACKET_INTERVAL_SECONDS = 1
         const val MAX_SYNC_PACKET_INTERVAL_SECONDS = 60
         const val GITHUB_RELEASES_API = "https://api.github.com/repos/LiuYunLingNai/music-together/releases"
+        val NETEASE_ROAMING_MODES = setOf(
+            "DEFAULT",
+            "FAMILIAR",
+            "EXPLORE",
+            "SCENE_RCMD:EXERCISE",
+            "SCENE_RCMD:FOCUS",
+            "SCENE_RCMD:NIGHT_EMO",
+            "aidj",
+        )
     }
 
     private val appPreferences = AppPreferences(application)
@@ -320,6 +329,35 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
 
     fun updateTemporaryAdminQueueClear(enabled: Boolean) {
         socket.emit(Events.ROOM_SETTINGS, JSONObject().put("allowTemporaryAdminQueueClear", enabled))
+    }
+
+    fun updateRoamingEnabled(enabled: Boolean) {
+        socket.emit(Events.ROOM_SETTINGS, JSONObject().put("roamingEnabled", enabled))
+    }
+
+    fun updateRoamingSource(source: String) {
+        if (source !in setOf("netease", "tencent", "kugou", "kugou_concept")) return
+        socket.emit(
+            Events.ROOM_SETTINGS,
+            JSONObject()
+                .put("roamingSource", source)
+                .put("roamingMode", if (source == "netease") _state.value.room?.roamingMode ?: "DEFAULT" else "DEFAULT"),
+        )
+    }
+
+    fun updateRoamingMode(mode: String) {
+        if (mode !in NETEASE_ROAMING_MODES) return
+        socket.emit(Events.ROOM_SETTINGS, JSONObject().put("roamingMode", mode))
+    }
+
+    fun updateRoomMemberRole(userId: String, role: String) {
+        if (role != "admin" && role != "member") return
+        socket.emit(
+            Events.ROOM_SET_ROLE,
+            JSONObject()
+                .put("userId", userId)
+                .put("role", role),
+        )
     }
 
     fun updatePlaybackTempoSync(enabled: Boolean) {
@@ -1674,6 +1712,9 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                             "allowTemporaryAdminQueueClear",
                             it.allowTemporaryAdminQueueClear,
                         ),
+                        roamingEnabled = value.optBoolean("roamingEnabled", it.roamingEnabled),
+                        roamingSource = value.optString("roamingSource", it.roamingSource),
+                        roamingMode = value.optString("roamingMode", it.roamingMode),
                         audioQuality = value.audioQuality("audioQuality", it.audioQuality),
                     )
                 }

@@ -259,7 +259,14 @@ fun RoomScreen(
                             RoomOverlay.Recommendations -> RecommendationsPane(appState, viewModel)
                             RoomOverlay.Download -> MusicDownloadPane(appState, viewModel)
                             RoomOverlay.Chat -> ChatPane(appState.messages, viewModel)
-                            RoomOverlay.Members -> MembersPane(room, appState.userId)
+                            RoomOverlay.Members -> MembersPane(
+                                room = room,
+                                userId = appState.userId,
+                                canManageRoles = room.users.firstOrNull { it.id == appState.userId }?.let { user ->
+                                    user.role == "owner" || user.isServerAdmin
+                                } == true || appState.accountProfile?.role == "admin",
+                                onSetRole = viewModel::updateRoomMemberRole,
+                            )
                             RoomOverlay.Accounts -> PlatformPane(appState, viewModel)
                             RoomOverlay.AccountSettings -> AccountSettingsPane(appState, viewModel)
                             RoomOverlay.RoomSettings -> RoomSettingsPane(appState, viewModel)

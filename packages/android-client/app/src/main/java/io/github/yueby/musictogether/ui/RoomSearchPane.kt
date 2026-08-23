@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.VerticalAlignTop
@@ -63,6 +64,8 @@ import io.github.yueby.musictogether.network.searchInputMaxLength
 import io.github.yueby.musictogether.ui.designsystem.AppButton
 import io.github.yueby.musictogether.ui.designsystem.AppDialog
 import io.github.yueby.musictogether.ui.designsystem.AppTextField
+import io.github.yueby.musictogether.ui.player.DropdownMenu as AppDropdownMenu
+import io.github.yueby.musictogether.ui.player.DropdownMenuItem as AppDropdownMenuItem
 
 @Composable
 internal fun SearchPane(state: AppState, viewModel: MusicTogetherViewModel) {
@@ -149,6 +152,8 @@ internal fun SearchPane(state: AppState, viewModel: MusicTogetherViewModel) {
                         primaryAction = null,
                         primaryIcon = Icons.AutoMirrored.Filled.PlaylistAdd,
                         onClick = if (isAdded) null else ({ viewModel.addTrack(track) }),
+                        headlineMaxLines = Int.MAX_VALUE,
+                        supportingMaxLines = Int.MAX_VALUE,
                         trailingContent = {
                             SearchTrackActions(
                                 isAdded = isAdded,
@@ -325,33 +330,64 @@ private fun SearchTrackActions(
     onPin: () -> Unit,
     onDownload: () -> Unit,
 ) {
-    Row {
-        when {
-            isDownloaded -> IconButton(onClick = {}, enabled = false) {
-                Icon(Icons.Default.Check, "已下载", tint = MaterialTheme.colorScheme.primary)
-            }
-            isDownloading -> Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(
-                    progress = { (downloadProgress ?: 0) / 100f },
-                    modifier = Modifier.size(22.dp),
-                    strokeWidth = 2.dp,
-                )
-            }
-            else -> IconButton(onClick = onDownload) {
-                Icon(Icons.Default.Download, "下载歌曲")
-            }
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { expanded = true }) {
+            Icon(Icons.Default.MoreVert, "更多歌曲操作")
         }
-        IconButton(onClick = onAdd, enabled = !isAdded) {
-            Icon(
-                if (isAdded) Icons.Default.Check else Icons.AutoMirrored.Filled.PlaylistAdd,
-                if (isAdded) "已添加" else "添加到播放列表",
-                tint = if (isAdded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+        AppDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            AppDropdownMenuItem(
+                text = { Text(if (isAdded) "已添加" else "添加到播放列表") },
+                leadingIcon = {
+                    Icon(
+                        if (isAdded) Icons.Default.Check else Icons.AutoMirrored.Filled.PlaylistAdd,
+                        null,
+                        tint = if (isAdded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                    )
+                },
+                enabled = !isAdded,
+                onClick = {
+                    expanded = false
+                    onAdd()
+                },
             )
-        }
-        if (!isAdded) {
-            IconButton(onClick = onPin) {
-                Icon(Icons.Default.VerticalAlignTop, "置顶到当前播放下方")
-            }
+            AppDropdownMenuItem(
+                text = {
+                    Text(
+                        when {
+                            isDownloaded -> "已下载"
+                            isDownloading && downloadProgress != null -> "下载中 $downloadProgress%"
+                            isDownloading -> "下载中"
+                            else -> "下载歌曲"
+                        },
+                    )
+                },
+                leadingIcon = {
+                    when {
+                        isDownloaded -> Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.primary)
+                        isDownloading -> CircularProgressIndicator(
+                            progress = { (downloadProgress ?: 0) / 100f },
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        else -> Icon(Icons.Default.Download, null)
+                    }
+                },
+                enabled = !isDownloaded && !isDownloading,
+                onClick = {
+                    expanded = false
+                    onDownload()
+                },
+            )
+            AppDropdownMenuItem(
+                text = { Text("置顶到当前播放下方") },
+                leadingIcon = { Icon(Icons.Default.VerticalAlignTop, null) },
+                enabled = !isAdded,
+                onClick = {
+                    expanded = false
+                    onPin()
+                },
+            )
         }
     }
 }

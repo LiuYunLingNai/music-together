@@ -139,6 +139,9 @@ internal fun JSONObject.toRoomState(): RoomState {
         permanent = optBoolean("permanent", false),
         allowTemporaryAdminTrackRemoval = optBoolean("allowTemporaryAdminTrackRemoval", false),
         allowTemporaryAdminQueueClear = optBoolean("allowTemporaryAdminQueueClear", false),
+        roamingEnabled = optBoolean("roamingEnabled", false),
+        roamingSource = optString("roamingSource", "netease"),
+        roamingMode = optString("roamingMode", "DEFAULT"),
         audioQuality = audioQuality("audioQuality"),
         users = users,
         members = membersJson?.let { value ->

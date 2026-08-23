@@ -15,6 +15,7 @@ object Events {
     const val ROOM_LIST_UPDATE = "room:list_update"
     const val ROOM_ERROR = "room:error"
     const val ROOM_SETTINGS = "room:settings"
+    const val ROOM_SET_ROLE = "room:set_role"
     const val ROOM_ROLE_CHANGED = "room:role_changed"
 
     const val PLAYER_PLAY = "player:play"
