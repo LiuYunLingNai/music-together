@@ -157,6 +157,83 @@ class JsonTest {
     }
 
     @Test
+    fun roomStatePreservesClientInformationForUsersAndMembers() {
+        val client = JSONObject()
+            .put("kind", "web")
+            .put("label", "Chrome · Windows")
+        val room = roomJson()
+            .put(
+                "users",
+                org.json.JSONArray().put(
+                    JSONObject()
+                        .put("id", "online-member")
+                        .put("nickname", "Online")
+                        .put("role", "member")
+                        .put("client", client),
+                ),
+            )
+            .put(
+                "members",
+                org.json.JSONArray().put(
+                    JSONObject()
+                        .put("id", "offline-member")
+                        .put("nickname", "Offline")
+                        .put("role", "member")
+                        .put("isOnline", false)
+                        .put("joinedAt", 1_000L)
+                        .put("client", JSONObject().put("kind", "android").put("label", "Android 客户端")),
+                ),
+            )
+            .toRoomState()
+
+        assertEquals("web", room.users.single().client?.kind)
+        assertEquals("Chrome · Windows", room.users.single().client?.label)
+        assertEquals("android", room.members.single().client?.kind)
+        assertEquals("Android 客户端", room.members.single().client?.label)
+    }
+
+    @Test
+    fun roomStateIgnoresMissingOrIncompleteClientInformation() {
+        val room = roomJson().put(
+            "users",
+            org.json.JSONArray().put(
+                JSONObject()
+                    .put("id", "legacy-member")
+                    .put("nickname", "Legacy")
+                    .put("role", "member")
+                    .put("client", JSONObject().put("kind", "web")),
+            ),
+        ).toRoomState()
+
+        assertNull(room.users.single().client)
+        assertNull(room.members.single().client)
+    }
+
+    @Test
+    fun roomStateParsesMultipleActiveClientsAndCounts() {
+        val room = roomJson().put(
+            "users",
+            org.json.JSONArray().put(
+                JSONObject()
+                    .put("id", "multi-device")
+                    .put("nickname", "Multi")
+                    .put("role", "member")
+                    .put("client", JSONObject().put("kind", "android").put("label", "Android 客户端"))
+                    .put(
+                        "clients",
+                        org.json.JSONArray()
+                            .put(JSONObject().put("kind", "android").put("label", "Android 客户端").put("count", 2))
+                            .put(JSONObject().put("kind", "web").put("label", "Chrome · Windows")),
+                    ),
+            ),
+        ).toRoomState()
+
+        assertEquals(2, room.users.single().clients.size)
+        assertEquals(2, room.users.single().clients[0].count)
+        assertEquals("Chrome · Windows", room.users.single().clients[1].label)
+    }
+
+    @Test
     fun roomStateBuildsOnlineMembersForLegacyServers() {
         val room = roomJson().put(
             "users",

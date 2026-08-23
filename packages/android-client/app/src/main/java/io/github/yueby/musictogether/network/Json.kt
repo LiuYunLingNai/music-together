@@ -1,6 +1,7 @@
 package io.github.yueby.musictogether.network
 
 import io.github.yueby.musictogether.model.ChatMessage
+import io.github.yueby.musictogether.model.ClientInfo
 import io.github.yueby.musictogether.model.PlayState
 import io.github.yueby.musictogether.model.Playlist
 import io.github.yueby.musictogether.model.PlatformAuthStatus
@@ -89,7 +90,24 @@ internal fun JSONObject.toUser(): User = User(
     role = optString("role", "member"),
     avatarUrl = stringOrNull("avatarUrl"),
     isServerAdmin = optBoolean("isServerAdmin", false),
+    client = optJSONObject("client")?.toClientInfo(),
+    clients = optJSONArray("clients")?.toClientInfos().orEmpty(),
 )
+
+internal fun JSONObject.toClientInfo(): ClientInfo? {
+    val label = stringOrNull("label") ?: return null
+    return ClientInfo(
+        kind = stringOrNull("kind") ?: "web",
+        label = label,
+        count = if (has("count") && !isNull("count")) optInt("count").takeIf { it > 1 } else null,
+    )
+}
+
+internal fun JSONArray.toClientInfos(): List<ClientInfo> = buildList {
+    for (index in 0 until length()) {
+        optJSONObject(index)?.toClientInfo()?.let(::add)
+    }
+}
 
 internal fun JSONObject.toRoomMember(): RoomMember = RoomMember(
     id = optString("id"),
@@ -97,6 +115,8 @@ internal fun JSONObject.toRoomMember(): RoomMember = RoomMember(
     role = optString("role", "member"),
     avatarUrl = stringOrNull("avatarUrl"),
     isServerAdmin = optBoolean("isServerAdmin", false),
+    client = optJSONObject("client")?.toClientInfo(),
+    clients = optJSONArray("clients")?.toClientInfos().orEmpty(),
     isOnline = optBoolean("isOnline", false),
     joinedAt = optLong("joinedAt", 0L),
     lastSeenAt = if (has("lastSeenAt") && !isNull("lastSeenAt")) optLong("lastSeenAt") else null,
@@ -130,6 +150,8 @@ internal fun JSONObject.toRoomState(): RoomState {
                 role = user.role,
                 avatarUrl = user.avatarUrl,
                 isServerAdmin = user.isServerAdmin,
+                client = user.client,
+                clients = user.clients,
                 isOnline = true,
                 joinedAt = 0L,
             )

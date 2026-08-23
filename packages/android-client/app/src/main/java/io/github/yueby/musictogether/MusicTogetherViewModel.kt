@@ -1691,6 +1691,8 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                                     role = user.role,
                                     avatarUrl = user.avatarUrl,
                                     isServerAdmin = user.isServerAdmin,
+                                    client = user.client ?: member.client,
+                                    clients = user.clients.ifEmpty { member.clients },
                                     isOnline = true,
                                     lastSeenAt = now,
                                 )
@@ -1705,6 +1707,8 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                             role = user.role,
                             avatarUrl = user.avatarUrl,
                             isServerAdmin = user.isServerAdmin,
+                            client = user.client,
+                            clients = user.clients,
                             isOnline = true,
                             joinedAt = now,
                             lastSeenAt = now,

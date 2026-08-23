@@ -62,12 +62,21 @@ fun PlayerDisplaySettings.normalized(): PlayerDisplaySettings = copy(
 )
 
 @Immutable
+data class ClientInfo(
+    val kind: String,
+    val label: String,
+    val count: Int? = null,
+)
+
+@Immutable
 data class User(
     val id: String,
     val nickname: String,
     val role: String,
     val avatarUrl: String? = null,
     val isServerAdmin: Boolean = false,
+    val client: ClientInfo? = null,
+    val clients: List<ClientInfo> = emptyList(),
 )
 
 @Immutable
@@ -77,6 +86,8 @@ data class RoomMember(
     val role: String,
     val avatarUrl: String? = null,
     val isServerAdmin: Boolean = false,
+    val client: ClientInfo? = null,
+    val clients: List<ClientInfo> = emptyList(),
     val isOnline: Boolean,
     val joinedAt: Long,
     val lastSeenAt: Long? = null,

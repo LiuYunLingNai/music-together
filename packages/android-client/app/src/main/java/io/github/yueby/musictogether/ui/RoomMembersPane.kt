@@ -18,7 +18,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -114,30 +117,82 @@ internal fun MembersPane(room: RoomState, userId: String?) {
                         )
                     }
                     Spacer(Modifier.width(10.dp))
-                    Text(
-                        member.nickname,
-                        modifier = Modifier.weight(1f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        fontSize = 14.sp,
-                    )
-                    if (member.id == userId) {
-                        Text(
-                            "你",
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(MaterialTheme.colorScheme.secondaryContainer)
-                                .padding(horizontal = 7.dp, vertical = 2.dp),
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            fontSize = 11.sp,
-                        )
-                        Spacer(Modifier.width(6.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Text(
+                                member.nickname,
+                                modifier = Modifier.weight(1f, fill = false),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                fontSize = 14.sp,
+                            )
+                            if (member.id == userId) {
+                                Text(
+                                    "你",
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(MaterialTheme.colorScheme.secondaryContainer)
+                                        .padding(horizontal = 7.dp, vertical = 2.dp),
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    fontSize = 11.sp,
+                                )
+                            }
+                            Text(
+                                if (member.isServerAdmin) "服务器管理员" else roleLabel(member.role),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                            )
+                        }
+                        val clients = member.clients.ifEmpty { listOfNotNull(member.client) }
+                        if (clients.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier.padding(top = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                if (!member.isOnline) {
+                                    Text(
+                                        "上次使用：",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 11.sp,
+                                    )
+                                }
+                                clients.forEachIndexed { index, client ->
+                                    if (index > 0) {
+                                        Text(
+                                            "、",
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontSize = 11.sp,
+                                        )
+                                    }
+                                    Icon(
+                                        imageVector = when (client.kind) {
+                                            "android" -> Icons.Default.Smartphone
+                                            "windows", "desktop" -> Icons.Default.Computer
+                                            else -> Icons.Default.Language
+                                        },
+                                        contentDescription = null,
+                                        modifier = Modifier.size(14.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Text(
+                                        text = buildString {
+                                            append(client.label)
+                                            client.count?.takeIf { it > 1 }?.let { append(" ×$it") }
+                                        },
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 11.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                        }
                     }
-                    Text(
-                        roleLabel(member.role),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 12.sp,
-                    )
                 }
             }
         }
