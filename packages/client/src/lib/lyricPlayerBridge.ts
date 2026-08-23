@@ -4,6 +4,7 @@ let player: LyricPlayerBase | null = null
 let offsetMs = 0
 
 const toLyricTime = (timeSeconds: number) => Math.max(0, Math.round(timeSeconds * 1000 - offsetMs))
+export type LyricSeekBehavior = 'immediate' | 'smooth'
 
 export const lyricPlayerBridge = {
   attach(nextPlayer: LyricPlayerBase): () => void {
@@ -21,10 +22,11 @@ export const lyricPlayerBridge = {
     player?.setCurrentTime(toLyricTime(timeSeconds), isSeeking)
   },
 
-  seek(timeSeconds: number): void {
+  seek(timeSeconds: number, behavior: LyricSeekBehavior = 'immediate'): void {
     if (!player) return
     player.resetScroll()
     player.setCurrentTime(toLyricTime(timeSeconds), true)
-    void player.calcLayout(true, true)
+    const immediate = behavior === 'immediate'
+    void player.calcLayout(immediate, immediate)
   },
 }

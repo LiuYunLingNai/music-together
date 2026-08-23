@@ -3,18 +3,27 @@ import { Slider as SliderPrimitive } from 'radix-ui'
 
 import { cn } from '@/lib/utils'
 
+type SliderProps = React.ComponentProps<typeof SliderPrimitive.Root> & {
+  /** Keep a single-value range endpoint aligned with the visual center of the 16px thumb. */
+  alignRangeWithThumb?: boolean
+}
+
 function Slider({
   className,
   defaultValue,
   value,
   min = 0,
   max = 100,
+  alignRangeWithThumb = false,
   ...props
-}: React.ComponentProps<typeof SliderPrimitive.Root>) {
+}: SliderProps) {
   const _values = React.useMemo(
     () => (Array.isArray(value) ? value : Array.isArray(defaultValue) ? defaultValue : [min, max]),
     [value, defaultValue, min, max],
   )
+  const rangePercentage = Math.min(100, Math.max(0, (((_values[0] ?? min) - min) / (max - min || 1)) * 100))
+  const thumbRadius = 8
+  const rangeThumbOffset = thumbRadius * (1 - (2 * rangePercentage) / 100)
 
   return (
     <SliderPrimitive.Root
@@ -35,10 +44,20 @@ function Slider({
           'bg-input relative grow overflow-hidden rounded-full data-[orientation=horizontal]:h-1.5 data-[orientation=horizontal]:w-full data-[orientation=vertical]:h-full data-[orientation=vertical]:w-1.5',
         )}
       >
-        <SliderPrimitive.Range
-          data-slot="slider-range"
-          className={cn('bg-primary absolute data-[orientation=horizontal]:h-full data-[orientation=vertical]:w-full')}
-        />
+        {alignRangeWithThumb ? (
+          <span
+            data-slot="slider-range"
+            className="absolute inset-y-0 start-0 bg-primary"
+            style={{ inlineSize: `calc(${rangePercentage}% + ${rangeThumbOffset}px)` }}
+          />
+        ) : (
+          <SliderPrimitive.Range
+            data-slot="slider-range"
+            className={cn(
+              'bg-primary absolute data-[orientation=horizontal]:h-full data-[orientation=vertical]:w-full',
+            )}
+          />
+        )}
       </SliderPrimitive.Track>
       {Array.from({ length: _values.length }, (_, index) => (
         <SliderPrimitive.Thumb

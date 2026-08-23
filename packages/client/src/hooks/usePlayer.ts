@@ -251,13 +251,16 @@ export function usePlayer() {
     socket.emit(EVENTS.PLAYER_PAUSE)
   }, [socket])
 
+  const requestSeek = useCallback((time: number) => socket.emit(EVENTS.PLAYER_SEEK, { currentTime: time }), [socket])
+
   const seek = useCallback(
     (time: number) => {
-      // Optimistic local update for the progress bar UI
+      // Progress controls retain an optimistic preview while the server
+      // schedules the authoritative seek for every room client.
       usePlayerStore.getState().setCurrentTime(time)
-      socket.emit(EVENTS.PLAYER_SEEK, { currentTime: time })
+      requestSeek(time)
     },
-    [socket],
+    [requestSeek],
   )
 
   const prev = useCallback(() => socket.emit(EVENTS.PLAYER_PREV), [socket])
@@ -266,5 +269,5 @@ export function usePlayer() {
   // Permission-aware: mirrors PlayerControls fallback-to-vote behaviour.
   useMediaSession({ play, pause, next, prev, seek })
 
-  return { play, pause, seek, next, prev }
+  return { play, pause, seek, requestSeek, next, prev }
 }

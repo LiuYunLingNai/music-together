@@ -381,8 +381,14 @@ body[data-room-cover-tint='true'] {
       linear-gradient(118deg, transparent 12%, rgb(var(--theme-accent-rgb) / 12%) 38%, transparent 59%),
       linear-gradient(286deg, transparent 25%, rgb(var(--theme-secondary-rgb) / 10%) 48%, transparent 72%),
       linear-gradient(180deg, transparent 20%, rgb(var(--theme-highlight-rgb) / 4%) 54%, transparent 84%);
-    background-size: 170% 170%, 160% 160%, 100% 100%;
-    background-position: 0% 20%, 100% 70%, center;
+    background-size:
+      170% 170%,
+      160% 160%,
+      100% 100%;
+    background-position:
+      0% 20%,
+      100% 70%,
+      center;
     filter: blur(28px);
     animation: mt-home-light-drift 24s ease-in-out infinite alternate;
   }
@@ -484,6 +490,64 @@ body[data-room-cover-tint='true'] {
     box-shadow:
       0 24px 64px rgb(0 0 0 / 34%),
       inset 0 1px 0 rgb(255 255 255 / 6%);
+  }
+
+  .mt-room-side-panel .mt-card {
+    border-color: rgb(var(--theme-border-rgb) / 18%);
+    background-color: rgb(13 18 28 / 76%);
+    box-shadow:
+      0 14px 34px -14px rgb(0 0 0 / 46%),
+      inset 0 1px 0 rgb(255 255 255 / 8%);
+    backdrop-filter: blur(22px) saturate(1.12);
+    -webkit-backdrop-filter: blur(22px) saturate(1.12);
+  }
+
+  .mt-room-side-panel .mt-card::after {
+    inset: auto;
+    left: 50%;
+    top: 50%;
+    width: 280px;
+    height: 280px;
+    border-radius: 999px;
+    background: radial-gradient(
+      circle,
+      rgb(var(--theme-highlight-rgb) / 22%) 0%,
+      rgb(var(--theme-accent-rgb) / 10%) 34%,
+      transparent 72%
+    );
+    opacity: 0;
+    transform: translate3d(calc(-50% + var(--mt-panel-glow-x, 0px)), calc(-50% + var(--mt-panel-glow-y, 0px)), 0);
+    transition: opacity 180ms ease;
+  }
+
+  .mt-room-side-panel:focus-within .mt-card::after {
+    opacity: 0.58;
+  }
+
+  .mt-hot-song-row {
+    transition:
+      background-color 160ms ease,
+      box-shadow 160ms ease;
+  }
+
+  .mt-hot-song-row:hover {
+    background-color: rgb(var(--theme-highlight-rgb) / 7%);
+    box-shadow:
+      inset 0 0 0 1px rgb(var(--theme-border-rgb) / 11%),
+      inset 0 1px 0 rgb(255 255 255 / 4%);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .mt-room-side-panel:hover .mt-card::after {
+      opacity: 0.82;
+      will-change: transform, opacity;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .mt-room-side-panel .mt-card::after {
+      transform: translate3d(-50%, -50%, 0);
+    }
   }
 
   /* Homepage surfaces use a lighter glass treatment so the shared background remains visible. */
@@ -605,6 +669,37 @@ body[data-room-cover-tint='true'] {
       inset 0 1px 0 rgb(255 255 255 / 6%);
   }
 
+  .mt-player-content {
+    padding: 1.25rem;
+    transition:
+      padding-inline-start 200ms ease-out,
+      padding-inline-end 200ms ease-out;
+  }
+
+  .mt-player-view-toggle {
+    right: 1rem;
+    transition: right 200ms ease-out;
+  }
+
+  @media (min-width: 768px) {
+    .mt-player-content {
+      padding-block: 5%;
+      padding-inline-start: max(5%, var(--mt-player-safe-left, 0px));
+      padding-inline-end: max(5%, var(--mt-player-safe-right, 0px));
+    }
+
+    .mt-player-view-toggle {
+      right: max(1rem, var(--mt-player-safe-right, 0px));
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .mt-player-content,
+    .mt-player-view-toggle {
+      transition-duration: 0.01ms;
+    }
+  }
+
   .mt-player-stage::before {
     position: absolute;
     inset: 10%;
@@ -647,12 +742,18 @@ body[data-room-cover-tint='true'] {
 
   @keyframes mt-home-light-drift {
     0% {
-      background-position: 0% 20%, 100% 70%, center;
+      background-position:
+        0% 20%,
+        100% 70%,
+        center;
       transform: rotate(-2deg) scale(1);
     }
 
     100% {
-      background-position: 100% 55%, 0% 35%, center;
+      background-position:
+        100% 55%,
+        0% 35%,
+        center;
       transform: rotate(2deg) scale(1.06);
     }
   }
@@ -721,6 +822,10 @@ body[data-room-cover-tint='true'] {
 .amll-container {
   color: var(--foreground);
   opacity: 0.9;
+}
+
+.amll-container--seekable [class*='lyricLine'] {
+  cursor: pointer;
 }
 
 /* 翻译歌词子行（lyricSubLine 中第一个） */

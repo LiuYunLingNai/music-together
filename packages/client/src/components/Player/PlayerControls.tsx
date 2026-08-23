@@ -134,6 +134,7 @@ export const PlayerControls = memo(function PlayerControls({
             value={[duration > 0 ? ((isSeeking ? seekTime : currentTime) / duration) * 100 : 0]}
             max={100}
             step={0.1}
+            alignRangeWithThumb
             disabled={disabled || !canSeek}
             onValueChange={(val) => {
               if (duration > 0) {

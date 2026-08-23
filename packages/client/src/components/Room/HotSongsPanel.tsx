@@ -107,7 +107,11 @@ export function HotSongsPanel({ roomId, onAddTrack, onCollapse, className, enabl
         </div>
       </div>
 
-      <Tabs value={source} onValueChange={handleSourceChange} className="shrink-0 gap-0 border-b border-border/50 px-2 py-2">
+      <Tabs
+        value={source}
+        onValueChange={handleSourceChange}
+        className="shrink-0 gap-0 border-b border-border/50 px-2 py-2"
+      >
         <TabsList className="grid w-full grid-cols-3">
           {SOURCE_ORDER.map((item) => (
             <TabsTrigger key={item} value={item} className="text-xs">
@@ -139,13 +143,15 @@ export function HotSongsPanel({ roomId, onAddTrack, onCollapse, className, enabl
           </div>
         )}
         {error && tracks.length === 0 && <p className="p-4 text-center text-xs text-muted-foreground">{error}</p>}
-        {!loading && !error && tracks.length === 0 && <p className="p-4 text-center text-xs text-muted-foreground">暂无热歌</p>}
+        {!loading && !error && tracks.length === 0 && (
+          <p className="p-4 text-center text-xs text-muted-foreground">暂无热歌</p>
+        )}
         <div className="space-y-0.5">
           {tracks.map((track, index) => {
             const added = queueKeys.has(trackKey(track))
             return (
               <div
-                className="group flex min-h-14 items-center gap-2 rounded-lg px-1.5 py-1 transition-colors hover:bg-accent/60"
+                className="mt-hot-song-row group flex min-h-14 items-center gap-2 rounded-lg px-1.5 py-1"
                 key={`${track.source}:${track.sourceId}`}
                 onDoubleClick={() => handleAdd(track)}
               >

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { useReducedMotion } from 'motion/react'
 import { ArrowDown, MessageSquare, Send, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -16,9 +17,9 @@ interface ChatPanelProps {
 }
 
 export function ChatPanel({ onCollapse }: ChatPanelProps) {
+  const reduceMotion = useReducedMotion()
   const [input, setInput] = useState('')
   const [showNewMsgHint, setShowNewMsgHint] = useState(false)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isAtBottomRef = useRef(true)
   const messages = useChatStore((s) => s.messages)
@@ -34,22 +35,31 @@ export function ChatPanel({ onCollapse }: ChatPanelProps) {
     if (atBottom) setShowNewMsgHint(false)
   }, [])
 
+  const scrollMessagesToBottom = useCallback(
+    (behavior: ScrollBehavior) => {
+      const container = scrollContainerRef.current
+      if (!container) return
+      container.scrollTo({ top: container.scrollHeight, behavior: reduceMotion ? 'auto' : behavior })
+    },
+    [reduceMotion],
+  )
+
   // Smart auto-scroll: only scroll to bottom if user was already at the bottom
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
       if (isAtBottomRef.current) {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+        scrollMessagesToBottom('smooth')
       } else {
         setShowNewMsgHint(true)
       }
     })
     return () => cancelAnimationFrame(frame)
-  }, [messages])
+  }, [messages, scrollMessagesToBottom])
 
   const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    scrollMessagesToBottom('smooth')
     setShowNewMsgHint(false)
-  }, [])
+  }, [scrollMessagesToBottom])
 
   const handleSend = () => {
     if (!input.trim()) return
@@ -58,7 +68,7 @@ export function ChatPanel({ onCollapse }: ChatPanelProps) {
   }
 
   return (
-    <div className="flex min-h-0 w-full flex-1 flex-col border-l border-border/50 bg-background/60 backdrop-blur-sm">
+    <div className="flex min-h-0 w-full flex-1 flex-col bg-transparent">
       {/* Header */}
       <div className="relative flex shrink-0 items-center gap-2 border-b border-border/50 px-4 py-3">
         <MessageSquare className="h-4 w-4 text-muted-foreground" />
@@ -87,7 +97,7 @@ export function ChatPanel({ onCollapse }: ChatPanelProps) {
         <div
           ref={scrollContainerRef}
           onScroll={handleScroll}
-          className="absolute inset-0 overflow-y-auto px-3"
+          className="absolute inset-0 overflow-y-auto overscroll-contain px-3"
           aria-live="polite"
           aria-label="聊天消息"
         >
@@ -99,7 +109,6 @@ export function ChatPanel({ onCollapse }: ChatPanelProps) {
                 <ChatMessage key={msg.id} message={msg} isOwnMessage={msg.userId === currentUser?.id} />
               ))
             )}
-            <div ref={messagesEndRef} />
           </div>
         </div>
 
@@ -120,7 +129,7 @@ export function ChatPanel({ onCollapse }: ChatPanelProps) {
       {/* Input */}
       <div className="flex shrink-0 gap-2 border-t border-border/50 px-3 py-3">
         <Input
-          placeholder="输入消息..."
+          placeholder="输入消息…"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}

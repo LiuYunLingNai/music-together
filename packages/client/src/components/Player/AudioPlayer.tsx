@@ -35,6 +35,7 @@ interface AudioPlayerProps {
   onPlay: () => void
   onPause: () => void
   onSeek: (time: number) => void
+  onLyricSeek: (time: number) => void
   onNext: () => void
   onPrev: () => void
   onOpenChat: () => void
@@ -51,6 +52,7 @@ export function AudioPlayer({
   onPlay,
   onPause,
   onSeek,
+  onLyricSeek,
   onNext,
   onPrev,
   onOpenChat,
@@ -140,10 +142,17 @@ export function AudioPlayer({
         </div>
       )}
 
-      <div className="absolute right-4 top-4 z-20">
+      <div className="mt-player-view-toggle absolute top-4 z-20">
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-primary/80 hover:bg-primary/10 hover:text-primary" onClick={onToggleView} aria-label={view === 'player' ? '打开房间歌单' : '返回播放器'}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 text-primary/80 hover:bg-primary/10 hover:text-primary"
+              onClick={onToggleView}
+              aria-label={view === 'player' ? '打开房间歌单' : '返回播放器'}
+            >
               {view === 'player' ? <ListMusic className="h-5 w-5" /> : <PanelsTopLeft className="h-5 w-5" />}
             </Button>
           </TooltipTrigger>
@@ -152,102 +161,102 @@ export function AudioPlayer({
       </div>
 
       {/* Content with padding */}
-      <div className="relative z-10 h-full p-5 md:p-[5%] lg:p-[5%]">
+      <div className="mt-player-content relative z-10 h-full">
         {view === 'playlist' ? (
           <RoomPlaylistView queue={queue} currentTrackId={currentTrack?.id} />
         ) : (
-        <div
-          ref={playerRef}
-          className={cn('flex h-full', isPortrait ? 'flex-col' : 'flex-row gap-[clamp(24px,3vw,48px)]')}
-        >
-          {/* ----------------------------------------------------------------- */}
-          {/* Mobile layout: dual-mode (cover view / lyric view)                */}
-          {/* ----------------------------------------------------------------- */}
-          {isPortrait ? (
-            <LayoutGroup>
-              <div className="relative mx-auto flex h-full w-full max-w-md flex-col items-center gap-[clamp(12px,3vh,32px)]">
-                {/* 1. Cover — fills remaining space in cover mode, centered within */}
-                <div
-                  ref={coverAreaRef}
-                  className={cn('w-full', !lyricExpanded && 'flex-1 min-h-0 flex items-center justify-center')}
-                  style={!lyricExpanded ? ({ containerType: 'size' } as React.CSSProperties) : undefined}
-                >
-                  <NowPlaying compact={lyricExpanded} onCoverClick={toggleLyricView} />
-                </div>
+          <div
+            ref={playerRef}
+            className={cn('flex h-full', isPortrait ? 'flex-col' : 'flex-row gap-[clamp(24px,3vw,48px)]')}
+          >
+            {/* ----------------------------------------------------------------- */}
+            {/* Mobile layout: dual-mode (cover view / lyric view)                */}
+            {/* ----------------------------------------------------------------- */}
+            {isPortrait ? (
+              <LayoutGroup>
+                <div className="relative mx-auto flex h-full w-full max-w-md flex-col items-center gap-[clamp(12px,3vh,32px)]">
+                  {/* 1. Cover — fills remaining space in cover mode, centered within */}
+                  <div
+                    ref={coverAreaRef}
+                    className={cn('w-full', !lyricExpanded && 'flex-1 min-h-0 flex items-center justify-center')}
+                    style={!lyricExpanded ? ({ containerType: 'size' } as React.CSSProperties) : undefined}
+                  >
+                    <NowPlaying compact={lyricExpanded} onCoverClick={toggleLyricView} />
+                  </div>
 
-                {/* Lyrics — popLayout so exiting lyrics don't occupy flex space */}
-                <AnimatePresence mode="popLayout">
-                  {lyricExpanded && (
-                    <motion.div
-                      key="lyrics"
-                      initial={{ opacity: 0, y: 32 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: 24 }}
-                      transition={{ duration: 0.65, ease: SMOOTH_EASE, delay: 0.08 }}
-                      className="min-h-0 w-full flex-1 overflow-hidden"
-                      style={LYRIC_MASK_STYLE}
-                    >
-                      <LyricDisplay />
-                    </motion.div>
+                  {/* Lyrics — popLayout so exiting lyrics don't occupy flex space */}
+                  <AnimatePresence mode="popLayout">
+                    {lyricExpanded && (
+                      <motion.div
+                        key="lyrics"
+                        initial={{ opacity: 0, y: 32 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 24 }}
+                        transition={{ duration: 0.65, ease: SMOOTH_EASE, delay: 0.08 }}
+                        className="min-h-0 w-full flex-1 overflow-hidden"
+                        style={LYRIC_MASK_STYLE}
+                      >
+                        <LyricDisplay onSeek={onLyricSeek} />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* 2. Song info + action buttons (independent zoom module) */}
+                  {!lyricExpanded && (
+                    <div className="w-full shrink-0 mx-auto" style={coverMaxStyle}>
+                      <SongInfoBar {...songInfoProps} />
+                    </div>
                   )}
-                </AnimatePresence>
 
-                {/* 2. Song info + action buttons (independent zoom module) */}
-                {!lyricExpanded && (
+                  {/* 3. Controls (independent zoom module) */}
+                  <div className="relative z-10 w-full shrink-0 mx-auto" style={coverMaxStyleUnlessExpanded}>
+                    <PlayerControls {...playerControlsProps} />
+                  </div>
+
+                  {/* Vote banner: absolute overlay at the bottom */}
+                  {activeVote && (
+                    <div className="absolute bottom-0 left-1/2 z-20 w-full -translate-x-1/2 px-2 pb-2">
+                      <VoteBanner vote={activeVote} onCastVote={onCastVote} />
+                    </div>
+                  )}
+                </div>
+              </LayoutGroup>
+            ) : (
+              // ---------------------------------------------------------------
+              // Desktop layout: left panel (cover + info + controls) + right lyrics
+              // ---------------------------------------------------------------
+              <>
+                <div className="relative flex w-[40%] flex-col items-center gap-[clamp(12px,3vh,32px)] transition-all duration-300">
+                  {/* 1. Cover — flex-1 fills remaining space, centered */}
+                  <div
+                    ref={coverAreaRef}
+                    className="min-h-0 w-full flex-1 flex items-center justify-center"
+                    style={{ containerType: 'size' }}
+                  >
+                    <NowPlaying />
+                  </div>
+                  {/* 2. Song info + action buttons */}
                   <div className="w-full shrink-0 mx-auto" style={coverMaxStyle}>
                     <SongInfoBar {...songInfoProps} />
                   </div>
-                )}
-
-                {/* 3. Controls (independent zoom module) */}
-                <div className="relative z-10 w-full shrink-0 mx-auto" style={coverMaxStyleUnlessExpanded}>
-                  <PlayerControls {...playerControlsProps} />
-                </div>
-
-                {/* Vote banner: absolute overlay at the bottom */}
-                {activeVote && (
-                  <div className="absolute bottom-0 left-1/2 z-20 w-full -translate-x-1/2 px-2 pb-2">
-                    <VoteBanner vote={activeVote} onCastVote={onCastVote} />
+                  {/* 3. Controls */}
+                  <div className="w-full shrink-0 mx-auto" style={coverMaxStyle}>
+                    <PlayerControls {...playerControlsProps} />
                   </div>
-                )}
-              </div>
-            </LayoutGroup>
-          ) : (
-            // ---------------------------------------------------------------
-            // Desktop layout: left panel (cover + info + controls) + right lyrics
-            // ---------------------------------------------------------------
-            <>
-              <div className="relative flex w-[40%] flex-col items-center gap-[clamp(12px,3vh,32px)] transition-all duration-300">
-                {/* 1. Cover — flex-1 fills remaining space, centered */}
-                <div
-                  ref={coverAreaRef}
-                  className="min-h-0 w-full flex-1 flex items-center justify-center"
-                  style={{ containerType: 'size' }}
-                >
-                  <NowPlaying />
-                </div>
-                {/* 2. Song info + action buttons */}
-                <div className="w-full shrink-0 mx-auto" style={coverMaxStyle}>
-                  <SongInfoBar {...songInfoProps} />
-                </div>
-                {/* 3. Controls */}
-                <div className="w-full shrink-0 mx-auto" style={coverMaxStyle}>
-                  <PlayerControls {...playerControlsProps} />
-                </div>
-                {activeVote && (
-                  <div className="absolute inset-x-0 bottom-0 z-20 flex justify-center px-2 pb-2">
-                    <div className="w-full">
-                      <VoteBanner vote={activeVote} onCastVote={onCastVote} />
+                  {activeVote && (
+                    <div className="absolute inset-x-0 bottom-0 z-20 flex justify-center px-2 pb-2">
+                      <div className="w-full">
+                        <VoteBanner vote={activeVote} onCastVote={onCastVote} />
+                      </div>
                     </div>
-                  </div>
-                )}
-              </div>
-              <div className="min-h-0 w-[60%] overflow-hidden" style={LYRIC_MASK_STYLE}>
-                <LyricDisplay />
-              </div>
-            </>
-          )}
-        </div>
+                  )}
+                </div>
+                <div className="min-h-0 w-[60%] overflow-hidden" style={LYRIC_MASK_STYLE}>
+                  <LyricDisplay onSeek={onLyricSeek} />
+                </div>
+              </>
+            )}
+          </div>
         )}
       </div>
     </div>

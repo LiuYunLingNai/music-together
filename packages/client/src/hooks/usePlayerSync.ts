@@ -118,7 +118,7 @@ export function usePlayerSync(
             : data.playState.currentTime
           setHowlPosition(howlRef.current, targetTime, soundIdRef.current)
           setCurrentTime(targetTime)
-          lyricPlayerBridge.seek(targetTime)
+          lyricPlayerBridge.seek(targetTime, 'smooth')
         }
         setPlaybackTempo(1)
         smoothedDriftRef.current = 0

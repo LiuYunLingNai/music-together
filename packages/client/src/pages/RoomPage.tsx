@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, type CSSProperties, type ReactNode } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { EVENTS, ERROR_CODE } from '@music-together/shared'
-import { motion } from 'motion/react'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { toast } from 'sonner'
 import { Loader2, PanelLeftOpen, PanelRightOpen } from 'lucide-react'
 import { InteractionGate } from '@/components/InteractionGate'
@@ -25,7 +25,6 @@ import { useRoom } from '@/hooks/useRoom'
 import { useVote } from '@/hooks/useVote'
 import { usePlayer } from '@/hooks/usePlayer'
 import { useQueue } from '@/hooks/useQueue'
-import { useIsMobile } from '@/hooks/useIsMobile'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useRoomStore } from '@/stores/roomStore'
 import { useChatStore } from '@/stores/chatStore'
@@ -46,23 +45,121 @@ interface RoomCheckInfo {
   userCount: number
 }
 
+interface RoomSidePanelProps {
+  side: 'left' | 'right'
+  label: string
+  width: number
+  children: ReactNode
+}
+
+const HOT_SONGS_PANEL_WIDTH = 288
+const CHAT_PANEL_WIDTH = 320
+const PANEL_CONTENT_GAP = 16
+const PANEL_EDGE_INSET = 'clamp(12px, 2vw, 24px)'
+
+function getPlayerSafeInset(panelWidth: number): string {
+  return `calc(${PANEL_EDGE_INSET} + ${panelWidth + PANEL_CONTENT_GAP}px)`
+}
+
+function RoomSidePanel({ side, label, width, children }: RoomSidePanelProps) {
+  const reduceMotion = useReducedMotion()
+  const panelRef = useRef<HTMLElement>(null)
+  const boundsRef = useRef<DOMRect | null>(null)
+  const pointerRef = useRef({ x: 0, y: 0 })
+  const frameRef = useRef<number | null>(null)
+  const offset = reduceMotion ? 0 : side === 'left' ? -24 : 24
+
+  const flushPointerGlow = useCallback(() => {
+    frameRef.current = null
+    const panel = panelRef.current
+    if (!panel) return
+    panel.style.setProperty('--mt-panel-glow-x', `${pointerRef.current.x}px`)
+    panel.style.setProperty('--mt-panel-glow-y', `${pointerRef.current.y}px`)
+  }, [])
+
+  const queuePointerGlow = useCallback(
+    (clientX: number, clientY: number, bounds: DOMRect) => {
+      pointerRef.current = {
+        x: Math.min(bounds.width / 2, Math.max(-bounds.width / 2, clientX - bounds.left - bounds.width / 2)),
+        y: Math.min(bounds.height / 2, Math.max(-bounds.height / 2, clientY - bounds.top - bounds.height / 2)),
+      }
+      if (frameRef.current === null) frameRef.current = requestAnimationFrame(flushPointerGlow)
+    },
+    [flushPointerGlow],
+  )
+
+  const handlePointerEnter = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      if (reduceMotion || event.pointerType !== 'mouse') return
+      const bounds = event.currentTarget.getBoundingClientRect()
+      boundsRef.current = bounds
+      queuePointerGlow(event.clientX, event.clientY, bounds)
+    },
+    [queuePointerGlow, reduceMotion],
+  )
+
+  const handlePointerMove = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      if (reduceMotion || event.pointerType !== 'mouse') return
+      const bounds = boundsRef.current ?? event.currentTarget.getBoundingClientRect()
+      boundsRef.current = bounds
+      queuePointerGlow(event.clientX, event.clientY, bounds)
+    },
+    [queuePointerGlow, reduceMotion],
+  )
+
+  const handlePointerLeave = useCallback(() => {
+    boundsRef.current = null
+  }, [])
+
+  useEffect(() => {
+    const panel = panelRef.current
+    const observer = panel ? new ResizeObserver(() => (boundsRef.current = null)) : null
+    if (panel && observer) observer.observe(panel)
+    return () => {
+      observer?.disconnect()
+      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current)
+    }
+  }, [])
+
+  return (
+    <motion.aside
+      ref={panelRef}
+      aria-label={label}
+      initial={{ opacity: 0, x: offset }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: offset }}
+      transition={reduceMotion ? { duration: 0 } : { duration: 0.2, ease: 'easeOut' }}
+      className={cn(
+        'mt-room-side-panel absolute bottom-[clamp(18px,3vh,32px)] top-[clamp(18px,3vh,32px)] z-30',
+        side === 'left' && 'left-[clamp(12px,2vw,24px)]',
+        side === 'right' && 'right-[clamp(12px,2vw,24px)]',
+      )}
+      style={{ width }}
+      onPointerEnter={handlePointerEnter}
+      onPointerMove={handlePointerMove}
+      onPointerLeave={handlePointerLeave}
+    >
+      {children}
+    </motion.aside>
+  )
+}
+
 export default function RoomPage() {
   const { roomId } = useParams<{ roomId: string }>()
   const navigate = useNavigate()
   const { socket, isConnected } = useSocketContext()
   const { leaveRoom, updateSettings, setUserRole } = useRoom()
-  const { play, pause, seek, next, prev } = usePlayer()
+  const { play, pause, seek, requestSeek, next, prev } = usePlayer()
   const { addTrack, insertAfterCurrent, removeTrack, reorderTracks, updateBilibiliMetadata, clearQueue } = useQueue()
 
   const room = useRoomStore((s) => s.room)
   const chatOpen = useChatStore((s) => s.isChatOpen)
   const setChatOpen = useChatStore((s) => s.setIsChatOpen)
   const chatUnreadCount = useChatStore((s) => s.unreadCount)
-  const toggleChat = useCallback(() => {
-    setChatOpen(!useChatStore.getState().isChatOpen)
-  }, [setChatOpen])
-  const isMobile = useIsMobile()
-  const showInlineHotSongs = useMediaQuery('(min-width: 1024px)')
+  const allowBothSidePanels = useMediaQuery('(min-width: 1600px)')
+  const showDesktopHotSongs = useMediaQuery('(min-width: 1024px)')
+  const showDesktopChat = useMediaQuery('(min-width: 768px)')
 
   // --- Pre-check state ---
   const [checking, setChecking] = useState(true)
@@ -82,12 +179,51 @@ export default function RoomPage() {
   const [hotSongsMobileOpen, setHotSongsMobileOpen] = useState(false)
   const [playerView, setPlayerView] = useState<'player' | 'playlist'>('player')
   const { activeVote, startVote, castVote } = useVote()
+  const hotSongsPanelVisible = showDesktopHotSongs && hotSongsOpen
+  const chatPanelVisible = showDesktopChat && chatOpen
+  const playerStageStyle = {
+    '--mt-player-safe-left': hotSongsPanelVisible ? getPlayerSafeInset(HOT_SONGS_PANEL_WIDTH) : '0px',
+    '--mt-player-safe-right': chatPanelVisible ? getPlayerSafeInset(CHAT_PANEL_WIDTH) : '0px',
+  } as CSSProperties
+
+  const openHotSongs = useCallback(() => {
+    if (!allowBothSidePanels) setChatOpen(false)
+    if (showDesktopHotSongs) {
+      setHotSongsOpen(true)
+      setHotSongsMobileOpen(false)
+      return
+    }
+    setHotSongsMobileOpen(true)
+  }, [allowBothSidePanels, setChatOpen, showDesktopHotSongs])
+
+  const openChat = useCallback(() => {
+    if (!allowBothSidePanels) {
+      setHotSongsOpen(false)
+      setHotSongsMobileOpen(false)
+    }
+    setChatOpen(true)
+  }, [allowBothSidePanels, setChatOpen])
+
+  const toggleChat = useCallback(() => {
+    const nextOpen = !useChatStore.getState().isChatOpen
+    if (nextOpen) {
+      openChat()
+      return
+    }
+    setChatOpen(false)
+  }, [openChat, setChatOpen])
 
   useEffect(() => {
-    if (!showInlineHotSongs) return
+    if (!showDesktopHotSongs) return
     const frame = requestAnimationFrame(() => setHotSongsMobileOpen(false))
     return () => cancelAnimationFrame(frame)
-  }, [showInlineHotSongs])
+  }, [showDesktopHotSongs])
+
+  useEffect(() => {
+    if (allowBothSidePanels || !showDesktopHotSongs || !showDesktopChat || !hotSongsOpen || !chatOpen) return
+    const frame = requestAnimationFrame(() => setChatOpen(false))
+    return () => cancelAnimationFrame(frame)
+  }, [allowBothSidePanels, chatOpen, hotSongsOpen, setChatOpen, showDesktopChat, showDesktopHotSongs])
 
   // Fallback password dialog state (edge case: password changed after pre-check)
   const [passwordNeeded, setPasswordNeeded] = useState(false)
@@ -331,40 +467,98 @@ export default function RoomPage() {
         <div className="flex h-dvh flex-col bg-transparent">
           <RoomHeader
             onOpenSearch={() => setSearchOpen(true)}
-            onOpenChat={() => setChatOpen(true)}
+            onOpenChat={openChat}
             onOpenSettings={() => setSettingsOpen(true)}
             onOpenMembers={handleOpenMembers}
-            onOpenHotSongs={() => setHotSongsMobileOpen(true)}
+            onOpenHotSongs={openHotSongs}
             onLeaveRoom={handleLeaveRoom}
             chatUnreadCount={chatUnreadCount}
           />
 
-          <div className="flex min-h-0 flex-1 overflow-hidden p-2 md:p-3 lg:p-4">
-            <div
-              className={cn(
-                'hidden h-full shrink-0 overflow-hidden transition-[width] duration-200 ease-out lg:block',
-                hotSongsOpen ? 'w-[288px] pr-3' : 'w-0',
-              )}
-            >
-              <HotSongsPanel roomId={room?.id ?? ''} onAddTrack={addTrack} onCollapse={() => setHotSongsOpen(false)} enabled={showInlineHotSongs} />
-            </div>
+          <div className="relative flex min-h-0 flex-1 overflow-hidden p-2 md:p-3 lg:p-4">
             <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-              <div className="mt-player-stage min-h-0 flex-1">
-                <AudioPlayer
-                  onPlay={play}
-                  onPause={pause}
-                  onSeek={seek}
-                  onNext={next}
-                  onPrev={prev}
-                  onOpenChat={toggleChat}
-                  onOpenQueue={() => setQueueOpen(true)}
-                  chatUnreadCount={chatUnreadCount}
-                  view={playerView}
-                  onToggleView={() => setPlayerView((view) => (view === 'player' ? 'playlist' : 'player'))}
-                  activeVote={activeVote}
-                  onCastVote={castVote}
-                  onStartVote={startVote}
-                />
+              <div className="relative min-h-0 flex-1" style={playerStageStyle}>
+                <div className="mt-player-stage h-full min-h-0">
+                  <AudioPlayer
+                    onPlay={play}
+                    onPause={pause}
+                    onSeek={seek}
+                    onLyricSeek={requestSeek}
+                    onNext={next}
+                    onPrev={prev}
+                    onOpenChat={toggleChat}
+                    onOpenQueue={() => setQueueOpen(true)}
+                    chatUnreadCount={chatUnreadCount}
+                    view={playerView}
+                    onToggleView={() => setPlayerView((view) => (view === 'player' ? 'playlist' : 'player'))}
+                    activeVote={activeVote}
+                    onCastVote={castVote}
+                    onStartVote={startVote}
+                  />
+                </div>
+
+                <AnimatePresence initial={false}>
+                  {hotSongsPanelVisible ? (
+                    <RoomSidePanel key="hot-songs" side="left" label="热歌榜" width={HOT_SONGS_PANEL_WIDTH}>
+                      <HotSongsPanel
+                        roomId={room?.id ?? ''}
+                        onAddTrack={addTrack}
+                        onCollapse={() => setHotSongsOpen(false)}
+                      />
+                    </RoomSidePanel>
+                  ) : null}
+                </AnimatePresence>
+
+                <AnimatePresence initial={false}>
+                  {chatPanelVisible ? (
+                    <RoomSidePanel key="chat" side="right" label="聊天" width={CHAT_PANEL_WIDTH}>
+                      <div className="mt-card flex h-full w-full flex-col overflow-hidden rounded-2xl">
+                        <ChatPanel onCollapse={() => setChatOpen(false)} />
+                      </div>
+                    </RoomSidePanel>
+                  ) : null}
+                </AnimatePresence>
+
+                {showDesktopHotSongs && !hotSongsOpen ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="icon"
+                        className="absolute left-3 top-1/2 z-20 -translate-y-1/2 border border-border/60 bg-background/80 shadow-lg backdrop-blur-sm"
+                        onClick={openHotSongs}
+                        aria-label="展开热歌榜"
+                      >
+                        <PanelLeftOpen className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">展开热歌榜</TooltipContent>
+                  </Tooltip>
+                ) : null}
+
+                {showDesktopChat && !chatOpen ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="icon"
+                        className="absolute right-3 top-1/2 z-20 -translate-y-1/2 border border-border/60 bg-background/80 shadow-lg backdrop-blur-sm"
+                        onClick={openChat}
+                        aria-label="展开聊天"
+                      >
+                        <PanelRightOpen className="h-4 w-4" />
+                        {chatUnreadCount > 0 ? (
+                          <span className="absolute -right-1 -top-1 flex min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] leading-4 text-primary-foreground">
+                            {chatUnreadCount > 99 ? '99+' : chatUnreadCount}
+                          </span>
+                        ) : null}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="left">展开聊天</TooltipContent>
+                  </Tooltip>
+                ) : null}
               </div>
 
               {playerView === 'playlist' && (
@@ -377,59 +571,6 @@ export default function RoomPage() {
                   onOpenPlaylist={() => setQueueOpen(true)}
                 />
               )}
-
-              {!hotSongsOpen && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="icon"
-                      className="absolute left-3 top-1/2 z-20 hidden -translate-y-1/2 border border-border/60 bg-background/80 shadow-lg backdrop-blur-sm lg:inline-flex"
-                      onClick={() => setHotSongsOpen(true)}
-                      aria-label="展开热歌榜"
-                    >
-                      <PanelLeftOpen className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">展开热歌榜</TooltipContent>
-                </Tooltip>
-              )}
-
-              {!chatOpen && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="icon"
-                      className="absolute right-3 top-1/2 z-20 hidden -translate-y-1/2 border border-border/60 bg-background/80 shadow-lg backdrop-blur-sm md:inline-flex"
-                      onClick={() => setChatOpen(true)}
-                      aria-label="展开聊天"
-                    >
-                      <PanelRightOpen className="h-4 w-4" />
-                      {chatUnreadCount > 0 && (
-                        <span className="absolute -right-1 -top-1 flex min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] leading-4 text-primary-foreground">
-                          {chatUnreadCount > 99 ? '99+' : chatUnreadCount}
-                        </span>
-                      )}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="left">展开聊天</TooltipContent>
-                </Tooltip>
-              )}
-            </div>
-
-            {/* Desktop: inline chat panel that squeezes the player */}
-            <div
-              className={cn(
-                'hidden h-full shrink-0 overflow-hidden transition-[width] duration-200 ease-out md:block',
-                chatOpen ? 'w-[320px] pl-3' : 'w-0',
-              )}
-            >
-              <div className="mt-card flex h-full w-[320px] flex-col overflow-hidden rounded-2xl">
-                {chatOpen && <ChatPanel onCollapse={() => setChatOpen(false)} />}
-              </div>
             </div>
           </div>
 
@@ -439,12 +580,17 @@ export default function RoomPage() {
               <DrawerHeader className="sr-only">
                 <DrawerTitle>热歌榜</DrawerTitle>
               </DrawerHeader>
-              <HotSongsPanel roomId={room?.id ?? ''} onAddTrack={addTrack} onCollapse={() => setHotSongsMobileOpen(false)} enabled={!showInlineHotSongs && hotSongsMobileOpen} />
+              <HotSongsPanel
+                roomId={room?.id ?? ''}
+                onAddTrack={addTrack}
+                onCollapse={() => setHotSongsMobileOpen(false)}
+                enabled={!showDesktopHotSongs && hotSongsMobileOpen}
+              />
             </DrawerContent>
           </Drawer>
 
           {/* Mobile: chat drawer from bottom */}
-          {isMobile && (
+          {!showDesktopChat ? (
             <Drawer open={chatOpen} onOpenChange={setChatOpen}>
               <DrawerContent className="flex h-[70vh] flex-col p-0">
                 <DrawerHeader className="sr-only">
@@ -453,7 +599,7 @@ export default function RoomPage() {
                 <ChatPanel onCollapse={() => setChatOpen(false)} />
               </DrawerContent>
             </Drawer>
-          )}
+          ) : null}
 
           <SearchDialog
             open={searchOpen}

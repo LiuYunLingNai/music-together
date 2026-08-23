@@ -2,10 +2,12 @@ import { usePlayerStore } from '@/stores/playerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { getLyricOffsetKey } from '@/lib/lyricOffset'
 import { lyricPlayerBridge } from '@/lib/lyricPlayerBridge'
-import type { LyricLine as AMLLLyricLine } from '@applemusic-like-lyrics/core'
+import { getLyricSeekTime } from '@/lib/lyricSeek'
+import { AbilityContext } from '@/providers/ability-context'
+import type { LyricLine as AMLLLyricLine, LyricLineMouseEvent } from '@applemusic-like-lyrics/core'
 import '@applemusic-like-lyrics/core/style.css'
 import { LyricPlayer, type LyricPlayerRef } from '@applemusic-like-lyrics/react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 
 const FULL_SIZE_STYLE = { width: '100%', height: '100%' } as const
 
@@ -13,6 +15,10 @@ interface LyricLine {
   time: number
   text: string
   translation?: string
+}
+
+interface LyricDisplayProps {
+  onSeek: (time: number) => void
 }
 
 function parseLRC(lrc: string): { time: number; text: string }[] {
@@ -97,15 +103,18 @@ function toAMLLLines(lines: LyricLine[]): AMLLLyricLine[] {
   })
 }
 
-export function LyricDisplay() {
+export function LyricDisplay({ onSeek }: LyricDisplayProps) {
   const lyric = usePlayerStore((s) => s.lyric)
   const tlyric = usePlayerStore((s) => s.tlyric)
   const lyricLoading = usePlayerStore((s) => s.lyricLoading)
   const ttmlLines = usePlayerStore((s) => s.ttmlLines)
   const currentTime = usePlayerStore((s) => s.currentTime)
+  const duration = usePlayerStore((s) => s.duration)
   const isPlaying = usePlayerStore((s) => s.isPlaying)
   const currentTrack = usePlayerStore((s) => s.currentTrack)
   const lyricOffsetPreview = usePlayerStore((s) => s.lyricOffsetPreview)
+  const ability = useContext(AbilityContext)
+  const canSeek = ability.can('seek', 'Player')
 
   const alignAnchor = useSettingsStore((s) => s.lyricAlignAnchor)
   const alignPosition = useSettingsStore((s) => s.lyricAlignPosition)
@@ -134,8 +143,9 @@ export function LyricDisplay() {
   const lrcAmllLines = useMemo(() => toAMLLLines(lrcLines), [lrcLines])
 
   // TTML 优先，LRC 回退
+  const seekableLines = ttmlLines ?? lrcAmllLines
   const amllLines = useMemo(() => {
-    const lines = ttmlLines ?? lrcAmllLines
+    const lines = seekableLines
     if (!showBottomLine || !currentTrack || lines.length === 0) return lines
 
     const lastEndTime = lines.at(-1)?.endTime ?? 0
@@ -161,8 +171,19 @@ export function LyricDisplay() {
         isDuet: false,
       },
     ] satisfies AMLLLyricLine[]
-  }, [currentTrack, lrcAmllLines, showBottomLine, ttmlLines])
+  }, [currentTrack, seekableLines, showBottomLine])
   const hasLyrics = ttmlLines ? ttmlLines.length > 0 : lrcLines.length > 0
+  const lyricSeekEnabled = canSeek && !isCalibrating && duration > 0
+
+  const handleLyricLineClick = useCallback(
+    (event: LyricLineMouseEvent) => {
+      if (!lyricSeekEnabled || event.lineIndex < 0 || event.lineIndex >= seekableLines.length) return
+
+      const seekTime = getLyricSeekTime(event.line.getLine(), lyricOffsetMs, duration)
+      if (seekTime !== null) onSeek(seekTime)
+    },
+    [duration, lyricOffsetMs, lyricSeekEnabled, onSeek, seekableLines.length],
+  )
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => setLyricPlayer(playerRef.current?.lyricPlayer))
@@ -189,7 +210,7 @@ export function LyricDisplay() {
 
   return (
     <div
-      className="amll-container h-full w-full"
+      className={`amll-container h-full w-full${lyricSeekEnabled ? ' amll-container--seekable' : ''}`}
       style={
         {
           fontWeight,
@@ -214,6 +235,7 @@ export function LyricDisplay() {
         maskObsceneWordsMode={maskObsceneWordsMode}
         maskObsceneWordChar={maskObsceneWordChar}
         wordFadeWidth={wordFadeWidth}
+        onLyricLineClick={lyricSeekEnabled ? handleLyricLineClick : undefined}
         style={FULL_SIZE_STYLE}
       />
     </div>

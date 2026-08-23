@@ -14,7 +14,9 @@ interface ChatStore {
   reset: () => void
 }
 
-const getInitialChatOpen = () => typeof window !== 'undefined' && !window.matchMedia('(orientation: portrait)').matches
+// Keep the player as the primary surface unless the viewport can comfortably
+// dock both auxiliary panels without narrowing the lyrics.
+const getInitialChatOpen = () => typeof window !== 'undefined' && window.matchMedia('(min-width: 1600px)').matches
 
 export const useChatStore = create<ChatStore>((set) => ({
   messages: [],
