@@ -144,34 +144,6 @@ export function LyricDisplay({ onSeek }: LyricDisplayProps) {
 
   // TTML 优先，LRC 回退
   const seekableLines = ttmlLines ?? lrcAmllLines
-  const amllLines = useMemo(() => {
-    const lines = seekableLines
-    if (!showBottomLine || !currentTrack || lines.length === 0) return lines
-
-    const lastEndTime = lines.at(-1)?.endTime ?? 0
-    const startTime = Math.max(lastEndTime + 1_200, Math.round(currentTrack.duration * 1000))
-    const endTime = startTime + 6_000
-    return [
-      ...lines,
-      {
-        words: [
-          {
-            word: currentTrack.title,
-            startTime,
-            endTime,
-            romanWord: '',
-            obscene: false,
-          },
-        ],
-        translatedLyric: currentTrack.artist.filter(Boolean).join(' / '),
-        romanLyric: '',
-        startTime,
-        endTime,
-        isBG: false,
-        isDuet: false,
-      },
-    ] satisfies AMLLLyricLine[]
-  }, [currentTrack, seekableLines, showBottomLine])
   const hasLyrics = ttmlLines ? ttmlLines.length > 0 : lrcLines.length > 0
   const lyricSeekEnabled = canSeek && !isCalibrating && duration > 0
 
@@ -222,7 +194,7 @@ export function LyricDisplay({ onSeek }: LyricDisplayProps) {
     >
       <LyricPlayer
         ref={playerRef}
-        lyricLines={amllLines}
+        lyricLines={seekableLines}
         currentTime={Math.max(0, Math.round(currentTime * 1000 - lyricOffsetMs))}
         playing={isPlaying}
         isSeeking={isCalibrating}
@@ -235,6 +207,14 @@ export function LyricDisplay({ onSeek }: LyricDisplayProps) {
         maskObsceneWordsMode={maskObsceneWordsMode}
         maskObsceneWordChar={maskObsceneWordChar}
         wordFadeWidth={wordFadeWidth}
+        bottomLine={
+          showBottomLine && currentTrack ? (
+            <div className="amll-song-footer">
+              <div className="amll-song-footer__title">{currentTrack.title}</div>
+              <div className="amll-song-footer__artist">{currentTrack.artist.filter(Boolean).join(' / ')}</div>
+            </div>
+          ) : null
+        }
         onLyricLineClick={lyricSeekEnabled ? handleLyricLineClick : undefined}
         style={FULL_SIZE_STYLE}
       />

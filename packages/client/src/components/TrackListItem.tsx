@@ -1,10 +1,10 @@
 import { Button } from '@/components/ui/button'
+import { QueueTrackCover } from '@/components/Room/QueueTrackCover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { formatDuration } from '@/lib/format'
-import { getProxiedCoverUrl } from '@/lib/cover'
 import { cn } from '@/lib/utils'
 import type { Track } from '@music-together/shared'
-import { ArrowUpToLine, Check, Music2, Plus } from 'lucide-react'
+import { ArrowUpToLine, Check, Plus } from 'lucide-react'
 import { memo } from 'react'
 
 export interface TrackListItemProps {
@@ -28,8 +28,6 @@ export const TrackListItem = memo(function TrackListItem({
   style,
   className,
 }: TrackListItemProps) {
-  const listCover = track.thumbnailCover ?? track.cover
-  const coverUrl = listCover ? getProxiedCoverUrl(listCover) : ''
   return (
     <div
       style={style}
@@ -39,19 +37,11 @@ export const TrackListItem = memo(function TrackListItem({
       <span className="w-6 shrink-0 text-center text-xs tabular-nums text-muted-foreground">{index + 1}</span>
 
       {/* Cover thumbnail */}
-      {coverUrl ? (
-        <img
-          src={coverUrl}
-          alt=""
-          referrerPolicy="no-referrer"
-          className="h-10 w-10 shrink-0 rounded object-cover"
-          loading="lazy"
-        />
-      ) : (
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-muted">
-          <Music2 className="h-4 w-4 text-muted-foreground" />
-        </div>
-      )}
+      <QueueTrackCover
+        track={track}
+        className="h-10 w-10 shrink-0 rounded"
+        iconClassName="h-4 w-4"
+      />
 
       {/* Track info */}
       <div className="min-w-0 flex-1">

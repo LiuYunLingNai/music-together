@@ -17,15 +17,31 @@ export function isBilibiliCoverUrl(coverUrl: string): boolean {
   }
 }
 
-/** Route non-Bilibili cover CDNs that reject browser-origin image requests through our cover proxy. */
-export function getProxiedCoverUrl(coverUrl: string): string {
+/** Upgrade known music artwork CDNs to HTTPS, including URLs stored by older rooms. */
+export function getDirectCoverUrl(coverUrl: string): string {
   try {
-    const { hostname } = new URL(coverUrl)
-    if (PROXY_COVER_HOSTS.has(hostname)) {
-      return `${SERVER_URL}/api/music/cover-proxy?url=${encodeURIComponent(coverUrl)}`
+    const url = new URL(coverUrl)
+    if (url.protocol === 'http:' && PROXY_COVER_HOSTS.has(url.hostname.toLowerCase())) {
+      url.protocol = 'https:'
+      url.port = ''
+      return url.toString()
     }
   } catch {
     // Keep invalid URLs unchanged so the image element's normal error handling applies.
   }
   return coverUrl
+}
+
+/** Route non-Bilibili cover CDNs that reject browser-origin image requests through our cover proxy. */
+export function getProxiedCoverUrl(coverUrl: string): string {
+  const directCoverUrl = getDirectCoverUrl(coverUrl)
+  try {
+    const { hostname } = new URL(directCoverUrl)
+    if (PROXY_COVER_HOSTS.has(hostname.toLowerCase())) {
+      return `${SERVER_URL}/api/music/cover-proxy?url=${encodeURIComponent(directCoverUrl)}`
+    }
+  } catch {
+    // Keep invalid URLs unchanged so the image element's normal error handling applies.
+  }
+  return directCoverUrl
 }

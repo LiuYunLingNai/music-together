@@ -3,7 +3,8 @@ import { deriveThumbnailCoverUrl, normalizeHighQualityCoverUrl } from './coverAr
 
 describe('cover artwork helpers', () => {
   it('separates NetEase detail artwork from thumbnails', () => {
-    const source = 'https://p1.music.126.net/example.jpg?param=300y300'
+    const source = 'http://p1.music.126.net/example.jpg?param=300y300'
+    expect(normalizeHighQualityCoverUrl('netease', source)).toMatch(/^https:/)
     expect(normalizeHighQualityCoverUrl('netease', source)).not.toContain('param=')
     expect(deriveThumbnailCoverUrl('netease', source)).toContain('param=120y120')
   })

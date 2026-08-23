@@ -824,8 +824,38 @@ body[data-room-cover-tint='true'] {
   opacity: 0.9;
 }
 
-.amll-container--seekable [class*='lyricLine'] {
+.amll-container--seekable [class*='lyricLine']:not([data-bottom-line='true']) {
   cursor: pointer;
+}
+
+.amll-song-footer {
+  box-sizing: border-box;
+  width: calc(100% - var(--lyric-line-padding-x));
+  margin-inline-start: var(--lyric-line-padding-x);
+  padding-block: 0.5em 0.9em;
+  cursor: default;
+  text-align: start;
+}
+
+.amll-song-footer__title {
+  overflow: hidden;
+  font-size: max(0.56em, 13px);
+  font-weight: 500;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.58;
+}
+
+.amll-song-footer__artist {
+  overflow: hidden;
+  margin-top: 0.2em;
+  font-size: max(0.42em, 11px);
+  font-weight: 400;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.36;
 }
 
 /* 翻译歌词子行（lyricSubLine 中第一个） */

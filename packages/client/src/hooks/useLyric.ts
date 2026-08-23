@@ -1,4 +1,5 @@
 import { SERVER_URL } from '@/lib/config'
+import { normalizeLyricTimeline, repairLyricTimeline } from '@/lib/lyricTimeline'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { parseTTML, parseYrc } from '@applemusic-like-lyrics/lyric'
@@ -14,6 +15,20 @@ const TTML_FOLDER_MAP: Record<string, string> = {
 
 /** TTML 请求超时（ms） */
 const TTML_TIMEOUT_MS = 8_000
+
+interface LyricData {
+  lyric: string
+  tlyric: string
+  romalrc: string
+  yrc: string
+  wordByWord?: AMLLLyricLine[]
+}
+
+interface LyricSupplementData {
+  source: 'kugou' | 'tencent' | null
+  lyric: string
+  wordByWord?: AMLLLyricLine[]
+}
 
 /**
  * 将 @applemusic-like-lyrics/lyric 的 LyricLine 转为 @applemusic-like-lyrics/core 的 LyricLine
@@ -142,19 +157,14 @@ export function useLyric() {
       abortRef.current = controller
 
       let wordByWordSuccess = false
-
-      // ========================================
-      // 1. 优先：TTML 在线逐词歌词（如果开启）
-      // ========================================
       const { ttmlEnabled, ttmlDbUrl } = useSettingsStore.getState()
       const lyricSource = track.metadataSource ?? track.source
       const folder = TTML_FOLDER_MAP[lyricSource]
-      if (ttmlEnabled && folder) {
+      const ttmlPromise = (async (): Promise<AMLLLyricLine[] | null> => {
+        if (!ttmlEnabled || !folder) return null
         try {
-          // URL 模板：%s 替换为歌曲 ID，ncm-lyrics 适配平台
           const lyricTrackId = track.metadataSource ? track.lyricId : track.sourceId
           const ttmlUrl = ttmlDbUrl.replace('ncm-lyrics', folder).replace('%s', lyricTrackId ?? '')
-          // 绑定主 controller：切歌/卸载时取消 TTML，避免过时响应写回 store；同时 8s 超时
           const timeoutSignal = typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(TTML_TIMEOUT_MS) : null
           const SignalFactory = AbortSignal as typeof AbortSignal & {
             any?: (signals: AbortSignal[]) => AbortSignal
@@ -165,51 +175,73 @@ export function useLyric() {
               : controller.signal
 
           const ttmlRes = await fetch(ttmlUrl, { signal: ttmlSignal })
-
-          if (ttmlRes.ok) {
-            const ttmlText = await ttmlRes.text()
-            // 确保返回的是 XML/TTML 而非错误页面
-            if (ttmlText.includes('<tt') || ttmlText.includes('<?xml')) {
-              const parsed = parseTTML(ttmlText)
-              if (parsed.lines.length > 0) {
-                setTtmlLines(toCoreLyricLines(parsed.lines))
-                wordByWordSuccess = true
-              }
-            }
-          }
+          if (!ttmlRes.ok) return null
+          const ttmlText = await ttmlRes.text()
+          if (!ttmlText.includes('<tt') && !ttmlText.includes('<?xml')) return null
+          const parsed = parseTTML(ttmlText)
+          return parsed.lines.length > 0 ? toCoreLyricLines(parsed.lines) : null
         } catch {
-          // TTML 获取失败（超时/网络错误），静默回退
-          if (controller.signal.aborted) return
+          return null
         }
-      }
+      })()
 
-      // ========================================
-      // 2. 获取服务端歌词（包含 LRC + 可能的 YRC/KRC）
-      // ========================================
-      let lyricData: {
-        lyric: string
-        tlyric: string
-        romalrc: string
-        yrc: string
-        wordByWord?: AMLLLyricLine[]
-      } | null = null
-
-      if (track.lyricId) {
+      const lyricPromise = (async (): Promise<LyricData | null> => {
+        if (!track.lyricId) return null
         try {
           const res = await fetch(
             `${SERVER_URL}/api/music/lyric?source=${lyricSource}&lyricId=${encodeURIComponent(track.lyricId)}`,
             { signal: controller.signal, credentials: 'include' },
           )
-          if (res.ok) {
-            lyricData = await res.json()
+          return res.ok ? await res.json() : null
+        } catch {
+          return null
+        }
+      })()
+
+      // TTML 与平台歌词相互独立，并行获取可避免原有的串行等待。
+      const [rawTtmlLines, lyricData] = await Promise.all([ttmlPromise, lyricPromise])
+      if (controller.signal.aborted) return
+
+      if (rawTtmlLines?.length) {
+        const primarySources = lyricData?.lyric ? [{ lrc: lyricData.lyric }] : []
+        let repairedTimeline = repairLyricTimeline(rawTtmlLines, primarySources)
+
+        if (repairedTimeline.unresolvedCount > 0 && track.lyricId && track.artist.length > 0 && track.duration > 0) {
+          const params = new URLSearchParams({
+            source: lyricSource,
+            lyricId: track.lyricId,
+            title: track.title,
+            duration: String(track.duration),
+          })
+          for (const artist of track.artist) params.append('artists', artist)
+
+          try {
+            const response = await fetch(`${SERVER_URL}/api/music/lyric-supplement?${params}`, {
+              signal: controller.signal,
+              credentials: 'include',
+            })
+            if (response.ok) {
+              const supplement: LyricSupplementData = await response.json()
+              const sources = [
+                ...(supplement.wordByWord?.length ? [{ wordByWord: supplement.wordByWord }] : []),
+                ...(supplement.lyric ? [{ lrc: supplement.lyric }] : []),
+                ...primarySources,
+              ]
+              repairedTimeline = repairLyricTimeline(rawTtmlLines, sources)
+            }
+          } catch {
+            if (controller.signal.aborted) return
           }
-        } catch (err) {
-          if (err instanceof DOMException && err.name === 'AbortError') return
+        }
+
+        if (repairedTimeline.lines.length > 0) {
+          setTtmlLines(repairedTimeline.lines)
+          wordByWordSuccess = true
         }
       }
 
       // ========================================
-      // 3. 其次：平台原生逐词歌词（KRC 酷狗 / YRC 网易云）
+      // 其次：平台原生逐词歌词（KRC 酷狗 / YRC 网易云）
       //    YRC/KRC 格式本身不携带翻译，需要将服务端返回的
       //    tlyric（LRC 格式）按时间戳合并到 translatedLyric 字段
       // ========================================
@@ -217,8 +249,11 @@ export function useLyric() {
         // KRC：服务端已转为 AMLL 格式，合并翻译和罗马音后写入 store
         mergeLRCIntoLines(lyricData.wordByWord, lyricData.tlyric, 'translatedLyric')
         mergeLRCIntoLines(lyricData.wordByWord, lyricData.romalrc, 'romanLyric')
-        setTtmlLines(lyricData.wordByWord)
-        wordByWordSuccess = true
+        const normalizedLines = normalizeLyricTimeline(lyricData.wordByWord)
+        if (normalizedLines.length > 0) {
+          setTtmlLines(normalizedLines)
+          wordByWordSuccess = true
+        }
       } else if (!wordByWordSuccess && lyricData?.yrc) {
         try {
           const parsed = parseYrc(lyricData.yrc)
@@ -227,8 +262,11 @@ export function useLyric() {
             // YRC 不携带翻译和罗马音，从服务端数据合并
             mergeLRCIntoLines(amllLines, lyricData.tlyric, 'translatedLyric')
             mergeLRCIntoLines(amllLines, lyricData.romalrc, 'romanLyric')
-            setTtmlLines(amllLines)
-            wordByWordSuccess = true
+            const normalizedLines = normalizeLyricTimeline(amllLines)
+            if (normalizedLines.length > 0) {
+              setTtmlLines(normalizedLines)
+              wordByWordSuccess = true
+            }
           }
         } catch {
           // YRC 解析失败，走 LRC 兜底

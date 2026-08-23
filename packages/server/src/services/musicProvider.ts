@@ -61,7 +61,7 @@ function ensureNeteaseEnhancedConfig(force = false): Promise<boolean> {
 }
 
 /** AMLL LyricLine 格式（与 @applemusic-like-lyrics/core 一致，避免引入 client 依赖） */
-interface AmllLyricLine {
+export interface AmllLyricLine {
   words: Array<{ word: string; startTime: number; endTime: number; romanWord: string; obscene: boolean }>
   translatedLyric: string
   romanLyric: string
@@ -69,6 +69,14 @@ interface AmllLyricLine {
   endTime: number
   isBG: boolean
   isDuet: boolean
+}
+
+export interface LyricResult {
+  lyric: string
+  tlyric: string
+  romalrc: string
+  yrc: string
+  wordByWord?: AmllLyricLine[]
 }
 
 /** 将 KRC 解析结果转为 AMLL LyricLine 格式 */
@@ -500,10 +508,7 @@ class MusicProvider {
   // Layer 3: Resource Caches — scalar values for stream URLs, covers, lyrics.
   private streamUrlCache = new LRUCache<string, CachedStreamUrl>({ max: 500, ttl: 1 * HOUR })
   private coverCache = new LRUCache<string, string>({ max: 1000, ttl: 24 * HOUR })
-  private lyricCache = new LRUCache<
-    string,
-    { lyric: string; tlyric: string; romalrc: string; yrc: string; wordByWord?: AmllLyricLine[] }
-  >({
+  private lyricCache = new LRUCache<string, LyricResult>({
     max: 500,
     ttl: 24 * HOUR,
   })
@@ -2592,7 +2597,7 @@ class MusicProvider {
   async getLyric(
     source: MusicSource,
     lyricId: string,
-  ): Promise<{ lyric: string; tlyric: string; romalrc: string; yrc: string; wordByWord?: AmllLyricLine[] }> {
+  ): Promise<LyricResult> {
     const cacheKey = `${source}:${lyricId}`
     const cached = this.lyricCache.get(cacheKey)
     if (cached) {
@@ -2605,7 +2610,7 @@ class MusicProvider {
     try {
       if (source === 'bilibili') return empty
 
-      let result: { lyric: string; tlyric: string; romalrc: string; yrc: string; wordByWord?: AmllLyricLine[] } = {
+      let result: LyricResult = {
         ...empty,
       }
 

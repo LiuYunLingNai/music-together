@@ -221,6 +221,15 @@ export const lyricQuerySchema = z.object({
   lyricId: z.string().min(1).max(2000),
 })
 
+export const lyricSupplementQuerySchema = lyricQuerySchema.extend({
+  title: z.string().min(1).max(300),
+  artists: z.preprocess(
+    (value) => (Array.isArray(value) ? value : value === undefined ? [] : [value]),
+    z.array(z.string().min(1).max(200)).min(1).max(10),
+  ),
+  duration: z.coerce.number().finite().positive().max(86_400),
+})
+
 export const coverQuerySchema = z.object({
   source: musicSourceSchema,
   picId: z.string().min(1).max(2000),

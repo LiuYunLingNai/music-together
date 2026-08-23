@@ -34,11 +34,3 @@ export const musicMetadataRateLimit = createHttpRateLimit({
   message: '音乐接口请求过于频繁，请稍后再试',
   suffix: 'music-metadata',
 })
-
-/** Cover proxying downloads remote bytes, so it uses a separate tighter budget. */
-export const coverProxyRateLimit = createHttpRateLimit({
-  points: 60,
-  durationSeconds: 60,
-  message: '封面请求过于频繁，请稍后再试',
-  suffix: 'cover-proxy',
-})

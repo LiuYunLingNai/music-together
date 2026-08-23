@@ -314,8 +314,9 @@ B站没有与房间 128K、320K 完全对应的普通 DASH 音轨，因此分别
 | `/api/music/search`             | GET   | 搜索曲目（`source` + `keyword` + `page`）                                                               |
 | `/api/music/url`                | GET   | 解析流媒体 URL（`source` + `id`）                                                                       |
 | `/api/music/lyric`              | GET   | 获取歌词                                                                                                |
+| `/api/music/lyric-supplement`   | GET   | 仅在逐词歌词存在无效时间行时，按曲名、歌手和时长匹配跨平台 KRC/LRC 补全；结果按曲目缓存并合并并发请求 |
 | `/api/music/cover`              | GET   | 获取封面图                                                                                              |
-| `/api/music/cover-proxy`        | GET   | 代理受信音乐 CDN 封面；逐跳校验 HTTPS 重定向、图片类型和 10 MiB 上限                                    |
+| `/api/music/cover-proxy`        | GET   | 代理受信音乐 CDN 封面；兼容升级白名单主机的旧 HTTP 地址，逐跳校验 HTTPS 重定向、图片类型和 10 MiB 上限                |
 | `/api/music/playlist`           | GET   | 获取歌单曲目列表（`source` + `id` + `limit` + `offset`），分页返回 `{ tracks, total, offset, hasMore }` |
 | `/api/music/hot`                | GET   | 获取房间内可见的官方热歌榜；校验 HTTP 身份和房间成员身份，支持 `source=netease|tencent|kugou` 及 `limit`/`offset` 分页，服务端分别缓存网易云热歌榜、QQ 热歌榜和酷狗热歌榜，`refresh=true` 可强制刷新 |
 | `/api/rooms/:roomId/check`      | GET   | 房间预检（存在性 + 是否需要密码），用于分享链接直接访问时的前置校验                                     |

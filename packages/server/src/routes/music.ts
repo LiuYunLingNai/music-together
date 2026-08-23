@@ -2,6 +2,7 @@ import {
   searchQuerySchema,
   urlQuerySchema,
   lyricQuerySchema,
+  lyricSupplementQuerySchema,
   coverQuerySchema,
   downloadOptionsQuerySchema,
   downloadQuerySchema,
@@ -33,11 +34,13 @@ import {
 } from '../services/kugouAudioUrl.js'
 import { BILIBILI_BVID_PATTERN, BILIBILI_STREAM_ID_PATTERN } from '../services/bilibiliInput.js'
 import { MusicDownloadError, resolveDownloadOptions, streamDownload } from '../services/musicDownloadService.js'
-import { coverProxyRateLimit, musicMetadataRateLimit } from '../middleware/httpRateLimiter.js'
+import { musicMetadataRateLimit } from '../middleware/httpRateLimiter.js'
 import { createHotSongsService, hotSongsPlaylistId } from '../services/hotSongsService.js'
+import { LyricSupplementService } from '../services/lyricSupplementService.js'
 
 const router: RouterType = Router()
 const hotSongsService = createHotSongsService(musicProvider)
+const lyricSupplementService = new LyricSupplementService(musicProvider)
 
 /**
  * Wrap an async route handler with validation + error handling.
@@ -276,6 +279,16 @@ router.get(
 )
 
 router.get(
+  '/lyric-supplement',
+  musicMetadataRateLimit,
+  validated(lyricSupplementQuerySchema, 'Get lyric supplement', async (data, _req, res) => {
+    const result = await lyricSupplementService.getSupplement(data)
+    res.setHeader('Cache-Control', result.source ? 'private, max-age=3600' : 'private, no-store')
+    res.json(result)
+  }),
+)
+
+router.get(
   '/cover',
   musicMetadataRateLimit,
   validated(coverQuerySchema, 'Get cover', async (data, _req, res) => {
@@ -344,6 +357,23 @@ function isAllowedCoverUrl(value: string): boolean {
   }
 }
 
+function normalizeCoverProxyUrl(value: string): string | null {
+  try {
+    const url = new URL(value)
+    if (
+      url.protocol === 'http:' &&
+      (!url.port || url.port === '80') &&
+      ALLOWED_COVER_HOSTS.includes(url.hostname.toLowerCase())
+    ) {
+      url.protocol = 'https:'
+      url.port = ''
+    }
+    return isAllowedCoverUrl(url.toString()) ? url.toString() : null
+  } catch {
+    return null
+  }
+}
+
 async function fetchAllowedCover(initialUrl: string): Promise<globalThis.Response | null> {
   let currentUrl = initialUrl
   for (let redirectCount = 0; redirectCount <= MAX_COVER_REDIRECTS; redirectCount += 1) {
@@ -385,7 +415,7 @@ function isAllowedKugouAudioUrl(value: string): boolean {
   }
 }
 
-router.get('/cover-proxy', coverProxyRateLimit, async (req: Request, res: Response) => {
+router.get('/cover-proxy', async (req: Request, res: Response) => {
   const imageUrl = req.query.url as string | undefined
   if (!imageUrl) {
     res.status(400).json({ error: 'Missing url parameter' })
@@ -393,12 +423,16 @@ router.get('/cover-proxy', coverProxyRateLimit, async (req: Request, res: Respon
   }
 
   try {
-    if (!isAllowedCoverUrl(imageUrl)) {
+    // Older rooms and native clients may still retain provider-issued HTTP
+    // artwork URLs. Upgrade only exact allowlisted hosts before applying the
+    // normal HTTPS and redirect policy.
+    const normalizedImageUrl = normalizeCoverProxyUrl(imageUrl)
+    if (!normalizedImageUrl) {
       res.status(403).json({ error: 'Host not allowed' })
       return
     }
 
-    const response = await fetchAllowedCover(imageUrl)
+    const response = await fetchAllowedCover(normalizedImageUrl)
     if (!response) {
       res.status(403).json({ error: 'Redirect host not allowed' })
       return

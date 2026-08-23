@@ -1,4 +1,5 @@
 import { MarqueeText } from '@/components/ui/marquee-text'
+import { getDirectCoverUrl } from '@/lib/cover'
 import { cn } from '@/lib/utils'
 import { usePlayerStore } from '@/stores/playerStore'
 import { Disc3 } from 'lucide-react'
@@ -29,7 +30,7 @@ export function NowPlaying({ compact = false, onCoverClick }: NowPlayingProps) {
 
   const coverContent = showCover ? (
     <img
-      src={currentTrack.cover}
+      src={getDirectCoverUrl(currentTrack.cover)}
       alt={currentTrack.title}
       referrerPolicy="no-referrer"
       className="h-full w-full object-cover"

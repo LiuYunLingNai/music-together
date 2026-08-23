@@ -151,7 +151,7 @@ withOwnerOnly(io)                →  withRoom(io)  →  Handler
 - `withPermission`：在 `withRoom` 基础上用 CASL `defineAbilityFor(role)` 检查 `(action, subject)` 权限
 - `withOwnerOnly`：在 `withRoom` 基础上仅允许房主（`user.role === 'owner'`），用于设置和角色管理
 - `socketRateLimiter`：按持久化用户身份限制关键控制事件，并为 QR/Cookie 认证使用独立额度；匿名连接才在断开时立即删除条目，身份级条目由 TTL 清理，避免多标签页绕过或互相重置限流
-- `httpRateLimiter`：按身份 Cookie（无身份时按 IP）分别限制音乐元数据请求和封面代理字节请求
+- `httpRateLimiter`：按身份 Cookie（无身份时按 IP）限制音乐元数据请求；封面代理不设请求次数限额，但仍保留受信主机、HTTPS 重定向、图片类型和单图大小校验
 
 错误统一通过 `ROOM_ERROR` 事件回传给客户端，错误码使用 `ERROR_CODE` 枚举（`shared/types.ts`），包括：`NOT_IN_ROOM`、`ROOM_NOT_FOUND`、`NO_PERMISSION`、`INVALID_DATA`、`QUEUE_FULL`、`RATE_LIMITED`、`INTERNAL` 等。
 

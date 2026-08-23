@@ -8,20 +8,30 @@ function parseUrl(value: string): URL | null {
   }
 }
 
+function upgradeCoverProtocol(value: string): string {
+  const url = parseUrl(value)
+  if (!url || url.protocol !== 'http:') return value
+  url.protocol = 'https:'
+  url.port = ''
+  return url.toString()
+}
+
 /** Keep detail/player artwork at the highest provider-safe resolution. */
 export function normalizeHighQualityCoverUrl(source: MusicSource, value: string): string {
   if (!value) return value
 
+  const secureValue = source === 'bilibili' ? value : upgradeCoverProtocol(value)
+
   if (source === 'netease') {
-    const url = parseUrl(value)
-    if (!url) return value
+    const url = parseUrl(secureValue)
+    if (!url) return secureValue
     url.searchParams.delete('param')
     return url.toString()
   }
 
-  if (source === 'tencent') return value.replace(/T002R\d+x\d+M000/i, 'T002R800x800M000')
-  if (source === 'kugou' || source === 'kugou_concept') return value.replaceAll('{size}', '5000')
-  return value
+  if (source === 'tencent') return secureValue.replace(/T002R\d+x\d+M000/i, 'T002R800x800M000')
+  if (source === 'kugou' || source === 'kugou_concept') return secureValue.replaceAll('{size}', '5000')
+  return secureValue
 }
 
 /** Derive a separately cacheable small image without guessing unknown CDN layouts. */

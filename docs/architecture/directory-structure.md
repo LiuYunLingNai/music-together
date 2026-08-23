@@ -201,7 +201,7 @@ src/
 │   ├── withRoom.ts             #   房间成员身份校验
 │   ├── withControl.ts          #   操作权限校验（包装 withRoom）
 │   ├── socketRateLimiter.ts    #   普通事件与认证事件分桶限流；身份级条目按 TTL 清理
-│   └── httpRateLimiter.ts      #   音乐元数据与封面代理的身份/IP 分桶限流
+│   └── httpRateLimiter.ts      #   音乐元数据的身份/IP 分桶限流
 │
 ├── routes/                     # Express REST 路由
 │   ├── music.ts                #   GET /api/music/search|url|lyric|cover|playlist|ttml（统一 validated() 路由包装器消除重复 try/catch + Zod 模式）

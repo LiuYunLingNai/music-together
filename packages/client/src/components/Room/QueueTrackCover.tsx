@@ -1,4 +1,4 @@
-import { getProxiedCoverUrl } from '@/lib/cover'
+import { getDirectCoverUrl, getProxiedCoverUrl } from '@/lib/cover'
 import { cn } from '@/lib/utils'
 import type { Track } from '@music-together/shared'
 import { Music } from 'lucide-react'
@@ -18,11 +18,13 @@ export const QueueTrackCover = memo(function QueueTrackCover({
 }: QueueTrackCoverProps) {
   const candidates = useMemo(
     () => {
-      const direct = [track.thumbnailCover, track.cover].filter((value): value is string => Boolean(value))
+      const direct = [track.thumbnailCover, track.cover]
+        .filter((value): value is string => Boolean(value))
+        .map(getDirectCoverUrl)
       // Normal <img> rendering does not require CORS, so prefer the direct CDN
       // URL. The server proxy remains a fallback for providers that reject the
-      // browser request; this also avoids exhausting the proxy budget for a
-      // long queue loaded all at once.
+      // browser request; direct loading also avoids unnecessary server traffic
+      // when a long queue is loaded all at once.
       return [...new Set([...direct, ...direct.map(getProxiedCoverUrl)])]
     },
     [track.cover, track.thumbnailCover],
