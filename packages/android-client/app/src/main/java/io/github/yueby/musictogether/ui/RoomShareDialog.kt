@@ -1,5 +1,6 @@
 package io.github.yueby.musictogether.ui
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
@@ -25,6 +26,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import io.github.yueby.musictogether.MusicTogetherViewModel
+import io.github.yueby.musictogether.logging.AppLogger
 import io.github.yueby.musictogether.model.RoomShareState
 import io.github.yueby.musictogether.share.ShareCardMetrics
 import io.github.yueby.musictogether.share.shareImageIntent
@@ -42,9 +44,31 @@ internal fun RoomShareDialog(state: RoomShareState, viewModel: MusicTogetherView
         confirmEnabled = state.imageUri != null,
         onConfirm = {
             val uri = state.imageUri ?: return@AppDialog
-            val intent = shareImageIntent(Uri.parse(uri), state.link)
-            context.startActivity(Intent.createChooser(intent, "分享房间"))
-            viewModel.dismissRoomShare()
+            val shareIntent = shareImageIntent(Uri.parse(uri), state.link)
+            try {
+                val chooser = Intent.createChooser(shareIntent, "分享房间").apply {
+                    // Keep the FileProvider grant on the chooser as well as on
+                    // the send intent. This is required by some Android 12+
+                    // and vendor chooser implementations.
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(chooser)
+                viewModel.dismissRoomShare()
+            } catch (error: ActivityNotFoundException) {
+                AppLogger.warn("Share", "no activity can share room card")
+                viewModel.copyRoomAppLink()
+            } catch (error: SecurityException) {
+                AppLogger.error("Share", "room card URI permission rejected", error)
+                viewModel.copyRoomAppLink()
+            } catch (error: IllegalArgumentException) {
+                AppLogger.error("Share", "invalid room card URI", error)
+                viewModel.copyRoomAppLink()
+            } catch (error: RuntimeException) {
+                // Sharing is an optional system integration. A broken or
+                // incompatible target must never bring down the room screen.
+                AppLogger.error("Share", "start room card share failed", error)
+                viewModel.copyRoomAppLink()
+            }
         },
         dismissText = "关闭",
     ) {

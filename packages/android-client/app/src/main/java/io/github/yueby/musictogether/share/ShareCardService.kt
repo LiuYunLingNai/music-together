@@ -66,7 +66,10 @@ internal class ShareCardService(private val client: OkHttpClient) {
 
 internal fun shareImageIntent(uri: Uri, text: String): Intent = Intent(Intent.ACTION_SEND).apply {
     type = "image/png"
-    clipData = ClipData.newUri(null, "Music Together 房间分享图片", uri)
+    // Do not use ClipData.newUri(null, ...): some Android/ROM implementations
+    // dereference the resolver while building the description and crash when it
+    // is null. A raw URI still grants the receiving app the same content URI.
+    clipData = ClipData.newRawUri("Music Together 房间分享图片", uri)
     putExtra(Intent.EXTRA_SUBJECT, "Music Together 房间邀请")
     putExtra(Intent.EXTRA_STREAM, uri)
     putExtra(Intent.EXTRA_TEXT, text)

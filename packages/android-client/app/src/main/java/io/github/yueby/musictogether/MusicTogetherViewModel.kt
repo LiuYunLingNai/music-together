@@ -117,7 +117,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         const val MAX_QUEUE_SIZE = 1000
         const val MAX_QUEUE_BATCH_SIZE = 200
         val BILIBILI_METADATA_SOURCES = setOf("netease", "tencent", "kugou", "kugou_concept")
-        const val DEFAULT_SERVER_URL = "https://sharemusic.lyln114514.com"
+        const val DEFAULT_SERVER_URL = "https://sharemusic.kuro.ltd"
         const val MAX_SERVERS = 10
         const val DEFAULT_SYNC_PACKET_INTERVAL_SECONDS = 3
         const val MIN_SYNC_PACKET_INTERVAL_SECONDS = 1

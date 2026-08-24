@@ -20,8 +20,8 @@ android {
         applicationId = "io.github.yueby.musictogether"
         minSdk = 26
         targetSdk = 36
-        versionCode = 29
-        versionName = "3.0.5"
+        versionCode = 30
+        versionName = "3.0.6"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
