@@ -56,6 +56,25 @@ test('keeps offline members in a permanent room roster after reload', () => {
   roomRepo.delete(room.id)
 })
 
+test('restores the last identified device for an offline member after reload', () => {
+  const client = { kind: 'windows' as const, label: 'Windows 客户端' }
+  const { room } = roomService.createRoom('device-owner-socket', 'Owner', 'Device room', null, 'device-owner-id', client)
+  roomService.updateSettings(room.id, { permanent: true })
+
+  roomService.leaveRoom('device-owner-socket')
+  assert.equal(room.members[0]?.isOnline, false)
+  assert.deepEqual(room.members[0]?.lastClient, client)
+  assert.equal(room.members[0]?.client, undefined)
+  assert.equal(room.members[0]?.clients, undefined)
+
+  const restoredRoom = new InMemoryRoomRepository().get(room.id)
+  assert.deepEqual(restoredRoom?.members[0]?.lastClient, client)
+  assert.equal(restoredRoom?.members[0]?.isOnline, false)
+  assert.equal(restoredRoom?.members[0]?.clients, undefined)
+
+  roomRepo.delete(room.id)
+})
+
 test('restores the permanent room track and saved playback position after reload', () => {
   const { room } = roomService.createRoom('player-socket', 'Player', 'Playback room', null, 'player-id')
   roomService.updateSettings(room.id, { permanent: true })
@@ -150,7 +169,8 @@ test('keeps every active client visible for an account with multiple sockets', (
   const finalDisconnected = roomService.leaveRoom('multi-windows-socket')
   assert.ok(finalDisconnected)
   assert.equal(finalDisconnected.staleSocketOnly, false)
-  assert.deepEqual(room.members[0]?.clients, [windowsClient])
+  assert.equal(room.members[0]?.clients, undefined)
+  assert.deepEqual(room.members[0]?.lastClient, windowsClient)
 
   roomRepo.delete(room.id)
 })

@@ -51,6 +51,7 @@ db.exec(`
     user_id TEXT NOT NULL,
     joined_at INTEGER NOT NULL,
     last_seen_at INTEGER NOT NULL,
+    client_json TEXT,
     PRIMARY KEY (room_id, user_id),
     FOREIGN KEY (room_id) REFERENCES permanent_rooms(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -90,6 +91,7 @@ ensureColumn('platform_auth', 'vip_label', 'vip_label TEXT')
 ensureColumn('platform_auth', 'vip_level', 'vip_level INTEGER')
 ensureColumn('platform_auth', 'credential_refresh_attempted_at', 'credential_refresh_attempted_at INTEGER')
 ensureColumn('permanent_rooms', 'chat_history_json', "chat_history_json TEXT NOT NULL DEFAULT '[]'")
+ensureColumn('permanent_room_members', 'client_json', 'client_json TEXT')
 
 const findMigration = db.prepare<[string], { id: string }>('SELECT id FROM schema_migrations WHERE id = ?')
 const recordMigration = db.prepare('INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)')

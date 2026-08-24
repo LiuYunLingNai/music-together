@@ -25,6 +25,7 @@ interface PermanentRoomMemberRow {
   user_role: 'user' | 'admin'
   joined_at: number
   last_seen_at: number
+  client_json: string | null
 }
 
 interface PersistedRoomState {
@@ -113,6 +114,23 @@ function withoutStreamUrl(track: Track): Track {
   return persistable
 }
 
+function parseClientInfo(value: string | null): ClientInfo | undefined {
+  if (!value) return undefined
+  try {
+    const parsed = JSON.parse(value) as Partial<ClientInfo>
+    if (
+      (parsed.kind === 'web' || parsed.kind === 'android' || parsed.kind === 'windows' || parsed.kind === 'desktop') &&
+      typeof parsed.label === 'string' && parsed.label.length > 0 &&
+      (parsed.count === undefined || (Number.isSafeInteger(parsed.count) && parsed.count > 0))
+    ) {
+      return { kind: parsed.kind, label: parsed.label, ...(parsed.count === undefined ? {} : { count: parsed.count }) }
+    }
+  } catch {
+    // Ignore malformed historical metadata.
+  }
+  return undefined
+}
+
 function restorePlayState(state: PersistedRoomState): RoomData['playState'] {
   const persisted = state.playState
   const currentTime = Number(persisted?.currentTime)
@@ -152,23 +170,26 @@ export class InMemoryRoomRepository implements RoomRepository {
       users.avatar_url,
       users.role AS user_role,
       members.joined_at,
-      members.last_seen_at
+      members.last_seen_at,
+      members.client_json
     FROM permanent_room_members AS members
     JOIN users ON users.id = members.user_id
     WHERE members.room_id = ?
     ORDER BY members.joined_at ASC
   `)
   private insertLegacyPermanentMember = db.prepare(`
-    INSERT INTO permanent_room_members (room_id, user_id, joined_at, last_seen_at)
-    SELECT @roomId, users.id, @now, @now
+    INSERT INTO permanent_room_members (room_id, user_id, joined_at, last_seen_at, client_json)
+    SELECT @roomId, users.id, @now, @now, NULL
     FROM users
     WHERE users.id = @userId
     ON CONFLICT(room_id, user_id) DO NOTHING
   `)
   private upsertPermanentMember = db.prepare(`
-    INSERT INTO permanent_room_members (room_id, user_id, joined_at, last_seen_at)
-    VALUES (@roomId, @userId, @joinedAt, @lastSeenAt)
-    ON CONFLICT(room_id, user_id) DO UPDATE SET last_seen_at = excluded.last_seen_at
+    INSERT INTO permanent_room_members (room_id, user_id, joined_at, last_seen_at, client_json)
+    VALUES (@roomId, @userId, @joinedAt, @lastSeenAt, @clientJson)
+    ON CONFLICT(room_id, user_id) DO UPDATE SET
+      last_seen_at = excluded.last_seen_at,
+      client_json = COALESCE(excluded.client_json, permanent_room_members.client_json)
   `)
 
   constructor() {
@@ -300,21 +321,26 @@ export class InMemoryRoomRepository implements RoomRepository {
         userId: member.id,
         joinedAt: member.joinedAt,
         lastSeenAt: member.lastSeenAt ?? member.joinedAt,
+        clientJson: member.lastClient ? JSON.stringify(member.lastClient) : null,
       })
     }
   }
 
   private loadPermanentMembers(roomId: string, creatorId: string, adminUserIds: Set<string>): RoomMember[] {
-    return this.selectPermanentRoomMembers.all(roomId).map((member) => ({
-      id: member.user_id,
-      nickname: member.nickname,
-      avatarUrl: member.avatar_url,
-      role: member.user_id === creatorId ? 'owner' : adminUserIds.has(member.user_id) ? 'admin' : 'member',
-      isServerAdmin: config.serverAdminIds.has(member.user_id) || member.user_role === 'admin',
-      isOnline: false,
-      joinedAt: member.joined_at,
-      lastSeenAt: member.last_seen_at,
-    }))
+    return this.selectPermanentRoomMembers.all(roomId).map((member) => {
+      const lastClient = parseClientInfo(member.client_json)
+      return {
+        id: member.user_id,
+        nickname: member.nickname,
+        avatarUrl: member.avatar_url,
+        role: member.user_id === creatorId ? 'owner' : adminUserIds.has(member.user_id) ? 'admin' : 'member',
+        isServerAdmin: config.serverAdminIds.has(member.user_id) || member.user_role === 'admin',
+        isOnline: false,
+        joinedAt: member.joined_at,
+        lastSeenAt: member.last_seen_at,
+        ...(lastClient ? { lastClient } : {}),
+      }
+    })
   }
 
   delete(roomId: string): void {

@@ -47,9 +47,10 @@ function getClientIcon(kind: ClientInfo['kind']) {
   return <Globe2 className="h-3.5 w-3.5" />
 }
 
-function getVisibleClients(user: { client?: ClientInfo; clients?: ClientInfo[] }): ClientInfo[] {
+function getVisibleClients(user: { client?: ClientInfo; clients?: ClientInfo[]; lastClient?: ClientInfo; isOnline: boolean }): ClientInfo[] {
   if (user.clients?.length) return user.clients
-  return user.client ? [user.client] : []
+  if (user.client) return [user.client]
+  return !user.isOnline && user.lastClient ? [user.lastClient] : []
 }
 
 export function MembersSection({ onSetUserRole }: MembersSectionProps) {

@@ -268,6 +268,8 @@ export interface RoomMember extends User {
   isOnline: boolean
   joinedAt: number
   lastSeenAt: number | null
+  /** Last identified client, retained for offline members across server restarts. */
+  lastClient?: ClientInfo
 }
 
 export interface ChatMessage {

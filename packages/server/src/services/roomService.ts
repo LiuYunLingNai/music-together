@@ -71,6 +71,7 @@ function upsertRoomMember(room: RoomData, user: User, role: UserRole): RoomMembe
     existing.isServerAdmin = user.isServerAdmin
     existing.client = user.client
     existing.clients = user.clients
+    if (user.client) existing.lastClient = user.client
     existing.role = role
     existing.isOnline = true
     existing.lastSeenAt = now
@@ -83,6 +84,7 @@ function upsertRoomMember(room: RoomData, user: User, role: UserRole): RoomMembe
     isOnline: true,
     joinedAt: now,
     lastSeenAt: now,
+    ...(user.client ? { lastClient: user.client } : {}),
   }
   room.members.push(member)
   return member
@@ -367,6 +369,11 @@ export function leaveRoom(
   room.users = room.users.filter((u) => u.id !== userId)
   const member = room.members.find((item) => item.id === userId)
   if (member) {
+    // `clients` describes active sockets only. Keep `lastClient` separately so
+    // the offline roster can still show the last identified device.
+    syncActiveClients(room, user)
+    member.client = undefined
+    member.clients = undefined
     member.isOnline = false
     member.lastSeenAt = Date.now()
   }

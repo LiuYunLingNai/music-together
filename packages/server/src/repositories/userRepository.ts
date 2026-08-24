@@ -38,6 +38,7 @@ interface PermanentRoomMembershipRenameRow {
   room_id: string
   joined_at: number
   last_seen_at: number
+  client_json: string | null
 }
 
 export type RenameUserResult =
@@ -83,16 +84,17 @@ const selectPlatformAuthForRename = db.prepare<[string], PlatformAuthRenameRow>(
 `)
 const deletePlatformAuthForRename = db.prepare('DELETE FROM platform_auth WHERE user_id = ?')
 const selectPermanentRoomMembershipsForRename = db.prepare<[string], PermanentRoomMembershipRenameRow>(`
-  SELECT room_id, joined_at, last_seen_at
+  SELECT room_id, joined_at, last_seen_at, client_json
   FROM permanent_room_members
   WHERE user_id = ?
 `)
 const insertRenamedPermanentRoomMembership = db.prepare(`
-  INSERT INTO permanent_room_members (room_id, user_id, joined_at, last_seen_at)
-  VALUES (@roomId, @userId, @joinedAt, @lastSeenAt)
+  INSERT INTO permanent_room_members (room_id, user_id, joined_at, last_seen_at, client_json)
+  VALUES (@roomId, @userId, @joinedAt, @lastSeenAt, @clientJson)
   ON CONFLICT(room_id, user_id) DO UPDATE SET
     joined_at = MIN(permanent_room_members.joined_at, excluded.joined_at),
-    last_seen_at = MAX(permanent_room_members.last_seen_at, excluded.last_seen_at)
+    last_seen_at = MAX(permanent_room_members.last_seen_at, excluded.last_seen_at),
+    client_json = COALESCE(excluded.client_json, permanent_room_members.client_json)
 `)
 const insertRenamedPlatformAuth = db.prepare(`
   INSERT INTO platform_auth (
@@ -145,6 +147,7 @@ const renameUser = db.transaction((oldUserId: string, newUserId: string): Rename
       userId: newUserId,
       joinedAt: membership.joined_at,
       lastSeenAt: membership.last_seen_at,
+      clientJson: membership.client_json,
     })
   }
 
