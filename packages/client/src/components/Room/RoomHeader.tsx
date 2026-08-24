@@ -1,8 +1,22 @@
-import { Copy, Download, Ellipsis, Flame, LogOut, MessageSquare, Search, Settings, Users, Wifi, WifiOff } from 'lucide-react'
+import {
+  Copy,
+  Download,
+  Ellipsis,
+  Flame,
+  LogOut,
+  MessageSquare,
+  Search,
+  Settings,
+  Share2,
+  Users,
+  Wifi,
+  WifiOff,
+} from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { LyricCalibration } from '@/components/Player/LyricCalibration'
 import { MusicDownloadDialog } from '@/components/Player/MusicDownloadDialog'
+import { RoomShareDialog } from '@/components/Room/RoomShareDialog'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -43,6 +57,7 @@ export function RoomHeader({
   const hasCurrentTrack = usePlayerStore((s) => Boolean(s.currentTrack))
   const { isConnected } = useSocketContext()
   const [downloadOpen, setDownloadOpen] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
 
   // Poll RTT from clockSync module every 3s
   const [rtt, setRtt] = useState(0)
@@ -98,6 +113,20 @@ export function RoomHeader({
                 </Button>
               </TooltipTrigger>
               <TooltipContent>复制房间链接</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="hidden h-7 w-7 text-primary sm:flex"
+                  onClick={() => setShareOpen(true)}
+                  aria-label="分享房间"
+                >
+                  <Share2 className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>分享房间</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -263,6 +292,10 @@ export function RoomHeader({
               <Download className="mr-2 h-4 w-4" />
               下载音乐
             </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setShareOpen(true)}>
+              <Share2 className="mr-2 h-4 w-4" />
+              分享房间
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={copyRoomLink}>
               <Copy className="mr-2 h-4 w-4" />
               复制房间链接
@@ -275,6 +308,7 @@ export function RoomHeader({
         </DropdownMenu>
       </div>
       <MusicDownloadDialog open={downloadOpen} onOpenChange={setDownloadOpen} />
+      <RoomShareDialog open={shareOpen} onOpenChange={setShareOpen} />
     </header>
   )
 }

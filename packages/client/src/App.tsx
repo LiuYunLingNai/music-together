@@ -4,6 +4,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { Button } from '@/components/ui/button'
 import { SocketProvider } from '@/providers/SocketProvider'
 import HomePage from '@/pages/HomePage'
+import JoinPage from '@/pages/JoinPage'
 import { BrowserRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { Toaster } from 'sonner'
 import { AnimatePresence } from 'motion/react'
@@ -58,6 +59,14 @@ function AnimatedRoutes() {
             element={
               <RouteErrorBoundary>
                 <HomePage />
+              </RouteErrorBoundary>
+            }
+          />
+          <Route
+            path="/join"
+            element={
+              <RouteErrorBoundary>
+                <JoinPage />
               </RouteErrorBoundary>
             }
           />

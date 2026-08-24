@@ -7,7 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test test/audioQualityPolicy.test.ts test/audioProxyPolicy.test.ts test/bilibiliAudioQuality.test.ts test/bilibiliInput.test.ts test/kugouAudioQuality.test.ts test/kugouEncryptedAudio.test.ts test/bilibiliMembership.test.ts test/neteaseMembership.test.ts test/tencentMembership.test.ts test/tencentCredentialRefresh.test.ts test/kugouMembership.test.ts test/membershipRefresh.test.ts test/offlineRoomMembers.test.ts test/platformMembershipMigration.test.ts test/permanentRoomAudioQualityMigration.test.ts test/recommendationParsers.test.ts test/clientInfoService.test.ts test/hotSongsService.test.ts test/roamingService.test.ts test/queueNavigation.test.ts",
+    "test": "tsx --test test/audioQualityPolicy.test.ts test/audioProxyPolicy.test.ts test/bilibiliAudioQuality.test.ts test/bilibiliInput.test.ts test/kugouAudioQuality.test.ts test/kugouEncryptedAudio.test.ts test/bilibiliMembership.test.ts test/neteaseMembership.test.ts test/tencentMembership.test.ts test/tencentCredentialRefresh.test.ts test/kugouMembership.test.ts test/membershipRefresh.test.ts test/offlineRoomMembers.test.ts test/platformMembershipMigration.test.ts test/permanentRoomAudioQualityMigration.test.ts test/recommendationParsers.test.ts test/clientInfoService.test.ts test/hotSongsService.test.ts test/roamingService.test.ts test/queueNavigation.test.ts test/roomShareService.test.ts",
     "start": "node dist/index.js"
   },
   "dependencies": {

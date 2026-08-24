@@ -19,6 +19,10 @@ export const roomJoinSchema = z.object({
   rejoinToken: z.string().min(1).max(500).optional(),
 })
 
+export const roomShareQrQuerySchema = z.object({
+  link: z.string().min(1, '分享链接不能为空').max(500, '分享链接过长'),
+})
+
 export const audioQualitySchema = z.union([
   z.literal(128),
   z.literal(192),
