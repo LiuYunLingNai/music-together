@@ -7,6 +7,7 @@ import {
   buildRoomWebUrl,
   isAndroidUserAgent,
   resolveRoomOpenUrl,
+  resolveShareBaseUrl,
 } from './appLink'
 
 const SERVER = 'https://sharemusic.lyln114514.com'
@@ -17,6 +18,12 @@ const IOS_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
 
 describe('房间分享链接构造', () => {
+  it('公开分享地址优先使用当前页面域名', () => {
+    expect(resolveShareBaseUrl('http://10.159.68.229:3001', SERVER)).toBe('http://10.159.68.229:3001')
+    expect(resolveShareBaseUrl('https://room.example/', SERVER)).toBe('https://room.example')
+    expect(resolveShareBaseUrl(null, SERVER)).toBe(SERVER)
+  })
+
   it('生成与安卓端一致的网页房间地址并忽略末尾斜杠', () => {
     expect(buildRoomWebUrl('CDIBR9', `${SERVER}//`)).toBe(`${SERVER}/join?ROMMid=CDIBR9`)
   })

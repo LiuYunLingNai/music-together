@@ -8,6 +8,19 @@ function trimTrailingSlash(url: string): string {
   return url.replace(/\/+$/, '')
 }
 
+export function resolveShareBaseUrl(pageOrigin: string | undefined | null, fallbackServerUrl: string): string {
+  const currentOrigin = pageOrigin?.trim()
+  if (currentOrigin) {
+    try {
+      const parsed = new URL(currentOrigin)
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return trimTrailingSlash(parsed.origin)
+    } catch {
+      // Fall back to the configured server URL when the page origin is unavailable or invalid.
+    }
+  }
+  return trimTrailingSlash(fallbackServerUrl)
+}
+
 export function isAndroidUserAgent(userAgent: string | undefined | null): boolean {
   if (!userAgent) return false
   return /android/i.test(userAgent)

@@ -11,13 +11,41 @@ import {
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
 } from '@/components/ui/responsive-dialog'
-import { buildRoomAppLink, buildRoomWebUrl, isAndroidUserAgent } from '@/lib/appLink'
+import { buildRoomAppLink, buildRoomWebUrl, isAndroidUserAgent, resolveShareBaseUrl } from '@/lib/appLink'
 import { SERVER_URL } from '@/lib/config'
 import { useRoomStore } from '@/stores/roomStore'
 
 interface RoomShareDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+}
+
+async function copyText(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return
+    } catch {
+      // Clipboard API is unavailable on some HTTP/IP pages or may be denied.
+    }
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.top = '0'
+  textarea.style.left = '-9999px'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.focus()
+  textarea.select()
+
+  try {
+    if (!document.execCommand('copy')) throw new Error('copy command was rejected')
+  } finally {
+    textarea.remove()
+  }
 }
 
 export function RoomShareDialog({ open, onOpenChange }: RoomShareDialogProps) {
@@ -31,7 +59,8 @@ export function RoomShareDialog({ open, onOpenChange }: RoomShareDialogProps) {
 
   const userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent
   const isAndroid = isAndroidUserAgent(userAgent)
-  const shareUrl = useMemo(() => (roomId ? buildRoomWebUrl(roomId, SERVER_URL) : ''), [roomId])
+  const shareBaseUrl = resolveShareBaseUrl(typeof window === 'undefined' ? null : window.location.origin, SERVER_URL)
+  const shareUrl = useMemo(() => (roomId ? buildRoomWebUrl(roomId, shareBaseUrl) : ''), [roomId, shareBaseUrl])
   const canSystemShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function'
 
   useEffect(() => {
@@ -70,7 +99,7 @@ export function RoomShareDialog({ open, onOpenChange }: RoomShareDialogProps) {
   const copyLink = useCallback(async () => {
     if (!shareUrl) return
     try {
-      await navigator.clipboard.writeText(shareUrl)
+      await copyText(shareUrl)
       setCopied(true)
       toast.success('房间链接已复制')
       window.setTimeout(() => setCopied(false), 2000)
@@ -97,12 +126,12 @@ export function RoomShareDialog({ open, onOpenChange }: RoomShareDialogProps) {
     if (!roomId) return
     // The public HTTPS URL is what users share. The landing page explicitly
     // redirects to this scheme so Android can dispatch the registered Intent.
-    window.location.href = buildRoomAppLink(roomId, SERVER_URL)
-  }, [roomId])
+    window.location.href = buildRoomAppLink(roomId, shareBaseUrl)
+  }, [roomId, shareBaseUrl])
 
   return (
     <ResponsiveDialog open={open} onOpenChange={onOpenChange}>
-      <ResponsiveDialogContent className="sm:max-w-md">
+      <ResponsiveDialogContent className="min-w-0 sm:max-w-md">
         <ResponsiveDialogHeader>
           <ResponsiveDialogTitle>分享房间</ResponsiveDialogTitle>
           <ResponsiveDialogDescription className="line-clamp-2">
@@ -110,19 +139,29 @@ export function RoomShareDialog({ open, onOpenChange }: RoomShareDialogProps) {
           </ResponsiveDialogDescription>
         </ResponsiveDialogHeader>
 
-        <ResponsiveDialogBody className="space-y-4">
-          <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
-            <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
+        <ResponsiveDialogBody className="min-w-0 space-y-4">
+          <div className="grid w-full min-w-0 max-w-full grid-cols-[minmax(0,1fr)_2rem] items-center gap-2 overflow-hidden rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
+            <span className="block min-w-0 truncate font-mono text-xs text-muted-foreground" title={shareUrl}>
               {shareUrl || '—'}
             </span>
-            <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={copyLink} aria-label="复制房间链接">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0"
+              onClick={copyLink}
+              aria-label="复制房间链接"
+            >
               {copied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
             </Button>
           </div>
 
-          <div className="flex flex-col items-center gap-2">
+          <div className="flex w-full flex-col items-center gap-2 text-center">
             {qrLoading ? (
-              <div className="flex h-40 w-40 items-center justify-center rounded-lg border border-border/60" role="status" aria-label="正在生成二维码">
+              <div
+                className="flex h-40 w-40 items-center justify-center rounded-lg border border-border/60"
+                role="status"
+                aria-label="正在生成二维码"
+              >
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
             ) : qrError ? (
@@ -153,8 +192,7 @@ export function RoomShareDialog({ open, onOpenChange }: RoomShareDialogProps) {
             )}
             {isAndroid && (
               <Button variant="outline" className="w-full" onClick={openInApp}>
-                <Smartphone />
-                在 App 中打开
+                <Smartphone />在 App 中打开
               </Button>
             )}
           </div>
