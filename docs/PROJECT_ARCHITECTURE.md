@@ -85,6 +85,7 @@ io/github/yueby/musictogether/
 ├── queue/
 ├── settings/
 ├── offline/
+├── share/
 ├── updates/
 └── ui/
     ├── designsystem/
@@ -102,6 +103,7 @@ io/github/yueby/musictogether/
 | `queue/` | 点歌操作的乐观占用、去重和服务端确认 |
 | `settings/` | 应用本地设置、房间重进凭据和平台凭据 |
 | `offline/` | 已下载歌曲的索引、应用私有音频文件和下载流程 |
+| `share/` | 房间分享卡片的布局计算、二维码编码和图片渲染导出 |
 | `updates/` | 应用更新检查、下载校验和安装流程 |
 | `lyrics/` | 歌词解析和 Apple Music-like Lyrics (AMLL) 数据处理 |
 | `ui/` | 大厅、房间、设置、账号和平台界面 |
@@ -195,6 +197,8 @@ MIUIX 设置二级页使用 MIUIX `Scaffold` 与 `SmallTopAppBar` 消费状态�
 房间状态包含临时管理员标识以及“删除单曲”“清空歌单”两个独立权限。Android 仅向房主或服务器管理员展示开关；临时管理员根据服务端下发的对应权限执行队列操作，旧服务端缺少字段时默认关闭。房主或服务器管理员还可从成员列表通过 `room:set_role` 将其他普通成员切换为管理员或成员；客户端不向本人、房主和服务器管理员展示该操作，并通过 `room:role_changed` 或后续完整房间状态更新角色。房间设置还兼容可选的 `roamingEnabled`、`roamingSource` 和 `roamingMode`：队列无后续点歌时可使用房主自己的网易云、QQ 音乐、酷狗或酷狗概念版账号继续推荐，网易云支持默认、熟悉、探索、运动、专注、深夜和 AI DJ 模式，其他平台固定使用默认模式；旧服务端缺少字段时默认关闭漫游。
 
 房间用户和离线成员可携带可选的 `client` 信息，包括粗粒度客户端类型与不含版本号的可读标签；同一账号的多个活动连接还可通过 `clients` 列表聚合，相同标签带有可选连接数量。成员列表对在线成员显示当前设备或浏览器列表，对离线成员显示上次使用的客户端列表；旧服务端未下发该字段、字段不完整或出现未知客户端类型时安全回退，不影响成员和权限状态解析。Android 的 OkHttp 握手由服务端识别为 Android 客户端，不上传或展示原始 User-Agent。
+
+房间分享链接使用当前房间所属服务端的 HTTPS 入口：`https://当前服务端/join?ROMMid=<房间号>`，不会强制跳转官方域名。Android 收到该链接后复用 `RoomJoinTargetParser` 和跨服务器加入流程；网页服务端的 `/join` 页面再调用 `musictogether://join` Scheme 唤起应用。旧版生成的 `musictogether://join`、`intent://` 以及带 `room`/`server` 参数的链接继续兼容。分享卡片二维码和系统分享文本均携带当前服务端链接；未安装应用时可回退到当前服务端的网页版房间。只有配置 Android App Links 时才需要对应服务端部署匹配签名的 `/.well-known/assetlinks.json`。
 
 `/api/music/recommendations` 按当前身份和房间返回已登录平台的原生推荐内容。请求携带 `roomId`、1 至 50 的 `limit`，并可使用 `radarPage` 与 `playlistOffset` 继续读取 QQ 雷达歌曲和推荐歌单；响应按平台提供 `tracks`、`playlists` 与独立的 `pagination` 游标。Android 按歌曲身份和 `source:id` 合并、去重分页结果；新增字段缺失时分别回退为空列表和无后续页。`unavailableReason` 区分空推荐与上游暂时不可用，旧服务端缺少接口时显示可重试错误，不影响搜索和点歌流程。
 

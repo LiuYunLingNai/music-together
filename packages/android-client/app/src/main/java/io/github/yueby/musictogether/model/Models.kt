@@ -424,6 +424,15 @@ data class PlatformHubState(
 )
 
 @Immutable
+data class RoomShareState(
+    val visible: Boolean = false,
+    val loading: Boolean = false,
+    val link: String = "",
+    val imageUri: String? = null,
+    val error: String? = null,
+)
+
+@Immutable
 data class UiNotice(
     val id: Long = System.nanoTime(),
     val text: String,
@@ -502,6 +511,7 @@ data class AppState(
     val updateReadyToInstall: Boolean = false,
     val updateError: String? = null,
     val offlineLibrary: OfflineLibraryState = OfflineLibraryState(),
+    val roomShare: RoomShareState = RoomShareState(),
     val notice: UiNotice? = null,
     val error: String? = null,
 )

@@ -29,6 +29,7 @@ import io.github.yueby.musictogether.model.Playlist
 import io.github.yueby.musictogether.model.QrLoginState
 import io.github.yueby.musictogether.model.PlayState
 import io.github.yueby.musictogether.model.RoomMember
+import io.github.yueby.musictogether.model.RoomShareState
 import io.github.yueby.musictogether.model.ServerConnection
 import io.github.yueby.musictogether.model.Track
 import io.github.yueby.musictogether.model.ThemeMode
@@ -50,6 +51,7 @@ import io.github.yueby.musictogether.network.PersistentCookieJar
 import io.github.yueby.musictogether.network.PlaybackTarget
 import io.github.yueby.musictogether.network.ReconnectBackoff
 import io.github.yueby.musictogether.network.RoomJoinTargetParser
+import io.github.yueby.musictogether.network.RoomShareLink
 import io.github.yueby.musictogether.network.ServerAddress
 import io.github.yueby.musictogether.network.ServerCatalog
 import io.github.yueby.musictogether.network.SocketEvents
@@ -83,6 +85,9 @@ import io.github.yueby.musictogether.queue.QueueActionTracker
 import io.github.yueby.musictogether.queue.loadCompletePlaylist
 import io.github.yueby.musictogether.queue.planPlaylistQueueBatches
 import io.github.yueby.musictogether.settings.AppPreferences
+import io.github.yueby.musictogether.share.ShareCardContent
+import io.github.yueby.musictogether.share.ShareCardService
+import io.github.yueby.musictogether.share.shareFileName
 import io.github.yueby.musictogether.updates.AppUpdateCoordinator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -143,6 +148,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private val initialMusicDownloadDirectory = appPreferences.musicDownloadDirectory()
     private val initialOfflineTracks = offlineLibrary.tracks()
     private val musicDownloads = MusicDownloadService(okHttp)
+    private val shareCards = ShareCardService(okHttp)
     private val musicDownloadStorage = MusicDownloadStorage(application)
     private val socket = MusicTogetherSocket(okHttp, this)
     private val chatNotifications = ChatNotificationManager(application)
@@ -217,6 +223,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
 
     private var activeServer: ServerAddress? = null
     private val offlineDownloadJobs = mutableMapOf<String, Job>()
+    private var shareCardJob: Job? = null
     private val discovery = DiscoveryConnectionCoordinator(
         okHttp = okHttp,
         api = api,
@@ -438,12 +445,83 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun copyRoomLink() {
-        val room = _state.value.room ?: return
-        val server = activeServer ?: return setError("请先连接服务端")
-        val link = "${server.displayUrl}/room/${room.id}"
-        val clipboard = getApplication<Application>().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("Music Together 房间链接", link))
+        val link = roomLink() ?: return
+        copyTextToClipboard(link)
         showNotice("房间链接已复制")
+    }
+
+    fun copyRoomAppLink() {
+        val link = roomAppLink() ?: return
+        copyTextToClipboard(link)
+        showNotice("App 房间链接已复制")
+    }
+
+    fun openRoomShare() {
+        val link = roomAppLink() ?: return
+        val room = _state.value.room ?: return
+        shareCardJob?.cancel()
+        _state.value = _state.value.copy(
+            roomShare = RoomShareState(visible = true, loading = true, link = link),
+        )
+        val content = ShareCardContent.from(room, link)
+        shareCardJob = viewModelScope.launch {
+            try {
+                val bitmap = shareCards.render(content)
+                val uri = try {
+                    shareCards.writeToCache(
+                        context = getApplication(),
+                        bitmap = bitmap,
+                        fileName = shareFileName(room.id, System.currentTimeMillis()),
+                    )
+                } finally {
+                    bitmap.recycle()
+                }
+                _state.value = _state.value.copy(
+                    roomShare = _state.value.roomShare.copy(loading = false, imageUri = uri.toString()),
+                )
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Throwable) {
+                AppLogger.error("Share", "render share card failed", error)
+                _state.value = _state.value.copy(
+                    roomShare = _state.value.roomShare.copy(loading = false, error = "分享图片生成失败"),
+                )
+            }
+        }
+    }
+
+    fun dismissRoomShare() {
+        shareCardJob?.cancel()
+        shareCardJob = null
+        _state.value = _state.value.copy(roomShare = RoomShareState())
+    }
+
+    private fun roomLink(): String? {
+        val room = _state.value.room ?: return null
+        val server = activeServer ?: run {
+            setError("请先连接服务端")
+            return null
+        }
+        return "${server.displayUrl}/room/${room.id}"
+    }
+
+    private fun roomAppLink(): String? {
+        val room = _state.value.room ?: return null
+        val server = activeServer ?: run {
+            setError("请先连接服务端")
+            return null
+        }
+        return RoomShareLink.buildWeb(server, room.id)
+    }
+
+    fun handleExternalRoomLink(input: String) {
+        joinRoomInput(input)
+    }
+
+    private fun copyTextToClipboard(text: String) {
+        val clipboard = getApplication<Application>()
+            .getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("Music Together 房间链接", text))
     }
 
     fun connect() {
@@ -2751,6 +2829,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         musicDownloadJob?.cancel()
         bilibiliMetadataSearchJob?.cancel()
         bilibiliCollectionJob?.cancel()
+        shareCardJob?.cancel()
         offlineDownloadJobs.values.forEach(Job::cancel)
         PlaybackCommandBridge.listener = null
         socket.disconnect()

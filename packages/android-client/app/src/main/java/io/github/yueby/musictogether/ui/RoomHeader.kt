@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -233,6 +234,10 @@ internal fun RoomHeader(
                 RoomMenuAction(Icons.Default.Settings, "房间与音质") {
                     onMenuExpandedChange(false)
                     onOpenOverlay(RoomOverlay.RoomSettings)
+                }
+                RoomMenuAction(Icons.Default.Share, "分享房间") {
+                    onMenuExpandedChange(false)
+                    viewModel.openRoomShare()
                 }
                 RoomMenuAction(Icons.Default.ContentCopy, "复制房间链接") {
                     onMenuExpandedChange(false)

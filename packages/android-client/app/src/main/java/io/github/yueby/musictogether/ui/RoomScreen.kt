@@ -277,5 +277,6 @@ fun RoomScreen(
         }
         BilibiliCollectionDialog(appState.bilibiliCollection, viewModel)
         BilibiliMetadataDialog(appState.bilibiliMetadataMatch, viewModel)
+        RoomShareDialog(appState.roomShare, viewModel)
     }
 }
