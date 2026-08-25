@@ -45,7 +45,7 @@ export function createRoamingService(
   const recentByRoom = new Map<string, string[]>()
 
   return {
-    async getNextTrack(room: RoomData, limit = 20): Promise<Track | null> {
+    async getNextTrack(room: RoomData, limit = 50): Promise<Track | null> {
       if (!room.roamingEnabled) return null
 
       const cookie = getCookie(room.creatorId, room.roamingSource, room.id)

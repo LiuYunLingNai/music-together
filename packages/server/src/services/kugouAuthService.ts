@@ -395,6 +395,51 @@ export async function getConceptRecommendationSongs(cookie: string, limit = 20):
   return getRecommendationSongsForEdition(cookie, limit, 'concept')
 }
 
+function shuffleItems<T>(items: readonly T[]): T[] {
+  const shuffled = [...items]
+  for (let index = shuffled.length - 1; index > 0; index--) {
+    const swapIndex = Math.floor(Math.random() * (index + 1))
+    ;[shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex]!, shuffled[index]!]
+  }
+  return shuffled
+}
+
+/**
+ * Build a Concept Edition roaming candidate pool. Daily recommendations are
+ * always placed first; a random recommended-playlist page is appended so the
+ * caller can continue after the daily pool has already been played.
+ */
+export async function getConceptRoamingSongs(cookie: string, limit = 50): Promise<Record<string, unknown>[]> {
+  const poolSize = Math.max(1, Math.min(50, Math.floor(limit)))
+  const dailyLimit = Math.max(1, Math.floor(poolSize / 2))
+  let dailySongs: Record<string, unknown>[] = []
+
+  try {
+    dailySongs = await getConceptRecommendationSongs(cookie, dailyLimit)
+  } catch (error) {
+    logger.warn('Kugou Concept daily recommendation failed; trying recommended playlists', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+
+  try {
+    const playlists = shuffleItems(await getConceptRecommendedPlaylists(cookie, 20))
+    for (const playlist of playlists.slice(0, 5)) {
+      const pageSize = Math.max(1, poolSize - dailySongs.length)
+      const pageCount = Math.max(1, Math.ceil(playlist.trackCount / pageSize))
+      const page = Math.floor(Math.random() * pageCount) + 1
+      const result = await getConceptPlaylistTracks(playlist.id, page, pageSize, cookie)
+      if (result.songs.length > 0) return [...dailySongs, ...result.songs].slice(0, poolSize)
+    }
+  } catch (error) {
+    logger.warn('Kugou Concept recommended-playlist roaming failed', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+
+  return dailySongs.length > 0 ? dailySongs : getConceptRecommendationSongs(cookie, poolSize)
+}
+
 // ---------------------------------------------------------------------------
 // QR Code Login
 // ---------------------------------------------------------------------------

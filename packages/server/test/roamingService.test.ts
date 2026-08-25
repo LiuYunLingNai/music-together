@@ -100,6 +100,22 @@ test('uses the room creator concept-edition account for Kugou concept roaming', 
   assert.equal(result?.requestedBy, ROAMING_REQUESTER_LABEL)
 })
 
+test('requests a larger candidate pool for roaming', async () => {
+  let receivedLimit = 0
+  const service = createRoamingService(
+    {
+      async getRoamingTracks(_source, _cookie, _mode, limit) {
+        receivedLimit = limit ?? 0
+        return [track('new')]
+      },
+    },
+    () => 'cookie',
+  )
+
+  await service.getNextTrack(room())
+  assert.equal(receivedLimit, 50)
+})
+
 test('prefers roaming over loop-all wrap at the end of the user queue', () => {
   const first = track('first')
   const last = track('last')

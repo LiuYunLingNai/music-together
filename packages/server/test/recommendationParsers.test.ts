@@ -3,6 +3,7 @@ import test from 'node:test'
 import { parseBilibiliRecommendedVideos } from '../src/services/bilibiliAuthService.js'
 import {
   getConceptPlaylistTracks,
+  getConceptRoamingSongs,
   getPlaylistTracks,
   parseKugouRecommendationSongs,
 } from '../src/services/kugouAuthService.js'
@@ -343,6 +344,69 @@ test('passes recommended Kugou global collection IDs to both detail loaders', as
 
   assert.equal(new URL(requestUrls[0]!).searchParams.get('global_collection_id'), 'global-standard')
   assert.equal(new URL(requestUrls[1]!).searchParams.get('global_collection_id'), 'global-concept')
+})
+
+test('builds Concept Edition roaming candidates from a recommended playlist', async () => {
+  const originalFetch = globalThis.fetch
+  const requestUrls: string[] = []
+
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    const url = String(input)
+    requestUrls.push(url)
+    if (url.includes('/everyday_song_recommend')) {
+      return new Response(
+        JSON.stringify({
+          status: 1,
+          data: { song_list: [{ hash: 'concept-daily-1', filename: '每日歌手 - 每日推荐一' }] },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      )
+    }
+    if (url.includes('/v2/special_recommend')) {
+      return new Response(
+        JSON.stringify({
+          status: 1,
+          data: {
+            special_list: [{ global_collection_id: 'concept-roaming-list', specialname: '概念版推荐', songcount: 120 }],
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      )
+    }
+    if (url.includes('/pubsongs/v2/get_other_list_file_nofilt')) {
+      return new Response(
+        JSON.stringify({
+          status: 1,
+          data: {
+            songs: [
+              { hash: 'concept-random-1', filename: '歌手甲 - 随机歌曲一' },
+              { hash: 'concept-random-2', filename: '歌手乙 - 随机歌曲二' },
+            ],
+            count: 120,
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      )
+    }
+    throw new Error(`Unexpected Kugou request: ${url}`)
+  }) as typeof fetch
+
+  try {
+    const songs = await getConceptRoamingSongs('userid=1; token=token', 50)
+    assert.deepEqual(
+      songs.map((song) => song.hash),
+      ['concept-daily-1', 'concept-random-1', 'concept-random-2'],
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+
+  assert.equal(requestUrls[0]?.includes('/everyday_song_recommend'), true)
+  assert.equal(requestUrls[1]?.includes('/v2/special_recommend'), true)
+  const detailUrl = requestUrls.find((url) => url.includes('/pubsongs/v2/get_other_list_file_nofilt'))
+  assert.ok(detailUrl)
+  assert.equal(new URL(detailUrl).searchParams.get('global_collection_id'), 'concept-roaming-list')
+  assert.equal(new URL(detailUrl).searchParams.get('pagesize'), '49')
 })
 
 test('filters and normalizes Bilibili recommendation videos', () => {

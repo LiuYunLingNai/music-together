@@ -1826,7 +1826,7 @@ class MusicProvider {
         rawSongs = await kugouAuth.getRecommendationSongs(cookie, size)
         break
       case 'kugou_concept':
-        rawSongs = await kugouAuth.getConceptRecommendationSongs(cookie, size)
+        rawSongs = await kugouAuth.getConceptRoamingSongs(cookie, size)
         break
       default: {
         const exhaustive: never = source
