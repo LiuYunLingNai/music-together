@@ -2,6 +2,8 @@ package io.github.yueby.musictogether.share
 
 import io.github.yueby.musictogether.model.PlayState
 import io.github.yueby.musictogether.model.RoomState
+import io.github.yueby.musictogether.model.ShareCardBackgroundSource
+import io.github.yueby.musictogether.model.ShareCardSettings
 import io.github.yueby.musictogether.model.Track
 import io.github.yueby.musictogether.model.User
 import org.junit.Assert.assertEquals
@@ -11,6 +13,21 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ShareCardContentTest {
+    @Test
+    fun normalizesShareCardSettings() {
+        val settings = ShareCardSettings(
+            backgroundSource = ShareCardBackgroundSource.Url,
+            backgroundUrl = "  https://example.com/background.jpg  ",
+            backgroundBlur = 99,
+            backgroundDim = -1f,
+        ).normalized()
+
+        assertEquals(ShareCardBackgroundSource.Url, settings.backgroundSource)
+        assertEquals("https://example.com/background.jpg", settings.backgroundUrl)
+        assertEquals(8, settings.backgroundBlur)
+        assertEquals(0f, settings.backgroundDim)
+    }
+
     @Test
     fun buildsContentFromCurrentTrack() {
         val content = ShareCardContent.from(room(track = track()), LINK)

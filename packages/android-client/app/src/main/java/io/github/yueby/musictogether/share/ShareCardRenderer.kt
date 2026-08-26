@@ -17,18 +17,24 @@ import kotlin.math.min
 
 internal object ShareCardRenderer {
     private const val BLUR_SAMPLE_WIDTH = 48
-    private const val BLUR_PASSES = 3
     private val FALLBACK_PRIMARY = Color.parseColor("#FF3F3A55")
     private val FALLBACK_SECONDARY = Color.parseColor("#FF14151C")
 
-    fun render(content: ShareCardContent, cover: Bitmap?, qr: QrCodeMatrix?): Bitmap {
+    fun render(content: ShareCardContent, cover: Bitmap?, background: Bitmap?, qr: QrCodeMatrix?): Bitmap {
         val metrics = ShareCardMetrics.create()
         val bitmap = Bitmap.createBitmap(metrics.width, metrics.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
-        val colors = extractColors(cover)
-        drawBackground(canvas, metrics, cover, colors)
-        drawInfoColumn(canvas, metrics, content, cover)
-        drawQrCard(canvas, metrics, qr)
+        val colors = extractColors(background ?: cover)
+        drawBackground(canvas, metrics, background, colors, content.shareSettings.backgroundBlur, content.shareSettings.backgroundDim)
+        drawInfoColumn(
+            canvas,
+            metrics,
+            content,
+            cover,
+            showCover = content.shareSettings.showCover,
+            showQrCode = content.shareSettings.showQrCode,
+        )
+        if (content.shareSettings.showQrCode) drawQrCard(canvas, metrics, qr)
         return bitmap
     }
 
@@ -51,8 +57,10 @@ internal object ShareCardRenderer {
     private fun drawBackground(
         canvas: Canvas,
         metrics: ShareCardMetrics,
-        cover: Bitmap?,
+        background: Bitmap?,
         colors: CardColors,
+        blurRadius: Int,
+        dim: Float,
     ) {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         paint.shader = LinearGradient(
@@ -66,13 +74,15 @@ internal object ShareCardRenderer {
         )
         canvas.drawRect(0f, 0f, metrics.width.toFloat(), metrics.height.toFloat(), paint)
 
-        val blurred = cover?.let(::blurBitmap)
-        if (blurred != null) {
+        val renderedBackground = background?.let { source ->
+            if (blurRadius > 0) blurBitmap(source, blurRadius) else source
+        }
+        if (renderedBackground != null) {
             val coverPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 isFilterBitmap = true
                 alpha = 150
             }
-            val source = RectF(0f, 0f, blurred.width.toFloat(), blurred.height.toFloat())
+            val source = RectF(0f, 0f, renderedBackground.width.toFloat(), renderedBackground.height.toFloat())
             val target = RectF(0f, 0f, metrics.width.toFloat(), metrics.height.toFloat())
             val matrix = Matrix().apply { setRectToRect(source, target, Matrix.ScaleToFit.CENTER) }
             val scale = max(
@@ -84,8 +94,8 @@ internal object ShareCardRenderer {
                 (target.width() - source.width() * scale) / 2f,
                 (target.height() - source.height() * scale) / 2f,
             )
-            canvas.drawBitmap(blurred, matrix, coverPaint)
-            blurred.recycle()
+            canvas.drawBitmap(renderedBackground, matrix, coverPaint)
+            if (renderedBackground !== background) renderedBackground.recycle()
         }
 
         val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -106,7 +116,7 @@ internal object ShareCardRenderer {
                 0f,
                 0f,
                 metrics.height.toFloat(),
-                intArrayOf(Color.argb(60, 0, 0, 0), Color.argb(150, 0, 0, 0)),
+                intArrayOf(Color.argb((dim * 150).toInt(), 0, 0, 0), Color.argb((dim * 255).toInt(), 0, 0, 0)),
                 floatArrayOf(0f, 1f),
                 Shader.TileMode.CLAMP,
             )
@@ -119,6 +129,8 @@ internal object ShareCardRenderer {
         metrics: ShareCardMetrics,
         content: ShareCardContent,
         cover: Bitmap?,
+        showCover: Boolean,
+        showQrCode: Boolean,
     ) {
         val coverRect = RectF(
             metrics.coverRect.left,
@@ -126,16 +138,18 @@ internal object ShareCardRenderer {
             metrics.coverRect.right,
             metrics.coverRect.bottom,
         )
-        val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(110, 0, 0, 0)
+        if (showCover) {
+            val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.argb(110, 0, 0, 0)
+            }
+            canvas.drawRoundRect(
+                RectF(coverRect.left + 6f, coverRect.top + 14f, coverRect.right + 6f, coverRect.bottom + 14f),
+                metrics.coverCornerRadius,
+                metrics.coverCornerRadius,
+                shadowPaint,
+            )
         }
-        canvas.drawRoundRect(
-            RectF(coverRect.left + 6f, coverRect.top + 14f, coverRect.right + 6f, coverRect.bottom + 14f),
-            metrics.coverCornerRadius,
-            metrics.coverCornerRadius,
-            shadowPaint,
-        )
-        if (cover != null) {
+        if (showCover && cover != null) {
             val shaderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 isFilterBitmap = true
                 shader = BitmapShader(cover, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply {
@@ -155,21 +169,24 @@ internal object ShareCardRenderer {
                 }
             }
             canvas.drawRoundRect(coverRect, metrics.coverCornerRadius, metrics.coverCornerRadius, shaderPaint)
-        } else {
+        } else if (showCover) {
             val placeholder = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(46, 255, 255, 255) }
             canvas.drawRoundRect(coverRect, metrics.coverCornerRadius, metrics.coverCornerRadius, placeholder)
             val notePaint = textPaint(Color.argb(190, 255, 255, 255), 88f, bold = true)
             canvas.drawText("♪", coverRect.centerX() - notePaint.measureText("♪") / 2f, coverRect.centerY() + 30f, notePaint)
         }
-        val coverBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeWidth = 2f
-            color = Color.argb(70, 255, 255, 255)
+        if (showCover) {
+            val coverBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                strokeWidth = 2f
+                color = Color.argb(70, 255, 255, 255)
+            }
+            canvas.drawRoundRect(coverRect, metrics.coverCornerRadius, metrics.coverCornerRadius, coverBorder)
         }
-        canvas.drawRoundRect(coverRect, metrics.coverCornerRadius, metrics.coverCornerRadius, coverBorder)
 
-        val textLeft = coverRect.right + 40f
-        val textWidth = metrics.infoRight - textLeft
+        val textLeft = if (showCover) coverRect.right + 40f else metrics.infoLeft
+        val infoRight = if (showQrCode) metrics.infoRight else metrics.width - metrics.padding
+        val textWidth = infoRight - textLeft
         val badgeText = content.roomName
         val badgePaint = textPaint(Color.argb(235, 255, 255, 255), 30f, bold = true)
         val badgeLabel = ellipsize(badgeText, badgePaint, textWidth - 44f)
@@ -219,12 +236,14 @@ internal object ShareCardRenderer {
         val brandPaint = textPaint(Color.argb(150, 255, 255, 255), 26f, bold = false)
         canvas.drawText("Music Together · 一起听歌", metrics.infoLeft, metrics.height - metrics.padding + 6f, brandPaint)
         val linkPaint = textPaint(Color.argb(210, 255, 255, 255), 26f, bold = false)
-        canvas.drawText(
-            ellipsize(content.link, linkPaint, metrics.infoRight - metrics.infoLeft),
-            metrics.infoLeft,
-            metrics.height - metrics.padding - 34f,
-            linkPaint,
-        )
+        if (content.shareSettings.showLink) {
+            canvas.drawText(
+                ellipsize(content.link, linkPaint, infoRight - metrics.infoLeft),
+                metrics.infoLeft,
+                metrics.height - metrics.padding - 34f,
+                linkPaint,
+            )
+        }
     }
 
     private fun drawQrCard(canvas: Canvas, metrics: ShareCardMetrics, qr: QrCodeMatrix?) {
@@ -309,7 +328,7 @@ internal object ShareCardRenderer {
         )
     }
 
-    private fun blurBitmap(source: Bitmap): Bitmap? {
+    private fun blurBitmap(source: Bitmap, blurRadius: Int): Bitmap? {
         if (source.width <= 0 || source.height <= 0) return null
         val ratio = source.height.toFloat() / source.width.toFloat()
         val sampleWidth = BLUR_SAMPLE_WIDTH
@@ -317,7 +336,7 @@ internal object ShareCardRenderer {
         var current = runCatching {
             Bitmap.createScaledBitmap(source, sampleWidth, sampleHeight, true)
         }.getOrNull() ?: return null
-        repeat(BLUR_PASSES) {
+        repeat((blurRadius.coerceIn(0, 8) / 2).coerceAtLeast(if (blurRadius > 0) 1 else 0)) {
             val next = runCatching {
                 Bitmap.createScaledBitmap(current, sampleWidth, sampleHeight, true)
             }.getOrNull()

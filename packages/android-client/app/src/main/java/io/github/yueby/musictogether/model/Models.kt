@@ -37,6 +37,36 @@ enum class BottomBarStyle(val preferenceValue: String) {
     }
 }
 
+enum class ShareCardBackgroundSource(val preferenceValue: String) {
+    Gradient("gradient"),
+    TrackCover("track_cover"),
+    LocalImage("local_image"),
+    Url("url");
+
+    companion object {
+        fun fromPreferenceValue(value: String?): ShareCardBackgroundSource =
+            entries.firstOrNull { it.preferenceValue == value } ?: TrackCover
+    }
+}
+
+@Immutable
+data class ShareCardSettings(
+    val backgroundSource: ShareCardBackgroundSource = ShareCardBackgroundSource.TrackCover,
+    val localImagePath: String? = null,
+    val backgroundUrl: String = "",
+    val backgroundBlur: Int = 3,
+    val backgroundDim: Float = 0.42f,
+    val showCover: Boolean = true,
+    val showQrCode: Boolean = true,
+    val showLink: Boolean = true,
+) {
+    fun normalized(): ShareCardSettings = copy(
+        backgroundBlur = backgroundBlur.coerceIn(0, 8),
+        backgroundDim = backgroundDim.coerceIn(0f, 0.8f),
+        backgroundUrl = backgroundUrl.trim().take(2048),
+    )
+}
+
 fun UiStyle.usesFloatingBottomBar(bottomBarStyle: BottomBarStyle): Boolean =
     this == UiStyle.Miuix && bottomBarStyle == BottomBarStyle.Floating
 
@@ -499,6 +529,7 @@ data class AppState(
     val appBlurEnabled: Boolean = true,
     val bottomBarStyle: BottomBarStyle = BottomBarStyle.Floating,
     val glassBottomBar: Boolean = true,
+    val shareCardSettings: ShareCardSettings = ShareCardSettings(),
     val playerDisplaySettings: PlayerDisplaySettings = PlayerDisplaySettings(),
     val syncPacketIntervalSeconds: Int = 3,
     val syncDriftSeconds: Double = 0.0,

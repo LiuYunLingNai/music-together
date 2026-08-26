@@ -1,6 +1,7 @@
 package io.github.yueby.musictogether.share
 
 import io.github.yueby.musictogether.model.RoomState
+import io.github.yueby.musictogether.model.ShareCardSettings
 import io.github.yueby.musictogether.model.Track
 
 internal data class ShareCardContent(
@@ -12,6 +13,7 @@ internal data class ShareCardContent(
     val listenerText: String,
     val link: String,
     val coverUrl: String?,
+    val shareSettings: ShareCardSettings = ShareCardSettings(),
 ) {
     companion object {
         fun from(room: RoomState, link: String): ShareCardContent {

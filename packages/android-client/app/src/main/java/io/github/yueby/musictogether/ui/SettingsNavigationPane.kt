@@ -1,6 +1,8 @@
 package io.github.yueby.musictogether.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,6 +36,7 @@ import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.SettingsEthernet
 import androidx.compose.material.icons.filled.Settings
@@ -42,6 +45,7 @@ import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Vibration
+import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -72,11 +76,15 @@ import io.github.yueby.musictogether.MusicTogetherViewModel
 import io.github.yueby.musictogether.model.AppState
 import io.github.yueby.musictogether.model.BottomBarStyle
 import io.github.yueby.musictogether.model.PlayerDisplaySettings
+import io.github.yueby.musictogether.model.ShareCardBackgroundSource
+import io.github.yueby.musictogether.model.ShareCardSettings
 import io.github.yueby.musictogether.model.ThemeMode
 import io.github.yueby.musictogether.model.UiStyle
 import io.github.yueby.musictogether.ui.designsystem.LocalUiStyle
 import io.github.yueby.musictogether.ui.designsystem.LocalAppPageBackground
 import io.github.yueby.musictogether.ui.designsystem.UiStyleSelector
+import io.github.yueby.musictogether.ui.designsystem.AppButton
+import io.github.yueby.musictogether.ui.designsystem.AppTextField
 import top.yukonga.miuix.kmp.basic.Card as MiuixCard
 import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
 import top.yukonga.miuix.kmp.basic.IconButton as MiuixIconButton
@@ -400,6 +408,7 @@ private fun AppearanceSettingsPage(state: AppState, viewModel: MusicTogetherView
                 onCheckedChange = viewModel::updateDynamicColor,
             )
         }
+        item { ShareCardSettingsSection(state.shareCardSettings, viewModel) }
         if (state.uiStyle == UiStyle.Miuix) {
             item {
                 ChoiceSetting(
@@ -461,6 +470,103 @@ private fun MiuixAppearanceSettingsPage(state: AppState, viewModel: MusicTogethe
                     SettingsSwitch("液态玻璃", "支持时启用官方实时折射；不支持时保持官方实色 iOS 胶囊", Icons.Default.BlurOn, state.glassBottomBar, false, viewModel::updateGlassBottomBar)
                 }
             }
+        }
+        item { ShareCardSettingsSection(state.shareCardSettings, viewModel) }
+    }
+}
+
+@Composable
+private fun ShareCardSettingsSection(settings: ShareCardSettings, viewModel: MusicTogetherViewModel) {
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let(viewModel::setShareCardLocalImage)
+    }
+    when (LocalUiStyle.current) {
+        UiStyle.Material3 -> Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        ) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Icon(Icons.Default.Palette, null, tint = MaterialTheme.colorScheme.primary)
+                    Column {
+                        Text("分享卡片", fontWeight = FontWeight.SemiBold)
+                        Text("自定义分享图片的背景和信息内容", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                ChoiceSetting(
+                    title = "背景来源",
+                    summary = "渐变、当前歌曲封面、本地图片或网络图片",
+                    icon = Icons.Default.Palette,
+                    entries = ShareCardBackgroundSource.entries,
+                    selected = settings.backgroundSource,
+                    label = { it.label },
+                    wrapInCard = false,
+                    onSelected = { source -> viewModel.updateShareCardSettings { it.copy(backgroundSource = source) } },
+                )
+                if (settings.backgroundSource == ShareCardBackgroundSource.LocalImage) {
+                    Text(
+                        settings.localImagePath?.let { "已选择本地图片" } ?: "尚未选择本地图片",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    AppButton("选择本地图片", { picker.launch("image/*") }, modifier = Modifier.fillMaxWidth(), primary = false)
+                    AppButton(
+                        "恢复歌曲封面",
+                        { viewModel.updateShareCardSettings { it.copy(backgroundSource = ShareCardBackgroundSource.TrackCover) } },
+                        modifier = Modifier.fillMaxWidth(),
+                        primary = false,
+                    )
+                }
+                if (settings.backgroundSource == ShareCardBackgroundSource.Url) {
+                    AppTextField(
+                        value = settings.backgroundUrl,
+                        onValueChange = { viewModel.updateShareCardSettings { current -> current.copy(backgroundUrl = it) } },
+                        label = "背景图片 URL",
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                SettingsSlider("背景模糊", "${settings.backgroundBlur}", Icons.Default.BlurOn, settings.backgroundBlur.toFloat(), 0f..8f, 7, false) {
+                    viewModel.updateShareCardSettings { current -> current.copy(backgroundBlur = it.toInt()) }
+                }
+                SettingsSlider("背景暗化", "${(settings.backgroundDim * 100).toInt()}%", Icons.Default.ColorLens, settings.backgroundDim, 0f..0.8f, 7, false) {
+                    viewModel.updateShareCardSettings { current -> current.copy(backgroundDim = it) }
+                }
+                SettingsSwitch("显示歌曲封面", "在分享卡片左侧保留歌曲封面", Icons.Default.Palette, settings.showCover) {
+                    viewModel.updateShareCardSettings { current -> current.copy(showCover = it) }
+                }
+                SettingsSwitch("显示二维码", "保留扫码加入房间的二维码区域", Icons.Default.QrCode, settings.showQrCode) {
+                    viewModel.updateShareCardSettings { current -> current.copy(showQrCode = it) }
+                }
+                SettingsSwitch("显示房间链接", "在卡片底部显示可复制的网页链接", Icons.Default.Link, settings.showLink) {
+                    viewModel.updateShareCardSettings { current -> current.copy(showLink = it) }
+                }
+            }
+        }
+        UiStyle.Miuix -> MiuixSettingsGroup {
+            SettingsSectionTitle("分享卡片")
+            ChoiceSetting("背景来源", "渐变、歌曲封面、本地图片或网络图片", Icons.Default.Palette, ShareCardBackgroundSource.entries, settings.backgroundSource, { it.label }, false) {
+                viewModel.updateShareCardSettings { current -> current.copy(backgroundSource = it) }
+            }
+            if (settings.backgroundSource == ShareCardBackgroundSource.LocalImage) {
+                AppButton("选择本地图片", { picker.launch("image/*") }, modifier = Modifier.fillMaxWidth(), primary = false)
+                AppButton(
+                    "恢复歌曲封面",
+                    { viewModel.updateShareCardSettings { it.copy(backgroundSource = ShareCardBackgroundSource.TrackCover) } },
+                    modifier = Modifier.fillMaxWidth(),
+                    primary = false,
+                )
+            }
+            if (settings.backgroundSource == ShareCardBackgroundSource.Url) {
+                AppTextField(settings.backgroundUrl, { value -> viewModel.updateShareCardSettings { it.copy(backgroundUrl = value) } }, "背景图片 URL", Modifier.fillMaxWidth())
+            }
+            SettingsSlider("背景模糊", settings.backgroundBlur.toString(), Icons.Default.BlurOn, settings.backgroundBlur.toFloat(), 0f..8f, 7, false) { value ->
+                viewModel.updateShareCardSettings { it.copy(backgroundBlur = value.toInt()) }
+            }
+            SettingsSlider("背景暗化", "${(settings.backgroundDim * 100).toInt()}%", Icons.Default.ColorLens, settings.backgroundDim, 0f..0.8f, 7, false) { value ->
+                viewModel.updateShareCardSettings { it.copy(backgroundDim = value) }
+            }
+            SettingsSwitch("显示歌曲封面", "在分享卡片左侧保留歌曲封面", Icons.Default.Palette, settings.showCover, false) { value -> viewModel.updateShareCardSettings { it.copy(showCover = value) } }
+            SettingsSwitch("显示二维码", "保留扫码加入房间的二维码区域", Icons.Default.QrCode, settings.showQrCode, false) { value -> viewModel.updateShareCardSettings { it.copy(showQrCode = value) } }
+            SettingsSwitch("显示房间链接", "在卡片底部显示可复制的网页链接", Icons.Default.Link, settings.showLink, false) { value -> viewModel.updateShareCardSettings { it.copy(showLink = value) } }
         }
     }
 }
@@ -777,6 +883,14 @@ private fun MiuixSettingsGroup(content: @Composable androidx.compose.foundation.
         content = content,
     )
 }
+
+private val ShareCardBackgroundSource.label: String
+    get() = when (this) {
+        ShareCardBackgroundSource.Gradient -> "动态渐变"
+        ShareCardBackgroundSource.TrackCover -> "歌曲封面"
+        ShareCardBackgroundSource.LocalImage -> "本地图片"
+        ShareCardBackgroundSource.Url -> "网络图片"
+    }
 
 private val ThemeMode.label: String
     get() = when (this) {

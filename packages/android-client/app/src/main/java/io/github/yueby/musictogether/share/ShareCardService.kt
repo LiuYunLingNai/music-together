@@ -24,14 +24,31 @@ import kotlin.coroutines.resumeWithException
 internal class ShareCardService(private val client: OkHttpClient) {
     suspend fun render(content: ShareCardContent): Bitmap = withContext(Dispatchers.IO) {
         val cover = content.coverUrl?.let { loadCover(it) }
+        val background = when (content.shareSettings.backgroundSource) {
+            io.github.yueby.musictogether.model.ShareCardBackgroundSource.Gradient -> null
+            io.github.yueby.musictogether.model.ShareCardBackgroundSource.TrackCover -> cover
+            io.github.yueby.musictogether.model.ShareCardBackgroundSource.LocalImage ->
+                content.shareSettings.localImagePath?.let { path -> loadLocalImage(path) }
+            io.github.yueby.musictogether.model.ShareCardBackgroundSource.Url ->
+                content.shareSettings.backgroundUrl.takeIf(String::isNotBlank)?.let { loadCover(it) }
+        }
         val qr = QrCodeEncoder.encode(content.link)
         if (qr == null) AppLogger.warn("Share", "qr encode failed link=${content.link}")
         try {
-            ShareCardRenderer.render(content, cover, qr)
+            ShareCardRenderer.render(content, cover, background, qr)
         } finally {
             cover?.recycle()
+            if (background !== cover) background?.recycle()
         }
     }
+
+    private fun loadLocalImage(path: String): Bitmap? = runCatching {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(path, bounds)
+        BitmapFactory.decodeFile(path, sampledOptions(bounds))
+    }.onFailure { error ->
+        AppLogger.warn("Share", "local background load failed: ${error.javaClass.simpleName}")
+    }.getOrNull()
 
     suspend fun writeToCache(context: Context, bitmap: Bitmap, fileName: String): Uri =
         withContext(Dispatchers.IO) {
@@ -47,12 +64,17 @@ internal class ShareCardService(private val client: OkHttpClient) {
         }
 
     private suspend fun loadCover(url: String): Bitmap? {
-        val request = Request.Builder().url(url).get().build()
         return runCatching {
+            val request = Request.Builder().url(url).get().build()
             client.newCall(request).awaitResponse().use { response ->
                 if (!response.isSuccessful) return@use null
-                val bytes = response.body?.bytes() ?: return@use null
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                val body = response.body ?: return@use null
+                if (body.contentLength() > MAX_IMAGE_BYTES) return@use null
+                val bytes = body.bytes()
+                if (bytes.size > MAX_IMAGE_BYTES) return@use null
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size, sampledOptions(bounds))
             }
         }.onFailure { error ->
             AppLogger.warn("Share", "cover load failed: ${error.javaClass.simpleName}")
@@ -61,7 +83,14 @@ internal class ShareCardService(private val client: OkHttpClient) {
 
     private companion object {
         const val SHARE_DIRECTORY = "shared_cards"
+        const val MAX_IMAGE_BYTES = 24 * 1024 * 1024
     }
+}
+
+private fun sampledOptions(bounds: BitmapFactory.Options): BitmapFactory.Options {
+    var sampleSize = 1
+    while (bounds.outWidth / sampleSize > 2048 || bounds.outHeight / sampleSize > 2048) sampleSize *= 2
+    return BitmapFactory.Options().apply { inSampleSize = sampleSize }
 }
 
 internal fun shareImageIntent(uri: Uri, text: String): Intent = Intent(Intent.ACTION_SEND).apply {

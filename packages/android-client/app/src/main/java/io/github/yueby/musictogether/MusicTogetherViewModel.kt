@@ -30,6 +30,7 @@ import io.github.yueby.musictogether.model.QrLoginState
 import io.github.yueby.musictogether.model.PlayState
 import io.github.yueby.musictogether.model.RoomMember
 import io.github.yueby.musictogether.model.RoomShareState
+import io.github.yueby.musictogether.model.ShareCardSettings
 import io.github.yueby.musictogether.model.ServerConnection
 import io.github.yueby.musictogether.model.Track
 import io.github.yueby.musictogether.model.ThemeMode
@@ -122,6 +123,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         const val DEFAULT_SYNC_PACKET_INTERVAL_SECONDS = 3
         const val MIN_SYNC_PACKET_INTERVAL_SECONDS = 1
         const val MAX_SYNC_PACKET_INTERVAL_SECONDS = 60
+        const val MAX_SHARE_BACKGROUND_BYTES = 24L * 1024L * 1024L
         const val GITHUB_RELEASES_API = "https://api.github.com/repos/LiuYunLingNai/music-together/releases"
         val NETEASE_ROAMING_MODES = setOf(
             "DEFAULT",
@@ -172,6 +174,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             appBlurEnabled = appPreferences.appBlurEnabled(),
             bottomBarStyle = appPreferences.bottomBarStyle(),
             glassBottomBar = appPreferences.glassBottomBar(),
+            shareCardSettings = appPreferences.shareCardSettings(),
             playerDisplaySettings = appPreferences.playerDisplaySettings(),
             syncPacketIntervalSeconds = appPreferences.syncPacketInterval(
                 defaultValue = DEFAULT_SYNC_PACKET_INTERVAL_SECONDS,
@@ -427,6 +430,38 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         _state.value = _state.value.copy(glassBottomBar = enabled)
     }
 
+    fun updateShareCardSettings(transform: (ShareCardSettings) -> ShareCardSettings) {
+        val updated = transform(_state.value.shareCardSettings).normalized()
+        appPreferences.setShareCardSettings(updated)
+        _state.value = _state.value.copy(shareCardSettings = updated)
+    }
+
+    fun setShareCardLocalImage(uri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val target = java.io.File(getApplication<Application>().filesDir, "share-card/background.png")
+            runCatching {
+                target.parentFile?.mkdirs()
+                getApplication<Application>().contentResolver.openInputStream(uri)?.use { input ->
+                    target.outputStream().use(input::copyTo)
+                } ?: error("无法读取图片")
+                if (target.length() > MAX_SHARE_BACKGROUND_BYTES) {
+                    target.delete()
+                    error("图片文件过大")
+                }
+                withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    updateShareCardSettings { it.copy(
+                        backgroundSource = io.github.yueby.musictogether.model.ShareCardBackgroundSource.LocalImage,
+                        localImagePath = target.absolutePath,
+                    ) }
+                    showNotice("分享卡片背景图片已更新")
+                }
+            }.onFailure { error ->
+                AppLogger.error("Share", "save local share background failed", error)
+                withContext(kotlinx.coroutines.Dispatchers.Main) { setError("分享卡片背景图片读取失败") }
+            }
+        }
+    }
+
     fun updatePlayerDisplaySettings(transform: (PlayerDisplaySettings) -> PlayerDisplaySettings) {
         val updated = transform(_state.value.playerDisplaySettings).normalized()
         appPreferences.setPlayerDisplaySettings(updated)
@@ -463,7 +498,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         _state.value = _state.value.copy(
             roomShare = RoomShareState(visible = true, loading = true, link = link),
         )
-        val content = ShareCardContent.from(room, link)
+        val content = ShareCardContent.from(room, link).copy(shareSettings = _state.value.shareCardSettings)
         shareCardJob = viewModelScope.launch {
             try {
                 val bitmap = shareCards.render(content)

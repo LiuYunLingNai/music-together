@@ -5,6 +5,8 @@ import io.github.yueby.musictogether.logging.AppLogger
 import io.github.yueby.musictogether.model.DEFAULT_MUSIC_DOWNLOAD_DIRECTORY
 import io.github.yueby.musictogether.model.BottomBarStyle
 import io.github.yueby.musictogether.model.PlayerDisplaySettings
+import io.github.yueby.musictogether.model.ShareCardBackgroundSource
+import io.github.yueby.musictogether.model.ShareCardSettings
 import io.github.yueby.musictogether.model.ThemeMode
 import io.github.yueby.musictogether.model.UiStyle
 import io.github.yueby.musictogether.model.UpdateDownloadSource
@@ -164,6 +166,33 @@ internal class AppPreferences(context: Context) {
         preferences.edit().putBoolean(GLASS_BOTTOM_BAR_KEY, enabled).apply()
     }
 
+    fun shareCardSettings(): ShareCardSettings = ShareCardSettings(
+        backgroundSource = ShareCardBackgroundSource.fromPreferenceValue(
+            preferences.getString(SHARE_CARD_BACKGROUND_SOURCE_KEY, null),
+        ),
+        localImagePath = preferences.getString(SHARE_CARD_LOCAL_IMAGE_KEY, null),
+        backgroundUrl = preferences.getString(SHARE_CARD_BACKGROUND_URL_KEY, "").orEmpty(),
+        backgroundBlur = preferences.getInt(SHARE_CARD_BACKGROUND_BLUR_KEY, 3),
+        backgroundDim = preferences.getFloat(SHARE_CARD_BACKGROUND_DIM_KEY, 0.42f),
+        showCover = preferences.getBoolean(SHARE_CARD_SHOW_COVER_KEY, true),
+        showQrCode = preferences.getBoolean(SHARE_CARD_SHOW_QR_KEY, true),
+        showLink = preferences.getBoolean(SHARE_CARD_SHOW_LINK_KEY, true),
+    ).normalized()
+
+    fun setShareCardSettings(settings: ShareCardSettings) {
+        val value = settings.normalized()
+        preferences.edit()
+            .putString(SHARE_CARD_BACKGROUND_SOURCE_KEY, value.backgroundSource.preferenceValue)
+            .putString(SHARE_CARD_LOCAL_IMAGE_KEY, value.localImagePath)
+            .putString(SHARE_CARD_BACKGROUND_URL_KEY, value.backgroundUrl)
+            .putInt(SHARE_CARD_BACKGROUND_BLUR_KEY, value.backgroundBlur)
+            .putFloat(SHARE_CARD_BACKGROUND_DIM_KEY, value.backgroundDim)
+            .putBoolean(SHARE_CARD_SHOW_COVER_KEY, value.showCover)
+            .putBoolean(SHARE_CARD_SHOW_QR_KEY, value.showQrCode)
+            .putBoolean(SHARE_CARD_SHOW_LINK_KEY, value.showLink)
+            .apply()
+    }
+
     fun playerDisplaySettings(): PlayerDisplaySettings = PlayerDisplaySettings(
         showTranslation = preferences.getBoolean(SHOW_TRANSLATION_KEY, true),
         showRomanization = preferences.getBoolean(SHOW_ROMANIZATION_KEY, true),
@@ -276,6 +305,14 @@ internal class AppPreferences(context: Context) {
         const val APP_BLUR_KEY = "app_blur_enabled"
         const val BOTTOM_BAR_STYLE_KEY = "bottom_bar_style"
         const val GLASS_BOTTOM_BAR_KEY = "glass_bottom_bar"
+        const val SHARE_CARD_BACKGROUND_SOURCE_KEY = "share_card_background_source"
+        const val SHARE_CARD_LOCAL_IMAGE_KEY = "share_card_local_image"
+        const val SHARE_CARD_BACKGROUND_URL_KEY = "share_card_background_url"
+        const val SHARE_CARD_BACKGROUND_BLUR_KEY = "share_card_background_blur"
+        const val SHARE_CARD_BACKGROUND_DIM_KEY = "share_card_background_dim"
+        const val SHARE_CARD_SHOW_COVER_KEY = "share_card_show_cover"
+        const val SHARE_CARD_SHOW_QR_KEY = "share_card_show_qr"
+        const val SHARE_CARD_SHOW_LINK_KEY = "share_card_show_link"
         const val SHOW_TRANSLATION_KEY = "player_show_translation"
         const val SHOW_ROMANIZATION_KEY = "player_show_romanization"
         const val LYRIC_FONT_SCALE_KEY = "player_lyric_font_scale"
