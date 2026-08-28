@@ -415,14 +415,17 @@ export function getUserAuthStatus(userId: string, roomId: string): MyPlatformAut
   return platforms.map((platform) => {
     const entries = pool?.get(platform) ?? []
     const entry = entries.find((e) => e.userId === userId)
-    return {
+    const result: MyPlatformAuth = {
       platform,
       loggedIn: !!entry,
       nickname: entry?.nickname,
-      avatarUrl: entry?.avatarUrl,
       vipType: entry?.vipType,
       vipLabel: entry?.vipLabel,
       vipLevel: entry?.vipLevel,
     }
+    if (entry?.avatarUrl) {
+      result.avatarUrl = entry.avatarUrl
+    }
+    return result
   })
 }
