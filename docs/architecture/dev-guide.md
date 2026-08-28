@@ -17,6 +17,9 @@ pnpm dev:client
 
 # 仅启动后端
 pnpm dev:server
+
+# 启动管理后台（需后端已运行，依赖 httpOnly 会话 Cookie）
+pnpm --filter @music-together/admin dev
 ```
 
 ## 端口
@@ -24,7 +27,10 @@ pnpm dev:server
 | 服务                            | 默认端口 |
 | ------------------------------- | -------- |
 | 前端 (Vite)                     | 5173     |
+| 管理后台 (Vite)                 | 5174     |
 | 后端 (Express + 原生 WebSocket) | 3001     |
+
+管理后台开发时通过 Vite 代理将 `/api` 与 `/uploads` 转发到后端（可用环境变量 `ADMIN_BACKEND_URL` 覆盖，默认 `http://localhost:3001`）。
 
 ## 环境变量
 
@@ -55,6 +61,7 @@ pnpm typecheck
 pnpm build
 
 # 前端产物 → packages/client/dist/
+# 管理后台产物 → packages/admin/dist/（构建与预览使用 base /admin/，生产模式由服务端托管在 /admin 路径）
 # 后端产物 → packages/server/dist/
 # shared 包无构建步骤，直接作为 TS 源码引用
 ```

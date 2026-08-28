@@ -7,7 +7,7 @@ import { userRepo } from '../repositories/userRepository.js'
 import { issueIdentityCookie } from '../services/identityService.js'
 import { replaceActiveUserId } from '../services/accountService.js'
 
-const RESERVED_ACCOUNT_IDS = new Set([
+export const RESERVED_ACCOUNT_IDS = new Set([
   'admin',
   'api',
   'root',

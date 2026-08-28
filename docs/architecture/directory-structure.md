@@ -6,6 +6,7 @@
 music-together/
 ├── packages/
 │   ├── client/          # React 前端
+│   ├── admin/           # React 管理后台（仅调用现有 REST 接口）
 │   ├── server/          # Node.js 后端
 │   └── shared/          # 共享类型与常量
 ├── docs/                # 项目文档（含本文件 PROJECT_ARCHITECTURE.md）
@@ -172,7 +173,7 @@ src/
 │   └── playlistController.ts   #   歌单管理（获取用户歌单列表 via Socket，使用 getUserCookie 取请求者自己的 cookie，歌单私有）
 │
 ├── services/                   # 服务层：业务逻辑
-│   ├── roomService.ts          #   房间 CRUD + 角色管理 + 加入校验（validateJoinRequest）
+│   ├── roomService.ts          #   房间 CRUD + 角色管理 + 加入校验（validateJoinRequest）+ 管理员移出成员（kickUserFromRoom）与投票重协调（reconcileAndBroadcastVote）
 │   ├── roomLifecycleService.ts #   房间生命周期定时器（空置删除）+ 防抖广播
 │   ├── playerService.ts        #   播放状态管理 + 流 URL 解析 + 切歌防抖 + 加入播放同步
 │   ├── queueService.ts         #   队列操作（含删除当前曲目前的后继选择）
@@ -188,7 +189,8 @@ src/
 │   ├── kugouAuthService.ts    #   酷狗 API 认证（QR 扫码登录 + VIP 检查 + 用户昵称(RSA) + 用户歌单列表 + 歌单歌曲获取；kugouRequest 含 HTTP 状态检查与 JSON 安全解析；自包含签名实现，状态码归一化为 800-803 与网易云统一）
 │   ├── tencentAuthService.ts  #   QQ 音乐认证（5 步 OAuth QR 扫码登录：ptqrshow/ptqrlogin/check_sig/authorize/QQLogin 换取 musickey；zzc 签名防风控；getUserInfo 获取昵称 + VIP 状态；getUserPlaylists 获取自建 + 收藏歌单；getPlaylistTracks 分页获取歌单歌曲）
 │   ├── voteService.ts          #   投票状态、成员重算与原子领取
-│   └── voteActionService.ts    #   已通过投票的播放器/队列动作执行
+│   ├── voteActionService.ts    #   已通过投票的播放器/队列动作执行
+│   └── adminSetupService.ts    #   首次初始化：判断是否需要创建首个管理员（无 admin 角色且未配置 SERVER_ADMIN_IDS）与事务化创建
 │
 ├── repositories/               # 数据仓库：内存状态与 SQLite 持久化
 │   ├── types.ts                #   接口定义（RoomRepository, ChatRepository）
@@ -205,7 +207,9 @@ src/
 │
 ├── routes/                     # Express REST 路由
 │   ├── music.ts                #   GET /api/music/search|url|lyric|cover|playlist|ttml（统一 validated() 路由包装器消除重复 try/catch + Zod 模式）
-│   └── rooms.ts                #   GET /api/rooms/:roomId/check（房间预检）
+│   ├── rooms.ts                #   GET /api/rooms/:roomId/check（房间预检）
+│   ├── admin.ts                #   /api/admin/* 管理端点（用户/平台授权/房间详情与移出/备份文件/代理策略/背景，均需服务器管理员）
+│   └── adminSetup.ts           #   GET /api/admin/setup-status、POST /api/admin/setup（公开，仅初始化窗口可用；需挂载在受保护的 admin 路由之前）
 │
 ├── types/
 │   └── meting.d.ts             #   @meting/core 类型声明
@@ -226,6 +230,42 @@ src/
 ├── constants.ts       # 业务常量：LIMITS（长度/数量限制）, TIMING（同步间隔/宽限期）, NTP（时钟同步参数）, QR_STATUS（扫码状态码）, QR_TIMING（轮询间隔）
 ├── schemas.ts         # Zod 验证 schema
 └── abilities.ts       # CASL 权限定义（Actions incl. set-mode, Subjects, defineAbilityFor）
+```
+
+## packages/admin/src/ — 管理后台前端源码
+
+独立 Vite 应用（端口 5174），复用 `@music-together/shared` 类型，仅通过现有 REST 接口（`/api/admin`、`/api/auth`、`/api/settings` 等）与后端交互，开发时经 Vite 代理转发到服务端（默认 `localhost:3001`）。
+
+```
+src/
+├── main.tsx                    # 入口：RouterProvider + ThemeProvider + AuthProvider + ToastProvider
+├── router.tsx                  # 路由定义：RequireAdmin / RedirectIfAdmin 守卫
+├── index.css                   # Tailwind v4 全局样式与 markdown 渲染样式
+│
+├── lib/                        # 数据与认证层（无 Zustand，仅 Context）
+│   ├── api.ts                  #   fetch 封装（credentials: 'include'、401 统一处理、authApi / publicApi / adminApi）
+│   ├── auth.tsx                #   AuthProvider：recover 登录 + /api/auth/me 会话恢复 + role === 'admin' 校验
+│   ├── theme.tsx               #   ThemeProvider：浅色/深色/跟随系统主题切换（.dark 类 + localStorage 持久化）
+│   ├── types.ts                #   管理端专用响应类型（MeProfile / AdminUser / AdminRoom 等）
+│   └── cn.ts                   #   class 拼接工具
+│
+├── components/                 # 通用组件
+│   ├── Layout.tsx              #   侧边栏布局（@iconify/react 图标导航 + 路由切换过渡动效）
+│   ├── ui.tsx                  #   Button / Card / Dialog / Switch / Table 等基础组件（浅色/深色双主题）
+│   └── toast.tsx               #   轻量 Toast 通知
+│
+├── pages/                      # 页面
+│   ├── LoginPage.tsx           #   管理员登录（账号恢复 + 角色校验）
+│   ├── DashboardPage.tsx       #   概览：单次 /api/admin/overview 聚合版本、健康状态、用户/房间统计
+│   ├── UsersPage.tsx           #   用户列表、删除、重置密码、平台授权查看/解除（/api/admin/users）
+│   ├── RoomsPage.tsx           #   房间列表、解散、详情与移出成员（/api/admin/rooms）
+│   ├── SettingsPage.tsx        #   音频代理策略、备份设置与备份文件管理（/api/admin/audio-proxy-policy、/api/admin/backups）
+│   ├── BackgroundPage.tsx      #   全局背景管理（/api/admin/background）
+│   ├── DocsPage.tsx            #   接口文档（marked 渲染内置 Markdown）
+│   └── ThemePage.tsx           #   主题设置（浅色/深色/跟随系统）
+│
+└── docs/
+    └── api.md                  # 全部 REST 与 /ws 协议清单（供 DocsPage 渲染）
 ```
 
 ---

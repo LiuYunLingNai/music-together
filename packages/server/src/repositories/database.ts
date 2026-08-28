@@ -34,6 +34,7 @@ db.exec(`
     cookie_encrypted TEXT NOT NULL,
     nickname_snapshot TEXT,
     vip_type INTEGER NOT NULL DEFAULT 0,
+    avatar_url TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -90,6 +91,7 @@ ensureColumn('platform_auth', 'vip_type', 'vip_type INTEGER NOT NULL DEFAULT 0')
 ensureColumn('platform_auth', 'vip_label', 'vip_label TEXT')
 ensureColumn('platform_auth', 'vip_level', 'vip_level INTEGER')
 ensureColumn('platform_auth', 'credential_refresh_attempted_at', 'credential_refresh_attempted_at INTEGER')
+ensureColumn('platform_auth', 'avatar_url', 'avatar_url TEXT')
 ensureColumn('permanent_rooms', 'chat_history_json', "chat_history_json TEXT NOT NULL DEFAULT '[]'")
 ensureColumn('permanent_room_members', 'client_json', 'client_json TEXT')
 

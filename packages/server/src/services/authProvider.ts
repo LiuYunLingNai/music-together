@@ -19,6 +19,7 @@ export interface UserInfoData {
   /** Optional provider-specific progression level. */
   vipLevel?: number
   userId: number
+  avatarUrl?: string
 }
 
 /**

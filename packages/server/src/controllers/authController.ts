@@ -148,6 +148,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
               userInfo.vipType,
               true,
               { vipLabel: userInfo.vipLabel, vipLevel: userInfo.vipLevel },
+              userInfo.avatarUrl,
             )
             broadcastAuthStatus(io, socket, mapping)
           }
@@ -156,6 +157,8 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
             message: `已登录为 ${userInfo.nickname}`,
             platform,
             cookie: result.cookie,
+            nickname: userInfo.nickname,
+            avatarUrl: userInfo.avatarUrl,
           })
           socket.emit(EVENTS.AUTH_QR_STATUS, { status: QR_STATUS.SUCCESS, message: '登录成功', key: data.key })
           logger.info(`${platform} 扫码登录成功：${userInfo.nickname}`, {
@@ -295,6 +298,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
             userInfo.vipType,
             data.persist !== false,
             { vipLabel: userInfo.vipLabel, vipLevel: userInfo.vipLevel },
+            userInfo.avatarUrl,
           )
         }
         socket.emit(EVENTS.AUTH_SET_COOKIE_RESULT, {
@@ -302,6 +306,8 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
           message: `已登录为 ${userInfo.nickname}`,
           platform,
           cookie,
+          nickname: userInfo.nickname,
+          avatarUrl: userInfo.avatarUrl,
         })
       } else if ((platform === 'netease' || platform === 'bilibili') && infoResult.reason === 'expired') {
         // 仅网易云：明确过期时拒绝保存

@@ -13,6 +13,7 @@ import { attachSocketIdentity } from './middleware/socketIdentity.js'
 import type { SocketData } from './middleware/types.js'
 import authRoutes from './routes/auth.js'
 import { createAdminRoutes } from './routes/admin.js'
+import { createAdminSetupRoutes } from './routes/adminSetup.js'
 import { createAccountRoutes } from './routes/account.js'
 import musicRoutes from './routes/music.js'
 import roomRoutes from './routes/rooms.js'
@@ -50,6 +51,8 @@ app.use('/uploads/backgrounds', express.static(path.join(path.dirname(databasePa
 // REST API routes
 app.use('/api/auth', authRoutes)
 app.use('/api/auth', createAccountRoutes(io))
+// 首次初始化端点（公开）必须先于受保护的 /api/admin 路由挂载
+app.use('/api/admin', createAdminSetupRoutes())
 app.use('/api/admin', createAdminRoutes(io))
 app.use('/api/settings', settingsRoutes)
 app.use('/api/music', musicRoutes)
@@ -65,8 +68,34 @@ app.get('/api/version', (_req, res) => {
   res.json({ version: config.version })
 })
 
-// --- Serve client SPA (条件挂载，仅当构建产物存在时) ---
+// --- Serve admin SPA（条件挂载，托管在 /admin 路径） ---
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const adminDist = path.resolve(__dirname, '../../admin/dist')
+const adminIndexHtml = path.join(adminDist, 'index.html')
+
+if (fs.existsSync(adminIndexHtml)) {
+  app.use(
+    '/admin',
+    express.static(adminDist, {
+      maxAge: '1h',
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('index.html')) {
+          res.setHeader('Cache-Control', 'no-cache, must-revalidate')
+        }
+      },
+    }),
+  )
+  // SPA fallback: /admin 下的深层路由 -> admin index.html（需在客户端 catch-all 之前）
+  app.get(/^\/admin(\/.*)?$/, (_req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, must-revalidate')
+    res.sendFile(adminIndexHtml)
+  })
+  logger.info('管理后台静态页面已加载', { adminDist })
+} else {
+  logger.info('未发现管理后台构建产物，已跳过 /admin 托管')
+}
+
+// --- Serve client SPA (条件挂载，仅当构建产物存在时) ---
 const clientDist = path.resolve(__dirname, '../../client/dist')
 const indexHtml = path.join(clientDist, 'index.html')
 

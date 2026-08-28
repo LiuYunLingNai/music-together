@@ -45,6 +45,10 @@ export type RenameUserResult =
   | { success: true; user: PersistedUser }
   | { success: false; reason: 'not_found' | 'conflict' }
 
+export type CreateAdminResult =
+  | { success: true; user: PersistedUser }
+  | { success: false; reason: 'admin_exists' | 'account_conflict' }
+
 function toUser(row: UserRow): PersistedUser {
   return {
     id: row.id,
@@ -60,6 +64,11 @@ function toUser(row: UserRow): PersistedUser {
 
 const selectUser = db.prepare<string, UserRow>('SELECT * FROM users WHERE id = ?')
 const selectUserCaseInsensitive = db.prepare<string, UserRow>('SELECT * FROM users WHERE id = ? COLLATE NOCASE LIMIT 1')
+const selectAnyAdmin = db.prepare<[], { id: string }>("SELECT id FROM users WHERE role = 'admin' LIMIT 1")
+const insertAdminUser = db.prepare(`
+  INSERT INTO users (id, nickname, avatar_url, password_hash, role, created_at, updated_at, last_seen_at)
+  VALUES (@id, @nickname, @avatarUrl, @passwordHash, 'admin', @now, @now, @now)
+`)
 const insertUser = db.prepare(`
   INSERT INTO users (id, nickname, avatar_url, password_hash, role, created_at, updated_at, last_seen_at)
   VALUES (@id, @nickname, NULL, NULL, @role, @now, @now, @now)
@@ -159,6 +168,22 @@ export const userRepo = {
   get(userId: string): PersistedUser | null {
     const row = selectUser.get(userId)
     return row ? toUser(row) : null
+  },
+
+  hasAdmin(): boolean {
+    return config.serverAdminIds.size > 0 || Boolean(selectAnyAdmin.get())
+  },
+
+  /** 首次初始化专用：在事务中检查并创建首个管理员，避免并发重复初始化 */
+  createAdmin(input: { id: string; nickname: string; passwordHash: string; avatarUrl?: string | null }): CreateAdminResult {
+    const run = db.transaction((): CreateAdminResult => {
+      if (this.hasAdmin()) return { success: false, reason: 'admin_exists' }
+      if (selectUserCaseInsensitive.get(input.id)) return { success: false, reason: 'account_conflict' }
+      const now = Date.now()
+      insertAdminUser.run({ id: input.id, nickname: input.nickname, avatarUrl: input.avatarUrl ?? null, passwordHash: input.passwordHash, now })
+      return { success: true, user: this.get(input.id)! }
+    })
+    return run()
   },
 
   touch(userId: string): PersistedUser | null {

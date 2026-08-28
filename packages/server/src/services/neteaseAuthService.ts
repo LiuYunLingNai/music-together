@@ -179,6 +179,7 @@ export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
         vipLabel,
         vipLevel,
         userId: profile.userId ?? 0,
+        avatarUrl: (profile as any)?.avatarUrl ? String((profile as any).avatarUrl).replace(/^http:\/\//, 'https://') : undefined,
       },
     }
   } catch (err) {

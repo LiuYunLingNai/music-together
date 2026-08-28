@@ -35,22 +35,31 @@ function PlatformRow({
 
   return (
     <div className="flex items-center justify-between gap-3 py-3">
-      <div className="min-w-0 flex-1 space-y-1">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">{PLATFORM_LABELS[platform]}</span>
-          {hasVip && (
-            <Badge variant="secondary" className="gap-1 text-xs">
-              <Crown className="h-3 w-3" />
-              {getVipDisplayLabel(maxVipType, status?.maxVipLabel)}
-            </Badge>
-          )}
+      <div className="flex items-center gap-3 min-w-0 flex-1">
+        {myStatus?.avatarUrl ? (
+          <img src={myStatus.avatarUrl} alt={myStatus.nickname || ''} className="h-8 w-8 rounded-full object-cover flex-shrink-0" />
+        ) : (
+          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary flex-shrink-0">
+            {(myStatus?.nickname || '?').slice(0, 1).toUpperCase()}
+          </span>
+        )}
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium">{PLATFORM_LABELS[platform]}</span>
+            {hasVip && (
+              <Badge variant="secondary" className="gap-1 text-xs">
+                <Crown className="h-3 w-3" />
+                {getVipDisplayLabel(maxVipType, status?.maxVipLabel)}
+              </Badge>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {loggedInCount > 0 ? `${loggedInCount} 人已登录${hasVip ? '，VIP 可用' : ''}` : '暂无人登录'}
+            {isMyLoggedIn && myStatus?.nickname && (
+              <span className="text-foreground ml-1">（我：{myStatus.nickname}）</span>
+            )}
+          </p>
         </div>
-        <p className="text-xs text-muted-foreground">
-          {loggedInCount > 0 ? `${loggedInCount} 人已登录${hasVip ? '，VIP 可用' : ''}` : '暂无人登录'}
-          {isMyLoggedIn && myStatus?.nickname && (
-            <span className="text-foreground ml-1">（我：{myStatus.nickname}）</span>
-          )}
-        </p>
       </div>
 
       <div className="flex shrink-0 items-center gap-1.5">

@@ -25,6 +25,7 @@ interface BilibiliNavData {
   uname?: string
   vipStatus?: number
   vipType?: number
+  face?: string
 }
 
 interface BilibiliFavoriteFolder {
@@ -205,6 +206,7 @@ export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
       ok: true,
       data: {
         nickname: user.uname || 'B站用户',
+        avatarUrl: user.face ? String(user.face).replace(/^http:\/\//, 'https://') : undefined,
         ...membership,
         userId: user.mid,
       },

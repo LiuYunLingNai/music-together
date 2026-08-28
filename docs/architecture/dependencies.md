@@ -32,6 +32,18 @@
 |              | lucide-react                                               | ^0.563.0 | 图标库                                  |
 |              | jss, jss-preset-default                                    | ^10.10.0 | CSS-in-JS（AMLL 依赖）                  |
 
+## Admin 核心依赖（管理后台）
+
+| 分类       | 库                 | 版本     | 用途                                                    |
+| ---------- | ------------------ | -------- | ------------------------------------------------------- |
+| **UI**     | react, react-dom   | ^19.2.8  | UI 基础                                                 |
+|            | tailwindcss        | ^4.1.18  | 原子化 CSS（深色主题）                                  |
+|            | @iconify/react     | ^5.2.1   | 图标（侧边栏导航与操作按钮）                            |
+| **路由**   | react-router-dom   | ^7.18.2  | 管理端路由与守卫                                        |
+| **文档**   | marked             | ^16.3.0  | 渲染内置接口文档（DocsPage）                            |
+| **共享**   | @music-together/shared | workspace | 复用 AudioProxyPolicy / BackupSettings 等类型与校验约束 |
+| **实时通信** | —                  | —        | 仅调用 REST 接口，不连接 `/ws`                          |
+
 ## Server 核心依赖
 
 | 库                                | 版本     | 用途                                                                |

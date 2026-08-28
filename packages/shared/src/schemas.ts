@@ -155,7 +155,7 @@ export const chatMessageSchema = z.object({
 // REST API – Music routes
 // ---------------------------------------------------------------------------
 
-const musicSourceSchema = z.enum(['netease', 'tencent', 'kugou', 'kugou_concept', 'bilibili'])
+export const musicSourceSchema = z.enum(['netease', 'tencent', 'kugou', 'kugou_concept', 'bilibili'])
 export const hotSongsSourceSchema = z.enum(['netease', 'tencent', 'kugou'])
 
 const searchQueryCommonShape = {

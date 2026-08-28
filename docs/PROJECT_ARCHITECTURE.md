@@ -24,7 +24,7 @@
 
 - **前端**: React 19 + Vite 7 + TypeScript 5.9 + Tailwind CSS v4 + shadcn/ui + Zustand
 - **后端**: Node.js 22 + Express 4 + 原生 `ws` JSON 事件协议 + SQLite + @meting/core
-- **Monorepo**: pnpm workspaces（3 个包：`client`、`server`、`shared`）
+- **Monorepo**: pnpm workspaces（4 个包：`client`、`admin`、`server`、`shared`；`admin` 为管理后台，基于 React 19 + Vite 6 + Tailwind CSS v4 + React Router 7 + Iconify + Marked）
 
 ---
 
@@ -34,10 +34,10 @@
 
 | 章节            | 文件                                                          | 内容                                                                              |
 | --------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| 2. 目录结构     | [directory-structure.md](architecture/directory-structure.md) | client / server / shared 三包目录树                                               |
+| 2. 目录结构     | [directory-structure.md](architecture/directory-structure.md) | client / admin / server / shared 四包目录树                                     |
 | 3. 架构与数据流 | [data-flow.md](architecture/data-flow.md)                     | 分层架构、Socket 事件清单、核心类型定义、NTP 同步、播放同步、播放模式、音频质量等 |
 | 上游同步策略 | [upstream-sync.md](architecture/upstream-sync.md) | 上游能力迁移范围、fork 不可破坏能力和有意保留的版本差异 |
-| 4. 第三方库依赖 | [dependencies.md](architecture/dependencies.md)               | 前端/后端/共享/开发依赖清单                                                       |
+| 4. 第三方库依赖 | [dependencies.md](architecture/dependencies.md)               | 前端/管理端/后端/共享/开发依赖清单                                                |
 | 5. 设计模式     | [design-patterns.md](architecture/design-patterns.md)         | Zustand Store、Hook 组合、Dialog、Provider、分层架构、Repository 等               |
 | 6. 代码规范     | [coding-standards.md](architecture/coding-standards.md)       | 语言模块、路径别名、状态更新、错误处理                                            |
 | 7. UI 设计规范  | [ui-design.md](architecture/ui-design.md)                     | 组件库、颜色系统、动画、歌词、响应式                                              |

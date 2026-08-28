@@ -18,6 +18,7 @@ interface CookieEntry {
   vipType: number
   vipLabel?: string
   vipLevel?: number
+  avatarUrl?: string
 }
 
 export interface MembershipDetails {
@@ -92,6 +93,7 @@ export function addCookie(
   vipType: number,
   persist = true,
   membership?: MembershipDetails,
+  avatarUrl?: string,
 ): void {
   vipType = normalizeVipType(platform, vipType)
   const { vipLabel, vipLevel } = normalizeMembershipDetails(membership)
@@ -100,10 +102,10 @@ export function addCookie(
   const idx = entries.findIndex((e) => e.cookie === cookie || e.userId === userId)
   const previousCookie = idx === -1 ? null : entries[idx]?.cookie
   if (idx !== -1) entries.splice(idx, 1)
-  entries.push({ cookie, userId, nickname, vipType, vipLabel, vipLevel })
+  entries.push({ cookie, userId, nickname, vipType, vipLabel, vipLevel, avatarUrl })
   if (persist) {
     platformAuthRepo.save(
-      { userId, platform, cookie, nickname, vipType, vipLabel, vipLevel },
+      { userId, platform, cookie, nickname, vipType, vipLabel, vipLevel, avatarUrl },
       { resetCredentialRefreshSchedule: platform === 'tencent' && previousCookie !== cookie },
     )
   }
@@ -116,18 +118,21 @@ export function addCookie(
     vipType,
     vipLabel,
     vipLevel,
+    avatarUrl,
   })
 }
 
-export function removeCookie(roomId: string, platform: MusicSource, userId: string): boolean {
+export function removeCookie(roomId: string, platform: MusicSource, userId: string, persist = true): boolean {
   membershipRefreshHistory.delete(`${roomId}:${platform}:${userId}`)
-  const removedPersisted = platformAuthRepo.remove(userId, platform)
+  if (persist) {
+    platformAuthRepo.remove(userId, platform)
+  }
   const pool = roomCookiePool.get(roomId)
-  if (!pool) return removedPersisted
+  if (!pool) return false
   const entries = pool.get(platform)
-  if (!entries) return removedPersisted
+  if (!entries) return false
   const idx = entries.findIndex((e) => e.userId === userId)
-  if (idx === -1) return removedPersisted
+  if (idx === -1) return false
   const removed = entries.splice(idx, 1)[0]
   logger.info(`用户“${removed.nickname}”已在房间 ${roomId} 退出 ${platform}`, {
     event: 'auth.account_removed',
@@ -414,6 +419,7 @@ export function getUserAuthStatus(userId: string, roomId: string): MyPlatformAut
       platform,
       loggedIn: !!entry,
       nickname: entry?.nickname,
+      avatarUrl: entry?.avatarUrl,
       vipType: entry?.vipType,
       vipLabel: entry?.vipLabel,
       vipLevel: entry?.vipLevel,

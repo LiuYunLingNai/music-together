@@ -552,11 +552,11 @@ export async function checkQrStatus(key: string): Promise<{ status: number; mess
  * Fetch user nickname from Kugou's user center API.
  * Requires RSA-encrypted auth payload.
  */
-async function fetchUserDetail(cookie: Record<string, string>, edition: KugouEdition): Promise<string | null> {
+async function fetchUserDetail(cookie: Record<string, string>, edition: KugouEdition): Promise<{ nickname: string | null; avatarUrl?: string }> {
   try {
     const token = cookie['token']
     const userid = Number(cookie['userid'] || '0')
-    if (!token || !userid) return null
+    if (!token || !userid) return { nickname: null }
 
     const clienttime = Math.floor(Date.now() / 1000)
     const pk = rsaEncrypt({ token, clienttime }).toUpperCase()
@@ -580,15 +580,16 @@ async function fetchUserDetail(cookie: Record<string, string>, edition: KugouEdi
 
     const d = body?.data as Record<string, unknown> | undefined
     const nickname = String(d?.nick_name || d?.nickname || d?.userName || '')
+    const avatarUrl = d?.pic ? String(d.pic).replace(/^http:\/\//, 'https://') : undefined
     if (nickname) {
       logger.debug('已获取酷狗用户资料', { nickname })
     } else {
       logger.warn('Kugou user detail: no nickname found in response', { keys: Object.keys(d || {}) })
     }
-    return nickname || null
+    return { nickname: nickname || null, avatarUrl }
   } catch (err) {
     logger.warn('Kugou fetchUserDetail failed (non-critical)', err as Record<string, unknown>)
-    return null
+    return { nickname: null }
   }
 }
 
@@ -751,13 +752,14 @@ async function getUserInfoForEdition(cookie: string, edition: KugouEdition): Pro
 
     const membership = parseKugouMembership(vipData, edition === 'concept')
 
-    // Fetch nickname (non-blocking — fallback to userid if failed)
-    const nickname = await fetchUserDetail({ token, userid }, edition)
+    // Fetch nickname and avatar (non-blocking — fallback to userid if failed)
+    const detail = await fetchUserDetail({ token, userid }, edition)
 
     return {
       ok: true,
       data: {
-        nickname: nickname || `酷狗用户${userid}`,
+        nickname: detail.nickname || `酷狗用户${userid}`,
+        avatarUrl: detail.avatarUrl,
         ...membership,
         userId: Number(userid),
       },

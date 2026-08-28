@@ -84,6 +84,8 @@ export interface ServerToClientEvents {
     message: string
     platform?: MusicSource
     cookie?: string
+    nickname?: string
+    avatarUrl?: string
     reason?: 'expired' | 'error' | 'reauth_required'
   }) => void
   [EVENTS.AUTH_STATUS_UPDATE]: (data: PlatformAuthStatus[]) => void

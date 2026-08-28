@@ -10,11 +10,22 @@ import { userRepo } from '../repositories/userRepository.js'
 import { audioProxyPolicyRepo } from '../repositories/audioProxyPolicyRepository.js'
 import { backupSettingsRepo } from '../repositories/backupSettingsRepository.js'
 import { globalBackgroundRepo } from '../repositories/globalBackgroundRepository.js'
+import { platformAuthRepo } from '../repositories/platformAuthRepository.js'
 import { databasePath } from '../repositories/database.js'
+import { config } from '../config.js'
 import { destroyRoom } from '../services/roomLifecycleService.js'
-import { refreshBackupScheduler } from '../services/backupService.js'
+import {
+  createManualBackup,
+  deleteBackup,
+  isBackupRunning,
+  listBackups,
+  refreshBackupScheduler,
+} from '../services/backupService.js'
+import { kickUserFromRoom } from '../services/roomService.js'
+import { estimateCurrentTime } from '../services/syncService.js'
+import * as authService from '../services/authService.js'
 import { logger } from '../utils/logger.js'
-import { EVENTS } from '@music-together/shared'
+import { EVENTS, musicSourceSchema } from '@music-together/shared'
 
 function auditContext(req: Request): Record<string, unknown> {
   return {
@@ -94,6 +105,44 @@ export function createAdminRoutes(io: TypedServer): Router {
   const router = Router()
   router.use(requireServerAdmin)
 
+  // -------------------------------------------------------------------------
+  // 概览：一次请求聚合版本/用户/房间信息，减少前端多次往返
+  // -------------------------------------------------------------------------
+  router.get('/overview', (req, res) => {
+    const users = userRepo.list()
+    const rooms = Array.from(roomRepo.getAll().values())
+    logger.info('服务器管理员查看了系统概览', {
+      event: 'admin.overview_viewed',
+      ...auditContext(req),
+      userCount: users.length,
+      roomCount: rooms.length,
+    })
+    res.json({
+      version: config.version,
+      healthy: true,
+      users: users.map((user) => ({
+        id: user.id,
+        nickname: user.nickname,
+        avatarUrl: user.avatarUrl,
+        role: user.role,
+        hasPassword: Boolean(user.passwordHash),
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+        lastSeenAt: user.lastSeenAt,
+      })),
+      rooms: rooms.map((room) => ({
+        id: room.id,
+        name: room.name,
+        creatorId: room.creatorId,
+        userCount: room.users.length,
+        hasPassword: room.password !== null,
+        hidden: room.hidden,
+        permanent: room.permanent,
+        currentTrackTitle: room.currentTrack?.title ?? null,
+      })),
+    })
+  })
+
   router.get('/audio-proxy-policy', (req, res) => {
     const policy = audioProxyPolicyRepo.get()
     logger.info('服务器管理员查看了音频代理策略', {
@@ -121,7 +170,7 @@ export function createAdminRoutes(io: TypedServer): Router {
 
   router.get('/backup-settings', (req, res) => {
     const settings = backupSettingsRepo.get()
-    logger.info('Server administrator viewed backup settings', {
+    logger.info('服务器管理员查看了备份设置', {
       event: 'admin.backup_settings_viewed',
       ...auditContext(req),
     })
@@ -138,7 +187,7 @@ export function createAdminRoutes(io: TypedServer): Router {
     const previous = backupSettingsRepo.get()
     const settings = backupSettingsRepo.update(parsed.data)
     refreshBackupScheduler(!previous.enabled && settings.enabled)
-    logger.info('Server administrator updated backup settings', {
+    logger.info('服务器管理员更新了备份设置', {
       event: 'admin.backup_settings_updated',
       ...auditContext(req),
       ...settings,
@@ -370,6 +419,195 @@ export function createAdminRoutes(io: TypedServer): Router {
       event: 'admin.room_dissolved',
       ...auditContext(req),
       ...roomAudit,
+    })
+    res.status(204).send()
+  })
+
+  // -------------------------------------------------------------------------
+  // 房间详情 / 移出成员（不含密码等敏感字段）
+  // -------------------------------------------------------------------------
+  router.get('/rooms/:roomId', (req, res) => {
+    const room = roomRepo.get(req.params.roomId)
+    if (!room) {
+      res.status(404).json({ error: 'Room not found' })
+      return
+    }
+    logger.info('服务器管理员查看了房间详情', {
+      event: 'admin.room_detail_viewed',
+      ...auditContext(req),
+      targetRoomId: room.id,
+    })
+    res.json({
+      id: room.id,
+      name: room.name,
+      creatorId: room.creatorId,
+      hostId: room.hostId,
+      hasPassword: room.password !== null,
+      hidden: room.hidden,
+      permanent: room.permanent,
+      audioQuality: room.audioQuality,
+      playMode: room.playMode,
+      isPlaying: room.playState.isPlaying,
+      currentTime: room.playState.isPlaying ? estimateCurrentTime(room.id) : room.playState.currentTime,
+      currentTrack: room.currentTrack
+        ? { id: room.currentTrack.id, title: room.currentTrack.title, artist: room.currentTrack.artist, source: room.currentTrack.source }
+        : null,
+      queue: room.queue.map((track) => ({ id: track.id, title: track.title, artist: track.artist, source: track.source })),
+      members: room.members.map((member) => ({
+        id: member.id,
+        nickname: member.nickname,
+        avatarUrl: member.avatarUrl,
+        role: member.role,
+        isOnline: member.isOnline,
+        lastSeenAt: member.lastSeenAt ?? null,
+      })),
+    })
+  })
+
+  router.post('/rooms/:roomId/kick/:userId', (req, res) => {
+    const result = kickUserFromRoom(req.params.roomId, req.params.userId, io)
+    if (!result.kicked) {
+      logger.warn('服务器管理员移出成员操作失败', {
+        event: 'admin.room_kick_failed',
+        ...auditContext(req),
+        targetRoomId: req.params.roomId,
+        targetUserId: req.params.userId,
+        reason: 'not_found',
+      })
+      res.status(404).json({ error: 'Room or member not found' })
+      return
+    }
+    logger.info(`服务器管理员将用户 ${req.params.userId} 移出房间 ${req.params.roomId}`, {
+      event: 'admin.room_kicked',
+      ...auditContext(req),
+      targetRoomId: req.params.roomId,
+      targetUserId: req.params.userId,
+      targetNickname: result.nickname,
+    })
+    res.status(204).send()
+  })
+
+  // -------------------------------------------------------------------------
+  // 备份文件管理（列表/手动备份/删除）
+  // -------------------------------------------------------------------------
+  router.get('/backups', async (req, res) => {
+    try {
+      const backups = await listBackups()
+      logger.info('服务器管理员查看了备份列表', {
+        event: 'admin.backups_viewed',
+        ...auditContext(req),
+        resultCount: backups.length,
+      })
+      res.json({ backups, running: isBackupRunning() })
+    } catch (err) {
+      logger.error('获取备份列表失败', err, auditContext(req))
+      res.status(500).json({ error: '获取备份列表失败' })
+    }
+  })
+
+  router.post('/backups/run', async (req, res) => {
+    if (isBackupRunning()) {
+      res.status(409).json({ error: '已有备份任务正在进行' })
+      return
+    }
+    try {
+      const name = await createManualBackup()
+      logger.info('服务器管理员手动创建了备份', {
+        event: 'admin.backup_created',
+        ...auditContext(req),
+        backupName: name,
+      })
+      res.json({ name })
+    } catch (err) {
+      logger.error('手动备份失败', err, auditContext(req))
+      res.status(500).json({ error: '备份失败，请查看服务端日志' })
+    }
+  })
+
+  router.delete('/backups/:name', async (req, res) => {
+    try {
+      const deleted = await deleteBackup(req.params.name)
+      if (!deleted) {
+        res.status(404).json({ error: '备份不存在' })
+        return
+      }
+      logger.info('服务器管理员删除了备份', {
+        event: 'admin.backup_deleted',
+        ...auditContext(req),
+        backupName: req.params.name,
+      })
+      res.status(204).send()
+    } catch (err) {
+      if (err instanceof Error && err.message === 'Invalid backup name') {
+        res.status(400).json({ error: '非法的备份名称' })
+        return
+      }
+      logger.error('删除备份失败', err, auditContext(req))
+      res.status(500).json({ error: '删除备份失败' })
+    }
+  })
+
+  // -------------------------------------------------------------------------
+  // 用户音乐平台授权（仅返回元信息，绝不返回 cookie）
+  // -------------------------------------------------------------------------
+  router.get('/users/:userId/platform-auths', (req, res) => {
+    const user = userRepo.get(req.params.userId)
+    if (!user) {
+      res.status(404).json({ error: 'User not found' })
+      return
+    }
+    const auths = platformAuthRepo.loadUser(user.id).map((auth) => ({
+      platform: auth.platform,
+      nickname: auth.nickname,
+      vipType: auth.vipType,
+      vipLabel: auth.vipLabel ?? null,
+      vipLevel: auth.vipLevel ?? null,
+      avatarUrl: auth.avatarUrl ?? null,
+      credentialRefreshAttemptedAt: auth.credentialRefreshAttemptedAt ?? null,
+    }))
+    logger.info('服务器管理员查看了用户平台授权列表', {
+      event: 'admin.platform_auths_viewed',
+      ...auditContext(req),
+      targetUserId: user.id,
+      resultCount: auths.length,
+    })
+    res.json({ auths })
+  })
+
+  router.delete('/users/:userId/platform-auths/:platform', (req, res) => {
+    const parsed = musicSourceSchema.safeParse(req.params.platform)
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid platform' })
+      return
+    }
+    const user = userRepo.get(req.params.userId)
+    if (!user) {
+      res.status(404).json({ error: 'User not found' })
+      return
+    }
+    const removed = platformAuthRepo.remove(user.id, parsed.data)
+    if (!removed) {
+      res.status(404).json({ error: 'Platform auth not found' })
+      return
+    }
+
+    // Also remove from in-memory room cookie pool and notify user's sockets
+    const platform = parsed.data
+    for (const [roomId] of roomRepo.getAll()) {
+      const socketId = roomRepo.getSocketIdForUser(roomId, user.id)
+      if (socketId) {
+        authService.removeCookie(roomId, platform, user.id, false)
+        // Each socket auto-joins a room named after its own ID, so io.to(socketId) is unicast
+        io.to(socketId).emit(EVENTS.AUTH_MY_STATUS, authService.getUserAuthStatus(user.id, roomId))
+        io.to(roomId).emit(EVENTS.AUTH_STATUS_UPDATE, authService.getAllPlatformStatus(roomId))
+      }
+    }
+
+    logger.info('服务器管理员解除了用户平台授权', {
+      event: 'admin.platform_auth_revoked',
+      ...auditContext(req),
+      targetUserId: user.id,
+      platform,
     })
     res.status(204).send()
   })

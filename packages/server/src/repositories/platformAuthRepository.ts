@@ -12,6 +12,7 @@ export interface PersistedPlatformAuth {
   vipType: number
   vipLabel?: string
   vipLevel?: number
+  avatarUrl?: string
   credentialRefreshAttemptedAt?: number
 }
 
@@ -23,6 +24,7 @@ interface PlatformAuthRow {
   vip_type: number | null
   vip_label: string | null
   vip_level: number | null
+  avatar_url: string | null
   credential_refresh_attempted_at: number | null
 }
 
@@ -36,17 +38,19 @@ const upsertAuth = db.prepare(`
     vip_type,
     vip_label,
     vip_level,
+    avatar_url,
     credential_refresh_attempted_at,
     created_at,
     updated_at
   )
-  VALUES (@id, @userId, @platform, @cookie, @nickname, @vipType, @vipLabel, @vipLevel, @refreshAttemptedAt, @now, @now)
+  VALUES (@id, @userId, @platform, @cookie, @nickname, @vipType, @vipLabel, @vipLevel, @avatarUrl, @refreshAttemptedAt, @now, @now)
   ON CONFLICT(id) DO UPDATE SET
     cookie_encrypted = excluded.cookie_encrypted,
     nickname_snapshot = excluded.nickname_snapshot,
     vip_type = excluded.vip_type,
     vip_label = excluded.vip_label,
     vip_level = excluded.vip_level,
+    avatar_url = excluded.avatar_url,
     credential_refresh_attempted_at = COALESCE(
       excluded.credential_refresh_attempted_at,
       platform_auth.credential_refresh_attempted_at
@@ -54,10 +58,10 @@ const upsertAuth = db.prepare(`
     updated_at = excluded.updated_at
 `)
 const loadUserAuth = db.prepare<[string], PlatformAuthRow>(
-  'SELECT user_id, platform, cookie_encrypted, nickname_snapshot, vip_type, vip_label, vip_level, credential_refresh_attempted_at FROM platform_auth WHERE user_id = ? ORDER BY updated_at DESC',
+  'SELECT user_id, platform, cookie_encrypted, nickname_snapshot, vip_type, vip_label, vip_level, avatar_url, credential_refresh_attempted_at FROM platform_auth WHERE user_id = ? ORDER BY updated_at DESC',
 )
 const loadDueTencentAuth = db.prepare<[number], PlatformAuthRow>(
-  `SELECT user_id, platform, cookie_encrypted, nickname_snapshot, vip_type, vip_label, vip_level, credential_refresh_attempted_at
+  `SELECT user_id, platform, cookie_encrypted, nickname_snapshot, vip_type, vip_label, vip_level, avatar_url, credential_refresh_attempted_at
    FROM platform_auth
    WHERE platform = 'tencent' AND (credential_refresh_attempted_at IS NULL OR credential_refresh_attempted_at <= ?)
    ORDER BY updated_at ASC`,
@@ -107,6 +111,7 @@ export const platformAuthRepo = {
       vipType: entry.vipType,
       vipLabel: entry.vipLabel ?? null,
       vipLevel: entry.vipLevel ?? null,
+      avatarUrl: entry.avatarUrl ?? null,
       refreshAttemptedAt: options?.resetCredentialRefreshSchedule ? now : (entry.credentialRefreshAttemptedAt ?? null),
       now,
     })
@@ -133,6 +138,7 @@ export const platformAuthRepo = {
                 vipType: row.vip_type ?? 0,
                 vipLabel: row.vip_label ?? undefined,
                 vipLevel: row.vip_level ?? undefined,
+                avatarUrl: row.avatar_url ?? undefined,
                 credentialRefreshAttemptedAt: row.credential_refresh_attempted_at ?? undefined,
               },
             ]
@@ -157,6 +163,7 @@ export const platformAuthRepo = {
               vipType: row.vip_type ?? 0,
               vipLabel: row.vip_label ?? undefined,
               vipLevel: row.vip_level ?? undefined,
+              avatarUrl: row.avatar_url ?? undefined,
               credentialRefreshAttemptedAt: row.credential_refresh_attempted_at ?? undefined,
             },
           ]

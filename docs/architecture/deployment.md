@@ -7,6 +7,7 @@
 ```
 Docker 容器 (:3001)
 ├── / 静态文件        → client/dist（Vite 产物）
+├── /admin 静态文件   → admin/dist（管理后台，base: /admin/）
 ├── /api/*           → REST API
 └── /ws              → 原生 WebSocket JSON 事件协议
 ```
@@ -22,7 +23,7 @@ Docker 容器 (:3001)
 ## Docker 多阶段构建
 
 - **阶段 1（deps）**：`pnpm install --frozen-lockfile` 安装全部依赖
-- **阶段 2（build）**：分别构建 shared、server（tsc）、client（vite build）
+- **阶段 2（build）**：分别构建 shared、server（tsc）、client（vite build）、admin（vite build，base `/admin/`）
 - **阶段 3（production）**：仅安装 server 生产依赖（`--filter @music-together/server...`），复制构建产物
 
 生产镜像沿用旧版直接启动方式，不主动修改历史绑定目录的属主或权限；容器通过 `/api/health` 执行健康检查。
@@ -46,10 +47,14 @@ Docker 容器 (:3001)
 
 ## 静态文件托管
 
-`packages/server/src/index.ts` 在启动时检测 `client/dist/index.html` 是否存在：
+`packages/server/src/index.ts` 在启动时分别检测 `client/dist/index.html` 与 `admin/dist/index.html` 是否存在：
 
-- **存在**（生产环境）：挂载 `express.static` + SPA fallback
-- **不存在**（本地开发）：跳过，零影响
+- **存在**（生产环境）：挂载 `express.static` + SPA fallback；admin 挂载在 `/admin` 路径且位于客户端 catch-all 之前，深层路由（如 `/admin/users`）回退到 admin 的 `index.html`
+- **不存在**（本地开发）：跳过，零影响；开发时用 `pnpm --filter @music-together/admin dev` 通过 Vite 代理访问
+
+## 管理后台首次初始化
+
+服务器尚无任何管理员（数据库无 `admin` 角色且未配置 `SERVER_ADMIN_IDS`）时，访问 `/admin` 会引导阅读使用声明并同意后创建首个管理员（公开端点 `GET /api/admin/setup-status`、`POST /api/admin/setup`，事务保证并发下仅创建一个）；初始化完成后该窗口永久关闭，追加管理员需配置 `SERVER_ADMIN_IDS`。
 
 ## 服务器部署命令
 

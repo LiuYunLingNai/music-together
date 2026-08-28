@@ -16,6 +16,8 @@ export const ERROR_CODE = {
   NO_VOTE_NEEDED: 'NO_VOTE_NEEDED',
   VOTE_IN_PROGRESS: 'VOTE_IN_PROGRESS',
   ALREADY_VOTED: 'ALREADY_VOTED',
+  /** 被服务器管理员移出房间（旧客户端按普通错误提示处理） */
+  KICKED_BY_ADMIN: 'KICKED_BY_ADMIN',
 } as const
 
 export type ErrorCode = (typeof ERROR_CODE)[keyof typeof ERROR_CODE]
@@ -327,6 +329,7 @@ export interface MyPlatformAuth {
   platform: MusicSource
   loggedIn: boolean
   nickname?: string
+  avatarUrl?: string
   vipType?: number
   vipLabel?: string
   vipLevel?: number

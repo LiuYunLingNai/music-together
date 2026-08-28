@@ -1,16 +1,20 @@
 import { timingSafeEqual } from 'node:crypto'
 import type { AudioQuality, ClientInfo, RoomListItem, RoomMember, User, UserRole } from '@music-together/shared'
+import { EVENTS, ERROR_CODE } from '@music-together/shared'
 import { nanoid } from 'nanoid'
 import type { RoomData } from '../repositories/types.js'
 import { roomRepo } from '../repositories/roomRepository.js'
 import { chatRepo } from '../repositories/chatRepository.js'
-import { scheduleDeletion, cancelDeletionTimer } from './roomLifecycleService.js'
+import { scheduleDeletion, cancelDeletionTimer, broadcastRoomList } from './roomLifecycleService.js'
 import { consumeRejoinTicket } from './rejoinTicketService.js'
 import { estimateCurrentTime } from './syncService.js'
-import { updateVoteThreshold } from './voteService.js'
+import * as voteService from './voteService.js'
+import { executeVoteAction } from './voteActionService.js'
+import { createSystemMessage } from './chatService.js'
 import { logger } from '../utils/logger.js'
 import type { TypedServer } from '../middleware/types.js'
 import { userRepo } from '../repositories/userRepository.js'
+import { toPublicRoomState } from '../utils/roomUtils.js'
 
 // Re-export from their new homes so existing `roomService.xxx()` callers
 // in controllers don't need import changes.
@@ -412,7 +416,7 @@ export function leaveRoom(
   roomRepo.persist(roomId)
 
   // Update active vote threshold so it doesn't become impossible to pass
-  const voteUpdated = updateVoteThreshold(roomId, room.users.length, user.id)
+  const voteUpdated = voteService.updateVoteThreshold(roomId, room.users.length, user.id)
 
   logger.info(`用户“${user.nickname}”离开房间 ${roomId}`, {
     event: 'room.user_left',
@@ -425,6 +429,100 @@ export function leaveRoom(
     roleChanged,
   })
   return { roomId, user, room, hostChanged, roleChanged, voteUpdated, staleSocketOnly: false }
+}
+
+// ---------------------------------------------------------------------------
+// 服务器管理员：将成员移出房间（kick）
+// ---------------------------------------------------------------------------
+
+/** 重新协调进行中的投票并广播；成员变化可能改变投票结果时复用。 */
+export async function reconcileAndBroadcastVote(io: TypedServer, roomId: string, room: RoomData): Promise<void> {
+  const result = voteService.reconcileVote(
+    roomId,
+    room.users.map((user) => user.id),
+    room.hostId,
+  )
+  if (!result) return
+  if (!result.decided) {
+    io.to(roomId).emit(EVENTS.VOTE_STARTED, voteService.toVoteState(result.vote))
+    return
+  }
+
+  const claimedVote = voteService.claimVote(roomId, result.vote.id)
+  if (!claimedVote) return
+  const executed = result.passed ? await executeVoteAction(io, roomId, claimedVote.action, claimedVote.payload) : false
+  io.to(roomId).emit(EVENTS.VOTE_RESULT, {
+    passed: result.passed && executed,
+    action: claimedVote.action,
+    reason: result.passed && !executed ? 'action_failed' : result.reason,
+  })
+}
+
+/**
+ * 服务器管理员将指定用户移出房间：
+ * 在线用户复用 leaveRoom 完成全部状态清理（角色/主持/投票阈值），
+ * 被移出者的所有连接会收到 KICKED_BY_ADMIN 并回到大厅；
+ * 仅在离线名册中的成员直接从 members 列表移除。
+ */
+export function kickUserFromRoom(
+  roomId: string,
+  userId: string,
+  io: TypedServer,
+): { kicked: boolean; nickname: string | null } {
+  const room = roomRepo.get(roomId)
+  if (!room) return { kicked: false, nickname: null }
+  const onlineUser = room.users.find((item) => item.id === userId)
+  const offlineMember = onlineUser ? null : room.members.find((item) => item.id === userId)
+  if (!onlineUser && !offlineMember) return { kicked: false, nickname: null }
+
+  // 先收集该用户在房间内的所有连接（leaveRoom 循环会逐个清理映射）
+  const targetSockets = io.getSocketsInRoom(roomId).filter((socket) => {
+    const mapping = roomRepo.getSocketMapping(socket.id)
+    return mapping?.roomId === roomId && mapping.userId === userId
+  })
+
+  let leaveResult: ReturnType<typeof leaveRoom> = null
+  for (const socket of targetSockets) {
+    leaveResult = leaveRoom(socket.id, io)
+  }
+
+  // 仅存在于离线名册：直接从成员列表移除并持久化
+  if (!onlineUser && offlineMember) {
+    room.members = room.members.filter((item) => item.id !== userId)
+    roomRepo.persist(roomId)
+  }
+
+  // 通知被移出用户的所有连接并回到大厅（旧客户端按普通错误提示处理）
+  for (const socket of targetSockets) {
+    socket.leave(roomId)
+    socket.join('lobby')
+    socket.emit(EVENTS.ROOM_ERROR, { code: ERROR_CODE.KICKED_BY_ADMIN, message: '你已被服务器管理员移出房间' })
+  }
+
+  const nickname = onlineUser?.nickname ?? offlineMember?.nickname ?? userId
+  if (leaveResult && !leaveResult.staleSocketOnly) {
+    io.to(roomId).emit(EVENTS.ROOM_USER_LEFT, leaveResult.user)
+    const kickMessage = createSystemMessage(roomId, `${nickname} 已被服务器管理员移出房间`)
+    if (room.users.length > 0) io.to(roomId).emit(EVENTS.CHAT_MESSAGE, kickMessage)
+    if ((leaveResult.hostChanged || leaveResult.roleChanged) && room.users.length > 0) {
+      io.to(roomId).emit(EVENTS.ROOM_STATE, toPublicRoomState(room))
+    }
+    if (leaveResult.voteUpdated) void reconcileAndBroadcastVote(io, roomId, room)
+  } else if (offlineMember) {
+    const kickMessage = createSystemMessage(roomId, `${nickname} 已被服务器管理员移出房间`)
+    if (room.users.length > 0) io.to(roomId).emit(EVENTS.CHAT_MESSAGE, kickMessage)
+  }
+  broadcastRoomList(io)
+
+  logger.info(`服务器管理员将用户“${nickname}”移出房间 ${roomId}`, {
+    event: 'room.user_kicked',
+    roomId,
+    userId,
+    nickname,
+    wasOnline: Boolean(onlineUser),
+    onlineUsers: room.users.length,
+  })
+  return { kicked: true, nickname }
 }
 
 // ---------------------------------------------------------------------------

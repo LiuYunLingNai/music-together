@@ -23,28 +23,6 @@ import { executeVoteAction } from '../services/voteActionService.js'
 import { logger } from '../utils/logger.js'
 import * as authService from '../services/authService.js'
 
-async function reconcileAndBroadcastVote(io: TypedServer, roomId: string, room: RoomData): Promise<void> {
-  const result = voteService.reconcileVote(
-    roomId,
-    room.users.map((user) => user.id),
-    room.hostId,
-  )
-  if (!result) return
-  if (!result.decided) {
-    io.to(roomId).emit(EVENTS.VOTE_STARTED, voteService.toVoteState(result.vote))
-    return
-  }
-
-  const claimedVote = voteService.claimVote(roomId, result.vote.id)
-  if (!claimedVote) return
-  const executed = result.passed ? await executeVoteAction(io, roomId, claimedVote.action, claimedVote.payload) : false
-  io.to(roomId).emit(EVENTS.VOTE_RESULT, {
-    passed: result.passed && executed,
-    action: claimedVote.action,
-    reason: result.passed && !executed ? 'action_failed' : result.reason,
-  })
-}
-
 export function registerRoomController(io: TypedServer, socket: TypedSocket) {
   const withRoom = createWithRoom(io)
   const withOwnerOnly = createWithOwnerOnly(io)
@@ -197,7 +175,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         logger.error('syncPlaybackToSocket failed', err, { roomId })
       })
 
-      await reconcileAndBroadcastVote(io, roomId, updatedRoom)
+      await roomService.reconcileAndBroadcastVote(io, roomId, updatedRoom)
 
       // Send active vote state if one is in progress
       const activeVote = voteService.getActiveVote(roomId)
@@ -474,7 +452,7 @@ function handleLeave(io: TypedServer, socket: TypedSocket, reason?: string, revo
 
   // Broadcast updated vote state after threshold recalculation
   if (voteUpdated) {
-    if (room) void reconcileAndBroadcastVote(io, roomId, room)
+    if (room) void roomService.reconcileAndBroadcastVote(io, roomId, room)
   }
 
   // 更新大厅房间列表

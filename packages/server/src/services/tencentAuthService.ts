@@ -56,6 +56,8 @@ interface ProfileData {
     nick?: string
     name?: string
     encrypt_uin?: string
+    headpic?: string
+    pic?: string
   }
 }
 
@@ -876,6 +878,11 @@ export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
       ok: true,
       data: {
         nickname,
+        avatarUrl: creator.headpic
+          ? String(creator.headpic).replace(/^http:\/\//, 'https://')
+          : creator.pic
+            ? String(creator.pic).replace(/^http:\/\//, 'https://')
+            : undefined,
         ...membership,
         userId: Number(uin),
       },
