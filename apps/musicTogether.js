@@ -10,11 +10,7 @@ import { renderSearchResults } from "../components/SearchRenderer.js"
 import { renderHelp } from "../components/HelpRenderer.js"
 import { renderTrackCard } from "../components/TrackRenderer.js"
 import Config from "../components/Config.js"
-import {
-  closeSession,
-  getSession,
-  reconnectSessionsForIdentity,
-} from "../components/MTSocket.js"
+import { closeSession, getSession, reconnectSessionsForIdentity } from "../components/MTSocket.js"
 import {
   EVENTS,
   MUSIC_SOURCES,
@@ -57,11 +53,7 @@ function identityKey(e) {
 
 function nickname(e, api = getMTApi(identityKey(e))) {
   return String(
-    api.profileNickname ||
-      Config.room.nickname ||
-      e.sender?.card ||
-      e.sender?.nickname ||
-      "Yunzai",
+    api.profileNickname || Config.room.nickname || e.sender?.card || e.sender?.nickname || "Yunzai",
   ).slice(0, 20)
 }
 
@@ -133,7 +125,9 @@ function formatTrack(track, index) {
 function imageTrack(track) {
   return {
     ...track,
-    artistText: Array.isArray(track.artist) ? track.artist.join("、") : String(track.artist || "未知歌手"),
+    artistText: Array.isArray(track.artist)
+      ? track.artist.join("、")
+      : String(track.artist || "未知歌手"),
     sourceText: SOURCE_NAMES[track.source] || track.source || "未知音源",
   }
 }
@@ -181,7 +175,13 @@ async function downloadTrackAudio(track, roomId, api) {
 
 async function pushTrackToGroup(session, track) {
   if (!pushEnabled(session.groupId) || !track) return
-  const card = pushTrackFormat(session.groupId) === "image" ? await renderTrackCard(track) : false
+  const card =
+    pushTrackFormat(session.groupId) === "image"
+      ? await renderTrackCard(track, {
+          roomName: session.roomState?.name,
+          listenerCount: session.roomState?.users?.length,
+        })
+      : false
   await pushToGroup(session.groupId, card || trackPushMessage(track))
   if (!pushAudioEnabled(session.groupId)) return
   let audioFile
@@ -276,9 +276,7 @@ export class MusicTogether extends plugin {
     if (!raw || /^(帮助|菜单)$/.test(raw)) return this.showHelp()
 
     const compactPlay = /^(点歌|播放)(\d+)$/.exec(raw)
-    const [command, ...args] = compactPlay
-      ? [compactPlay[1], compactPlay[2]]
-      : raw.split(/\s+/)
+    const [command, ...args] = compactPlay ? [compactPlay[1], compactPlay[2]] : raw.split(/\s+/)
     const rest = args.join(" ").trim()
     try {
       switch (command) {
@@ -628,8 +626,17 @@ export class MusicTogether extends plugin {
     ]
     const cover = track.cover || track.thumbnailCover
     const songInfo = lines.join("\n")
-    const infoResult = await this.reply(cover ? [songInfo, segment.image(cover)] : songInfo)
-    if (replyFailed(infoResult) && cover) await this.reply(songInfo)
+    const useImageCard = pushTrackFormat(groupKey(e)) === "image"
+    const card = useImageCard
+      ? await renderTrackCard(track, {
+          roomName: session.roomState?.name,
+          listenerCount: session.roomState?.users?.length,
+        })
+      : false
+    const infoResult = await this.reply(
+      card || (cover ? [songInfo, segment.image(cover)] : songInfo),
+    )
+    if (replyFailed(infoResult) && (card || cover)) await this.reply(songInfo)
 
     let audioFile
     try {
@@ -682,7 +689,9 @@ export class MusicTogether extends plugin {
       !e.member?.is_owner
     )
       return this.reply("当前配置要求群管理员才能控制播放")
-    const role = session.roomState?.users?.find(user => user.id === session.api.identityUserId)?.role
+    const role = session.roomState?.users?.find(
+      user => user.id === session.api.identityUserId,
+    )?.role
     const voteAction = {
       [EVENTS.PLAYER_PAUSE]: "pause",
       [EVENTS.PLAYER_PLAY]: "resume",
@@ -712,7 +721,9 @@ export class MusicTogether extends plugin {
       !e.member?.is_owner
     )
       return this.reply("当前配置要求群管理员才能切换模式")
-    const role = session.roomState?.users?.find(user => user.id === session.api.identityUserId)?.role
+    const role = session.roomState?.users?.find(
+      user => user.id === session.api.identityUserId,
+    )?.role
     if (role === "member")
       session.send(EVENTS.VOTE_START, { action: "set-mode", payload: { mode } })
     else session.send(EVENTS.PLAYER_SET_MODE, { mode })
@@ -783,7 +794,9 @@ export class MusicTogether extends plugin {
     if (Config.permission.bindMasterOnly && !e.isMaster)
       return this.reply("只有主人可以修改当前群的一起听歌推送")
 
-    const normalized = String(value || "").trim().toLowerCase()
+    const normalized = String(value || "")
+      .trim()
+      .toLowerCase()
     const imageActions = new Set(["图片", "纯图片", "图", "image"])
     const textActions = new Set(["图文", "文字", "文字图片", "text"])
     if (!imageActions.has(normalized) && !textActions.has(normalized))
@@ -804,7 +817,9 @@ export class MusicTogether extends plugin {
     if (Config.permission.bindMasterOnly && !e.isMaster)
       return this.reply("只有主人可以修改当前群的一起听歌推送")
 
-    const normalized = String(value || "").trim().toLowerCase()
+    const normalized = String(value || "")
+      .trim()
+      .toLowerCase()
     const enableActions = new Set(["开启", "打开", "启用", "开", "发送", "on", "true", "1"])
     const disableActions = new Set(["关闭", "关掉", "停用", "关", "不发", "off", "false", "0"])
     if (!enableActions.has(normalized) && !disableActions.has(normalized))
