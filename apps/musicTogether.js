@@ -7,6 +7,7 @@ import { Readable } from "node:stream"
 import { pipeline } from "node:stream/promises"
 import { getMTApi } from "../components/MTApi.js"
 import { renderSearchResults } from "../components/SearchRenderer.js"
+import { renderHelp } from "../components/HelpRenderer.js"
 import Config from "../components/Config.js"
 import {
   closeSession,
@@ -347,26 +348,10 @@ export class MusicTogether extends plugin {
     }
   }
 
-  showHelp() {
-    return this.reply(
-      [
-        "Music Together 一起听歌",
-        "一起听歌创建 [房间名] [密码]",
-        "一起听歌加入 <房间号> [密码]",
-        "一起听歌搜索 [音源] <关键词>",
-        "一起听歌热歌 [音源] / 推荐",
-        "一起听歌歌单 <音源> <歌单ID>",
-        "一起听歌登录 <账号ID> <密码>（支持私聊，每个QQ独立保存）",
-        "一起听歌更新 / 升级（仅主人，更新插件代码后请重启）",
-        "一起听歌点歌 <序号>",
-        "一起听歌当前歌曲 / 发歌 / 发送歌曲",
-        "一起听歌状态 / 列表 / 暂停 / 继续 / 下一首 / 上一首",
-        "一起听歌模式 <顺序|列表循环|单曲循环|随机>",
-        "一起听歌聊天 <内容> / 推送 <开启|关闭|状态>",
-        "一起听歌分享 / 退出",
-        "绑定和解绑操作默认仅限主人",
-      ].join("\n"),
-    )
+  async showHelp() {
+    const image = await renderHelp()
+    if (image) return this.reply(image)
+    return this.reply("帮助图生成失败，请检查 Yunzai Puppeteer/Chromium 渲染器配置")
   }
 
   async createRoom(e, text) {

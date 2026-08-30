@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{title}}</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; width: 980px; color: #f7f8ff; font-family: "Microsoft YaHei", "PingFang SC", sans-serif; background: #12162b; }
+      .container { padding: 42px 44px 34px; background: radial-gradient(circle at 100% 0%, #62548f 0, transparent 38%), radial-gradient(circle at 0% 100%, #236d73 0, transparent 44%), #12162b; }
+      .header { padding-bottom: 26px; border-bottom: 1px solid rgba(255,255,255,.2); }
+      h1 { margin: 0; font-size: 40px; letter-spacing: 2px; }
+      .subtitle { margin-top: 9px; color: #cbd0e8; font-size: 19px; }
+      .prefix { display: inline-block; margin-top: 18px; padding: 7px 14px; color: #a9fff0; background: rgba(125,242,220,.1); border: 1px solid rgba(169,255,240,.3); border-radius: 99px; font-size: 16px; }
+      .groups { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 24px; }
+      .group { padding: 18px 18px 12px; border: 1px solid rgba(255,255,255,.14); border-radius: 20px; background: rgba(255,255,255,.1); box-shadow: 0 12px 28px rgba(0,0,0,.16); }
+      .group-title { margin-bottom: 12px; color: #9fe8dc; font-size: 23px; font-weight: bold; }
+      .item { padding: 9px 0; border-top: 1px solid rgba(255,255,255,.1); }
+      .command { color: #fff; font-size: 17px; font-weight: bold; }
+      .desc { margin-top: 3px; color: #c9cde0; font-size: 14px; }
+      .footer { margin-top: 24px; color: #aeb5d2; font-size: 15px; text-align: center; }
+    </style>
+  </head>
+  <body>
+    <main class="container">
+      <header class="header">
+        <h1>{{title}}</h1>
+        <div class="subtitle">{{subtitle}}</div>
+        <div class="prefix">命令前缀：#一起听歌　（也支持不加 #）</div>
+      </header>
+      <section class="groups">
+        {{each groups group}}
+        <article class="group">
+          <div class="group-title">{{group.name}}</div>
+          {{each group.items item}}
+          <div class="item"><div class="command">一起听歌{{item[0]}}</div><div class="desc">{{item[1]}}</div></div>
+          {{/each}}
+        </article>
+        {{/each}}
+      </section>
+      <footer class="footer">Music Together · TRSS-Yunzai</footer>
+    </main>
+  </body>
+</html>
