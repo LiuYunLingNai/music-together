@@ -8,6 +8,7 @@ import { pipeline } from "node:stream/promises"
 import { getMTApi } from "../components/MTApi.js"
 import { renderSearchResults } from "../components/SearchRenderer.js"
 import { renderHelp } from "../components/HelpRenderer.js"
+import { renderTrackCard } from "../components/TrackRenderer.js"
 import Config from "../components/Config.js"
 import {
   closeSession,
@@ -75,6 +76,14 @@ function bindingWithRoom(e, roomId, password = "") {
 
 function pushEnabled(groupId) {
   return Config.getBinding(String(groupId))?.push?.enabled === true
+}
+
+function pushTrackFormat(groupId) {
+  return Config.getBinding(String(groupId))?.push?.trackFormat === "image" ? "image" : "text"
+}
+
+function pushAudioEnabled(groupId) {
+  return Config.getBinding(String(groupId))?.push?.audio !== false
 }
 
 function savePushEnabled(groupId, enabled) {
@@ -172,7 +181,9 @@ async function downloadTrackAudio(track, roomId, api) {
 
 async function pushTrackToGroup(session, track) {
   if (!pushEnabled(session.groupId) || !track) return
-  await pushToGroup(session.groupId, trackPushMessage(track))
+  const card = pushTrackFormat(session.groupId) === "image" ? await renderTrackCard(track) : false
+  await pushToGroup(session.groupId, card || trackPushMessage(track))
+  if (!pushAudioEnabled(session.groupId)) return
   let audioFile
   try {
     audioFile = await downloadTrackAudio(track, session.roomId, session.api)
@@ -325,6 +336,20 @@ export class MusicTogether extends plugin {
           return await this.chat(e, rest)
         case "推送":
           return await this.setPush(e, rest)
+        case "推送格式":
+        case "推送样式":
+        case "推送模式":
+          return await this.setPushFormat(e, rest)
+        case "推送音频":
+          return await this.setPushAudio(e, rest)
+        case "推送图片":
+          return await this.setPushFormat(e, "图片")
+        case "推送图文":
+          return await this.setPushFormat(e, "图文")
+        case "推送音频开启":
+          return await this.setPushAudio(e, "开启")
+        case "推送音频关闭":
+          return await this.setPushAudio(e, "关闭")
         case "推送开启":
         case "开启推送":
           return await this.setPush(e, "开启")
@@ -713,11 +738,22 @@ export class MusicTogether extends plugin {
       .toLowerCase()
     const enableActions = new Set(["开启", "打开", "启用", "开", "on", "true", "1"])
     const disableActions = new Set(["关闭", "关掉", "停用", "关", "off", "false", "0"])
+    const imageActions = new Set(["图片", "纯图片", "图", "image"])
+    const textActions = new Set(["图文", "文字", "文字图片", "text"])
+    const audioActions = new Set(["音频", "声音", "audio"])
+    const noAudioActions = new Set(["无音频", "不发音频", "关闭音频", "静音", "noaudio"])
+
+    if (imageActions.has(normalized)) return this.setPushFormat(e, "图片")
+    if (textActions.has(normalized)) return this.setPushFormat(e, "图文")
+    if (audioActions.has(normalized)) return this.setPushAudio(e, "开启")
+    if (noAudioActions.has(normalized)) return this.setPushAudio(e, "关闭")
 
     if (!enableActions.has(normalized) && !disableActions.has(normalized)) {
       const enabled = binding.push?.enabled === true
+      const format = binding.push?.trackFormat === "image" ? "纯图片" : "图文"
+      const audio = binding.push?.audio === false ? "不发送" : "发送"
       return this.reply(
-        `当前群一起听歌推送：${enabled ? "已开启" : "已关闭"}\n推送内容：播放歌曲、房间聊天${Config.chat.notifyUserChange ? "、成员进出" : ""}`,
+        `当前群一起听歌推送：${enabled ? "已开启" : "已关闭"}\n歌曲样式：${format}\n歌曲音频：${audio}\n推送内容：播放歌曲、房间聊天${Config.chat.notifyUserChange ? "、成员进出" : ""}`,
       )
     }
 
@@ -738,6 +774,48 @@ export class MusicTogether extends plugin {
     }
 
     return this.reply(`✅ 当前群一起听歌推送已${enabled ? "开启" : "关闭"}`)
+  }
+
+  async setPushFormat(e, value) {
+    const key = groupKey(e)
+    const binding = Config.getBinding(key)
+    if (!binding?.roomId) return this.reply("本群尚未绑定房间，请先加入或创建一起听歌房间")
+    if (Config.permission.bindMasterOnly && !e.isMaster)
+      return this.reply("只有主人可以修改当前群的一起听歌推送")
+
+    const normalized = String(value || "").trim().toLowerCase()
+    const imageActions = new Set(["图片", "纯图片", "图", "image"])
+    const textActions = new Set(["图文", "文字", "文字图片", "text"])
+    if (!imageActions.has(normalized) && !textActions.has(normalized))
+      return this.reply("用法：一起听歌推送格式 <图文|图片>")
+
+    const trackFormat = imageActions.has(normalized) ? "image" : "text"
+    Config.setBinding(key, {
+      ...binding,
+      push: { ...(binding.push || {}), trackFormat },
+    })
+    return this.reply(`✅ 当前群歌曲推送样式已设为：${trackFormat === "image" ? "纯图片" : "图文"}`)
+  }
+
+  async setPushAudio(e, value) {
+    const key = groupKey(e)
+    const binding = Config.getBinding(key)
+    if (!binding?.roomId) return this.reply("本群尚未绑定房间，请先加入或创建一起听歌房间")
+    if (Config.permission.bindMasterOnly && !e.isMaster)
+      return this.reply("只有主人可以修改当前群的一起听歌推送")
+
+    const normalized = String(value || "").trim().toLowerCase()
+    const enableActions = new Set(["开启", "打开", "启用", "开", "发送", "on", "true", "1"])
+    const disableActions = new Set(["关闭", "关掉", "停用", "关", "不发", "off", "false", "0"])
+    if (!enableActions.has(normalized) && !disableActions.has(normalized))
+      return this.reply("用法：一起听歌推送音频 <开启|关闭>")
+
+    const audio = enableActions.has(normalized)
+    Config.setBinding(key, {
+      ...binding,
+      push: { ...(binding.push || {}), audio },
+    })
+    return this.reply(`✅ 当前群歌曲推送音频已${audio ? "开启" : "关闭"}`)
   }
 
   async share(e) {

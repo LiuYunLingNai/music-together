@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{track.title}}</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; width: 900px; color: #f8f9ff; font-family: "Microsoft YaHei", "PingFang SC", sans-serif; background: #15182c; }
+      .card { display: flex; min-height: 300px; padding: 34px; gap: 30px; align-items: center; background: radial-gradient(circle at 100% 0%, #665493 0, transparent 48%), radial-gradient(circle at 0% 100%, #227576 0, transparent 50%), #15182c; }
+      .cover { width: 232px; height: 232px; flex: 0 0 232px; border-radius: 22px; object-fit: cover; box-shadow: 0 16px 34px rgba(0,0,0,.35); background: linear-gradient(135deg,#7987dc,#32b5ac); }
+      .info { min-width: 0; }
+      .label { color: #aaffef; font-size: 17px; letter-spacing: 2px; }
+      h1 { margin: 10px 0 18px; overflow: hidden; font-size: 38px; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+      .row { overflow: hidden; margin: 9px 0; color: #d5d9ec; font-size: 20px; text-overflow: ellipsis; white-space: nowrap; }
+      .source { display: inline-block; margin-top: 12px; padding: 5px 13px; color: #b7fff5; border: 1px solid rgba(183,255,245,.35); border-radius: 99px; font-size: 15px; }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      {{if track.cover}}<img class="cover" src="{{track.cover}}" />{{else}}<div class="cover"></div>{{/if}}
+      <section class="info">
+        <div class="label">▶ 正在播放</div>
+        <h1>{{track.title}}</h1>
+        <div class="row">歌手：{{track.artist}}</div>
+        <div class="row">专辑：{{track.album}}</div>
+        <span class="source">{{track.source}}</span>
+      </section>
+    </main>
+  </body>
+</html>

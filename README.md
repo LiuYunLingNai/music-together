@@ -24,6 +24,8 @@ git clone -b yunzai-plugin https://github.com/LiuYunLingNai/music-together.git .
 #一起听歌发歌
 #一起听歌聊天 <内容>
 #一起听歌推送 <开启|关闭|状态>
+#一起听歌推送格式 <图文|图片>
+#一起听歌推送音频 <开启|关闭>
 #一起听歌更新
 #一起听歌状态
 #一起听歌列表
@@ -34,5 +36,7 @@ git clone -b yunzai-plugin https://github.com/LiuYunLingNai/music-together.git .
 `#一起听歌发歌` 会发送当前歌曲信息、封面和音频。开启群推送后，插件会实时转发播放歌曲信息、封面、音频和房间聊天。
 
 主人可以发送 `#一起听歌更新` 从 `yunzai-plugin` 分支快进更新插件；更新成功后请重启 Yunzai。
+
+推送样式和是否发送音频按群保存。默认发送图文和音频，可用 `#一起听歌推送格式 图片` 切换为纯图片，用 `#一起听歌推送音频 关闭` 停止发送音频。
 
 账号身份会按 QQ 用户分别保存；群内登录会将当前群切换到该账号，私聊登录不会改变其他用户的账号。房间密码和群绑定保存在 `config/config/`，该目录不会提交到 Git。
