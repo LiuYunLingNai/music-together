@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{title}}</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        width: 980px;
+        color: #f5f7ff;
+        font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+        background: #14172a;
+      }
+      .container {
+        padding: 34px 38px 30px;
+        background: radial-gradient(circle at 100% 0%, #51478a 0, transparent 38%),
+          radial-gradient(circle at 0% 100%, #1f6070 0, transparent 42%), #14172a;
+      }
+      .header { display: flex; align-items: end; justify-content: space-between; margin-bottom: 22px; }
+      h1 { margin: 0; font-size: 34px; letter-spacing: 1px; }
+      .subtitle { margin-top: 8px; color: #c7cbe4; font-size: 18px; }
+      .hint { color: #aeb5d2; font-size: 16px; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+      .track {
+        display: flex; min-height: 112px; padding: 12px; gap: 14px; align-items: center;
+        border: 1px solid rgba(255,255,255,.13); border-radius: 18px;
+        background: rgba(255,255,255,.1); box-shadow: 0 10px 26px rgba(0,0,0,.16);
+      }
+      .cover { width: 88px; height: 88px; flex: 0 0 88px; border-radius: 12px; object-fit: cover; background: linear-gradient(135deg,#7784d8,#35b6ad); }
+      .meta { min-width: 0; }
+      .index { color: #9fe6dd; font-size: 14px; font-weight: bold; }
+      .name { margin: 4px 0 5px; overflow: hidden; color: #fff; font-size: 21px; font-weight: bold; text-overflow: ellipsis; white-space: nowrap; }
+      .line { overflow: hidden; color: #d4d8ec; font-size: 16px; text-overflow: ellipsis; white-space: nowrap; }
+      .source { display: inline-block; margin-top: 6px; padding: 2px 8px; color: #b8fff4; border: 1px solid rgba(184,255,244,.35); border-radius: 99px; font-size: 12px; }
+      .footer { margin-top: 20px; color: #b7bdd8; font-size: 16px; text-align: center; }
+      @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <main class="container">
+      <header class="header">
+        <div><h1>{{title}}</h1><div class="subtitle">{{subtitle}}</div></div>
+        <div class="hint">发送「一起听歌点歌 序号」加入队列</div>
+      </header>
+      <section class="grid">
+        {{each tracks track index}}
+        <article class="track">
+          {{if track.cover}}<img class="cover" src="{{track.cover}}" />{{else}}<div class="cover"></div>{{/if}}
+          <div class="meta">
+            <div class="index">NO. {{index + 1}}</div>
+            <div class="name">{{track.title}}</div>
+            <div class="line">{{track.artistText}}</div>
+            <div class="line">{{track.album}}</div>
+            <span class="source">{{track.sourceText}}</span>
+          </div>
+        </article>
+        {{/each}}
+      </section>
+      <footer class="footer">Music Together · Yunzai 一起听歌</footer>
+    </main>
+  </body>
+</html>

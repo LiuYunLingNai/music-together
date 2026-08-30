@@ -6,6 +6,7 @@ import path from "node:path"
 import { Readable } from "node:stream"
 import { pipeline } from "node:stream/promises"
 import { getMTApi } from "../components/MTApi.js"
+import { renderSearchResults } from "../components/SearchRenderer.js"
 import Config from "../components/Config.js"
 import { closeSession, getSession, reconnectSessionsForIdentity } from "../components/MTSocket.js"
 import {
@@ -108,7 +109,17 @@ function formatTrack(track, index) {
   const duration = track.duration
     ? ` ${Math.floor(track.duration / 60)}:${String(Math.floor(track.duration % 60)).padStart(2, "0")}`
     : ""
-  return `${index}. ${track.title} - ${artists}${duration} [${SOURCE_NAMES[track.source] || track.source}]`
+  return `${index + 1}. ${track.title} - ${artists}${duration} [${SOURCE_NAMES[track.source] || track.source}]`
+}
+
+function imageTrack(track) {
+  return {
+    ...track,
+    artistText: Array.isArray(track.artist)
+      ? track.artist.join("、")
+      : String(track.artist || "未知歌手"),
+    sourceText: SOURCE_NAMES[track.source] || track.source || "未知音源",
+  }
 }
 
 function sendToGroup(groupId, message) {
@@ -138,6 +149,34 @@ function trackPushMessage(track) {
   return cover ? [text, segment.image(cover)] : text
 }
 
+async function downloadTrackAudio(track, roomId, api) {
+  const response = await api.download({ roomId, trackId: String(track.id), quality: 128 })
+  if (!response.body) throw new Error("Music Together 返回了空音频")
+  await mkdir(audioTempDir, { recursive: true })
+  const file = path.join(audioTempDir, `${randomUUID()}${audioExtension(response)}`)
+  try {
+    await pipeline(Readable.fromWeb(response.body), createWriteStream(file))
+    return file
+  } catch (error) {
+    await unlink(file).catch(() => {})
+    throw error
+  }
+}
+
+async function pushTrackToGroup(session, track) {
+  if (!pushEnabled(session.groupId) || !track) return
+  await pushToGroup(session.groupId, trackPushMessage(track))
+  let audioFile
+  try {
+    audioFile = await downloadTrackAudio(track, session.roomId, session.api)
+    await pushToGroup(session.groupId, segment.record(audioFile))
+  } catch (error) {
+    logger.warn(`${Log_Prefix} 群 ${session.groupId} 播放歌曲音频推送失败：${error.message}`)
+  } finally {
+    if (audioFile) await unlink(audioFile).catch(() => {})
+  }
+}
+
 function wireNotifications(session) {
   if (session[notificationWired]) return
   session[notificationWired] = true
@@ -161,8 +200,7 @@ function wireNotifications(session) {
       void pushToGroup(session.groupId, `❎ ${error.message}`)
   })
   session.on("trackChange", track => {
-    if (!pushEnabled(session.groupId) || !track) return
-    void pushToGroup(session.groupId, trackPushMessage(track))
+    void pushTrackToGroup(session, track)
   })
   session.on("error", error =>
     logger.debug(`${Log_Prefix} 群 ${session.groupId} WebSocket：${error.message}`),
@@ -403,13 +441,16 @@ export class MusicTogether extends plugin {
       .filter(track => track.id)
     this.cacheTracks(e, tracks)
     if (!tracks.length) return this.reply("没有找到相关歌曲")
-    return this.reply(
-      [
+    return this.replyTrackResults(e, {
+      title: "🔎 搜索结果",
+      subtitle: `${SOURCE_NAMES[source] || source}：${keyword}`,
+      tracks,
+      fallback: [
         `🔎 ${SOURCE_NAMES[source] || source}：${keyword}`,
         ...tracks.map(formatTrack),
         "发送“一起听歌点歌 序号”加入队列",
       ].join("\n"),
-    )
+    })
   }
 
   cacheTracks(e, tracks) {
@@ -417,6 +458,16 @@ export class MusicTogether extends plugin {
       tracks,
       expiresAt: Date.now() + Number(Config.music.searchExpireMinutes || 5) * 60_000,
     })
+  }
+
+  async replyTrackResults(e, { title, subtitle, tracks, fallback }) {
+    const image = await renderSearchResults({
+      title,
+      subtitle,
+      tracks: tracks.map(imageTrack),
+    })
+    if (image) return this.reply(image)
+    return this.reply(fallback)
   }
 
   async hot(e, text) {
@@ -434,13 +485,16 @@ export class MusicTogether extends plugin {
       .filter(track => track.id)
     this.cacheTracks(e, tracks)
     if (!tracks.length) return this.reply("热歌榜暂时为空")
-    return this.reply(
-      [
+    return this.replyTrackResults(e, {
+      title: "🔥 热歌榜",
+      subtitle: result.name || `${SOURCE_NAMES[source]}热歌榜`,
+      tracks,
+      fallback: [
         `🔥 ${result.name || SOURCE_NAMES[source] + "热歌榜"}`,
         ...tracks.map(formatTrack),
         "发送“一起听歌点歌 序号”加入队列",
       ].join("\n"),
-    )
+    })
   }
 
   async recommend(e) {
@@ -454,13 +508,17 @@ export class MusicTogether extends plugin {
       .filter(track => track.id)
     this.cacheTracks(e, tracks)
     if (!tracks.length) return this.reply("暂无可用推荐，请先在 Music Together 中登录音乐平台")
-    return this.reply(
-      [
+    const displayTracks = tracks.slice(0, 30)
+    return this.replyTrackResults(e, {
+      title: "✨ 为你推荐",
+      subtitle: "Music Together 推荐歌曲",
+      tracks: displayTracks,
+      fallback: [
         "✨ 为你推荐",
-        ...tracks.slice(0, 30).map(formatTrack),
+        ...displayTracks.map(formatTrack),
         "发送“一起听歌点歌 序号”加入队列",
       ].join("\n"),
-    )
+    })
   }
 
   async playlist(e, args) {
@@ -555,7 +613,7 @@ export class MusicTogether extends plugin {
 
     let audioFile
     try {
-      audioFile = await this.downloadCurrentAudio(track, session.roomId, session.api)
+      audioFile = await downloadTrackAudio(track, session.roomId, session.api)
       const localResult = await this.reply(segment.record(audioFile))
       if (!replyFailed(localResult)) return true
       throw new Error(replyError(localResult))
@@ -567,20 +625,6 @@ export class MusicTogether extends plugin {
       return true
     } finally {
       if (audioFile) await unlink(audioFile).catch(() => {})
-    }
-  }
-
-  async downloadCurrentAudio(track, roomId, api) {
-    const response = await api.download({ roomId, trackId: String(track.id), quality: 128 })
-    if (!response.body) throw new Error("Music Together 返回了空音频")
-    await mkdir(audioTempDir, { recursive: true })
-    const file = path.join(audioTempDir, `${randomUUID()}${audioExtension(response)}`)
-    try {
-      await pipeline(Readable.fromWeb(response.body), createWriteStream(file))
-      return file
-    } catch (error) {
-      await unlink(file).catch(() => {})
-      throw error
     }
   }
 
@@ -697,7 +741,7 @@ export class MusicTogether extends plugin {
       const session = await this.ensureSession(e)
       savePushEnabled(key, true)
       if (session.roomState?.currentTrack)
-        await pushToGroup(key, trackPushMessage(session.roomState.currentTrack))
+        await pushTrackToGroup(session, session.roomState.currentTrack)
     } else {
       savePushEnabled(key, false)
     }
