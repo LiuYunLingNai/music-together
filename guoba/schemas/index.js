@@ -49,6 +49,11 @@ export const schemas = [
   },
   { component: "Divider", label: "群聊权限与转发" },
   { field: "permission.bindMasterOnly", label: "绑定/解绑仅限主人", component: "Switch" },
+  {
+    field: "permission.authMasterOnly",
+    label: "群内账号登录仅限主人",
+    component: "Switch",
+  },
   { field: "permission.controlGroupAdmin", label: "播放控制需要群管理", component: "Switch" },
   { field: "chat.roomToGroup", label: "房间聊天转发到群", component: "Switch" },
   { field: "chat.notifyUserChange", label: "转发成员进出通知", component: "Switch" },

@@ -116,6 +116,21 @@ class Config {
     return this.getDefOrConfig("auth").identity ?? {}
   }
 
+  /** 按 Yunzai 用户保存的 Music Together 身份 */
+  get identities() {
+    return this.getDefOrConfig("auth").identities ?? {}
+  }
+
+  /**
+   * 获取指定 Yunzai 用户的 Music Together 身份。
+   * `legacy` 用于兼容升级前的全局身份。
+   * @param {string|number} identityKey
+   */
+  getAuth(identityKey = "legacy") {
+    const key = this.normalizeIdentityKey(identityKey)
+    return key === "legacy" ? this.auth : (this.identities?.[key] ?? {})
+  }
+
   /**
    * 合并默认配置与用户配置
    * @param {string} name 配置文件名
@@ -236,24 +251,36 @@ class Config {
     return this.bindings?.[groupKey]
   }
 
+  normalizeIdentityKey(identityKey) {
+    return String(identityKey || "legacy").replace(/[^A-Za-z0-9_-]/g, "_")
+  }
+
   /**
    * 保存 Music Together 身份，不保存账号密码。
-   * @param {object} identity
+   * @param {string|number|object} identityKey
+   * @param {object} [identity]
    */
-  setAuth(identity) {
+  setAuth(identityKey, identity) {
+    if (identity === undefined && identityKey && typeof identityKey === "object") {
+      identity = identityKey
+      identityKey = "legacy"
+    }
+    const key = this.normalizeIdentityKey(identityKey)
+    const prefix = key === "legacy" ? "identity" : `identities.${key}`
+    const value = identity || {}
     return this.setConfigs(
       [
-        { key: "identity.token", value: identity.token || "" },
-        { key: "identity.userId", value: identity.userId || "" },
-        { key: "identity.expiresAt", value: Number(identity.expiresAt) || 0 },
-        { key: "identity.profile", value: identity.profile || null },
+        { key: `${prefix}.token`, value: value.token || "" },
+        { key: `${prefix}.userId`, value: value.userId || "" },
+        { key: `${prefix}.expiresAt`, value: Number(value.expiresAt) || 0 },
+        { key: `${prefix}.profile`, value: value.profile || null },
       ],
       "auth",
     )
   }
 
-  clearAuth() {
-    return this.setAuth({})
+  clearAuth(identityKey = "legacy") {
+    return this.setAuth(identityKey, {})
   }
 }
 

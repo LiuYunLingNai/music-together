@@ -5,9 +5,9 @@ import { mkdir, unlink } from "node:fs/promises"
 import path from "node:path"
 import { Readable } from "node:stream"
 import { pipeline } from "node:stream/promises"
-import MTApi from "../components/MTApi.js"
+import { getMTApi } from "../components/MTApi.js"
 import Config from "../components/Config.js"
-import { closeSession, getSession } from "../components/MTSocket.js"
+import { closeSession, getSession, reconnectSessionsForIdentity } from "../components/MTSocket.js"
 import {
   EVENTS,
   MUSIC_SOURCES,
@@ -44,13 +44,13 @@ function groupKey(e) {
   return e.group_id ? String(e.group_id) : `private:${e.user_id}`
 }
 
-function nickname(e) {
+function identityKey(e) {
+  return Config.normalizeIdentityKey(e.user_id || "legacy")
+}
+
+function nickname(e, api = getMTApi(identityKey(e))) {
   return String(
-    MTApi.profileNickname ||
-      Config.room.nickname ||
-      e.sender?.card ||
-      e.sender?.nickname ||
-      "Yunzai",
+    api.profileNickname || Config.room.nickname || e.sender?.card || e.sender?.nickname || "Yunzai",
   ).slice(0, 20)
 }
 
@@ -59,6 +59,7 @@ function bindingWithRoom(e, roomId, password = "") {
     ...(Config.getBinding(groupKey(e)) || {}),
     roomId: String(roomId),
     password,
+    accountUserId: identityKey(e),
   }
 }
 
@@ -171,14 +172,14 @@ function wireNotifications(session) {
 async function restorePushSessions() {
   for (const [groupId, binding] of Object.entries(Config.bindings)) {
     if (!binding?.roomId || binding.push?.enabled !== true) continue
-    const session = getSession(groupId)
+    const session = getSession(groupId, binding.accountUserId || "legacy")
     wireNotifications(session)
     if (session.connected && session.roomState && session.roomId === String(binding.roomId))
       continue
     try {
       await session.join(
         binding.roomId,
-        String(MTApi.profileNickname || Config.room.nickname || "Yunzai").slice(0, 20),
+        String(session.api.profileNickname || Config.room.nickname || "Yunzai").slice(0, 20),
         binding.password || undefined,
         session.rejoinToken,
       )
@@ -213,8 +214,9 @@ export class MusicTogether extends plugin {
   }
 
   async handle(e) {
-    if (!e.isGroup) return this.reply("一起听歌命令仅支持群聊")
     const raw = e.msg.replace(/^#?(?:一起听歌|音乐同听)/, "").trim()
+    if (!e.isGroup && !/^(?:登录|登陆)(?:\s+.*)?$/.test(raw))
+      return this.reply("私聊仅支持“一起听歌登录 <账号ID> <密码>”")
     if (!raw || /^(帮助|菜单)$/.test(raw)) return this.showHelp()
 
     const [command, ...args] = raw.split(/\s+/)
@@ -307,7 +309,7 @@ export class MusicTogether extends plugin {
         "一起听歌搜索 [音源] <关键词>",
         "一起听歌热歌 [音源] / 推荐",
         "一起听歌歌单 <音源> <歌单ID>",
-        "一起听歌登录 <账号ID> <密码>",
+        "一起听歌登录 <账号ID> <密码>（支持私聊，每个QQ独立保存）",
         "一起听歌点歌 <序号>",
         "一起听歌当前歌曲 / 发歌 / 发送歌曲",
         "一起听歌状态 / 列表 / 暂停 / 继续 / 下一首 / 上一首",
@@ -324,10 +326,10 @@ export class MusicTogether extends plugin {
       return this.reply("只有主人可以创建并绑定听歌房间")
     const [roomName, ...passwordParts] = text ? text.split(/\s+/) : []
     const password = passwordParts.join(" ") || undefined
-    const session = getSession(groupKey(e))
+    const session = getSession(groupKey(e), identityKey(e))
     wireNotifications(session)
     const created = await session.create({
-      nickname: nickname(e),
+      nickname: nickname(e, session.api),
       roomName: roomName || Config.room.defaultRoomName,
       password,
     })
@@ -341,9 +343,9 @@ export class MusicTogether extends plugin {
     const roomId = args[0]
     if (!roomId) return this.reply("用法：一起听歌加入 <房间号> [密码]")
     const password = args.slice(1).join(" ") || undefined
-    const session = getSession(groupKey(e))
+    const session = getSession(groupKey(e), identityKey(e))
     wireNotifications(session)
-    await session.join(roomId, nickname(e), password)
+    await session.join(roomId, nickname(e, session.api), password)
     Config.setBinding(groupKey(e), bindingWithRoom(e, roomId, password || ""))
     return this.reply(`✅ 已加入房间 ${roomId}`)
   }
@@ -369,12 +371,12 @@ export class MusicTogether extends plugin {
     const binding = Config.getBinding(groupKey(e))
     if (!binding?.roomId)
       throw new Error("本群尚未绑定房间，请先使用“一起听歌加入”或“一起听歌创建”")
-    const session = getSession(groupKey(e))
+    const session = getSession(groupKey(e), binding.accountUserId || "legacy")
     wireNotifications(session)
     if (!session.connected || !session.roomState || session.roomId !== String(binding.roomId)) {
       await session.join(
         binding.roomId,
-        nickname(e),
+        nickname(e, session.api),
         binding.password || undefined,
         session.rejoinToken,
       )
@@ -390,7 +392,7 @@ export class MusicTogether extends plugin {
     const keyword = (maybeSource ? parts.slice(1) : parts).join(" ").trim()
     if (!keyword) return this.reply("请输入搜索关键词")
     const session = await this.ensureSession(e)
-    const result = await MTApi.search({
+    const result = await session.api.search({
       source,
       keyword,
       limit: Config.music.searchLimit,
@@ -422,7 +424,7 @@ export class MusicTogether extends plugin {
     if (!["netease", "tencent", "kugou"].includes(source))
       return this.reply("热歌仅支持网易云、QQ音乐和酷狗")
     const session = await this.ensureSession(e)
-    const result = await MTApi.hotSongs({
+    const result = await session.api.hotSongs({
       source,
       roomId: session.roomId,
       limit: Config.music.hotSongsLimit,
@@ -443,7 +445,7 @@ export class MusicTogether extends plugin {
 
   async recommend(e) {
     const session = await this.ensureSession(e)
-    const result = await MTApi.recommendations({
+    const result = await session.api.recommendations({
       roomId: session.roomId,
       limit: Config.music.searchLimit,
     })
@@ -467,7 +469,7 @@ export class MusicTogether extends plugin {
     if (!id) return this.reply("用法：一起听歌歌单 <音源> <歌单ID>")
     const actualSource = source || Config.music.defaultSource || "netease"
     const session = await this.ensureSession(e)
-    const result = await MTApi.playlist({
+    const result = await session.api.playlist({
       source: actualSource,
       id,
       limit: Config.music.playlistLimit,
@@ -482,21 +484,40 @@ export class MusicTogether extends plugin {
   }
 
   async login(e, text) {
-    if (Config.permission.authMasterOnly && !e.isMaster)
+    if (e.isGroup && Config.permission.authMasterOnly && !e.isMaster)
       return this.reply("只有主人可以登录 Music Together 账号")
     const parts = text.trim().split(/\s+/)
     const accountId = parts.shift()
     const password = parts.join(" ")
     if (!accountId || !password) return this.reply("用法：一起听歌登录 <账号ID> <密码>")
 
-    const session = getSession(groupKey(e))
-    const result = await MTApi.recoverIdentity(accountId, password)
-    const profile = await MTApi.getProfile().catch(() => null)
-    session.roomNickname = profile?.nickname || MTApi.profileNickname || session.roomNickname
-    if (session.connected || session.roomId) await session.reconnect()
+    const userIdentityKey = identityKey(e)
+    const api = getMTApi(userIdentityKey)
+    const result = await api.recoverIdentity(accountId, password)
+    const profile = await api.getProfile().catch(() => null)
+    await reconnectSessionsForIdentity(userIdentityKey)
+
+    if (e.isGroup) {
+      const key = groupKey(e)
+      const binding = Config.getBinding(key)
+      if (binding?.roomId) {
+        Config.setBinding(key, { ...binding, accountUserId: userIdentityKey })
+        closeSession(key)
+        const session = getSession(key, userIdentityKey)
+        wireNotifications(session)
+        await session.join(
+          binding.roomId,
+          profile?.nickname || api.profileNickname || Config.room.nickname || "Yunzai",
+          binding.password || undefined,
+        )
+      }
+    }
     const name = profile?.nickname ? `（${profile.nickname}）` : ""
+    const scope = e.isGroup
+      ? "当前群已切换为此账号，登录状态按你的QQ独立保存"
+      : "登录状态已按你的QQ独立保存；回群后由你执行加入、创建或登录即可使用此账号"
     return this.reply(
-      `✅ Music Together 账号登录成功${name}\n账号：${result?.userId || accountId}\n登录状态已保存，重启后仍会使用此账号`,
+      `✅ Music Together 账号登录成功${name}\n账号：${result?.userId || accountId}\n${scope}`,
     )
   }
 
@@ -534,7 +555,7 @@ export class MusicTogether extends plugin {
 
     let audioFile
     try {
-      audioFile = await this.downloadCurrentAudio(track, session.roomId)
+      audioFile = await this.downloadCurrentAudio(track, session.roomId, session.api)
       const localResult = await this.reply(segment.record(audioFile))
       if (!replyFailed(localResult)) return true
       throw new Error(replyError(localResult))
@@ -549,8 +570,8 @@ export class MusicTogether extends plugin {
     }
   }
 
-  async downloadCurrentAudio(track, roomId) {
-    const response = await MTApi.download({ roomId, trackId: String(track.id), quality: 128 })
+  async downloadCurrentAudio(track, roomId, api) {
+    const response = await api.download({ roomId, trackId: String(track.id), quality: 128 })
     if (!response.body) throw new Error("Music Together 返回了空音频")
     await mkdir(audioTempDir, { recursive: true })
     const file = path.join(audioTempDir, `${randomUUID()}${audioExtension(response)}`)
@@ -597,7 +618,9 @@ export class MusicTogether extends plugin {
       !e.member?.is_owner
     )
       return this.reply("当前配置要求群管理员才能控制播放")
-    const role = session.roomState?.users?.find(user => user.id === MTApi.identityUserId)?.role
+    const role = session.roomState?.users?.find(
+      user => user.id === session.api.identityUserId,
+    )?.role
     const voteAction = {
       [EVENTS.PLAYER_PAUSE]: "pause",
       [EVENTS.PLAYER_PLAY]: "resume",
@@ -627,7 +650,9 @@ export class MusicTogether extends plugin {
       !e.member?.is_owner
     )
       return this.reply("当前配置要求群管理员才能切换模式")
-    const role = session.roomState?.users?.find(user => user.id === MTApi.identityUserId)?.role
+    const role = session.roomState?.users?.find(
+      user => user.id === session.api.identityUserId,
+    )?.role
     if (role === "member")
       session.send(EVENTS.VOTE_START, { action: "set-mode", payload: { mode } })
     else session.send(EVENTS.PLAYER_SET_MODE, { mode })
@@ -682,14 +707,15 @@ export class MusicTogether extends plugin {
 
   async share(e) {
     const session = await this.ensureSession(e)
-    const result = await MTApi.roomShareQr(session.roomId)
+    const result = await session.api.roomShareQr(session.roomId)
     if (result?.qrimg)
       return this.reply([`房间 ${session.roomId} 分享二维码`, segment.image(result.qrimg)])
     return this.reply(result?.url || result?.link || `房间号：${session.roomId}`)
   }
 
   async leaveRoom(e) {
-    const session = getSession(groupKey(e))
+    const binding = Config.getBinding(groupKey(e))
+    const session = getSession(groupKey(e), binding?.accountUserId || "legacy")
     session.leave()
     return this.reply("✅ 已退出听歌房间（绑定仍保留，可再次进入）")
   }

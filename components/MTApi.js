@@ -10,8 +10,9 @@ const IDENTITY_COOKIE_NAME = "mt_identity"
  * 由 POST /api/auth/identity/bootstrap 签发，HTTP 与 WebSocket handshake 共用。
  */
 class MTApi {
-  constructor() {
-    const savedIdentity = Config.auth
+  constructor(identityKey = "legacy") {
+    this.identityKey = Config.normalizeIdentityKey(identityKey)
+    const savedIdentity = Config.getAuth(this.identityKey)
     /** @type {string|null} 当前持有的 mt_identity token */
     this.identityToken = savedIdentity.token ? String(savedIdentity.token) : null
     /** @type {string|null} 服务端返回的用户 id */
@@ -62,7 +63,7 @@ class MTApi {
   }
 
   #persistIdentity() {
-    Config.setAuth({
+    Config.setAuth(this.identityKey, {
       token: this.identityToken,
       userId: this.identityUserId,
       expiresAt: this.identityExpiresAt,
@@ -76,7 +77,7 @@ class MTApi {
     this.identityUserId = null
     this.identityExpiresAt = 0
     this.identityProfile = null
-    Config.clearAuth()
+    Config.clearAuth(this.identityKey)
   }
 
   /**
@@ -410,4 +411,21 @@ class MTApi {
   }
 }
 
-export default new MTApi()
+const apiClients = new Map()
+
+export function getMTApi(identityKey = "legacy") {
+  const key = Config.normalizeIdentityKey(identityKey)
+  let api = apiClients.get(key)
+  if (!api) {
+    api = new MTApi(key)
+    apiClients.set(key, api)
+  }
+  return api
+}
+
+export function removeMTApi(identityKey) {
+  apiClients.delete(Config.normalizeIdentityKey(identityKey))
+}
+
+export { MTApi }
+export default getMTApi("legacy")

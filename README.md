@@ -18,7 +18,7 @@ git clone -b yunzai-plugin https://github.com/LiuYunLingNai/music-together.git .
 #一起听歌帮助
 #一起听歌创建 [房间名] [密码]
 #一起听歌加入 <房间号> [密码]
-#一起听歌登录 <账号ID> <密码>
+#一起听歌登录 <账号ID> <密码>（私聊登录，每个QQ独立保存）
 #一起听歌搜索 [音源] <关键词>
 #一起听歌点歌 <序号>
 #一起听歌发歌
@@ -32,4 +32,4 @@ git clone -b yunzai-plugin https://github.com/LiuYunLingNai/music-together.git .
 
 `#一起听歌发歌` 会发送当前歌曲信息、封面和音频。开启群推送后，插件会实时转发播放歌曲和房间聊天。
 
-账号身份、房间密码和群绑定保存在 `config/config/`，该目录不会提交到 Git。
+账号身份会按 QQ 用户分别保存；群内登录会将当前群切换到该账号，私聊登录不会改变其他用户的账号。房间密码和群绑定保存在 `config/config/`，该目录不会提交到 Git。

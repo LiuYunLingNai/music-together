@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events"
 import { WebSocket } from "ws"
 import Config from "./Config.js"
-import MTApi from "./MTApi.js"
+import { getMTApi } from "./MTApi.js"
 import { EVENTS, TIMING, Log_Prefix } from "./Constants.js"
 
 const sessions = new Map()
@@ -15,9 +15,11 @@ function timeoutError(event) {
  * 会话只负责协议和状态，不直接发送 QQ 消息，便于命令与事件通知复用。
  */
 class MTSocket extends EventEmitter {
-  constructor(groupId) {
+  constructor(groupId, identityKey = "legacy") {
     super()
     this.groupId = String(groupId)
+    this.identityKey = Config.normalizeIdentityKey(identityKey)
+    this.api = getMTApi(this.identityKey)
     this.ws = null
     this.roomId = null
     this.roomState = null
@@ -42,9 +44,9 @@ class MTSocket extends EventEmitter {
 
     this.closedByUser = false
     this.connectPromise = (async () => {
-      await MTApi.bootstrap()
-      const ws = new WebSocket(MTApi.wsUrl, {
-        headers: MTApi.cookieHeader ? { Cookie: MTApi.cookieHeader } : undefined,
+      await this.api.bootstrap()
+      const ws = new WebSocket(this.api.wsUrl, {
+        headers: this.api.cookieHeader ? { Cookie: this.api.cookieHeader } : undefined,
       })
       this.ws = ws
 
@@ -314,11 +316,17 @@ class MTSocket extends EventEmitter {
   }
 }
 
-export function getSession(groupId) {
+export function getSession(groupId, identityKey = "legacy") {
   const key = String(groupId)
+  const normalizedIdentityKey = Config.normalizeIdentityKey(identityKey)
   let session = sessions.get(key)
+  if (session && session.identityKey !== normalizedIdentityKey) {
+    session.close()
+    sessions.delete(key)
+    session = null
+  }
   if (!session) {
-    session = new MTSocket(key)
+    session = new MTSocket(key, normalizedIdentityKey)
     sessions.set(key, session)
   }
   return session
@@ -328,6 +336,17 @@ export function closeSession(groupId) {
   const key = String(groupId)
   sessions.get(key)?.close()
   sessions.delete(key)
+}
+
+/** 账号重新登录后，重建所有使用该账号的群会话握手。 */
+export async function reconnectSessionsForIdentity(identityKey) {
+  const key = Config.normalizeIdentityKey(identityKey)
+  const reconnects = []
+  for (const session of sessions.values()) {
+    if (session.identityKey !== key || (!session.connected && !session.roomId)) continue
+    reconnects.push(session.reconnect())
+  }
+  return Promise.allSettled(reconnects)
 }
 
 export function closeAllSessions() {
