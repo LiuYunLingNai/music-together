@@ -1,28 +1,9 @@
 import plugin from "../../../lib/plugins/plugin.js"
-import { Log_Prefix, Plugin_Path } from "../components/Constants.js"
+import { update as Update } from "../../other/update.js"
 
-let updating = false
+const Plugin_Name = "music-together-plugin"
 
-function cleanGitOutput(value) {
-  return String(value || "").replace(/https?:\/\/[^\s/@]+@/gi, "https://")
-}
-
-function formatChangelog(value) {
-  const lines = String(value || "")
-    .split(/\r?\n/)
-    .map(line => line.trim())
-    .filter(Boolean)
-    .slice(0, 12)
-  if (!lines.length) return "暂无提交说明"
-  return lines
-    .map(line => {
-      const [hash, ...subject] = line.split("\t")
-      return `- ${hash} ${cleanGitOutput(subject.join("\t")).trim() || "（无提交说明）"}`
-    })
-    .join("\n")
-}
-
-/** 独立的一起听歌插件更新命令，避免和听歌业务命令耦合。 */
+/** 复用 Yunzai 通用更新器，提供一起听歌插件更新与更新日志。 */
 export class MusicTogetherUpdate extends plugin {
   constructor() {
     super({
@@ -32,64 +13,32 @@ export class MusicTogetherUpdate extends plugin {
       priority: 10,
       rule: [
         {
-          reg: "^#?(?:一起听歌|音乐同听)(?:更新|升级)$",
+          reg: "^#?(?:一起听歌|音乐同听)(?:插件)?(?:强制)?更新$",
           fnc: "update",
+          log: false,
+        },
+        {
+          reg: "^#?(?:一起听歌|音乐同听)(?:插件)?更新日志$",
+          fnc: "updateLog",
           log: false,
         },
       ],
     })
   }
 
-  async update(e) {
-    if (!e.isMaster) return this.reply("只有主人可以更新一起听歌插件")
-    if (updating) return this.reply("一起听歌插件正在更新，请稍候再试")
+  async update(e = this.e) {
+    if (!e?.isMaster) return this.reply("只有主人可以更新一起听歌插件")
+    e.msg = `#${e.msg?.includes("强制") ? "强制" : ""}更新${Plugin_Name}`
+    const updater = new Update(e)
+    updater.e = e
+    return updater.update()
+  }
 
-    updating = true
-    try {
-      const branch = await Bot.exec("git branch --show-current", {
-        cwd: Plugin_Path,
-        quiet: true,
-      })
-      if (branch.error) return this.reply("更新失败：当前插件目录不是 Git 仓库")
-
-      const currentBranch = branch.stdout.trim()
-      if (currentBranch !== "yunzai-plugin")
-        return this.reply(`更新失败：当前分支为 ${currentBranch || "未知"}，需要 yunzai-plugin`)
-
-      const status = await Bot.exec("git status --porcelain --untracked-files=no", {
-        cwd: Plugin_Path,
-        quiet: true,
-      })
-      if (status.error) return this.reply("更新失败：无法检查插件目录状态")
-      if (status.stdout.trim())
-        return this.reply("更新已取消：插件目录有未提交修改，请先手动处理")
-
-      const previous = await Bot.exec("git rev-parse HEAD", {
-        cwd: Plugin_Path,
-        quiet: true,
-      })
-      if (previous.error || !previous.stdout.trim()) return this.reply("更新失败：无法读取当前版本")
-      const previousCommit = previous.stdout.trim()
-
-      const result = await Bot.exec("git pull --ff-only origin yunzai-plugin", {
-        cwd: Plugin_Path,
-        quiet: true,
-      })
-      if (result.error) {
-        logger.warn(`${Log_Prefix} 插件更新失败：${cleanGitOutput(result.stderr || result.stdout)}`)
-        return this.reply("更新失败：无法快进到远端 yunzai-plugin，请检查网络或手动更新")
-      }
-      if (/Already up.to.date|已经是最新/i.test(result.stdout))
-        return this.reply("✅ 一起听歌插件已经是最新版本")
-      const log = await Bot.exec(`git log --pretty=format:%h%x09%s ${previousCommit}..HEAD`, {
-        cwd: Plugin_Path,
-        quiet: true,
-      })
-      const changelog = log.error ? "暂无提交说明" : formatChangelog(log.stdout)
-      return this.reply(`✅ 一起听歌插件更新成功\n更新日志：\n${changelog}\n\n请重启 Yunzai 使新代码生效`)
-    } finally {
-      updating = false
-    }
+  async updateLog(e = this.e) {
+    const updater = new Update()
+    updater.e = e
+    if (await updater.getPlugin(Plugin_Name)) return this.reply(await updater.getLog(Plugin_Name))
+    return this.reply("未找到一起听歌插件 Git 仓库")
   }
 }
 
