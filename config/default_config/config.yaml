@@ -1,0 +1,43 @@
+server:
+  baseUrl: http://127.0.0.1:3001
+  wsUrl: ''
+  timeout: 15000
+  requestTimeout: 20000
+
+room:
+  nickname: Yunzai
+  defaultRoomName: Yunzai 同步听歌
+  autoRejoin: true
+  reconnectMaxRetries: 10
+  reconnectBaseDelay: 2000
+  idleReleaseMinutes: 30
+
+music:
+  defaultSource: netease
+  searchLimit: 10
+  searchExpireMinutes: 5
+  audioQuality: 320
+  hotSongsLimit: 20
+  playlistLimit: 100
+
+chat:
+  roomToGroup: true
+  groupToRoom: false
+  syncSystemMessage: false
+  notifyUserChange: true
+  notifyTrackChange: true
+
+render:
+  scale: 100
+  imgType: jpeg
+  quality: 90
+  useImage: true
+
+permission:
+  bindMasterOnly: true
+  controlGroupAdmin: false
+  authMasterOnly: true
+
+other:
+  showLog: true
+  cmdPrefix: ''
