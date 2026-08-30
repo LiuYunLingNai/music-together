@@ -1,10 +1,25 @@
 import plugin from "../../../lib/plugins/plugin.js"
-import { Plugin_Path } from "../components/Constants.js"
+import { Log_Prefix, Plugin_Path } from "../components/Constants.js"
 
 let updating = false
 
 function cleanGitOutput(value) {
   return String(value || "").replace(/https?:\/\/[^\s/@]+@/gi, "https://")
+}
+
+function formatChangelog(value) {
+  const lines = String(value || "")
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .slice(0, 12)
+  if (!lines.length) return "暂无提交说明"
+  return lines
+    .map(line => {
+      const [hash, ...subject] = line.split("\t")
+      return `- ${hash} ${cleanGitOutput(subject.join("\t")).trim() || "（无提交说明）"}`
+    })
+    .join("\n")
 }
 
 /** 独立的一起听歌插件更新命令，避免和听歌业务命令耦合。 */
@@ -46,7 +61,15 @@ export class MusicTogetherUpdate extends plugin {
         quiet: true,
       })
       if (status.error) return this.reply("更新失败：无法检查插件目录状态")
-      if (status.stdout.trim()) return this.reply("更新已取消：插件目录有未提交修改，请先手动处理")
+      if (status.stdout.trim())
+        return this.reply("更新已取消：插件目录有未提交修改，请先手动处理")
+
+      const previous = await Bot.exec("git rev-parse HEAD", {
+        cwd: Plugin_Path,
+        quiet: true,
+      })
+      if (previous.error || !previous.stdout.trim()) return this.reply("更新失败：无法读取当前版本")
+      const previousCommit = previous.stdout.trim()
 
       const result = await Bot.exec("git pull --ff-only origin yunzai-plugin", {
         cwd: Plugin_Path,
@@ -58,7 +81,12 @@ export class MusicTogetherUpdate extends plugin {
       }
       if (/Already up.to.date|已经是最新/i.test(result.stdout))
         return this.reply("✅ 一起听歌插件已经是最新版本")
-      return this.reply("✅ 一起听歌插件更新成功，请重启 Yunzai 使新代码生效")
+      const log = await Bot.exec(`git log --pretty=format:%h%x09%s ${previousCommit}..HEAD`, {
+        cwd: Plugin_Path,
+        quiet: true,
+      })
+      const changelog = log.error ? "暂无提交说明" : formatChangelog(log.stdout)
+      return this.reply(`✅ 一起听歌插件更新成功\n更新日志：\n${changelog}\n\n请重启 Yunzai 使新代码生效`)
     } finally {
       updating = false
     }
