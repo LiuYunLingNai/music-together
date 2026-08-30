@@ -78,6 +78,22 @@ function pushAudioEnabled(groupId) {
   return Config.getBinding(String(groupId))?.push?.audio !== false
 }
 
+function trackIdOf(track) {
+  const id = track?.id ?? track?.sourceId
+  return id === undefined || id === null ? "" : String(id)
+}
+
+function savePushTrackId(groupId, trackId) {
+  if (!trackId) return false
+  const key = String(groupId)
+  const binding = Config.getBinding(key)
+  if (!binding?.roomId) return false
+  return Config.setBinding(key, {
+    ...binding,
+    push: { ...(binding.push || {}), lastTrackId: trackId },
+  })
+}
+
 function savePushEnabled(groupId, enabled) {
   const binding = Config.getBinding(String(groupId))
   if (!binding?.roomId) return false
@@ -173,8 +189,14 @@ async function downloadTrackAudio(track, roomId, api) {
   }
 }
 
-async function pushTrackToGroup(session, track) {
+async function pushTrackToGroup(session, track, { force = false } = {}) {
   if (!pushEnabled(session.groupId) || !track) return
+  const trackId = trackIdOf(track)
+  if (!force && trackId && session.lastPushedTrackId === trackId) return
+  if (trackId) {
+    session.lastPushedTrackId = trackId
+    savePushTrackId(session.groupId, trackId)
+  }
   const card =
     pushTrackFormat(session.groupId) === "image"
       ? await renderTrackCard(track, {
@@ -229,6 +251,7 @@ async function restorePushSessions() {
   for (const [groupId, binding] of Object.entries(Config.bindings)) {
     if (!binding?.roomId || binding.push?.enabled !== true) continue
     const session = getSession(groupId, binding.accountUserId || "legacy")
+    session.lastPushedTrackId = String(binding.push?.lastTrackId || "")
     wireNotifications(session)
     if (session.connected && session.roomState && session.roomId === String(binding.roomId))
       continue
@@ -779,7 +802,7 @@ export class MusicTogether extends plugin {
       const session = await this.ensureSession(e)
       savePushEnabled(key, true)
       if (session.roomState?.currentTrack)
-        await pushTrackToGroup(session, session.roomState.currentTrack)
+        await pushTrackToGroup(session, session.roomState.currentTrack, { force: true })
     } else {
       savePushEnabled(key, false)
     }
