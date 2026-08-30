@@ -8,7 +8,11 @@ import { pipeline } from "node:stream/promises"
 import { getMTApi } from "../components/MTApi.js"
 import { renderSearchResults } from "../components/SearchRenderer.js"
 import Config from "../components/Config.js"
-import { closeSession, getSession, reconnectSessionsForIdentity } from "../components/MTSocket.js"
+import {
+  closeSession,
+  getSession,
+  reconnectSessionsForIdentity,
+} from "../components/MTSocket.js"
 import {
   EVENTS,
   MUSIC_SOURCES,
@@ -51,7 +55,11 @@ function identityKey(e) {
 
 function nickname(e, api = getMTApi(identityKey(e))) {
   return String(
-    api.profileNickname || Config.room.nickname || e.sender?.card || e.sender?.nickname || "Yunzai",
+    api.profileNickname ||
+      Config.room.nickname ||
+      e.sender?.card ||
+      e.sender?.nickname ||
+      "Yunzai",
   ).slice(0, 20)
 }
 
@@ -115,9 +123,7 @@ function formatTrack(track, index) {
 function imageTrack(track) {
   return {
     ...track,
-    artistText: Array.isArray(track.artist)
-      ? track.artist.join("、")
-      : String(track.artist || "未知歌手"),
+    artistText: Array.isArray(track.artist) ? track.artist.join("、") : String(track.artist || "未知歌手"),
     sourceText: SOURCE_NAMES[track.source] || track.source || "未知音源",
   }
 }
@@ -257,7 +263,10 @@ export class MusicTogether extends plugin {
       return this.reply("私聊仅支持“一起听歌登录 <账号ID> <密码>”")
     if (!raw || /^(帮助|菜单)$/.test(raw)) return this.showHelp()
 
-    const [command, ...args] = raw.split(/\s+/)
+    const compactPlay = /^(点歌|播放)(\d+)$/.exec(raw)
+    const [command, ...args] = compactPlay
+      ? [compactPlay[1], compactPlay[2]]
+      : raw.split(/\s+/)
     const rest = args.join(" ").trim()
     try {
       switch (command) {
@@ -663,9 +672,7 @@ export class MusicTogether extends plugin {
       !e.member?.is_owner
     )
       return this.reply("当前配置要求群管理员才能控制播放")
-    const role = session.roomState?.users?.find(
-      user => user.id === session.api.identityUserId,
-    )?.role
+    const role = session.roomState?.users?.find(user => user.id === session.api.identityUserId)?.role
     const voteAction = {
       [EVENTS.PLAYER_PAUSE]: "pause",
       [EVENTS.PLAYER_PLAY]: "resume",
@@ -695,9 +702,7 @@ export class MusicTogether extends plugin {
       !e.member?.is_owner
     )
       return this.reply("当前配置要求群管理员才能切换模式")
-    const role = session.roomState?.users?.find(
-      user => user.id === session.api.identityUserId,
-    )?.role
+    const role = session.roomState?.users?.find(user => user.id === session.api.identityUserId)?.role
     if (role === "member")
       session.send(EVENTS.VOTE_START, { action: "set-mode", payload: { mode } })
     else session.send(EVENTS.PLAYER_SET_MODE, { mode })
