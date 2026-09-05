@@ -1,8 +1,5 @@
 import { ActionCards } from '@/components/Lobby/ActionCards'
-import { CreateRoomDialog } from '@/components/Lobby/CreateRoomDialog'
 import { HeroSection } from '@/components/Lobby/HeroSection'
-import { NicknameDialog } from '@/components/Lobby/NicknameDialog'
-import { PasswordDialog } from '@/components/Lobby/PasswordDialog'
 import { RoomListSection } from '@/components/Lobby/RoomListSection'
 import { UserPopover } from '@/components/Lobby/UserPopover'
 import { GlobalBackground } from '@/components/GlobalBackground'
@@ -18,11 +15,34 @@ import { useVersionCheck } from '@/hooks/useVersionCheck'
 import { EVENTS, ERROR_CODE, type RoomListItem, type RoomState } from '@music-together/shared'
 import { Github, Headphones } from 'lucide-react'
 import { motion } from 'motion/react'
-import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react'
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useAccountStore } from '@/stores/accountStore'
 import { fetchCurrentProfile, updateCurrentNickname } from '@/lib/profileApi'
+
+const loadCreateRoomDialog = () => import('@/components/Lobby/CreateRoomDialog')
+const loadNicknameDialog = () => import('@/components/Lobby/NicknameDialog')
+const loadPasswordDialog = () => import('@/components/Lobby/PasswordDialog')
+
+const CreateRoomDialog = lazy(() =>
+  loadCreateRoomDialog().then((module) => ({ default: module.CreateRoomDialog })),
+)
+const NicknameDialog = lazy(() =>
+  loadNicknameDialog().then((module) => ({ default: module.NicknameDialog })),
+)
+const PasswordDialog = lazy(() =>
+  loadPasswordDialog().then((module) => ({ default: module.PasswordDialog })),
+)
 
 export default function HomePage() {
   const navigate = useNavigate()
@@ -40,6 +60,59 @@ export default function HomePage() {
   const actionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [directRoomId, setDirectRoomId] = useState('')
   const [nicknameDialogOpen, setNicknameDialogOpen] = useState(false)
+  const [createDialogMounted, setCreateDialogMounted] = useState(false)
+  const [nicknameDialogMounted, setNicknameDialogMounted] = useState(false)
+  const [passwordDialogMounted, setPasswordDialogMounted] = useState(false)
+  const glowFrameRef = useRef<number | null>(null)
+  const glowTargetRef = useRef<HTMLElement | null>(null)
+  const glowPointerRef = useRef({ x: 0, y: 0 })
+
+  // Keep dialogs out of the critical bundle, then warm their tiny chunks once
+  // the first paint and urgent browser work have completed.
+  useEffect(() => {
+    const preload = () => {
+      void Promise.all([loadCreateRoomDialog(), loadNicknameDialog(), loadPasswordDialog()]).catch(() => {
+        // A transient chunk preload failure must not become an unhandled rejection.
+        // React.lazy will retry the import if the user opens the dialog later.
+      })
+    }
+    if ('requestIdleCallback' in window) {
+      const idleId = window.requestIdleCallback(preload, { timeout: 1_500 })
+      return () => window.cancelIdleCallback(idleId)
+    }
+    const timer = setTimeout(preload, 800)
+    return () => clearTimeout(timer)
+  }, [])
+
+  const flushCardGlow = useCallback(() => {
+    glowFrameRef.current = null
+    const card = glowTargetRef.current
+    if (!card) return
+    const bounds = card.getBoundingClientRect()
+    card.style.setProperty('--mt-card-glow-x', `${glowPointerRef.current.x - bounds.left}px`)
+    card.style.setProperty('--mt-card-glow-y', `${glowPointerRef.current.y - bounds.top}px`)
+  }, [])
+
+  const handleCardGlow = useCallback(
+    (event: ReactPointerEvent<HTMLElement>) => {
+      if (event.pointerType !== 'mouse') return
+      const target = event.target instanceof Element ? event.target.closest<HTMLElement>('.mt-card') : null
+      glowTargetRef.current = target
+      glowPointerRef.current = { x: event.clientX, y: event.clientY }
+      if (target && glowFrameRef.current === null) glowFrameRef.current = requestAnimationFrame(flushCardGlow)
+    },
+    [flushCardGlow],
+  )
+
+  const clearCardGlow = useCallback(() => {
+    glowTargetRef.current = null
+    if (glowFrameRef.current !== null) {
+      cancelAnimationFrame(glowFrameRef.current)
+      glowFrameRef.current = null
+    }
+  }, [])
+
+  useEffect(() => clearCardGlow, [clearCardGlow])
 
   // Stores the pending join action while waiting for nickname input
   const pendingJoinRef = useRef<{ type: 'room'; room: RoomListItem } | { type: 'direct'; roomId: string } | null>(null)
@@ -68,6 +141,7 @@ export default function HomePage() {
       return
     }
 
+    setPasswordDialogMounted(true)
     setPasswordDialog({
       open: true,
       room: {
@@ -159,24 +233,29 @@ export default function HomePage() {
     createRoom(nickname, roomName, password)
   }
 
-  const handleRoomClick = async (room: RoomListItem) => {
-    if (actionLoading) return
-    if (!savedNickname) {
-      pendingJoinRef.current = { type: 'room', room }
-      setNicknameDialogOpen(true)
-      return
-    }
+  const handleRoomClick = useCallback(
+    async (room: RoomListItem) => {
+      if (actionLoading) return
+      if (!savedNickname) {
+        pendingJoinRef.current = { type: 'room', room }
+        setNicknameDialogMounted(true)
+        setNicknameDialogOpen(true)
+        return
+      }
 
-    await unlockAudio()
+      await unlockAudio()
 
-    if (room.hasPassword) {
-      setPasswordDialog({ open: true, room })
-      setPasswordError(null)
-    } else {
-      setActionLoading(true)
-      joinRoom(room.id, savedNickname)
-    }
-  }
+      if (room.hasPassword) {
+        setPasswordDialogMounted(true)
+        setPasswordDialog({ open: true, room })
+        setPasswordError(null)
+      } else {
+        setActionLoading(true)
+        joinRoom(room.id, savedNickname)
+      }
+    },
+    [actionLoading, joinRoom, savedNickname],
+  )
 
   const handlePasswordSubmit = (password: string) => {
     if (!passwordDialog.room) return
@@ -194,6 +273,7 @@ export default function HomePage() {
     }
     if (!savedNickname) {
       pendingJoinRef.current = { type: 'direct', roomId: directRoomId.trim() }
+      setNicknameDialogMounted(true)
       setNicknameDialogOpen(true)
       return
     }
@@ -217,6 +297,7 @@ export default function HomePage() {
       if (pending.type === 'room') {
         const room = pending.room
         if (room.hasPassword) {
+          setPasswordDialogMounted(true)
           setPasswordDialog({ open: true, room })
           setPasswordError(null)
         } else {
@@ -239,6 +320,8 @@ export default function HomePage() {
       exit={{ opacity: 0 }}
       transition={{ duration: 0.2 }}
       className="mt-page-surface mt-home-page flex min-h-screen flex-col bg-background"
+      onPointerMove={handleCardGlow}
+      onPointerLeave={clearCardGlow}
     >
       <GlobalBackground />
       {/* Header */}
@@ -260,7 +343,10 @@ export default function HomePage() {
           <ActionCards
             directRoomId={directRoomId}
             onDirectRoomIdChange={setDirectRoomId}
-            onCreateClick={() => setCreateDialogOpen(true)}
+            onCreateClick={() => {
+              setCreateDialogMounted(true)
+              setCreateDialogOpen(true)
+            }}
             onDirectJoin={handleDirectJoin}
             actionLoading={actionLoading}
           />
@@ -303,32 +389,40 @@ export default function HomePage() {
         </div>
       </footer>
 
-      {/* Dialogs */}
-      <CreateRoomDialog
-        open={createDialogOpen}
-        onOpenChange={setCreateDialogOpen}
-        onCreateRoom={handleCreateRoom}
-        defaultNickname={savedNickname}
-        isLoading={actionLoading}
-      />
+      {/* Dialog code is fetched only when the corresponding interaction is used. */}
+      <Suspense fallback={null}>
+        {createDialogMounted && (
+          <CreateRoomDialog
+            open={createDialogOpen}
+            onOpenChange={setCreateDialogOpen}
+            onCreateRoom={handleCreateRoom}
+            defaultNickname={savedNickname}
+            isLoading={actionLoading}
+          />
+        )}
 
-      <NicknameDialog
-        open={nicknameDialogOpen}
-        onOpenChange={setNicknameDialogOpen}
-        onConfirm={handleNicknameConfirm}
-      />
+        {nicknameDialogMounted && (
+          <NicknameDialog
+            open={nicknameDialogOpen}
+            onOpenChange={setNicknameDialogOpen}
+            onConfirm={handleNicknameConfirm}
+          />
+        )}
 
-      <PasswordDialog
-        open={passwordDialog.open}
-        onOpenChange={(open: boolean) => {
-          setPasswordDialog((prev) => ({ ...prev, open }))
-          if (!open) setPasswordError(null)
-        }}
-        roomName={passwordDialog.room?.name ?? ''}
-        onSubmit={handlePasswordSubmit}
-        error={passwordError}
-        isLoading={actionLoading}
-      />
+        {passwordDialogMounted && (
+          <PasswordDialog
+            open={passwordDialog.open}
+            onOpenChange={(open: boolean) => {
+              setPasswordDialog((prev) => ({ ...prev, open }))
+              if (!open) setPasswordError(null)
+            }}
+            roomName={passwordDialog.room?.name ?? ''}
+            onSubmit={handlePasswordSubmit}
+            error={passwordError}
+            isLoading={actionLoading}
+          />
+        )}
+      </Suspense>
     </motion.div>
   )
 }

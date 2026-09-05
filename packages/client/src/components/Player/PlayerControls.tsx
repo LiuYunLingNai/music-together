@@ -34,6 +34,47 @@ interface PlayerControlsProps {
   onStartVote: (action: VoteAction, payload?: Record<string, unknown>) => void
 }
 
+interface ProgressControlProps {
+  disabled: boolean
+  canSeek: boolean
+  onSeek: (time: number) => void
+}
+
+/** Keep the 10 Hz playback clock isolated from the buttons and tooltips. */
+const ProgressControl = memo(function ProgressControl({ disabled, canSeek, onSeek }: ProgressControlProps) {
+  const currentTime = usePlayerStore((s) => s.currentTime)
+  const duration = usePlayerStore((s) => s.duration)
+  const [isSeeking, setIsSeeking] = useState(false)
+  const [seekTime, setSeekTime] = useState(0)
+
+  return (
+    <div className="flex w-full flex-col gap-1">
+      <Slider
+        value={[duration > 0 ? ((isSeeking ? seekTime : currentTime) / duration) * 100 : 0]}
+        max={100}
+        step={0.1}
+        alignRangeWithThumb
+        disabled={disabled || !canSeek}
+        onValueChange={(value) => {
+          if (duration > 0) {
+            setIsSeeking(true)
+            setSeekTime((value[0] / 100) * duration)
+          }
+        }}
+        onValueCommit={(value) => {
+          if (duration > 0) onSeek((value[0] / 100) * duration)
+          setIsSeeking(false)
+        }}
+        className="w-full"
+      />
+      <div className="flex w-full justify-between">
+        <span className="text-xs tabular-nums text-white/50">{formatTime(isSeeking ? seekTime : currentTime)}</span>
+        <span className="text-xs tabular-nums text-white/50">{formatTime(duration)}</span>
+      </div>
+    </div>
+  )
+})
+
 export const PlayerControls = memo(function PlayerControls({
   onPlay,
   onPause,
@@ -45,8 +86,6 @@ export const PlayerControls = memo(function PlayerControls({
 }: PlayerControlsProps) {
   const { socket } = useSocketContext()
   const isPlaying = usePlayerStore((s) => s.isPlaying)
-  const currentTime = usePlayerStore((s) => s.currentTime)
-  const duration = usePlayerStore((s) => s.duration)
   const currentTrack = usePlayerStore((s) => s.currentTrack)
   const queueLength = useRoomStore((s) => s.room?.queue?.length ?? 0)
   const playMode = useRoomStore((s) => s.room?.playMode ?? 'sequential')
@@ -57,8 +96,6 @@ export const PlayerControls = memo(function PlayerControls({
   const canVote = ability.can('vote', 'Player')
   const [skipCooldown, setSkipCooldown] = useState(false)
   const [playCooldown, setPlayCooldown] = useState(false)
-  const [isSeeking, setIsSeeking] = useState(false)
-  const [seekTime, setSeekTime] = useState(0)
   const cooldownTimer = useRef<ReturnType<typeof setTimeout>>(null)
   const playCooldownTimer = useRef<ReturnType<typeof setTimeout>>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -129,32 +166,7 @@ export const PlayerControls = memo(function PlayerControls({
     <div ref={wrapperRef} className="w-full">
       <div ref={innerRef} className="flex flex-col gap-6" style={{ width: DESIGN_WIDTH }}>
         {/* 1. Progress bar */}
-        <div className="flex w-full flex-col gap-1">
-          <Slider
-            value={[duration > 0 ? ((isSeeking ? seekTime : currentTime) / duration) * 100 : 0]}
-            max={100}
-            step={0.1}
-            alignRangeWithThumb
-            disabled={disabled || !canSeek}
-            onValueChange={(val) => {
-              if (duration > 0) {
-                setIsSeeking(true)
-                setSeekTime((val[0] / 100) * duration)
-              }
-            }}
-            onValueCommit={(val) => {
-              if (duration > 0) {
-                onSeek((val[0] / 100) * duration)
-              }
-              setIsSeeking(false)
-            }}
-            className="w-full"
-          />
-          <div className="flex w-full justify-between">
-            <span className="text-xs text-white/50 tabular-nums">{formatTime(isSeeking ? seekTime : currentTime)}</span>
-            <span className="text-xs text-white/50 tabular-nums">{formatTime(duration)}</span>
-          </div>
-        </div>
+        <ProgressControl disabled={disabled} canSeek={canSeek} onSeek={onSeek} />
 
         {/* 2. Controls row — left/right flex-1 keeps center truly centered */}
         <div className="flex w-full items-center">

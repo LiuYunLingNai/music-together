@@ -73,6 +73,13 @@ export function AudioPlayer({
   const bgFlowSpeed = useSettingsStore((s) => s.bgFlowSpeed)
   const bgRenderScale = useSettingsStore((s) => s.bgRenderScale)
   const { ref: playerRef, isPortrait } = useContainerPortrait()
+  const [documentVisible, setDocumentVisible] = useState(() => document.visibilityState !== 'hidden')
+
+  useEffect(() => {
+    const handleVisibilityChange = () => setDocumentVisible(document.visibilityState !== 'hidden')
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [])
 
   // 封面 URL 代理：解决 QQ 音乐 / 酷狗等 CDN 的 CORS 限制
   const proxiedCover = currentTrack?.cover ? getProxiedCoverUrl(currentTrack.cover) : undefined
@@ -133,7 +140,7 @@ export function AudioPlayer({
         <div className="pointer-events-none absolute inset-0 z-0 opacity-80 saturate-[1.3]">
           <BackgroundRender
             album={backgroundCover}
-            playing
+            playing={view === 'player' && documentVisible}
             fps={bgFps}
             flowSpeed={bgFlowSpeed}
             renderScale={bgRenderScale}

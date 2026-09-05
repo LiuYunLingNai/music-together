@@ -28,7 +28,6 @@ export default defineConfig({
         manualChunks: {
           'vendor-react': ['react', 'react-dom', 'react-router-dom'],
           'vendor-motion': ['motion'],
-          'vendor-ui': ['radix-ui', 'sonner', 'vaul', 'class-variance-authority'],
           'vendor-pixi': [
             '@pixi/app',
             '@pixi/core',

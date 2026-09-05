@@ -169,6 +169,8 @@ export function HotSongsPanel({ roomId, onAddTrack, onCollapse, className, enabl
                   <img
                     src={track.thumbnailCover || track.cover}
                     alt=""
+                    loading="lazy"
+                    decoding="async"
                     className="h-10 w-10 shrink-0 rounded-md object-cover"
                     referrerPolicy="no-referrer"
                   />

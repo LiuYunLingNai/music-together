@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils'
 interface RoomCardProps {
   room: RoomListItem
   index: number
-  onClick: () => void
+  onClick: (room: RoomListItem) => void
 }
 
 export const RoomCard = memo(function RoomCard({ room, index, onClick }: RoomCardProps) {
@@ -16,12 +16,12 @@ export const RoomCard = memo(function RoomCard({ room, index, onClick }: RoomCar
     <motion.button
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, delay: index * 0.06, ease: [0.25, 0.46, 0.45, 0.94] }}
+      transition={{ duration: 0.4, delay: Math.min(index, 6) * 0.05, ease: [0.25, 0.46, 0.45, 0.94] }}
       whileHover={{ y: -4, scale: 1.01 }}
       whileTap={{ scale: 0.98 }}
-      onClick={onClick}
+      onClick={() => onClick(room)}
       className={cn(
-        'group relative flex w-full flex-col gap-3 overflow-hidden rounded-xl p-5 text-left',
+        'mt-room-card group relative flex w-full flex-col gap-3 overflow-hidden rounded-xl p-5 text-left',
         'mt-card rounded-2xl transition-all duration-300',
         'hover:-translate-y-1 hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5',
       )}
@@ -50,8 +50,8 @@ export const RoomCard = memo(function RoomCard({ room, index, onClick }: RoomCar
               {[0, 1, 2].map((i) => (
                 <motion.div
                   key={i}
-                  className="w-0.5 rounded-full bg-primary/40"
-                  animate={prefersReducedMotion ? { height: 8 } : { height: [4, 12, 6, 10, 4] }}
+                  className="h-3 w-0.5 origin-bottom rounded-full bg-primary/40"
+                  animate={prefersReducedMotion ? { scaleY: 0.66 } : { scaleY: [0.33, 1, 0.5, 0.83, 0.33] }}
                   transition={
                     prefersReducedMotion
                       ? {}

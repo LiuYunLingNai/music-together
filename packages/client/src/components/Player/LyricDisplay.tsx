@@ -108,7 +108,6 @@ export function LyricDisplay({ onSeek }: LyricDisplayProps) {
   const tlyric = usePlayerStore((s) => s.tlyric)
   const lyricLoading = usePlayerStore((s) => s.lyricLoading)
   const ttmlLines = usePlayerStore((s) => s.ttmlLines)
-  const currentTime = usePlayerStore((s) => s.currentTime)
   const duration = usePlayerStore((s) => s.duration)
   const isPlaying = usePlayerStore((s) => s.isPlaying)
   const currentTrack = usePlayerStore((s) => s.currentTrack)
@@ -169,8 +168,8 @@ export function LyricDisplay({ onSeek }: LyricDisplayProps) {
 
   useEffect(() => {
     lyricPlayerBridge.setOffset(lyricOffsetMs)
-    lyricPlayerBridge.setCurrentTime(currentTime, isCalibrating)
-  }, [currentTime, isCalibrating, lyricOffsetMs, lyricPlayer])
+    lyricPlayerBridge.setCurrentTime(usePlayerStore.getState().currentTime, isCalibrating)
+  }, [isCalibrating, lyricOffsetMs, lyricPlayer])
 
   if (!hasLyrics) {
     return (
@@ -195,7 +194,7 @@ export function LyricDisplay({ onSeek }: LyricDisplayProps) {
       <LyricPlayer
         ref={playerRef}
         lyricLines={seekableLines}
-        currentTime={Math.max(0, Math.round(currentTime * 1000 - lyricOffsetMs))}
+        currentTime={Math.max(0, Math.round(usePlayerStore.getState().currentTime * 1000 - lyricOffsetMs))}
         playing={isPlaying}
         isSeeking={isCalibrating}
         alignAnchor={alignAnchor}
