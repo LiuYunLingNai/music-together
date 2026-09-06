@@ -9,6 +9,10 @@ import io.github.yueby.musictogether.model.PlatformRecommendation
 import io.github.yueby.musictogether.model.Track
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.suspendCancellableCoroutine
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.Response
 import okhttp3.HttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -45,13 +49,33 @@ data class PlaybackTarget(
 class ApiException(val statusCode: Int, message: String) : IOException(message)
 
 class MusicTogetherApi(private val client: OkHttpClient) {
+    private suspend fun <T> Call.readCancellable(read: (Response) -> T): T =
+        suspendCancellableCoroutine { continuation ->
+            continuation.invokeOnCancellation { cancel() }
+            enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    continuation.resumeWith(Result.failure(e))
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    val result = runCatching {
+                        response.use {
+                            if (!continuation.isActive) throw IOException("Request cancelled")
+                            read(it)
+                        }
+                    }
+                    continuation.resumeWith(result)
+                }
+            })
+        }
+
     suspend fun bootstrapIdentity(server: ServerAddress): String = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url(server.api("auth", "identity", "bootstrap"))
             .post(ByteArray(0).toRequestBody())
             .build()
         AppLogger.info("HTTP", "POST ${request.url.encodedPath}")
-        client.newCall(request).execute().use { response ->
+        client.newCall(request).readCancellable { response ->
             if (!response.isSuccessful) throw IOException("身份初始化失败（${response.code}）")
             AppLogger.info("HTTP", "identity bootstrap status=${response.code}")
             response.header("X-Identity-UserId")
@@ -321,10 +345,10 @@ class MusicTogetherApi(private val client: OkHttpClient) {
         val request = Request.Builder().url(url).get().build()
         val ttmlClient = client.newBuilder().callTimeout(8, TimeUnit.SECONDS).build()
         AppLogger.info("HTTP", "GET TTML source=$source sourceId=$lyricTrackId")
-        ttmlClient.newCall(request).execute().use { response ->
+        ttmlClient.newCall(request).readCancellable { response ->
             if (!response.isSuccessful) {
                 AppLogger.warn("HTTP", "TTML status=${response.code}")
-                return@withContext null
+                return@readCancellable null
             }
             response.body?.string()?.takeIf { it.contains("<tt") }
         }
@@ -340,7 +364,7 @@ class MusicTogetherApi(private val client: OkHttpClient) {
         requireNotNull(jsonRequest(server, segments, method, body, label)).toAccountProfile()
     }
 
-    private fun jsonRequest(
+    private suspend fun jsonRequest(
         server: ServerAddress,
         segments: List<String>,
         method: String,
@@ -360,15 +384,16 @@ class MusicTogetherApi(private val client: OkHttpClient) {
         return executeRequest(request, label, allowNoContent)
     }
 
-    private fun executeJson(url: HttpUrl, label: String): JSONObject {
+    private suspend fun executeJson(url: HttpUrl, label: String): JSONObject {
         val request = Request.Builder().url(url).get().build()
         return requireNotNull(executeRequest(request, label))
     }
 
-    private fun executeRequest(request: Request, label: String, allowNoContent: Boolean = false): JSONObject? {
-        val requestClient = client.newBuilder().callTimeout(60, TimeUnit.SECONDS).build()
+    private suspend fun executeRequest(request: Request, label: String, allowNoContent: Boolean = false): JSONObject? {
+        val timeout = if (label.startsWith("lyrics:") || label.startsWith("search")) 15L else 60L
+        val requestClient = client.newBuilder().callTimeout(timeout, TimeUnit.SECONDS).build()
         AppLogger.info("HTTP", "${request.method} ${request.url.encodedPath} label=$label")
-        requestClient.newCall(request).execute().use { response ->
+        return requestClient.newCall(request).readCancellable { response ->
             val body = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 AppLogger.warn("HTTP", "$label status=${response.code} body=${body.take(300)}")
@@ -378,7 +403,7 @@ class MusicTogetherApi(private val client: OkHttpClient) {
                 throw ApiException(response.code, message)
             }
             if (response.code == 204 || body.isBlank()) {
-                if (allowNoContent || response.code == 204) return null
+                if (allowNoContent || response.code == 204) return@readCancellable null
                 throw IOException("服务端未返回数据")
             }
             val json = runCatching { JSONObject(body) }.getOrElse {
@@ -386,7 +411,7 @@ class MusicTogetherApi(private val client: OkHttpClient) {
                 throw IOException("服务端返回了无法解析的数据")
             }
             AppLogger.info("HTTP", "$label status=${response.code} items=${json.optJSONArray("tracks")?.length() ?: "n/a"}")
-            return json
+            json
         }
     }
 

@@ -373,3 +373,9 @@ AMLL 纯算法按职责分布：
 推送中 `versionName` 发生变化时，CI 会触发签名 Release 构建，与提交类型无关。发布任务生成 Standard/Vivo APK、Standard AAB 和 SHA-256，并创建或更新对应的 GitHub Release。若存在版本专用说明 `docs/releases/<version>.md`，Release 正文直接采用该文件；否则以最近的上一版本标签为基线，逐条列出到当前构建提交之间所有非合并提交的标题与短 SHA，并附带 GitHub 比较链接。同版本重新发布时也会同步刷新正文。
 
 本地构建与验证命令见根目录 [AGENTS.md](../AGENTS.md)。
+
+## 歌词和 HTTP 生命周期补充
+
+TTML 与平台歌词并行请求，先展示可用结果，再优先选择具有逐字时间的结果，同等级保留 TTML。歌词解析在 Dispatchers.Default 执行；按服务器与音源标识隔离的缓存最多保留 30 首、有效期 30 分钟。当前歌词完成后预取顺序或列表循环的下一曲，切歌与离开取消当前歌词任务及其预取。
+
+MusicTogetherApi 使用 OkHttp 异步回调读取响应，协程取消会取消底层 Call，响应体在回调线程内读取并关闭。TTML 总超时 8 秒，搜索和平台歌词 15 秒，其他现有普通请求保持 60 秒。

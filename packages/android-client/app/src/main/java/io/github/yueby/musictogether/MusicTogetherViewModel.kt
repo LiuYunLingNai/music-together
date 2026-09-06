@@ -92,6 +92,8 @@ import io.github.yueby.musictogether.share.shareFileName
 import io.github.yueby.musictogether.updates.AppUpdateCoordinator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.async
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
@@ -247,6 +249,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private var bilibiliCollectionJob: Job? = null
     private var syncJob: Job? = null
     private var lyricJob: Job? = null
+    private val lyricCache = linkedMapOf<String, Pair<Long, LyricsState>>()
     private var searchJob: Job? = null
     private var recommendationsJob: Job? = null
     private var downloadOptionsJob: Job? = null
@@ -2658,64 +2661,89 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
 
     private fun loadLyrics(track: Track) {
         lyricJob?.cancel()
-        _state.value = _state.value.copy(lyrics = LyricsState(trackId = track.id, loading = true))
-        val server = activeServer
-        if (server == null) {
-            _state.value = _state.value.copy(
-                lyrics = LyricsState(trackId = track.id, error = "尚未连接服务端"),
-            )
-            return
-        }
-        lyricJob = viewModelScope.launch {
-            AppLogger.info("Lyrics", "load track=${track.id} source=${track.source}")
-            val ttmlLines = runCatching { api.ttml(track) }
-                .onFailure {
-                    if (it is CancellationException) throw it
-                    AppLogger.warn("Lyrics", "TTML failed track=${track.id}: ${it.message}")
-                }
-                .getOrNull()
-                ?.let { xml ->
-                    runCatching { LyricsParser.parseTtml(xml) }
-                        .onFailure { AppLogger.error("Lyrics", "TTML parse failed track=${track.id}", it) }
-                        .getOrNull()
-                }
-                .orEmpty()
-
-            val (lines, source, error) = if (ttmlLines.isNotEmpty()) {
-                Triple(ttmlLines, "ttml", null)
-            } else {
-                runCatching { api.lyrics(server, track) }
-                    .map { raw ->
-                        if (raw == null) Triple(emptyList(), "none", "这首歌没有歌词标识")
-                        else {
-                            val parsed = LyricsParser.parseServerResponse(raw)
-                            Triple(parsed.first, parsed.second, null)
-                        }
-                    }
-                    .onFailure {
-                        if (it is CancellationException) throw it
-                        AppLogger.error("Lyrics", "server lyric failed track=${track.id}", it)
-                    }
-                    .getOrElse { Triple(emptyList(), "none", it.message ?: "歌词加载失败") }
+        val server = activeServer ?: return
+        val key = listOf(server.displayUrl, track.metadataSource ?: track.source, track.lyricId, track.sourceId).joinToString("|")
+        lyricCache.remove(key)?.let { cached ->
+            if (System.currentTimeMillis() - cached.first < 30 * 60_000L) {
+                lyricCache[key] = cached
+                _state.value = _state.value.copy(lyrics = cached.second.copy(trackId = track.id))
+                return
             }
-
-            if (_state.value.room?.currentTrack?.id != track.id) return@launch
-            val message = error ?: if (lines.isEmpty()) "暂无歌词" else null
-            AppLogger.info(
-                "Lyrics",
-                "loaded track=${track.id} source=$source lines=${lines.size} " +
-                    "firstMs=${lines.firstOrNull()?.startTimeMs ?: -1} " +
-                    "lastMs=${lines.lastOrNull()?.endTimeMs ?: -1} error=${message.orEmpty()}",
-            )
-            _state.value = _state.value.copy(
-                lyrics = LyricsState(
-                    trackId = track.id,
-                    lines = lines,
-                    loading = false,
-                    source = source,
-                    error = message,
-                ),
-            )
+        }
+        _state.value = _state.value.copy(lyrics = LyricsState(trackId = track.id, loading = true))
+        lyricJob = viewModelScope.launch {
+            var bestRank = -1
+            fun publish(lines: List<io.github.yueby.musictogether.model.LyricLine>, source: String) {
+                if (!isActive || activeServer?.displayUrl != server.displayUrl || _state.value.room?.currentTrack?.id != track.id || lines.isEmpty()) return
+                val rank = (if (lines.any { it.words.size > 1 }) 2 else 0) + (if (source == "ttml") 1 else 0)
+                if (rank <= bestRank) return
+                bestRank = rank
+                val lyrics = LyricsState(trackId = track.id, lines = lines, source = source, loading = false)
+                _state.value = _state.value.copy(lyrics = lyrics)
+                lyricCache.remove(key)
+                lyricCache[key] = System.currentTimeMillis() to lyrics
+                while (lyricCache.size > 30) lyricCache.remove(lyricCache.keys.first())
+            }
+            coroutineScope {
+                val ttml = launch {
+                    try {
+                        val xml = api.ttml(track)
+                        val lines = withContext(Dispatchers.Default) { xml?.let(LyricsParser::parseTtml).orEmpty() }
+                        publish(lines, "ttml")
+                    } catch (error: Exception) {
+                        if (error is CancellationException) throw error
+                    }
+                }
+                val platform = launch {
+                    try {
+                        val raw = api.lyrics(server, track)
+                        if (raw != null) {
+                            val parsed = withContext(Dispatchers.Default) { LyricsParser.parseServerResponse(raw) }
+                            publish(parsed.first, parsed.second)
+                        }
+                    } catch (error: Exception) {
+                        if (error is CancellationException) throw error
+                    }
+                }
+                ttml.join()
+                platform.join()
+            }
+            if (isActive && bestRank < 0 && activeServer?.displayUrl == server.displayUrl && _state.value.room?.currentTrack?.id == track.id) {
+                _state.value = _state.value.copy(lyrics = LyricsState(trackId = track.id, error = "暂无可用歌词，请稍后重试"))
+            }
+            val room = _state.value.room
+            if (room == null || room.currentTrack?.id != track.id || room.playMode in listOf("shuffle", "loop-one")) return@launch
+            val index = room.queue.indexOfFirst { it.id == track.id }
+            val next = room.queue.getOrNull(index + 1)
+                ?: if (room.playMode == "loop-all") room.queue.firstOrNull() else null
+            if (next == null || next.id == track.id) return@launch
+            val nextKey = listOf(server.displayUrl, next.metadataSource ?: next.source, next.lyricId, next.sourceId).joinToString("|")
+            if (lyricCache[nextKey]?.let { System.currentTimeMillis() - it.first < 30 * 60_000L } == true) return@launch
+            try {
+                coroutineScope {
+                    val ttml = async {
+                        val xml = api.ttml(next)
+                        withContext(Dispatchers.Default) { xml?.let(LyricsParser::parseTtml).orEmpty() }
+                    }
+                    val platform = async {
+                        val raw = api.lyrics(server, next)
+                        withContext(Dispatchers.Default) { raw?.let(LyricsParser::parseServerResponse) }
+                    }
+                    val lines = ttml.await()
+                    val native = platform.await()
+                    val preferTtml = lines.isNotEmpty() && (lines.any { it.words.size > 1 } || native?.first?.any { it.words.size > 1 } != true)
+                    val selected = if (preferTtml) LyricsState(trackId = next.id, lines = lines, source = "ttml")
+                        else native?.let { LyricsState(trackId = next.id, lines = it.first, source = it.second) }
+                    if (selected != null && selected.lines.isNotEmpty()) {
+                        lyricCache.remove(nextKey)
+                        lyricCache[nextKey] = System.currentTimeMillis() to selected
+                        while (lyricCache.size > 30) lyricCache.remove(lyricCache.keys.first())
+                    }
+                }
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                // Prefetch failure must not replace the current song's lyrics.
+            }
         }
     }
 
