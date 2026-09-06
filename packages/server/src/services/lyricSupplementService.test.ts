@@ -76,8 +76,41 @@ describe('LyricSupplementService', () => {
     const [first, second] = await Promise.all([service.getSupplement(request), service.getSupplement(request)])
 
     expect(first).toEqual(second)
-    expect(fakeProvider.search).toHaveBeenCalledTimes(1)
-    expect(fakeProvider.getLyric).toHaveBeenCalledTimes(1)
+    expect(fakeProvider.search).toHaveBeenCalledTimes(2)
+    expect(fakeProvider.getLyric).toHaveBeenCalledTimes(2)
+  })
+
+  it('uses an exactly matched Netease YRC for a Tencent track without word timing', async () => {
+    const neteaseTrack = track({
+      source: 'netease',
+      sourceId: '1901371647',
+      lyricId: '1901371647',
+      title: '孤勇者',
+      artist: ['陈奕迅'],
+      duration: 256,
+    })
+    const fakeProvider: LyricSupplementProvider = {
+      search: vi.fn(async (source) => (source === 'netease' ? [neteaseTrack] : [])),
+      getLyric: vi.fn(async () => ({
+        lyric: '[00:00.00]都 是勇敢的',
+        tlyric: '',
+        romalrc: '',
+        yrc: '[0,1000](0,300,0)都(300,300,0)是(600,400,0)勇敢的',
+      })),
+    }
+    const service = new LyricSupplementService(fakeProvider)
+
+    const result = await service.getSupplement({
+      source: 'tencent',
+      lyricId: '003UkWuI0E8U0l',
+      title: '孤勇者',
+      artists: ['陈奕迅'],
+      duration: 256,
+    })
+
+    expect(result.source).toBe('netease')
+    expect(result.yrc).toContain('(300,300,0)是')
+    expect(fakeProvider.getLyric).toHaveBeenCalledWith('netease', '1901371647')
   })
 
   it('falls back to an empty optional result when supplementary providers fail', async () => {

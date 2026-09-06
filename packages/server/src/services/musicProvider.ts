@@ -512,6 +512,7 @@ class MusicProvider {
     max: 500,
     ttl: 24 * HOUR,
   })
+  private lyricInFlight = new Map<string, Promise<LyricResult>>()
   private bilibiliViewCache = new LRUCache<string, BilibiliViewData>({ max: 500, ttl: 1 * HOUR })
   private bilibiliWbiMixinKey: { value: string; expiresAt: number } | null = null
   private bilibiliBuvid3: { value: string; expiresAt: number } | null = null
@@ -2594,10 +2595,7 @@ class MusicProvider {
     return (await this.getStreamInfo(source, urlId, quality, cookie))?.url ?? null
   }
 
-  async getLyric(
-    source: MusicSource,
-    lyricId: string,
-  ): Promise<LyricResult> {
+  async getLyric(source: MusicSource, lyricId: string): Promise<LyricResult> {
     const cacheKey = `${source}:${lyricId}`
     const cached = this.lyricCache.get(cacheKey)
     if (cached) {
@@ -2605,6 +2603,17 @@ class MusicProvider {
       return cached
     }
 
+    const existing = this.lyricInFlight.get(cacheKey)
+    if (existing) return existing
+
+    const task = this.resolveLyric(source, lyricId, cacheKey).finally(() => {
+      this.lyricInFlight.delete(cacheKey)
+    })
+    this.lyricInFlight.set(cacheKey, task)
+    return task
+  }
+
+  private async resolveLyric(source: MusicSource, lyricId: string, cacheKey: string): Promise<LyricResult> {
     const empty = { lyric: '', tlyric: '', romalrc: '', yrc: '' as string }
 
     try {

@@ -274,6 +274,8 @@ router.get(
   validated(lyricQuerySchema, 'Get lyric', async (data, _req, res) => {
     const { source, lyricId } = data
     const result = await musicProvider.getLyric(source, lyricId)
+    const hasLyric = !!(result.lyric || result.yrc || result.wordByWord?.length)
+    res.setHeader('Cache-Control', hasLyric ? 'private, max-age=3600' : 'private, no-store')
     res.json(result)
   }),
 )

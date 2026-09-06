@@ -316,7 +316,7 @@ B站没有与房间 128K、320K 完全对应的普通 DASH 音轨，因此分别
 | `/api/music/search`             | GET   | 搜索曲目（`source` + `keyword` + `page`）                                                               |
 | `/api/music/url`                | GET   | 解析流媒体 URL（`source` + `id`）                                                                       |
 | `/api/music/lyric`              | GET   | 获取歌词                                                                                                |
-| `/api/music/lyric-supplement`   | GET   | 仅在逐词歌词存在无效时间行时，按曲名、歌手和时长匹配跨平台 KRC/LRC 补全；结果按曲目缓存并合并并发请求 |
+| `/api/music/lyric-supplement`   | GET   | 当前来源缺少可靠逐词或时间轴需要修复时，并行搜索其他平台；按标准化曲名、全部歌手和 ±3 秒时长匹配后返回 YRC/KRC/LRC 候选，由客户端统一评分择优；结果按曲目缓存并合并并发请求 |
 | `/api/music/cover`              | GET   | 获取封面图                                                                                              |
 | `/api/music/cover-proxy`        | GET   | 代理受信音乐 CDN 封面；兼容升级白名单主机的旧 HTTP 地址，逐跳校验 HTTPS 重定向、图片类型和 10 MiB 上限                |
 | `/api/music/playlist`           | GET   | 获取歌单曲目列表（`source` + `id` + `limit` + `offset`），分页返回 `{ tracks, total, offset, hasMore }` |

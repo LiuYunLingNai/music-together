@@ -1,6 +1,6 @@
 import type { LyricLine, LyricWord } from '@applemusic-like-lyrics/core'
 import { describe, expect, it } from 'vitest'
-import { normalizeLyricTimeline, repairLyricTimeline } from './lyricTimeline'
+import { evaluateLyricAnimationQuality, normalizeLyricTimeline, repairLyricTimeline } from './lyricTimeline'
 
 function lyricWord(word: string, startTime: number, endTime: number): LyricWord {
   return { word, startTime, endTime, romanWord: '', obscene: false }
@@ -119,8 +119,7 @@ describe('normalizeLyricTimeline', () => {
     const supplemented = repairLyricTimeline(ttml, [{ wordByWord: kugouKrc }, { lrc: neteaseLrc }])
     expect(supplemented.unresolvedCount).toBe(0)
     expect(supplemented.lines.filter((line) => line.words[0]?.word === '喔').map((line) => line.startTime)).toEqual([
-      36_673,
-      184_167,
+      36_673, 184_167,
     ])
   })
 
@@ -130,5 +129,80 @@ describe('normalizeLyricTimeline', () => {
 
     expect(repaired.lines[0].words[0]?.word).toBe('你说：我们还会再见')
     expect(repaired.lines[0]).toMatchObject({ startTime: 10_000, endTime: 11_500 })
+  })
+})
+
+describe('evaluateLyricAnimationQuality', () => {
+  const animatedLine = (first: string, second: string, startTime: number) =>
+    lyricLine(`${first}${second}`, startTime, startTime + 1_000, {
+      words: [lyricWord(first, startTime, startTime + 500), lyricWord(second, startTime + 500, startTime + 1_000)],
+    })
+
+  it('recognizes a complete lyric with genuine per-word timing', () => {
+    const lines = [
+      animatedLine('飞云', '之下', 1_000),
+      animatedLine('我看', '着海峡', 3_000),
+      animatedLine('走月', '光沙滩', 5_000),
+    ]
+    const quality = evaluateLyricAnimationQuality(
+      lines,
+      '[00:01.00]飞云之下\n[00:03.00]我看着海峡\n[00:05.00]走月光沙滩',
+    )
+
+    expect(quality.hasWordAnimation).toBe(true)
+    expect(quality.animationCoverage).toBe(1)
+    expect(quality.textCoverage).toBe(1)
+  })
+
+  it('records duet and background-vocal structure independently from word timing quality', () => {
+    const lines = [
+      lyricLine('女声主句', 1_000, 2_000),
+      lyricLine('男声对唱', 3_000, 4_000, { isDuet: true }),
+      lyricLine('背景和声', 3_200, 4_000, { isBG: true }),
+    ]
+
+    const quality = evaluateLyricAnimationQuality(lines)
+
+    expect(quality.duetLineCount).toBe(1)
+    expect(quality.backgroundLineCount).toBe(1)
+    expect(quality.hasWordAnimation).toBe(false)
+  })
+
+  it('rejects a format that only has isolated animated lines', () => {
+    const lines = [
+      animatedLine('飞云', '之下', 1_000),
+      lyricLine('我看着海峡', 3_000, 4_000),
+      lyricLine('走月光沙滩', 5_000, 6_000),
+      lyricLine('云朵很近', 7_000, 8_000),
+    ]
+    const quality = evaluateLyricAnimationQuality(
+      lines,
+      '[00:01.00]飞云之下\n[00:03.00]我看着海峡\n[00:05.00]走月光沙滩\n[00:07.00]云朵很近',
+    )
+
+    expect(quality.hasWordAnimation).toBe(false)
+    expect(quality.animationCoverage).toBeLessThan(0.55)
+  })
+
+  it('rejects animated timing when the candidate is missing too much reference text', () => {
+    const lines = [animatedLine('飞云', '之下', 1_000), animatedLine('我看', '着海峡', 3_000)]
+    const quality = evaluateLyricAnimationQuality(
+      lines,
+      '[00:01.00]飞云之下\n[00:03.00]我看着海峡\n[00:05.00]走月光沙滩\n[00:07.00]云朵很近',
+    )
+
+    expect(quality.hasWordAnimation).toBe(false)
+    expect(quality.textCoverage).toBeLessThan(0.8)
+  })
+
+  it('measures complete lyrics independently from provider line wrapping and timed credits', () => {
+    const lines = [animatedLine('无声开在', '乌云之下', 10_000), animatedLine('然后又飘', '到哪里呀', 14_000)]
+    const quality = evaluateLyricAnimationQuality(
+      lines,
+      '[00:01.00]作词：某某\n[00:10.00]无声开在乌云之下 然后\n[00:14.00]又飘到哪里呀',
+    )
+
+    expect(quality.textCoverage).toBe(1)
+    expect(quality.hasWordAnimation).toBe(true)
   })
 })

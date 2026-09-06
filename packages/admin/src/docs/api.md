@@ -30,7 +30,7 @@
 | GET | `/bilibili-collection` | B 站视频合集，参数 `bvid` |
 | GET | `/url` | 播放流地址，参数 `source`、`urlId`、`bitrate` |
 | GET | `/lyric` | 歌词，参数 `source`、`lyricId` |
-| GET | `/lyric-supplement` | 歌词补充（翻译/罗马音） |
+| GET | `/lyric-supplement` | 严格匹配其他平台并返回 YRC/KRC/LRC 歌词候选，供逐词质量评估和时间轴修复 |
 | GET | `/cover` | 封面图地址，参数 `source`、`picId`、`size` |
 | GET | `/download-options` | 当前曲目下载选项，参数 `roomId`、`trackId`（曲目切换返回 409） |
 | GET | `/download` | 流式下载，参数 `roomId`、`trackId`、`quality` |

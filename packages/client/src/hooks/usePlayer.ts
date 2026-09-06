@@ -53,7 +53,7 @@ export function usePlayer() {
     stopPlayback,
     setPlaybackTempo,
   } = useHowl(autoNext)
-  const { fetchLyric } = useLyric()
+  const { fetchLyric, prefetchLyric } = useLyric()
 
   // Connect sync (handles SEEK, PAUSE, RESUME + conductor reporting)
   usePlayerSync(howlRef, soundIdRef, schedulePlayback, cancelScheduledPlayback, pausePlayback, setPlaybackTempo)
@@ -141,6 +141,7 @@ export function usePlayer() {
       // committed at the shared server time. If this device buffers past the
       // deadline, schedulePlayback aligns it before the fade-in.
       loadTrack(data.track, data.playState.currentTime, data.playState.isPlaying)
+      prefetchLyric(data.track)
       if (data.playState.isPlaying) {
         schedulePlayback(data.playState.currentTime, data.playState.serverTimeToExecute, () => {
           fetchLyric(data.track)
@@ -155,7 +156,7 @@ export function usePlayer() {
     return () => {
       socket.off(EVENTS.PLAYER_PLAY, onPlayerPlay)
     }
-  }, [socket, loadTrack, fetchLyric, schedulePlayback])
+  }, [socket, loadTrack, fetchLyric, prefetchLyric, schedulePlayback])
 
   useEffect(() => {
     const onTrackMetadataUpdated = (data: { track: Track }) => {
@@ -221,6 +222,7 @@ export function usePlayer() {
         const recoveredTime = ps.currentTime + Math.max(0, elapsed)
         recoveredTrackIdRef.current = roomTrack.id
         loadTrack(roomTrack, recoveredTime, ps.isPlaying)
+        prefetchLyric(roomTrack)
         if (ps.isPlaying) {
           schedulePlayback(recoveredTime, getServerTime(), () => fetchLyric(roomTrack))
         } else {
@@ -237,7 +239,7 @@ export function usePlayer() {
     return unsubscribe
     // `socket` intentionally excluded — effect subscribes to roomStore, not socket directly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadTrack, fetchLyric, schedulePlayback, stopPlayback])
+  }, [loadTrack, fetchLyric, prefetchLyric, schedulePlayback, stopPlayback])
 
   // -----------------------------------------------------------------------
   // Controls — emit to server only.  Server broadcasts ScheduledPlayState

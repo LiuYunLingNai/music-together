@@ -56,7 +56,7 @@ Music Together consists of a Node.js server and several clients. The server coor
 - NetEase Cloud Music, QQ Music, Kugou, Kugou Concept, and Bilibili sources
 - Platform sign-in and playlists through QR/Cookie login, with quality selection based on account capability
 - Rooms, password rooms, invite links, queue management, chat, roles, votes, and hidden rooms
-- Sequential, single-loop, list-loop, and shuffle playback with word-by-word, translated, romanized, and Ruby lyrics
+- Sequential, single-loop, list-loop, and shuffle playback with word-by-word, translated, romanized, and Ruby lyrics; when the current source lacks reliable word timing, the server strictly matches recordings on other platforms and the client selects the highest-confidence candidate by animation coverage, text completeness, and timing quality
 - One shared room protocol across the web, Android native player, and Windows desktop client
 
 ## Architecture

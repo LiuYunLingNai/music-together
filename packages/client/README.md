@@ -1,73 +1,34 @@
-# React + TypeScript + Vite
+# Music Together Web Client
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+`packages/client` 是 Music Together 的 React Web 客户端，同时适配桌面浏览器与移动浏览器。它通过仓库内的 Node.js 服务端连接房间，负责音频播放、房间同步、搜索点歌、队列、聊天、平台账号与歌单，以及 Apple Music 风格歌词展示。
 
-Currently, two official plugins are available:
+## 歌词加载
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- 播放器准备音频时预取歌词，当前平台歌词与对应 TTML 并行加载，并对重复请求和最终展示结果做有界缓存。
+- 当前版本没有可靠逐词时，服务端按标准化歌名、全部歌手和歌曲时长严格匹配其他平台，聚合网易云 YRC、酷狗 KRC 等候选。
+- 客户端按真实逐词动画覆盖率、相对当前版本主 LRC 的整首有序文本完整度、有效时间轴覆盖率和独立计时行数量统一评分；带有对唱或背景人声结构的完整 AMLL 候选优先保留，TTML 只是候选之一。
+- 所有逐词候选都不可靠时回退到当前平台 LRC；普通 LRC 也可用于修复少量无效时间行，但不会被当成逐词歌词。
 
-## React Compiler
+## 开发
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+请从仓库根目录安装依赖并启动完整开发环境：
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```powershell
+pnpm install --frozen-lockfile
+pnpm dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+默认地址：
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+- Web 客户端：`http://localhost:5173`
+- 服务端：`http://localhost:3001`
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+常用检查：
+
+```powershell
+pnpm --filter @music-together/client lint
+pnpm --filter @music-together/client typecheck
+pnpm --filter @music-together/client build
 ```
+
+完整项目说明、生产构建和部署方式见仓库根目录的 [README](../../README.md) 与 [架构文档](../../docs/PROJECT_ARCHITECTURE.md)。

@@ -2,6 +2,8 @@ import type { LyricLine, LyricWord } from '@applemusic-like-lyrics/core'
 
 const LRC_TIMESTAMP_PATTERN = /\[(\d{2}):(\d{2})(?:\.(\d{1,3}))?\](.*)/g
 const SPEAKER_PREFIX_PATTERN = /^[^:：]{1,16}[:：]\s*/
+const LYRIC_CREDIT_PATTERN =
+  /^(?:作?词|作?曲|编曲|制作人|监制|混音|母带|录音(?:师|棚)?|封面设计|吉他|贝斯|鼓|弦乐|和声|发行|出品|op|sp|isrc)\s*[:：]/iu
 
 interface LyricCandidate {
   words: LyricWord[]
@@ -19,6 +21,17 @@ export interface LyricRepairSource {
 export interface LyricTimelineResult {
   lines: LyricLine[]
   unresolvedCount: number
+}
+
+export interface LyricAnimationQuality {
+  hasWordAnimation: boolean
+  confidence: number
+  animationCoverage: number
+  textCoverage: number
+  validTimingCoverage: number
+  meaningfulCharacterCount: number
+  duetLineCount: number
+  backgroundLineCount: number
 }
 
 interface LyricGroup {
@@ -41,6 +54,116 @@ function normalizeLyricText(value: string): string {
 
 function lineText(line: LyricLine): string {
   return line.words.map((word) => word.word).join('')
+}
+
+function countNormalizedCharacters(value: string): number {
+  return normalizeLyricText(value).length
+}
+
+function referenceText(lrc: string): string {
+  const lines: string[] = []
+  LRC_TIMESTAMP_PATTERN.lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = LRC_TIMESTAMP_PATTERN.exec(lrc)) !== null) {
+    if (LYRIC_CREDIT_PATTERN.test(match[4].trim())) continue
+    const text = normalizeLyricText(match[4])
+    if (text) lines.push(text)
+  }
+  return lines.join('')
+}
+
+/** Line wrapping differs between providers, so compare the ordered lyric text rather than exact lines. */
+function orderedTextCoverage(candidate: string, reference: string): number {
+  if (!reference) return candidate ? 1 : 0
+  if (!candidate) return 0
+
+  const row = new Uint16Array(reference.length + 1)
+  for (let candidateIndex = 0; candidateIndex < candidate.length; candidateIndex++) {
+    let diagonal = 0
+    for (let referenceIndex = 1; referenceIndex <= reference.length; referenceIndex++) {
+      const previous = row[referenceIndex]
+      row[referenceIndex] =
+        candidate[candidateIndex] === reference[referenceIndex - 1]
+          ? diagonal + 1
+          : Math.max(row[referenceIndex], row[referenceIndex - 1])
+      diagonal = previous
+    }
+  }
+  return row[reference.length] / reference.length
+}
+
+/**
+ * Scores actual word animation data rather than trusting the source format.
+ * A candidate must be substantially animated, correctly timed, and complete
+ * enough compared with the provider's main LRC before it can outrank a
+ * structurally richer line-timed source.
+ */
+export function evaluateLyricAnimationQuality(
+  lines: readonly LyricLine[],
+  referenceLrc = '',
+  comparisonCharacterCount = 0,
+): LyricAnimationQuality {
+  let meaningfulCharacterCount = 0
+  let animatedCharacterCount = 0
+  let validTimingCharacterCount = 0
+  let meaningfulLineCount = 0
+  let animatedLineCount = 0
+  let duetLineCount = 0
+  let backgroundLineCount = 0
+  const candidateText: string[] = []
+
+  for (const line of lines) {
+    const normalizedLine = normalizeLyricText(lineText(line))
+    if (!normalizedLine) continue
+    meaningfulLineCount += 1
+    if (line.isDuet) duetLineCount += 1
+    if (line.isBG) backgroundLineCount += 1
+    meaningfulCharacterCount += normalizedLine.length
+    candidateText.push(normalizedLine)
+
+    const meaningfulWords = line.words.filter((word) => countNormalizedCharacters(word.word) > 0)
+    const timedWords = meaningfulWords.filter((word) => isValidRange(word.startTime, word.endTime))
+    validTimingCharacterCount += timedWords.reduce((total, word) => total + countNormalizedCharacters(word.word), 0)
+
+    const distinctTimings = new Set(timedWords.map((word) => `${word.startTime}:${word.endTime}`))
+    if (timedWords.length >= 2 && distinctTimings.size >= 2) {
+      animatedLineCount += 1
+      animatedCharacterCount += normalizedLine.length
+    }
+  }
+
+  const animationCoverage =
+    meaningfulCharacterCount > 0 ? Math.min(1, animatedCharacterCount / meaningfulCharacterCount) : 0
+  const validTimingCoverage =
+    meaningfulCharacterCount > 0 ? Math.min(1, validTimingCharacterCount / meaningfulCharacterCount) : 0
+  const normalizedReferenceText = referenceText(referenceLrc)
+  const textCoverage =
+    normalizedReferenceText.length > 0
+      ? orderedTextCoverage(candidateText.join(''), normalizedReferenceText)
+      : comparisonCharacterCount > 0
+        ? Math.min(1, meaningfulCharacterCount / comparisonCharacterCount)
+        : meaningfulCharacterCount > 0
+          ? 1
+          : 0
+
+  const requiredAnimatedLines = Math.min(3, Math.max(1, Math.ceil(meaningfulLineCount * 0.1)))
+  const hasWordAnimation =
+    animatedLineCount >= requiredAnimatedLines &&
+    animationCoverage >= 0.55 &&
+    validTimingCoverage >= 0.85 &&
+    textCoverage >= 0.8
+  const confidence = Math.min(1, animationCoverage * 0.5 + textCoverage * 0.3 + validTimingCoverage * 0.2)
+
+  return {
+    hasWordAnimation,
+    confidence,
+    animationCoverage,
+    textCoverage,
+    validTimingCoverage,
+    meaningfulCharacterCount,
+    duetLineCount,
+    backgroundLineCount,
+  }
 }
 
 function parseLrcCandidates(lrc: string): LyricCandidate[] {
@@ -123,7 +246,8 @@ function estimateTimelineOffset(lines: readonly LyricLine[], candidates: readonl
 function repairInvalidLines(lines: readonly LyricLine[], sources: readonly LyricRepairSource[]): LyricLine[] {
   const repaired = lines.map((line) => ({ ...line, words: line.words.map((word) => ({ ...word })) }))
   const invalidIndexes = repaired.flatMap((line, index) =>
-    !isValidRange(line.startTime, line.endTime) && !line.words.some((word) => isValidRange(word.startTime, word.endTime))
+    !isValidRange(line.startTime, line.endTime) &&
+    !line.words.some((word) => isValidRange(word.startTime, word.endTime))
       ? [index]
       : [],
   )

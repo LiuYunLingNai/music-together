@@ -105,7 +105,7 @@ src/
 │   ├── useSocketEvent.ts       #   通用 Socket 事件订阅工具 Hook（自动 on/off，ref 稳定）
 │   ├── usePlayer.ts            #   播放器主 hook（组合 useHowl + useLyric + usePlayerSync）
 │   ├── useHowl.ts              #   Howler.js 音频实例管理
-│   ├── useLyric.ts             #   歌词加载（TTML → 平台逐词 YRC/KRC → LRC）
+│   ├── useLyric.ts             #   歌词预取、并行加载、缓存与多平台逐词候选置信度择优
 │   ├── usePlayerSync.ts        #   播放同步（Scheduled Execution + 服务端权威时间轴 + 自适应漂移校正）
 │   ├── useClockSync.ts         #   NTP 时钟同步 hook（校准客户端时钟与服务器对齐）
 │   ├── useRoom.ts              #   房间组合 hook（编排 5 个子 hook，对外 API 不变）
@@ -143,6 +143,7 @@ src/
     ├── clockSync.ts            #   NTP 时钟同步引擎（采样、offset 计算、getServerTime）
     ├── howlPosition.ts         #   HTML5 Howl 低延迟定位与安全回退
     ├── lyricPlayerBridge.ts    #   音频逐帧时钟到 AMLL 的桥接（含歌词偏移）
+    ├── lyricTimeline.ts        #   歌词时间轴规范化、异常行修复与逐词质量评分
     ├── audioPlaybackLifecycle.ts #  断线时停止当前活动音频
     ├── playbackSync.ts         #   漂移阈值、计划位置和自适应同步纯函数
     ├── resetStores.ts          #   全局 store 重置工具
@@ -183,6 +184,7 @@ src/
 │   ├── musicProvider.ts        #   音乐数据聚合（3 层引用式 LRU 缓存 + 外部 API 超时保护 + 歌单分页获取；Netease 歌单使用 ncmApi.playlist_track_all 分块请求突破 1000 首限制，Kugou 用户歌单使用原生 API (get_other_list_file_nofilt) + Meting fallback，Tencent 使用 Meting 原始模式保留 VIP/时长字段）
 │   ├── coverArtwork.ts         #   高分辨率封面规范化与列表缩略图派生
 │   ├── kugouLyricService.ts    #   基于原生 fetch/zlib 的 KRC 获取、解密与逐字解析
+│   ├── lyricSupplementService.ts # 严格匹配其他音乐平台并聚合 YRC/KRC/LRC 候选，含缓存、并发合并和超时降级
 │   ├── authService.ts          #   Cookie 池管理（房间级作用域；getAnyCookie 用于 VIP 播放共享，getUserCookie 用于歌单等用户私有操作）
 │   ├── authProvider.ts         #   统一认证接口（AuthProvider 接口定义 + GetUserInfoResult/UserInfoData 共享类型 + AUTH_PROVIDERS 策略映射表）
 │   ├── neteaseAuthService.ts   #   网易云 API 认证（QR / Cookie 验证 / 用户信息 / 用户歌单列表；getUserInfo 返回 { ok, data? } | { ok: false, reason: 'expired' | 'error' } 区分过期与临时故障）

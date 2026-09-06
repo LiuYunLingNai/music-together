@@ -7,6 +7,7 @@ const DURATION_TOLERANCE_SECONDS = 3
 const SUCCESS_CACHE_TTL_MS = 24 * 60 * 60 * 1_000
 const NEGATIVE_CACHE_TTL_MS = 10 * 60 * 1_000
 const EMPTY_SUPPLEMENT: LyricSupplementResult = { source: null, lyric: '' }
+const SUPPLEMENT_SOURCES = ['netease', 'kugou', 'tencent'] as const
 
 export interface LyricSupplementRequest {
   source: MusicSource
@@ -16,10 +17,18 @@ export interface LyricSupplementRequest {
   duration: number
 }
 
-export interface LyricSupplementResult {
-  source: 'kugou' | 'tencent' | null
+export interface LyricSupplementCandidate {
+  source: (typeof SUPPLEMENT_SOURCES)[number]
   lyric: string
+  tlyric?: string
+  romalrc?: string
+  yrc?: string
   wordByWord?: AmllLyricLine[]
+}
+
+export interface LyricSupplementResult extends Omit<LyricSupplementCandidate, 'source'> {
+  source: LyricSupplementCandidate['source'] | null
+  candidates?: LyricSupplementCandidate[]
 }
 
 export interface LyricSupplementProvider {
@@ -90,33 +99,32 @@ export class LyricSupplementService {
 
   private async resolveSupplement(request: LyricSupplementRequest): Promise<LyricSupplementResult> {
     const keyword = `${request.title} ${request.artists.join(' ')}`
-    try {
-      const kugouTracks = await this.provider.search('kugou', keyword, 10, 1)
-      const kugouTrack = selectMatchingTrack(request, kugouTracks)
-      if (kugouTrack) {
-        const lyric = await this.provider.getLyric('kugou', kugouTrack.lyricId ?? kugouTrack.sourceId)
-        if (lyric.wordByWord?.length) {
-          return { source: 'kugou', lyric: lyric.lyric, wordByWord: lyric.wordByWord }
-        }
-        if (lyric.lyric) return { source: 'kugou', lyric: lyric.lyric }
-      }
-    } catch {
-      // Supplementary sources are optional; continue to the next provider.
-    }
-
-    if (request.source !== 'tencent') {
+    const sources = SUPPLEMENT_SOURCES.filter((source) => source !== request.source)
+    const candidates = await Promise.all(
+      sources.map(async (source): Promise<LyricSupplementCandidate | null> => {
       try {
-        const tencentTracks = await this.provider.search('tencent', keyword, 10, 1)
-        const tencentTrack = selectMatchingTrack(request, tencentTracks)
-        if (tencentTrack) {
-          const lyric = await this.provider.getLyric('tencent', tencentTrack.lyricId ?? tencentTrack.sourceId)
-          if (lyric.lyric) return { source: 'tencent', lyric: lyric.lyric }
+        const tracks = await this.provider.search(source, keyword, 10, 1)
+        const track = selectMatchingTrack(request, tracks)
+        if (!track) return null
+        const lyric = await this.provider.getLyric(source, track.lyricId ?? track.sourceId)
+        if (!lyric.lyric && !lyric.yrc && !lyric.wordByWord?.length) return null
+        return {
+          source,
+          lyric: lyric.lyric,
+          tlyric: lyric.tlyric,
+          romalrc: lyric.romalrc,
+          yrc: lyric.yrc,
+          wordByWord: lyric.wordByWord,
         }
       } catch {
-        // A provider outage must not fail the primary lyric request.
+        return null
       }
-    }
+      }),
+    ).then((results) => results.filter((candidate): candidate is LyricSupplementCandidate => candidate !== null))
 
-    return EMPTY_SUPPLEMENT
+    if (candidates.length === 0) return EMPTY_SUPPLEMENT
+    const legacyCandidate =
+      candidates.find((candidate) => candidate.wordByWord?.length || candidate.yrc) ?? candidates[0]
+    return { ...legacyCandidate, candidates }
   }
 }
