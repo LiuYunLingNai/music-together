@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useRef, type CSSProperties, type ReactNode } from 'react'
+import { useState, useEffect, useCallback, useContext, useRef, type CSSProperties, type ReactNode } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { EVENTS, ERROR_CODE } from '@music-together/shared'
+import { EVENTS, ERROR_CODE, TIMING, type VoteAction } from '@music-together/shared'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { toast } from 'sonner'
 import { Loader2, PanelLeftOpen, PanelRightOpen } from 'lucide-react'
@@ -30,12 +30,108 @@ import { useRoomStore } from '@/stores/roomStore'
 import { useChatStore } from '@/stores/chatStore'
 import { useSocketContext } from '@/providers/socket-context'
 import { AbilityProvider } from '@/providers/AbilityProvider'
+import { AbilityContext } from '@/providers/ability-context'
 import { useClockSync } from '@/hooks/useClockSync'
 import { storage } from '@/lib/storage'
+import { usePlayerStore } from '@/stores/playerStore'
 
 /** Invisible component that runs NTP clock-sync only while in a room. */
 function ClockSyncRunner() {
   useClockSync()
+  return null
+}
+
+interface PlaybackSpaceShortcutProps {
+  enabled: boolean
+  blocked: boolean
+  onPlay: () => void
+  onPause: () => void
+  onStartVote: (action: VoteAction) => void
+}
+
+const SPACE_SHORTCUT_INTERACTIVE_SELECTOR = [
+  'input',
+  'textarea',
+  'select',
+  'button',
+  'a[href]',
+  '[contenteditable]:not([contenteditable="false"])',
+  '[role="button"]',
+  '[role="link"]',
+  '[role="slider"]',
+  '[role="textbox"]',
+  '[role="combobox"]',
+  '[role="menuitem"]',
+  '[role="option"]',
+  '[role="dialog"]',
+  '[role="alertdialog"]',
+  '[role="menu"]',
+  '[role="listbox"]',
+  '[role="tab"]',
+  '[role="switch"]',
+  '[role="checkbox"]',
+  '[role="radio"]',
+].join(',')
+
+function PlaybackSpaceShortcut({ enabled, blocked, onPlay, onPause, onStartVote }: PlaybackSpaceShortcutProps) {
+  const ability = useContext(AbilityContext)
+  const currentTrack = usePlayerStore((state) => state.currentTrack)
+  const isPlaying = usePlayerStore((state) => state.isPlaying)
+  const cooldownRef = useRef(false)
+  const cooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        !enabled ||
+        blocked ||
+        event.defaultPrevented ||
+        event.repeat ||
+        event.code !== 'Space' ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.shiftKey ||
+        document.visibilityState !== 'visible' ||
+        cooldownRef.current ||
+        !currentTrack
+      ) {
+        return
+      }
+
+      const target = event.target
+      if (target instanceof Element && target.closest(SPACE_SHORTCUT_INTERACTIVE_SELECTOR)) return
+
+      const action = isPlaying ? 'pause' : 'resume'
+      const canControl = ability.can(isPlaying ? 'pause' : 'play', 'Player')
+      const canVote = ability.can('vote', 'Player')
+      if (!canControl && !canVote) return
+
+      event.preventDefault()
+      if (canControl) {
+        if (isPlaying) onPause()
+        else onPlay()
+      } else {
+        onStartVote(action)
+      }
+
+      cooldownRef.current = true
+      cooldownTimerRef.current = setTimeout(() => {
+        cooldownRef.current = false
+        cooldownTimerRef.current = null
+      }, TIMING.PLAYER_NEXT_DEBOUNCE_MS)
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [ability, blocked, currentTrack, enabled, isPlaying, onPause, onPlay, onStartVote])
+
+  useEffect(() => {
+    return () => {
+      if (cooldownTimerRef.current) clearTimeout(cooldownTimerRef.current)
+    }
+  }, [])
+
   return null
 }
 
@@ -160,6 +256,7 @@ export default function RoomPage() {
   const allowBothSidePanels = useMediaQuery('(min-width: 1600px)')
   const showDesktopHotSongs = useMediaQuery('(min-width: 1024px)')
   const showDesktopChat = useMediaQuery('(min-width: 768px)')
+  const supportsDesktopShortcuts = useMediaQuery('(hover: hover) and (pointer: fine)')
 
   // --- Pre-check state ---
   const [checking, setChecking] = useState(true)
@@ -456,6 +553,21 @@ export default function RoomPage() {
   return (
     <AbilityProvider>
       <ClockSyncRunner />
+      <PlaybackSpaceShortcut
+        enabled={supportsDesktopShortcuts && playerView === 'player'}
+        blocked={
+          searchOpen ||
+          queueOpen ||
+          settingsOpen ||
+          passwordNeeded ||
+          activeVote !== null ||
+          hotSongsMobileOpen ||
+          (!showDesktopChat && chatOpen)
+        }
+        onPlay={play}
+        onPause={pause}
+        onStartVote={startVote}
+      />
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}

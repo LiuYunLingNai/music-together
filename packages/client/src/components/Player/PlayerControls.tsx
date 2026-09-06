@@ -240,7 +240,7 @@ export const PlayerControls = memo(function PlayerControls({
                   </Button>
                 </motion.div>
               </TooltipTrigger>
-              <TooltipContent>{isPlaying ? '暂停' : '播放'}</TooltipContent>
+              <TooltipContent>{isPlaying ? '暂停（空格）' : '播放（空格）'}</TooltipContent>
             </Tooltip>
 
             <Tooltip delayDuration={300}>
