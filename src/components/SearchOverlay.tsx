@@ -1,8 +1,8 @@
 import { ArrowDownToLine, ChevronLeft, Clock3, Disc3, ListMusic, LoaderCircle, Plus, RefreshCw, Search, Sparkles, X } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MusicSource, Playlist, Track } from '../domain/types'
 import { formatArtists, formatTime } from '../lib/format'
-import { addBatchToQueue, addToQueue, loadRecommendations, search } from '../services/runtime'
+import { addBatchToQueue, addToQueue, cancelSearch, loadRecommendations, search } from '../services/runtime'
 import { fetchPlaylistTracks } from '../services/api'
 import { useAppStore } from '../store/app-store'
 import { BilibiliCollectionDialog } from './BilibiliCollectionDialog'
@@ -24,6 +24,7 @@ function isTrack(item: Track | Playlist): item is Track {
 }
 
 export function SearchOverlay() {
+  const searchGeneration = useRef(0)
   const [source, setSource] = useState<MusicSource>('netease')
   const [type, setType] = useState<SearchType>('song')
   const [keyword, setKeyword] = useState('')
@@ -59,9 +60,18 @@ export function SearchOverlay() {
     return () => window.removeEventListener('keydown', onKey)
   }, [set])
 
+  useEffect(() => {
+    cancelSearch()
+    setPage(1)
+    setHasMore(false)
+    return () => { searchGeneration.current++; cancelSearch() }
+  }, [source, type])
+
   const runSearch = async (nextPage = 1, append = false) => {
+    const generation = ++searchGeneration.current
     if (type === 'recommend') { await loadRecommendations(); return }
     const more = await search(source, keyword, nextPage, type, append)
+    if (generation !== searchGeneration.current) return
     setPage(nextPage)
     setHasMore(more)
   }

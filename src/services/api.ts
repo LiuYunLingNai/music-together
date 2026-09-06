@@ -44,9 +44,10 @@ export async function searchTracks(
   keyword: string,
   page = 1,
   type: 'song' | 'album' | 'playlist' = 'song',
+  signal?: AbortSignal,
 ): Promise<{ items: Array<Track | Playlist>; hasMore: boolean }> {
   const params = new URLSearchParams({ source, keyword, limit: '30', page: String(page), type, roomId })
-  const result = await requestJson<{ tracks: Array<Track | Playlist>; hasMore?: boolean }>(serverUrl, `/api/music/search?${params}`)
+  const result = await requestJson<{ tracks: Array<Track | Playlist>; hasMore?: boolean }>(serverUrl, `/api/music/search?${params}`, { signal })
   return { items: result.tracks, hasMore: result.hasMore ?? result.tracks.length >= 30 }
 }
 
@@ -76,9 +77,9 @@ export interface ServerLyrics {
   }>
 }
 
-export async function fetchServerLyrics(serverUrl: string, source: string, lyricId: string): Promise<ServerLyrics> {
+export async function fetchServerLyrics(serverUrl: string, source: string, lyricId: string, signal?: AbortSignal): Promise<ServerLyrics> {
   const params = new URLSearchParams({ source, lyricId })
-  return requestJson(serverUrl, `/api/music/lyric?${params}`)
+  return requestJson(serverUrl, `/api/music/lyric?${params}`, { signal })
 }
 
 export async function fetchPlaylistTracks(serverUrl: string, roomId: string, source: MusicSource, id: string, offset = 0, total?: number, type: 'playlist' | 'album' = 'playlist'): Promise<{ tracks: Track[]; total: number; hasMore: boolean }> {

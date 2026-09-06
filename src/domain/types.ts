@@ -61,6 +61,7 @@ export interface PlayState {
   currentTime: number
   serverTimestamp: number
   serverTimeToExecute?: number
+  revision?: number
 }
 
 export interface RoomState {

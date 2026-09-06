@@ -12,13 +12,16 @@ export class DesktopAudioPlayer {
   private animationFrame = 0
   private pendingSeek = 0
   private pendingPlay = false
+  private playbackPosition?: () => number
+  private playAt = 0
+  private playTimer = 0
 
   constructor(private callbacks: AudioCallbacks) {
     this.audio.preload = 'auto'
     this.audio.addEventListener('loadedmetadata', () => {
-      this.audio.currentTime = Math.min(this.pendingSeek, this.audio.duration || this.pendingSeek)
+      this.audio.currentTime = Math.min(this.playbackPosition?.() ?? this.pendingSeek, this.audio.duration || this.pendingSeek)
       this.emitTime()
-      if (this.pendingPlay) void this.play()
+      if (this.pendingPlay) this.startScheduledPlay()
     })
     this.audio.addEventListener('playing', () => {
       this.callbacks.onPlaying(true)
@@ -36,13 +39,16 @@ export class DesktopAudioPlayer {
     this.audio.addEventListener('progress', () => this.emitTime())
   }
 
-  load(track: Track, serverUrl: string, roomId: string, startAt = 0, playing = false): void {
+  load(track: Track, serverUrl: string, roomId: string, startAt = 0, playing = false, playAt = 0, position?: () => number): void {
+    this.pause()
     if (!track.streamUrl) {
       this.callbacks.onError('服务器尚未提供可播放地址')
       return
     }
     this.pendingSeek = Math.max(0, startAt)
     this.pendingPlay = playing
+    this.playAt = playAt
+    this.playbackPosition = position
     this.audio.src = this.resolveStreamUrl(track, serverUrl, roomId)
     this.audio.load()
   }
@@ -51,12 +57,25 @@ export class DesktopAudioPlayer {
     this.pendingPlay = true
     try {
       await this.audio.play()
-    } catch {
+    } catch (error) {
+      if (!this.pendingPlay || (error instanceof DOMException && error.name === 'AbortError')) return
       this.callbacks.onError('系统阻止了自动播放，请点击播放按钮继续')
     }
   }
 
+  private startScheduledPlay(): void {
+    window.clearTimeout(this.playTimer)
+    this.playTimer = window.setTimeout(() => {
+      if (!this.pendingPlay) return
+      if (this.playbackPosition) this.audio.currentTime = this.playbackPosition()
+      this.playbackPosition = undefined
+      void this.play()
+    }, Math.max(0, this.playAt - Date.now()))
+  }
+
   pause(at?: number): void {
+    window.clearTimeout(this.playTimer)
+    this.playbackPosition = undefined
     this.pendingPlay = false
     if (typeof at === 'number') this.seek(at)
     this.audio.pause()

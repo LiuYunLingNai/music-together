@@ -4,11 +4,10 @@ import { playbackSyncAdjustment } from '../domain/playback-sync'
 import { markMemberOffline, markMemberOnline, nextUnreadChatCount, normalizeRoomState, updateMemberRole, type RoomStatePayload } from '../domain/room-state'
 import { reduceVote } from '../domain/vote'
 import type { AudioProxyPolicy, AudioQuality, ChatMessage, MusicSource, MyPlatformAuth, PlatformAuthStatus, PlayState, Playlist, RoomAutoFallbackEvent, RoomListItem, RoomState, Track, User, UserRole, VoteAction, VoteState } from '../domain/types'
-import { prepareLyricGroups } from '../lyrics/engine'
-import { parseServerLyrics, parseTtml } from '../lyrics/parser'
+import { loadLyrics, cancelLyrics } from './lyrics'
 import { normalizePlayerVisualSettings, normalizeServerUrl, storage } from '../lib/storage'
 import { useAppStore } from '../store/app-store'
-import { bootstrapIdentity, fetchCurrentProfile, fetchRecommendations, fetchServerLyrics, logoutIdentity, recoverIdentity, searchTracks, setInitialPassword, updateAccountId, updateCurrentProfile, uploadCurrentAvatar } from './api'
+import { bootstrapIdentity, fetchCurrentProfile, fetchRecommendations, logoutIdentity, recoverIdentity, searchTracks, setInitialPassword, updateAccountId, updateCurrentProfile, uploadCurrentAvatar } from './api'
 import { DesktopAudioPlayer } from './audio-player'
 import { shouldSendAutoNext } from './auto-next'
 import { MusicTogetherSocket } from './socket'
@@ -24,6 +23,38 @@ let pendingQrPlatform: MusicSource = 'netease'
 let reconnectRoomId = ''
 let lastJoinRoomId = ''
 const pingStarts = new Map<number, number>()
+let sessionVersion = 0
+let searchVersion = 0
+let searchController: AbortController | undefined
+let recommendationVersion = 0
+let ntpTimer = 0
+let clockSamples: Array<{ rtt: number; offset: number }> = []
+let hardSeekCount = 0
+let smoothedDrift: number | undefined
+
+function cancelPlayback(): void {
+  window.clearTimeout(scheduledTimer)
+  hardSeekCount = 0
+  smoothedDrift = undefined
+  audio.setPlaybackRate(1)
+  audio.pause()
+}
+
+function cancelRequests(): void {
+  searchVersion++
+  recommendationVersion++
+  searchController?.abort()
+  cancelLyrics()
+}
+
+function pingClock(nextSocket: MusicTogetherSocket): void {
+  if (socket !== nextSocket || !nextSocket.connected) return
+  const now = performance.now()
+  for (const [id, started] of pingStarts) if (now - started > 10_000) pingStarts.delete(id)
+  const id = Date.now()
+  pingStarts.set(id, now)
+  nextSocket.emit(EVENTS.NTP_PING, { clientPingId: id })
+}
 
 const audio = new DesktopAudioPlayer({
   onTime: (currentTime, duration, buffered) => useAppStore.getState().set({ currentTime, duration, buffered }),
@@ -45,6 +76,11 @@ if ('mediaSession' in navigator) {
 
 function registerSocketHandlers(nextSocket: MusicTogetherSocket): void {
   nextSocket.onStatus((connected, error) => {
+    if (socket !== nextSocket) return
+    if (!connected) {
+      window.clearInterval(ntpTimer)
+      cancelPlayback()
+    }
     const state = useAppStore.getState()
     state.set({
       connectionStatus: connected ? 'connected' : state.room ? 'reconnecting' : 'disconnected',
@@ -65,11 +101,11 @@ function registerSocketHandlers(nextSocket: MusicTogetherSocket): void {
       }, useAppStore.getState().syncInterval * 1000)
       for (let index = 0; index < 3; index += 1) {
         window.setTimeout(() => {
-          const id = Date.now() + index
-          pingStarts.set(id, performance.now())
-          nextSocket.emit(EVENTS.NTP_PING, { clientPingId: id })
+          pingClock(nextSocket)
         }, index * 180)
       }
+      window.clearInterval(ntpTimer)
+      ntpTimer = window.setInterval(() => pingClock(nextSocket), 30_000)
     }
   })
   nextSocket.on<AudioProxyPolicy>(EVENTS.SERVER_AUDIO_PROXY_POLICY, (audioProxyPolicy) => useAppStore.getState().set({ audioProxyPolicy }))
@@ -78,7 +114,12 @@ function registerSocketHandlers(nextSocket: MusicTogetherSocket): void {
     if (started === undefined) return
     const elapsed = performance.now() - started
     useAppStore.getState().set({ rttMs: Math.round(elapsed) })
-    serverOffsetMs = serverTime - (Date.now() - elapsed / 2)
+    if (elapsed > 2_000) { pingStarts.delete(clientPingId); return }
+    clockSamples.push({ rtt: elapsed, offset: serverTime - (Date.now() - elapsed / 2) })
+    clockSamples = clockSamples.slice(-12)
+    const best = [...clockSamples].sort((a, b) => a.rtt - b.rtt).slice(0, 5)
+    const offsets = best.map((sample) => sample.offset).sort((a, b) => a - b)
+    serverOffsetMs = offsets[Math.floor(offsets.length / 2)]
     pingStarts.delete(clientPingId)
   })
   nextSocket.on<RoomListItem[]>(EVENTS.ROOM_LIST_UPDATE, (rooms) => useAppStore.getState().set({ rooms }))
@@ -89,6 +130,8 @@ function registerSocketHandlers(nextSocket: MusicTogetherSocket): void {
   nextSocket.on<RoomStatePayload>(EVENTS.ROOM_STATE, (payload) => {
     const state = useAppStore.getState()
     const room = normalizeRoomState(payload)
+    if (state.room?.id !== room.id) cancelRequests()
+    window.clearTimeout(scheduledTimer)
     reconnectRoomId = room.id
     state.set({ room })
     activePlaybackKey = playbackKey(room.currentTrack, room.playState)
@@ -149,16 +192,17 @@ function registerSocketHandlers(nextSocket: MusicTogetherSocket): void {
   nextSocket.on<{ track: Track; playState: PlayState }>(EVENTS.PLAYER_PLAY, ({ track, playState }) => {
     const room = useAppStore.getState().room
     if (!room) return
+    if (isStaleAction(playState)) return
     useAppStore.getState().updateRoom({ currentTrack: track, playState })
     activePlaybackKey = playbackKey(track, playState)
     syncTrack(track, playState, room.id, true)
   })
   nextSocket.on<{ playState: PlayState }>(EVENTS.PLAYER_PAUSE, ({ playState }) => schedule(playState, () => audio.pause(playState.currentTime)))
   nextSocket.on<{ playState: PlayState }>(EVENTS.PLAYER_RESUME, ({ playState }) => schedule(playState, () => {
-    audio.seek(playState.currentTime)
+    audio.seek(expectedPosition(playState))
     void audio.play()
   }))
-  nextSocket.on<{ playState: PlayState }>(EVENTS.PLAYER_SEEK, ({ playState }) => schedule(playState, () => audio.seek(playState.currentTime)))
+  nextSocket.on<{ playState: PlayState }>(EVENTS.PLAYER_SEEK, ({ playState }) => schedule(playState, () => audio.seek(expectedPosition(playState))))
   nextSocket.on<{ track: Track }>(EVENTS.PLAYER_TRACK_METADATA_UPDATED, ({ track }) => {
     const room = useAppStore.getState().room
     if (room?.currentTrack?.id === track.id) {
@@ -167,14 +211,17 @@ function registerSocketHandlers(nextSocket: MusicTogetherSocket): void {
     }
   })
   nextSocket.on<{ currentTime: number; isPlaying: boolean; serverTimestamp: number }>(EVENTS.PLAYER_SYNC_RESPONSE, (response) => {
+    if (!clockSamples.length) return
     if (!response.isPlaying || !useAppStore.getState().isPlaying) return
     const expected = response.currentTime + Math.max(0, (Date.now() + serverOffsetMs - response.serverTimestamp) / 1000)
     const drift = audio.currentTime - expected
     useAppStore.getState().set({ syncDriftMs: Math.round(drift * 1000) })
     const current = useAppStore.getState()
-    const adjustment = playbackSyncAdjustment(drift, current.playbackTempoSyncEnabled, current.playbackHardSeekSyncEnabled)
+    smoothedDrift = smoothedDrift === undefined ? drift : smoothedDrift * 0.65 + drift * 0.35
+    const adjustment = playbackSyncAdjustment(smoothedDrift, current.playbackTempoSyncEnabled, current.playbackHardSeekSyncEnabled)
     audio.setPlaybackRate(adjustment.playbackRate)
-    if (adjustment.shouldSeek) audio.seek(expected)
+    hardSeekCount = adjustment.shouldSeek ? hardSeekCount + 1 : 0
+    if (hardSeekCount >= 3) { audio.seek(expected); hardSeekCount = 0; smoothedDrift = undefined }
   })
   nextSocket.on<VoteState>(EVENTS.VOTE_STARTED, (vote) => {
     const state = useAppStore.getState()
@@ -222,25 +269,38 @@ function handleAudioEnded(): void {
   }
 }
 
+function isStaleAction(playState: PlayState): boolean {
+  const previous = useAppStore.getState().room?.playState
+  return previous?.revision !== undefined && playState.revision !== undefined && playState.revision < previous.revision
+}
+
 function schedule(playState: PlayState, action: () => void): void {
+  if (!useAppStore.getState().room || isStaleAction(playState)) return
   window.clearTimeout(scheduledTimer)
-  const delay = Math.max(0, (playState.serverTimeToExecute ?? Date.now() + serverOffsetMs) - (Date.now() + serverOffsetMs))
+  hardSeekCount = 0
+  smoothedDrift = undefined
+  const delay = clockSamples.length ? Math.max(0, (playState.serverTimeToExecute ?? Date.now() + serverOffsetMs) - (Date.now() + serverOffsetMs)) : 0
   scheduledTimer = window.setTimeout(action, delay)
   audio.setPlaybackRate(1)
   useAppStore.getState().updateRoom({ playState })
 }
 
 function expectedPosition(playState: PlayState): number {
-  if (!playState.isPlaying) return playState.currentTime
-  return playState.currentTime + Math.max(0, (Date.now() + serverOffsetMs - playState.serverTimestamp) / 1000)
+  if (!playState.isPlaying || !clockSamples.length) return playState.currentTime
+  const position = playState.currentTime + Math.max(0, (Date.now() + serverOffsetMs - playState.serverTimestamp) / 1000)
+  const duration = useAppStore.getState().room?.currentTrack?.duration
+  return duration && duration > 0 ? Math.min(position, duration) : position
 }
 
 function syncTrack(track: Track | null, playState: PlayState, roomId: string, force = false): void {
   if (!track) return
   if (force || activeTrackId !== track.id) {
+    cancelPlayback()
     activeTrackId = track.id
     audio.setPlaybackRate(1)
-    audio.load(track, useAppStore.getState().serverUrl, roomId, expectedPosition(playState), playState.isPlaying)
+    audio.load(track, useAppStore.getState().serverUrl, roomId, expectedPosition(playState), playState.isPlaying,
+      clockSamples.length ? (playState.serverTimeToExecute ?? Date.now() + serverOffsetMs) - serverOffsetMs : 0,
+      () => expectedPosition(playState))
     if ('mediaSession' in navigator) {
       navigator.mediaSession.metadata = new MediaMetadata({
         title: track.title,
@@ -249,70 +309,58 @@ function syncTrack(track: Track | null, playState: PlayState, roomId: string, fo
         artwork: track.cover ? [{ src: track.cover }] : [],
       })
     }
-    void loadLyrics(track)
-  }
-}
-
-async function loadLyrics(track: Track): Promise<void> {
-  const state = useAppStore.getState()
-  state.set({ lyricsLoading: true, lyricsError: undefined, lyricGroups: [] })
-  const source = track.metadataSource ?? track.source
-  const ttmlId = track.metadataSource ? track.lyricId : track.sourceId
-  const settings = state.lyricSettings
-  const ttmlUrl = source === 'netease'
-    ? settings.ttmlDbUrl.replace('%s', encodeURIComponent(ttmlId ?? ''))
-    : source === 'tencent'
-      ? `https://amlldb.bikonoo.com/qq-lyrics/${encodeURIComponent(ttmlId ?? '')}.ttml`
-      : ''
-  if (settings.ttmlEnabled && ttmlUrl && ttmlId) {
-    try {
-      const response = await fetch(ttmlUrl)
-      if (response.ok) {
-        const lines = parseTtml(await response.text())
-        if (lines.length && activeTrackId === track.id) {
-          state.set({ lyricGroups: prepareLyricGroups(lines), lyricSource: 'TTML', lyricsLoading: false })
-          return
-        }
-      }
-    } catch {
-      // Platform lyrics below are the offline-compatible fallback.
-    }
-  }
-  if (!track.lyricId) {
-    state.set({ lyricsLoading: false, lyricsError: '这首歌暂无歌词' })
-    return
-  }
-  try {
-    const parsed = parseServerLyrics(await fetchServerLyrics(state.serverUrl, source, track.lyricId))
-    if (activeTrackId === track.id) state.set({ lyricGroups: prepareLyricGroups(parsed.lines), lyricSource: parsed.source, lyricsLoading: false })
-  } catch (error) {
-    if (activeTrackId === track.id) state.set({ lyricsLoading: false, lyricsError: error instanceof Error ? error.message : '歌词加载失败' })
+    const lyricSession = sessionVersion
+    void loadLyrics(track).then(() => {
+      const room = useAppStore.getState().room
+      if (lyricSession !== sessionVersion || room?.id !== roomId || activeTrackId !== track.id || !room || room.playMode === 'shuffle' || room.playMode === 'loop-one') return
+      const index = room.queue.findIndex((item) => item.id === track.id)
+      const next = room.queue[index + 1] ?? (room.playMode === 'loop-all' ? room.queue[0] : undefined)
+      if (next && next.id !== track.id) void loadLyrics(next, true)
+    })
   }
 }
 
 export async function connectClient(serverInput: string, nicknameInput: string): Promise<void> {
+  const version = ++sessionVersion
   const state = useAppStore.getState()
   try {
     const serverUrl = normalizeServerUrl(serverInput)
     const nickname = nicknameInput.trim()
     if (!nickname) throw new Error('请输入昵称')
     socket?.disconnect()
+    cancelPlayback()
+    cancelRequests()
+    window.clearInterval(ntpTimer)
+    window.clearInterval(syncIntervalTimer)
+    clockSamples = []
+    pingStarts.clear()
+    serverOffsetMs = 0
+    activeTrackId = ''
+    reconnectRoomId = ''
+    state.resetSession()
     state.set({ serverUrl, nickname, connectionStatus: 'connecting', connectionError: undefined })
     storage.setServerUrl(serverUrl)
     storage.setNickname(nickname)
     const identity = await bootstrapIdentity(serverUrl)
+    if (version !== sessionVersion) return
     storage.setUserId(identity.userId)
     const profile = await fetchCurrentProfile(serverUrl).catch(() => undefined)
+    if (version !== sessionVersion) return
     state.set({ currentUserId: identity.userId, profile: profile ?? null })
     socket = new MusicTogetherSocket(serverUrl)
     registerSocketHandlers(socket)
     socket.connect()
   } catch (error) {
+    if (version !== sessionVersion) return
     state.set({ connectionStatus: 'disconnected', connectionError: error instanceof Error ? error.message : '连接失败' })
   }
 }
 
 export function disconnectClient(): void {
+  sessionVersion++
+  cancelPlayback()
+  cancelRequests()
+  window.clearInterval(ntpTimer)
   socket?.disconnect()
   socket = null
   activeTrackId = ''
@@ -337,6 +385,8 @@ export function createRoom(name?: string, password?: string): void {
 }
 
 export function leaveRoom(): void {
+  cancelPlayback()
+  cancelRequests()
   socket?.emit(EVENTS.ROOM_LEAVE)
   audio.pause()
   activeTrackId = ''
@@ -432,28 +482,43 @@ export function logoutPlatform(platform: MusicSource): void {
 export function requestMyPlaylists(platform: MusicSource): void { socket?.emit(EVENTS.PLAYLIST_GET_MY, { platform }) }
 export function claimKugouConceptVip(): void { socket?.emit(EVENTS.AUTH_CLAIM_KUGOU_CONCEPT_VIP) }
 
+export function cancelSearch(): void {
+  searchVersion++
+  searchController?.abort()
+  useAppStore.getState().set({ searchLoading: false, searchResults: [], searchError: undefined })
+}
+
 export async function search(source: MusicSource, keyword: string, page = 1, type: 'song' | 'album' | 'playlist' = 'song', append = false): Promise<boolean> {
   const state = useAppStore.getState()
   if (!state.room || !keyword.trim()) return false
+  const version = ++searchVersion
+  searchController?.abort()
+  searchController = new AbortController()
+  const isCurrent = () => version === searchVersion && useAppStore.getState().serverUrl === state.serverUrl && useAppStore.getState().room?.id === state.room?.id
   state.set({ searchLoading: true, searchError: undefined })
   try {
-    const result = await searchTracks(state.serverUrl, state.room.id, source, keyword.trim(), page, type)
+    const result = await searchTracks(state.serverUrl, state.room.id, source, keyword.trim(), page, type, searchController.signal)
+    if (!isCurrent()) return false
     state.set({ searchResults: append ? [...state.searchResults, ...result.items] : result.items, searchLoading: false })
     return result.hasMore
   } catch (error) {
+    if (!isCurrent()) return false
     state.set({ searchLoading: false, searchError: error instanceof Error ? error.message : '搜索失败' })
     return false
   }
 }
 
 export async function loadRecommendations(): Promise<void> {
+  const version = ++recommendationVersion
   const state = useAppStore.getState()
   if (!state.room) return
   state.set({ recommendationsLoading: true, recommendationsLoaded: false, searchError: undefined })
   try {
     const recommendations = await fetchRecommendations(state.serverUrl, state.room.id)
+    if (version !== recommendationVersion) return
     state.set({ recommendations, recommendationsLoading: false, recommendationsLoaded: true })
   } catch (error) {
+    if (version !== recommendationVersion) return
     state.set({ recommendations: [], recommendationsLoading: false, recommendationsLoaded: true, searchError: error instanceof Error ? error.message : '推荐加载失败' })
   }
 }
@@ -507,6 +572,10 @@ export async function saveAvatar(image: string): Promise<void> {
 }
 
 function rebuildSocket(preserveRoom: boolean): void {
+  cancelPlayback()
+  cancelRequests()
+  window.clearInterval(ntpTimer)
+  window.clearInterval(syncIntervalTimer)
   const state = useAppStore.getState()
   reconnectRoomId = preserveRoom ? state.room?.id ?? '' : ''
   socket?.disconnect()
