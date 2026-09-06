@@ -19,6 +19,18 @@ import { WebSocket, WebSocketServer, type RawData, type AddressInfo } from 'ws'
 import { logger } from './utils/logger.js'
 
 const MAX_WEBSOCKET_PAYLOAD_BYTES = 1024 * 1024
+const MAX_PENDING_SEND_BYTES = 4 * 1024 * 1024
+
+/** Slow consumers reconnect and receive a fresh snapshot rather than retaining an unbounded backlog. */
+function sendBounded(ws: WebSocket, message: string): boolean {
+  if (ws.readyState !== WebSocket.OPEN) return false
+  if (ws.bufferedAmount + Buffer.byteLength(message) > MAX_PENDING_SEND_BYTES) {
+    ws.terminate()
+    return false
+  }
+  ws.send(message)
+  return true
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -101,8 +113,7 @@ export class TypedSocket<
   emit<E extends keyof ServerToClientEvents & string>(event: E, ...args: any[]): boolean {
     if (this.ws.readyState !== WebSocket.OPEN) return false
     const data = args.length <= 1 ? args[0] : args
-    this.ws.send(JSON.stringify({ event, data }))
-    return true
+    return sendBounded(this.ws, JSON.stringify({ event, data }))
   }
 
   private dispatch(event: string, ...args: any[]): void {
@@ -188,7 +199,7 @@ class Broadcaster<ServerToClientEvents extends Record<string, any>> {
     for (const s of sockets) {
       if (this.exceptId && s.id === this.exceptId) continue
       if (s.ws.readyState === WebSocket.OPEN) {
-        s.ws.send(msg)
+        sendBounded(s.ws, msg)
       }
     }
   }
@@ -278,7 +289,7 @@ export class TypedServer<
     const data = args.length <= 1 ? args[0] : args
     const message = JSON.stringify({ event, data })
     for (const socket of this.sockets) {
-      if (socket.ws.readyState === WebSocket.OPEN) socket.ws.send(message)
+      sendBounded(socket.ws, message)
     }
   }
 

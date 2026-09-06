@@ -98,14 +98,14 @@ function encryptPassword(password: string | null): string | null {
 function decryptPassword(value: string | null | undefined): string | null {
   if (value == null) return null
   const [, iv, tag, encrypted] = value.split(':')
-  if (!value.startsWith('v1:') || !iv || !tag || !encrypted) return null
+  if (!value.startsWith('v1:') || !iv || !tag || !encrypted) throw new Error('Invalid encrypted room password')
   try {
     const decipher = createDecipheriv('aes-256-gcm', encryptionKey, Buffer.from(iv, 'base64url'))
     decipher.setAuthTag(Buffer.from(tag, 'base64url'))
     return Buffer.concat([decipher.update(Buffer.from(encrypted, 'base64url')), decipher.final()]).toString('utf8')
   } catch (error) {
     logger.warn('Failed to decrypt permanent room password', { error })
-    return null
+    throw new Error('Permanent room password could not be decrypted')
   }
 }
 
@@ -146,6 +146,16 @@ function restorePlayState(state: PersistedRoomState): RoomData['playState'] {
 }
 
 export class InMemoryRoomRepository implements RoomRepository {
+  private persistedSnapshots = new Map<string, {
+    password: string | null
+    encryptedPassword: string | null
+    structure: string
+    playback: string
+    members: Map<string, string>
+  }>()
+  private updatePlayback = db.prepare(`
+    UPDATE permanent_rooms SET state_json = json_set(state_json, '$.playState', json(@playback)), updated_at = @now WHERE id = @id
+  `)
   private rooms = new Map<string, RoomData>()
   private socketToRoom = new Map<string, SocketMapping>()
   /** Smoothed RTT per socket (ms).  Cleaned up together with socket mapping. */
@@ -175,7 +185,7 @@ export class InMemoryRoomRepository implements RoomRepository {
     FROM permanent_room_members AS members
     JOIN users ON users.id = members.user_id
     WHERE members.room_id = ?
-    ORDER BY members.joined_at ASC
+    ORDER BY members.joined_at ASC, members.rowid ASC
   `)
   private insertLegacyPermanentMember = db.prepare(`
     INSERT INTO permanent_room_members (room_id, user_id, joined_at, last_seen_at, client_json)
@@ -197,6 +207,8 @@ export class InMemoryRoomRepository implements RoomRepository {
     for (const row of rows) {
       try {
         let state = JSON.parse(row.state_json) as PersistedRoomState
+        const restoredPassword = state.passwordEncrypted !== undefined
+          ? decryptPassword(state.passwordEncrypted) : (state.password ?? null)
         const migration = migratePermanentRoomAudioQuality(state)
         if (migration) {
           try {
@@ -246,8 +258,7 @@ export class InMemoryRoomRepository implements RoomRepository {
         this.rooms.set(row.id, {
           id: row.id,
           name: state.name,
-          password:
-            state.passwordEncrypted !== undefined ? decryptPassword(state.passwordEncrypted) : (state.password ?? null),
+          password: restoredPassword,
           creatorId: state.creatorId,
           hostId: state.creatorId,
           adminUserIds: new Set(state.adminUserIds ?? []),
@@ -276,7 +287,7 @@ export class InMemoryRoomRepository implements RoomRepository {
           roomId: row.id,
           error: error instanceof Error ? error.message : String(error),
         })
-        this.deletePermanentRoom.run(row.id)
+        // Keep the original row for recovery; an unreadable room is not exposed.
       }
     }
   }
@@ -293,12 +304,15 @@ export class InMemoryRoomRepository implements RoomRepository {
   persist(roomId: string): void {
     const room = this.rooms.get(roomId)
     if (!room?.permanent) {
+      this.persistedSnapshots.delete(roomId)
       this.deletePermanentRoom.run(roomId)
       return
     }
+    const previous = this.persistedSnapshots.get(roomId)
+    const encryptedPassword = previous && previous.password === room.password ? previous.encryptedPassword : encryptPassword(room.password)
     const state: PersistedRoomState = {
       name: room.name,
-      passwordEncrypted: encryptPassword(room.password),
+      passwordEncrypted: encryptedPassword,
       creatorId: room.creatorId,
       adminUserIds: Array.from(room.adminUserIds),
       hidden: room.hidden,
@@ -314,16 +328,29 @@ export class InMemoryRoomRepository implements RoomRepository {
       playState: room.playState,
       playMode: room.playMode,
     }
-    this.upsertPermanentRoom.run({ id: roomId, stateJson: JSON.stringify(state), updatedAt: Date.now() })
-    for (const member of room.members) {
-      this.upsertPermanentMember.run({
+    const structure = JSON.stringify({ ...state, playState: undefined })
+    const playback = JSON.stringify(state.playState)
+    const members = new Map<string, string>()
+    const changedMembers = room.members.map((member) => ({
         roomId,
         userId: member.id,
         joinedAt: member.joinedAt,
         lastSeenAt: member.lastSeenAt ?? member.joinedAt,
         clientJson: member.lastClient ? JSON.stringify(member.lastClient) : null,
-      })
-    }
+    })).filter((member) => {
+      const serialized = JSON.stringify(member)
+      members.set(member.userId, serialized)
+      return previous?.members.get(member.userId) !== serialized
+    })
+    db.transaction(() => {
+      if (previous?.structure !== structure) {
+        this.upsertPermanentRoom.run({ id: roomId, stateJson: JSON.stringify(state), updatedAt: Date.now() })
+      } else if (previous.playback !== playback) {
+        this.updatePlayback.run({ id: roomId, playback, now: Date.now() })
+      }
+      for (const member of changedMembers) this.upsertPermanentMember.run(member)
+    })()
+    this.persistedSnapshots.set(roomId, { password: room.password, encryptedPassword, structure, playback, members })
   }
 
   private loadPermanentMembers(roomId: string, creatorId: string, adminUserIds: Set<string>): RoomMember[] {
@@ -344,6 +371,7 @@ export class InMemoryRoomRepository implements RoomRepository {
   }
 
   delete(roomId: string): void {
+    this.persistedSnapshots.delete(roomId)
     this.rooms.delete(roomId)
     this.deletePermanentRoom.run(roomId)
     // Clean up reverse index for the deleted room

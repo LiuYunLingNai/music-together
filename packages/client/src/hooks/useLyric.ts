@@ -452,11 +452,46 @@ export function useLyric() {
       setLyric(initialPresentation.lyric, initialPresentation.tlyric)
       setLyricLoading(false)
 
+      const canSupplement = !!track.lyricId && track.artist.length > 0 && track.duration > 0
+      const requestSupplement = async (): Promise<LyricSupplementData | null> => {
+        const params = new URLSearchParams({
+          source: track.metadataSource ?? track.source,
+          lyricId: track.lyricId!, title: track.title, duration: String(track.duration),
+        })
+        for (const artist of track.artist) params.append('artists', artist)
+        try {
+          const response = await fetch(`${SERVER_URL}/api/music/lyric-supplement?${params}`, {
+            signal: request.controller.signal, credentials: 'include',
+          })
+          return response.ok ? await response.json() : null
+        } catch { return null }
+      }
+      // Start matching while a slow TTML provider is still pending. Only one supplement request is used.
+      const earlySupplement = canSupplement && !initialPresentation.quality.hasWordAnimation
+        ? requestSupplement() : null
+      let baseCompleted = false
+      const earlyPublication = earlySupplement?.then((supplement) => {
+        if (!supplement || !isCurrent() || baseCompleted) return
+        const candidates = supplement.candidates?.length ? supplement.candidates : supplement.source ? [supplement] : []
+        const characterCount = Math.max(initialPresentation.quality.meaningfulCharacterCount,
+          ...candidates.map((candidate) => buildNativePresentation(candidate).quality.meaningfulCharacterCount))
+        const referenceLrc = firstCandidate?.type === 'platform' ? firstCandidate.data.lyric : initialPresentation.lyric
+        const best = candidates.map((candidate) => buildNativePresentation(candidate, characterCount, referenceLrc))
+          .filter((candidate) => candidate.quality.hasWordAnimation)
+          .sort((a, b) => b.quality.confidence - a.quality.confidence)[0]
+        if (best && isPresentationBetter(best, initialPresentation)) {
+          initialPresentation = best
+          setTtmlLines(best.lines)
+          setLyric(best.lyric, best.tlyric)
+        }
+      }).catch(() => { /* An unusable supplement must not block the base lyrics. */ })
       const [rawTtmlLines, lyricData] = completeWithinGrace?.value ?? (await completeBasePromise)
+      baseCompleted = true
       if (!isCurrent()) return
 
       const baseTtmlPresentation = buildTtmlPresentation(rawTtmlLines, lyricData)
       let preferredPresentation = selectPreferredPresentation(rawTtmlLines, lyricData)
+      if (isPresentationBetter(initialPresentation, preferredPresentation)) preferredPresentation = initialPresentation
       if (!completeWithinGrace) {
         if (isPresentationBetter(preferredPresentation, initialPresentation)) {
           setTtmlLines(preferredPresentation.lines)
@@ -473,21 +508,9 @@ export function useLyric() {
         !preferredPresentation.quality.hasWordAnimation ||
         (baseTtmlPresentation?.unresolvedCount ?? 0) > 0
       if (needsSupplement && track.lyricId && track.artist.length > 0 && track.duration > 0) {
-        const params = new URLSearchParams({
-          source: track.metadataSource ?? track.source,
-          lyricId: track.lyricId,
-          title: track.title,
-          duration: String(track.duration),
-        })
-        for (const artist of track.artist) params.append('artists', artist)
-
         try {
-          const response = await fetch(`${SERVER_URL}/api/music/lyric-supplement?${params}`, {
-            signal: request.controller.signal,
-            credentials: 'include',
-          })
-          if (response.ok) {
-            const supplement: LyricSupplementData = await response.json()
+          const supplement = await (earlySupplement ?? requestSupplement())
+          if (supplement) {
             const supplementCandidates: LyricData[] = supplement.candidates?.length
               ? supplement.candidates
               : supplement.source
@@ -543,6 +566,9 @@ export function useLyric() {
       }
 
       if (!isCurrent()) return
+      await earlyPublication
+      if (!isCurrent()) return
+      if (isPresentationBetter(initialPresentation, preferredPresentation)) preferredPresentation = initialPresentation
       cachePresentation(key, preferredPresentation)
       if (preparedRef.current === request) preparedRef.current = null
     },

@@ -16,6 +16,23 @@ after(() => {
   rmSync(testDataDir, { recursive: true, force: true })
 })
 
+test('persists playback without rewriting unchanged members and skips identical snapshots', () => {
+  const { room } = roomService.createRoom('persist-socket', 'Owner', 'Incremental room', null, 'persist-owner')
+  roomService.updateSettings(room.id, { permanent: true })
+  roomRepo.persist(room.id)
+  const changes = () => db.prepare<[], { count: number }>('SELECT total_changes() AS count').get()!.count
+  const before = changes()
+  roomRepo.persist(room.id)
+  assert.equal(changes(), before)
+  room.playState = { ...room.playState, currentTime: 42 }
+  roomRepo.persist(room.id)
+  assert.equal(changes(), before + 1)
+  const restored = new InMemoryRoomRepository().get(room.id)
+  assert.equal(restored?.playState.currentTime, 42)
+  assert.equal(restored?.members.length, room.members.length)
+  roomRepo.delete(room.id)
+})
+
 test('keeps offline members in a permanent room roster after reload', () => {
   const { room } = roomService.createRoom('owner-socket', 'Owner', 'Roster room', null, 'owner-id')
   roomService.updateSettings(room.id, { permanent: true })

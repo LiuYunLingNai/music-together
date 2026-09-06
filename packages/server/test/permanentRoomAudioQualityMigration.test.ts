@@ -125,6 +125,7 @@ test('migrates legacy SQ-or-higher provider qualities in memory and in SQLite ex
 test('preserves explicit numeric SQ and startup after one malformed row', () => {
   assert.equal(roomRepo.get('SQROOM')?.audioQuality, 999)
   assert.equal(roomRepo.get('BROKEN'), undefined)
+  assert.ok(db.prepare("SELECT id FROM permanent_rooms WHERE id = 'BROKEN'").get())
 
   const sqRow = db
     .prepare<
@@ -134,4 +135,13 @@ test('preserves explicit numeric SQ and startup after one malformed row', () => 
     .get()
   assert.deepEqual(JSON.parse(sqRow!.state_json), explicitSqState)
   assert.equal(sqRow!.updated_at, 300)
+})
+
+test('keeps an unreadable password offline and preserves its original record', () => {
+  const original = JSON.stringify({ ...legacyState, passwordEncrypted: 'v1:invalid:invalid:invalid' })
+  insertRoom.run('BADKEY', original, '[]', 400)
+  const restored = new InMemoryRoomRepository()
+  assert.equal(restored.get('BADKEY'), undefined)
+  const row = db.prepare<[string], { state_json: string }>('SELECT state_json FROM permanent_rooms WHERE id = ?').get('BADKEY')
+  assert.equal(row?.state_json, original)
 })
