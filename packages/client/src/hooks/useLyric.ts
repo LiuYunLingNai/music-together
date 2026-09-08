@@ -1,6 +1,9 @@
 import { SERVER_URL } from '@/lib/config'
 import {
+  enrichLyricAuxiliary,
+  enrichLyricStructure,
   evaluateLyricAnimationQuality,
+  needsLyricAuxiliary,
   normalizeLyricTimeline,
   repairLyricTimeline,
   type LyricAnimationQuality,
@@ -109,64 +112,6 @@ function yrcToCoreLyricLines(lines: ReturnType<typeof parseYrc>): AMLLLyricLine[
   }))
 }
 
-/** 解析 LRC 格式歌词为 {timeMs, text} 数组 */
-function parseLRC(lrc: string): { timeMs: number; text: string }[] {
-  const lines: { timeMs: number; text: string }[] = []
-  const regex = /\[(\d{2}):(\d{2})(?:\.(\d{1,3}))?\](.*)/g
-  let match
-  while ((match = regex.exec(lrc)) !== null) {
-    const minutes = parseInt(match[1], 10)
-    const seconds = parseInt(match[2], 10)
-    const ms = match[3] ? parseInt(match[3].padEnd(3, '0'), 10) : 0
-    const timeMs = (minutes * 60 + seconds) * 1000 + ms
-    const text = match[4].trim()
-    if (text) lines.push({ timeMs, text })
-  }
-  return lines.sort((a, b) => a.timeMs - b.timeMs)
-}
-
-/**
- * 将 LRC 格式的辅助歌词（翻译/罗马音）按时间戳合并到 AMLL LyricLine 的指定字段。
- * 匹配策略：精确匹配 → ±500ms 容差（适配不同平台的时间轴偏差）。
- * 直接修改传入的 lines 数组（避免不必要的拷贝）。
- */
-function mergeLRCIntoLines(lines: AMLLLyricLine[], lrc: string, field: 'translatedLyric' | 'romanLyric'): void {
-  if (!lrc) return
-  const parsed = parseLRC(lrc)
-  if (parsed.length === 0) return
-
-  // 构建时间→文本映射（key = 毫秒取整到 100ms，加速查找）
-  const map = new Map<number, string>()
-  for (const item of parsed) {
-    map.set(Math.round(item.timeMs / 100), item.text)
-  }
-
-  const TOLERANCE_STEPS = 5 // ±500ms，每步 100ms
-  for (const line of lines) {
-    // 跳过已有内容的行（TTML 自带时不覆盖）
-    if (line[field]) continue
-
-    const key = Math.round(line.startTime / 100)
-    const exact = map.get(key)
-    if (exact) {
-      line[field] = exact
-      continue
-    }
-    // 容差匹配
-    for (let offset = 1; offset <= TOLERANCE_STEPS; offset++) {
-      const near = map.get(key + offset) ?? map.get(key - offset)
-      if (near) {
-        line[field] = near
-        break
-      }
-    }
-  }
-}
-
-function cloneLyricLines(lines: readonly AMLLLyricLine[]): AMLLLyricLine[] {
-  return lines.map((line) => ({ ...line, words: line.words.map((word) => ({ ...word })) }))
-}
-
 function hasUsablePlatformLyric(data: LyricData | null): data is LyricData {
   return !!data && !!(data.lyric || data.yrc || data.wordByWord?.length)
 }
@@ -179,19 +124,14 @@ function buildNativePresentation(
   let lines: AMLLLyricLine[] | null = null
 
   if (data?.wordByWord?.length) {
-    const nativeLines = cloneLyricLines(data.wordByWord)
-    mergeLRCIntoLines(nativeLines, data.tlyric, 'translatedLyric')
-    mergeLRCIntoLines(nativeLines, data.romalrc, 'romanLyric')
-    const normalized = normalizeLyricTimeline(nativeLines)
+    const normalized = enrichLyricAuxiliary(normalizeLyricTimeline(data.wordByWord), [data]).lines
     if (normalized.length > 0) lines = normalized
   } else if (data?.yrc) {
     try {
       const parsed = parseYrc(data.yrc)
       if (parsed.length > 0) {
         const nativeLines = yrcToCoreLyricLines(parsed)
-        mergeLRCIntoLines(nativeLines, data.tlyric, 'translatedLyric')
-        mergeLRCIntoLines(nativeLines, data.romalrc, 'romanLyric')
-        const normalized = normalizeLyricTimeline(nativeLines)
+        const normalized = enrichLyricAuxiliary(normalizeLyricTimeline(nativeLines), [data]).lines
         if (normalized.length > 0) lines = normalized
       }
     } catch {
@@ -215,13 +155,14 @@ function createTtmlPresentation(
   lyricData: LyricData | null,
   comparisonCharacterCount = 0,
 ): LyricPresentation {
+  const enrichedLines = lyricData ? enrichLyricAuxiliary(lines, [lyricData]).lines : lines
   return {
     source: 'ttml',
-    lines: lines.length > 0 ? lines : null,
+    lines: enrichedLines.length > 0 ? enrichedLines : null,
     lyric: lyricData?.lyric ?? '',
     tlyric: lyricData?.tlyric ?? '',
     unresolvedCount,
-    quality: evaluateLyricAnimationQuality(lines, lyricData?.lyric, comparisonCharacterCount),
+    quality: evaluateLyricAnimationQuality(enrichedLines, lyricData?.lyric, comparisonCharacterCount),
   }
 }
 
@@ -239,8 +180,11 @@ function buildTtmlPresentation(
 function chooseBetweenPresentations(native: LyricPresentation, ttml: LyricPresentation): LyricPresentation {
   const nativeStructure = native.quality.duetLineCount + native.quality.backgroundLineCount
   const ttmlStructure = ttml.quality.duetLineCount + ttml.quality.backgroundLineCount
+  const nativeStructureUsable = native.quality.validTimingCoverage >= 0.85 && native.quality.textCoverage >= 0.8
+  const ttmlStructureUsable = ttml.quality.validTimingCoverage >= 0.85 && ttml.quality.textCoverage >= 0.8
   if (nativeStructure !== ttmlStructure) {
-    return ttmlStructure > nativeStructure ? ttml : native
+    if (ttmlStructure > nativeStructure && ttmlStructureUsable) return ttml
+    if (nativeStructure > ttmlStructure && nativeStructureUsable) return native
   }
   if (native.quality.hasWordAnimation !== ttml.quality.hasWordAnimation) {
     return native.quality.hasWordAnimation ? native : ttml
@@ -271,9 +215,10 @@ function selectPreferredPresentation(
 function isPresentationBetter(next: LyricPresentation, current: LyricPresentation): boolean {
   const nextStructure = next.quality.duetLineCount + next.quality.backgroundLineCount
   const currentStructure = current.quality.duetLineCount + current.quality.backgroundLineCount
-  if (currentStructure > 0 && nextStructure === 0) return false
+  const currentStructureUsable = current.quality.validTimingCoverage >= 0.85 && current.quality.textCoverage >= 0.8
+  if (currentStructure > 0 && nextStructure === 0 && currentStructureUsable) return false
   if (nextStructure > 0 && currentStructure === 0) {
-    return next.quality.validTimingCoverage >= 0.85 && next.quality.textCoverage >= 0.5
+    return next.quality.validTimingCoverage >= 0.85 && next.quality.textCoverage >= 0.8
   }
   if (next.quality.hasWordAnimation !== current.quality.hasWordAnimation) {
     return next.quality.hasWordAnimation
@@ -283,6 +228,25 @@ function isPresentationBetter(next: LyricPresentation, current: LyricPresentatio
   }
   if (!current.lines?.length && next.lines?.length) return true
   return next.unresolvedCount < current.unresolvedCount
+}
+
+function preserveTtmlStructure(
+  presentation: LyricPresentation,
+  ttmlPresentation: LyricPresentation | null,
+): LyricPresentation {
+  if (!presentation.lines?.length || !ttmlPresentation?.lines?.length) return presentation
+  if (ttmlPresentation.quality.duetLineCount + ttmlPresentation.quality.backgroundLineCount === 0) return presentation
+  const result = enrichLyricStructure(presentation.lines, ttmlPresentation.lines)
+  if (!result.changed) return presentation
+  return {
+    ...presentation,
+    lines: result.lines,
+    quality: evaluateLyricAnimationQuality(
+      result.lines,
+      presentation.lyric,
+      presentation.quality.meaningfulCharacterCount,
+    ),
+  }
 }
 
 function getCachedPresentation(key: string): LyricPresentation | null {
@@ -467,7 +431,10 @@ export function useLyric() {
         } catch { return null }
       }
       // Start matching while a slow TTML provider is still pending. Only one supplement request is used.
-      const earlySupplement = canSupplement && !initialPresentation.quality.hasWordAnimation
+      const earlySupplement = canSupplement && (
+        !initialPresentation.quality.hasWordAnimation ||
+        needsLyricAuxiliary(initialPresentation.lines ?? [])
+      )
         ? requestSupplement() : null
       let baseCompleted = false
       const earlyPublication = earlySupplement?.then((supplement) => {
@@ -491,6 +458,7 @@ export function useLyric() {
 
       const baseTtmlPresentation = buildTtmlPresentation(rawTtmlLines, lyricData)
       let preferredPresentation = selectPreferredPresentation(rawTtmlLines, lyricData)
+      preferredPresentation = preserveTtmlStructure(preferredPresentation, baseTtmlPresentation)
       if (isPresentationBetter(initialPresentation, preferredPresentation)) preferredPresentation = initialPresentation
       if (!completeWithinGrace) {
         if (isPresentationBetter(preferredPresentation, initialPresentation)) {
@@ -506,7 +474,8 @@ export function useLyric() {
 
       const needsSupplement =
         !preferredPresentation.quality.hasWordAnimation ||
-        (baseTtmlPresentation?.unresolvedCount ?? 0) > 0
+        (baseTtmlPresentation?.unresolvedCount ?? 0) > 0 ||
+        needsLyricAuxiliary(preferredPresentation.lines ?? [])
       if (needsSupplement && track.lyricId && track.artist.length > 0 && track.duration > 0) {
         try {
           const supplement = await (earlySupplement ?? requestSupplement())
@@ -523,9 +492,10 @@ export function useLyric() {
               preferredPresentation.quality.meaningfulCharacterCount,
               ...preliminarySupplements.map((presentation) => presentation.quality.meaningfulCharacterCount),
             )
-            const supplementalPresentations = supplementCandidates.map((candidate) =>
+            const supplementalPresentations = supplementCandidates.map((candidate) => preserveTtmlStructure(
               buildNativePresentation(candidate, comparisonCharacterCount, lyricData?.lyric ?? ''),
-            )
+              baseTtmlPresentation,
+            ))
             const supplementalPresentation = supplementalPresentations
               .filter((presentation) => presentation.quality.hasWordAnimation)
               .sort((left, right) => right.quality.confidence - left.quality.confidence)[0]
@@ -557,6 +527,19 @@ export function useLyric() {
               if (isPresentationBetter(repairedPresentation, preferredPresentation)) {
                 preferredPresentation = repairedPresentation
                 if (isCurrent()) setTtmlLines(preferredPresentation.lines)
+              }
+            }
+
+            if (preferredPresentation.lines?.length) {
+              const auxiliary = enrichLyricAuxiliary(preferredPresentation.lines, [
+                ...(initialPresentation.lines ? [{ lines: initialPresentation.lines }] : []),
+                ...(baseTtmlPresentation?.lines ? [{ lines: baseTtmlPresentation.lines }] : []),
+                ...(lyricData ? [lyricData] : []),
+                ...supplementCandidates,
+              ])
+              if (auxiliary.changed) {
+                preferredPresentation = { ...preferredPresentation, lines: auxiliary.lines }
+                if (isCurrent()) setTtmlLines(auxiliary.lines)
               }
             }
           }

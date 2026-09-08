@@ -1,6 +1,13 @@
 import type { LyricLine, LyricWord } from '@applemusic-like-lyrics/core'
 import { describe, expect, it } from 'vitest'
-import { evaluateLyricAnimationQuality, normalizeLyricTimeline, repairLyricTimeline } from './lyricTimeline'
+import {
+  enrichLyricAuxiliary,
+  enrichLyricStructure,
+  evaluateLyricAnimationQuality,
+  needsLyricAuxiliary,
+  normalizeLyricTimeline,
+  repairLyricTimeline,
+} from './lyricTimeline'
 
 function lyricWord(word: string, startTime: number, endTime: number): LyricWord {
   return { word, startTime, endTime, romanWord: '', obscene: false }
@@ -204,5 +211,159 @@ describe('evaluateLyricAnimationQuality', () => {
 
     expect(quality.textCoverage).toBe(1)
     expect(quality.hasWordAnimation).toBe(true)
+  })
+
+  it('rejects word timing that covers only one occurrence of a repeated chorus', () => {
+    const chorus = 'Gee gee gee gee baby baby baby'
+    const lines = [
+      animatedLine('第一段', '主歌内容', 1_000),
+      animatedLine('第二段', '主歌内容', 3_000),
+      animatedLine('Gee gee gee gee ', 'baby baby baby', 5_000),
+      animatedLine('第三段', '主歌内容', 7_000),
+    ]
+    const quality = evaluateLyricAnimationQuality(
+      lines,
+      `[00:01.00]第一段主歌内容\n[00:03.00]第二段主歌内容\n[00:05.00]${chorus}\n[00:07.00]第三段主歌内容\n[00:09.00]${chorus}`,
+    )
+
+    expect(quality.repeatedSectionCoverage).toBe(0.5)
+    expect(quality.hasWordAnimation).toBe(false)
+  })
+})
+
+describe('enrichLyricAuxiliary', () => {
+  it('fills translated and romanized lyrics across a provider-wide timing offset', () => {
+    const lines = [
+      lyricLine('Uh huh listen boy', 11_200, 13_000),
+      lyricLine('너무 너무 멋져', 14_200, 16_000),
+      lyricLine('눈이 눈이 부셔', 17_200, 19_000),
+    ]
+    const source = {
+      lyric: '[00:10.00]Uh huh listen boy\n[00:13.00]너무 너무 멋져\n[00:16.00]눈이 눈이 부셔',
+      tlyric: '[00:10.00]Uh huh 听着 男孩\n[00:13.00]真的真的好帅\n[00:16.00]耀眼得睁不开眼',
+      romalrc: '[00:10.00]Uh huh listen boy\n[00:13.00]neomu neomu meotjyeo\n[00:16.00]nuni nuni busyeo',
+    }
+
+    const result = enrichLyricAuxiliary(lines, [source])
+
+    expect(result.lines.map((line) => line.translatedLyric)).toEqual([
+      'Uh huh 听着 男孩', '真的真的好帅', '耀眼得睁不开眼',
+    ])
+    expect(result.lines[1].romanLyric).toBe('neomu neomu meotjyeo')
+    expect(result.lines.map((line) => line.startTime)).toEqual([11_200, 14_200, 17_200])
+    expect(needsLyricAuxiliary(result.lines)).toBe(false)
+  })
+
+  it('keeps AMLL fields and existing auxiliary text intact', () => {
+    const words = [lyricWord('Gee ', 5_000, 5_400), lyricWord('Gee', 5_400, 5_900)]
+    const main = lyricLine('Gee Gee', 5_000, 5_900, { isDuet: true, words })
+    main.translatedLyric = '已有翻译'
+    const background = lyricLine('baby baby', 5_100, 5_800, { isBG: true })
+
+    const result = enrichLyricAuxiliary([main, background], [{
+      lyric: '[00:05.00]Gee Gee\n[00:05.10]baby baby',
+      tlyric: '[00:05.00]新的翻译\n[00:05.10]宝贝 宝贝',
+    }])
+
+    expect(result.lines[0]).toMatchObject({ translatedLyric: '已有翻译', isDuet: true, startTime: 5_000 })
+    expect(result.lines[0].words).toEqual(words)
+    expect(result.lines[0].words).not.toBe(words)
+    expect(result.lines[1]).toMatchObject({ translatedLyric: '', isBG: true })
+  })
+
+  it('maps repeated lines in order and ignores unrelated sources', () => {
+    const lines = [lyricLine('Gee Gee Gee', 10_000, 11_000), lyricLine('Gee Gee Gee', 40_000, 41_000)]
+    const result = enrichLyricAuxiliary(lines, [
+      { lyric: '[00:10.00]完全无关\n[00:40.00]仍然无关', tlyric: '[00:10.00]错误一\n[00:40.00]错误二' },
+      { lyric: '[00:10.00]Gee Gee Gee\n[00:40.00]Gee Gee Gee', tlyric: '[00:10.00]第一次\n[00:40.00]第二次' },
+    ])
+
+    expect(result.lines.map((line) => line.translatedLyric)).toEqual(['第一次', '第二次'])
+  })
+
+  it('keeps translations from the earlier AMLL presentation when a better word timeline replaces it', () => {
+    const earlier = [lyricLine('너무 너무 멋져', 13_000, 15_000), lyricLine('눈이 눈이 부셔', 16_000, 18_000)]
+    earlier[0].translatedLyric = '真的真的好帅'
+    earlier[1].translatedLyric = '耀眼得睁不开眼'
+    const betterWordTimeline = [
+      lyricLine('너무 너무 멋져', 14_100, 16_000, {
+        words: [lyricWord('너무 ', 14_100, 14_800), lyricWord('너무 멋져', 14_800, 16_000)],
+      }),
+      lyricLine('눈이 눈이 부셔', 17_100, 19_000, {
+        words: [lyricWord('눈이 ', 17_100, 17_800), lyricWord('눈이 부셔', 17_800, 19_000)],
+      }),
+    ]
+
+    const result = enrichLyricAuxiliary(betterWordTimeline, [{ lines: earlier }])
+
+    expect(result.lines.map((line) => line.translatedLyric)).toEqual(['真的真的好帅', '耀眼得睁不开眼'])
+    expect(result.lines[0].words).toEqual(betterWordTimeline[0].words)
+  })
+
+  it('does not reuse one auxiliary timestamp for adjacent source lines', () => {
+    const lines = [lyricLine('첫째 줄', 10_000, 11_000), lyricLine('둘째 줄', 11_000, 12_000)]
+    const result = enrichLyricAuxiliary(lines, [{
+      lyric: '[00:10.00]첫째 줄\n[00:11.00]둘째 줄',
+      tlyric: '[00:10.50]唯一译文',
+    }])
+
+    expect(result.lines.map((line) => line.translatedLyric)).toEqual(['唯一译文', ''])
+  })
+
+  it('prefers the auxiliary source whose segmentation best matches the AMLL timeline', () => {
+    const lines = [
+      lyricLine('첫째 줄', 10_000, 11_000),
+      lyricLine('둘째 줄', 12_000, 13_000),
+      lyricLine('셋째 줄', 14_000, 15_000),
+    ]
+    const result = enrichLyricAuxiliary(lines, [
+      {
+        lyric: '[00:10.00]첫째 줄 둘째 줄\n[00:14.00]셋째 줄',
+        tlyric: '[00:10.00]较粗分行一\n[00:14.00]较粗分行二',
+      },
+      {
+        lyric: '[00:10.00]첫째 줄\n[00:12.00]둘째 줄\n[00:14.00]셋째 줄',
+        tlyric: '[00:10.00]精确一\n[00:12.00]精确二\n[00:14.00]精确三',
+        romalrc: '[00:10.00]cheotjjae\n[00:12.00]duljjae\n[00:14.00]setjjae',
+      },
+    ])
+
+    expect(result.lines.map((line) => line.translatedLyric)).toEqual(['精确一', '精确二', '精确三'])
+    expect(result.lines.map((line) => line.romanLyric)).toEqual(['cheotjjae', 'duljjae', 'setjjae'])
+  })
+})
+
+describe('enrichLyricStructure', () => {
+  it('transfers matched duet and background flags without changing word timing', () => {
+    const target = [
+      lyricLine('女声主句', 10_100, 12_000, {
+        words: [lyricWord('女声', 10_100, 11_000), lyricWord('主句', 11_000, 12_000)],
+      }),
+      lyricLine('背景和声', 10_500, 12_000),
+      lyricLine('男声接唱', 13_100, 15_000),
+    ]
+    const structure = [
+      lyricLine('女声主句', 10_000, 12_000, { isDuet: true }),
+      lyricLine('背景和声', 10_400, 12_000, { isBG: true }),
+      lyricLine('男声接唱', 13_000, 15_000, { isDuet: true }),
+    ]
+
+    const result = enrichLyricStructure(target, structure)
+
+    expect(result.changed).toBe(true)
+    expect(result.lines.map((line) => ({ isDuet: line.isDuet, isBG: line.isBG }))).toEqual([
+      { isDuet: true, isBG: false },
+      { isDuet: false, isBG: true },
+      { isDuet: true, isBG: false },
+    ])
+    expect(result.lines[0].words).toEqual(target[0].words)
+    expect(result.lines.map((line) => line.startTime)).toEqual([10_100, 10_500, 13_100])
+  })
+
+  it('does not transfer structure from an unrelated timeline', () => {
+    const target = [lyricLine('目标歌词一', 10_000, 11_000), lyricLine('目标歌词二', 12_000, 13_000)]
+    const unrelated = [lyricLine('其他内容一', 10_000, 11_000, { isDuet: true })]
+
+    expect(enrichLyricStructure(target, unrelated)).toMatchObject({ changed: false })
   })
 })
