@@ -10,7 +10,10 @@ import androidx.lifecycle.viewModelScope
 import io.github.yueby.musictogether.account.AccountCoordinator
 import io.github.yueby.musictogether.logging.AppLogger
 import io.github.yueby.musictogether.lyrics.LyricsParser
+import io.github.yueby.musictogether.lyrics.enrichLyricLines
 import io.github.yueby.musictogether.lyrics.lyricOffsetKey
+import io.github.yueby.musictogether.lyrics.needsLyricSupplement
+import io.github.yueby.musictogether.lyrics.preferLyricCandidate
 import io.github.yueby.musictogether.model.AppState
 import io.github.yueby.musictogether.model.AudioProxyPolicy
 import io.github.yueby.musictogether.model.BilibiliMetadataMatchState
@@ -2672,23 +2675,30 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         }
         _state.value = _state.value.copy(lyrics = LyricsState(trackId = track.id, loading = true))
         lyricJob = viewModelScope.launch {
-            var bestRank = -1
-            fun publish(lines: List<io.github.yueby.musictogether.model.LyricLine>, source: String) {
+            var bestLines = emptyList<io.github.yueby.musictogether.model.LyricLine>()
+            var bestSource = ""
+            var platformRaw: JSONObject? = null
+            var ttmlLines = emptyList<io.github.yueby.musictogether.model.LyricLine>()
+            fun commit(lines: List<io.github.yueby.musictogether.model.LyricLine>, source: String) {
                 if (!isActive || activeServer?.displayUrl != server.displayUrl || _state.value.room?.currentTrack?.id != track.id || lines.isEmpty()) return
-                val rank = (if (lines.any { it.words.size > 1 }) 2 else 0) + (if (source == "ttml") 1 else 0)
-                if (rank <= bestRank) return
-                bestRank = rank
+                bestLines = lines
+                bestSource = source
                 val lyrics = LyricsState(trackId = track.id, lines = lines, source = source, loading = false)
                 _state.value = _state.value.copy(lyrics = lyrics)
                 lyricCache.remove(key)
                 lyricCache[key] = System.currentTimeMillis() to lyrics
                 while (lyricCache.size > 30) lyricCache.remove(lyricCache.keys.first())
             }
+            fun publish(lines: List<io.github.yueby.musictogether.model.LyricLine>, source: String) {
+                val reference = platformRaw?.optString("lyric").orEmpty()
+                if (preferLyricCandidate(bestLines, lines, reference, source == "ttml")) commit(lines, source)
+            }
             coroutineScope {
                 val ttml = launch {
                     try {
                         val xml = api.ttml(track)
                         val lines = withContext(Dispatchers.Default) { xml?.let(LyricsParser::parseTtml).orEmpty() }
+                        ttmlLines = lines
                         publish(lines, "ttml")
                     } catch (error: Exception) {
                         if (error is CancellationException) throw error
@@ -2698,6 +2708,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     try {
                         val raw = api.lyrics(server, track)
                         if (raw != null) {
+                            platformRaw = raw
                             val parsed = withContext(Dispatchers.Default) { LyricsParser.parseServerResponse(raw) }
                             publish(parsed.first, parsed.second)
                         }
@@ -2708,7 +2719,30 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 ttml.join()
                 platform.join()
             }
-            if (isActive && bestRank < 0 && activeServer?.displayUrl == server.displayUrl && _state.value.room?.currentTrack?.id == track.id) {
+            val supplementCandidates = mutableListOf<JSONObject>()
+            if (track.lyricId?.isNotBlank() == true && track.artist.isNotEmpty() && track.duration > 0 && needsLyricSupplement(bestLines, platformRaw?.optString("lyric").orEmpty())) {
+                try {
+                    val supplement = api.lyricSupplement(server, track)
+                    val array = supplement?.optJSONArray("candidates")
+                    if (array != null) {
+                        repeat(array.length()) { index -> array.optJSONObject(index)?.let(supplementCandidates::add) }
+                    } else if (supplement?.optString("source")?.isNotBlank() == true) {
+                        supplementCandidates += supplement
+                    }
+                    supplementCandidates.forEach { raw ->
+                        val parsed = withContext(Dispatchers.Default) { LyricsParser.parseServerResponse(raw) }
+                        publish(parsed.first, "supplement:${raw.optString("source", parsed.second)}")
+                    }
+                } catch (error: Exception) {
+                    if (error is CancellationException) throw error
+                }
+            }
+            if (bestLines.isNotEmpty()) {
+                val auxiliarySources = listOfNotNull(platformRaw) + supplementCandidates
+                val enriched = withContext(Dispatchers.Default) { enrichLyricLines(bestLines, auxiliarySources, ttmlLines) }
+                commit(enriched, bestSource)
+            }
+            if (isActive && bestLines.isEmpty() && activeServer?.displayUrl == server.displayUrl && _state.value.room?.currentTrack?.id == track.id) {
                 _state.value = _state.value.copy(lyrics = LyricsState(trackId = track.id, error = "暂无可用歌词，请稍后重试"))
             }
             val room = _state.value.room
@@ -2727,14 +2761,39 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     }
                     val platform = async {
                         val raw = api.lyrics(server, next)
-                        withContext(Dispatchers.Default) { raw?.let(LyricsParser::parseServerResponse) }
+                        raw to withContext(Dispatchers.Default) { raw?.let(LyricsParser::parseServerResponse) }
                     }
-                    val lines = ttml.await()
-                    val native = platform.await()
-                    val preferTtml = lines.isNotEmpty() && (lines.any { it.words.size > 1 } || native?.first?.any { it.words.size > 1 } != true)
-                    val selected = if (preferTtml) LyricsState(trackId = next.id, lines = lines, source = "ttml")
-                        else native?.let { LyricsState(trackId = next.id, lines = it.first, source = it.second) }
-                    if (selected != null && selected.lines.isNotEmpty()) {
+                    val ttmlResult = ttml.await()
+                    val (nativeRaw, native) = platform.await()
+                    val reference = nativeRaw?.optString("lyric").orEmpty()
+                    var selectedLines = native?.first.orEmpty()
+                    var selectedSource = native?.second.orEmpty()
+                    if (preferLyricCandidate(selectedLines, ttmlResult, reference, nextIsTtml = true)) {
+                        selectedLines = ttmlResult
+                        selectedSource = "ttml"
+                    }
+                    val supplements = mutableListOf<JSONObject>()
+                    if (next.lyricId?.isNotBlank() == true && next.artist.isNotEmpty() && next.duration > 0 && needsLyricSupplement(selectedLines, reference)) {
+                        val supplement = api.lyricSupplement(server, next)
+                        val candidates = supplement?.optJSONArray("candidates")
+                        if (candidates != null) repeat(candidates.length()) { index -> candidates.optJSONObject(index)?.let(supplements::add) }
+                        else if (supplement?.optString("source")?.isNotBlank() == true) supplements += supplement
+                        supplements.forEach { raw ->
+                            val parsed = withContext(Dispatchers.Default) { LyricsParser.parseServerResponse(raw) }
+                            if (preferLyricCandidate(selectedLines, parsed.first, reference)) {
+                                selectedLines = parsed.first
+                                selectedSource = "supplement:${raw.optString("source", parsed.second)}"
+                            }
+                        }
+                    }
+                    if (selectedLines.isNotEmpty()) {
+                        val auxiliarySources = listOfNotNull(nativeRaw) + supplements
+                        val enriched = withContext(Dispatchers.Default) { enrichLyricLines(selectedLines, auxiliarySources, ttmlResult) }
+                        val selected = LyricsState(
+                            trackId = next.id,
+                            lines = enriched,
+                            source = selectedSource,
+                        )
                         lyricCache.remove(nextKey)
                         lyricCache[nextKey] = System.currentTimeMillis() to selected
                         while (lyricCache.size > 30) lyricCache.remove(lyricCache.keys.first())

@@ -302,6 +302,18 @@ class MusicTogetherApi(private val client: OkHttpClient) {
         executeJson(url, "lyrics:$source")
     }
 
+    suspend fun lyricSupplement(server: ServerAddress, track: Track): JSONObject? = withContext(Dispatchers.IO) {
+        val lyricId = track.lyricId?.takeIf { it.isNotBlank() } ?: return@withContext null
+        val url = server.api("music", "lyric-supplement").newBuilder()
+            .addQueryParameter("source", track.metadataSource ?: track.source)
+            .addQueryParameter("lyricId", lyricId)
+            .addQueryParameter("title", track.title)
+            .addQueryParameter("duration", track.duration.toString())
+            .apply { track.artist.forEach { addQueryParameter("artists", it) } }
+            .build()
+        executeJson(url, "lyric-supplement:" + track.source)
+    }
+
     suspend fun playlist(
         server: ServerAddress,
         source: String,
@@ -390,7 +402,7 @@ class MusicTogetherApi(private val client: OkHttpClient) {
     }
 
     private suspend fun executeRequest(request: Request, label: String, allowNoContent: Boolean = false): JSONObject? {
-        val timeout = if (label.startsWith("lyrics:") || label.startsWith("search")) 15L else 60L
+        val timeout = if (label.startsWith("lyric") || label.startsWith("search")) 15L else 60L
         val requestClient = client.newBuilder().callTimeout(timeout, TimeUnit.SECONDS).build()
         AppLogger.info("HTTP", "${request.method} ${request.url.encodedPath} label=$label")
         return requestClient.newCall(request).readCancellable { response ->
