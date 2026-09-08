@@ -77,9 +77,20 @@ export interface ServerLyrics {
   }>
 }
 
+export interface LyricSupplement extends ServerLyrics {
+  source?: MusicSource | null
+  candidates?: Array<ServerLyrics & { source: MusicSource }>
+}
+
 export async function fetchServerLyrics(serverUrl: string, source: string, lyricId: string, signal?: AbortSignal): Promise<ServerLyrics> {
   const params = new URLSearchParams({ source, lyricId })
   return requestJson(serverUrl, `/api/music/lyric?${params}`, { signal })
+}
+
+export async function fetchLyricSupplement(serverUrl: string, track: Track, signal?: AbortSignal): Promise<LyricSupplement> {
+  const params = new URLSearchParams({ source: track.metadataSource ?? track.source, lyricId: track.lyricId ?? '', title: track.title, duration: String(track.duration) })
+  track.artist.forEach((artist) => params.append('artists', artist))
+  return requestJson(serverUrl, `/api/music/lyric-supplement?${params}`, { signal })
 }
 
 export async function fetchPlaylistTracks(serverUrl: string, roomId: string, source: MusicSource, id: string, offset = 0, total?: number, type: 'playlist' | 'album' = 'playlist'): Promise<{ tracks: Track[]; total: number; hasMore: boolean }> {
