@@ -24,6 +24,8 @@
 |              | tw-animate-css                                             | ^1.4.0   | Tailwind 动画预设                       |
 | **图形渲染** | @pixi/app, core, display, sprite                           | ^7.4.3   | PixiJS（歌词背景渲染）                  |
 |              | @pixi/filter-blur, filter-bulge-pinch, filter-color-matrix | —        | PixiJS 滤镜                             |
+| **视觉舞台** | three                                                      | ^0.186.0 | Mineradio 舞台的粒子/相机/着色器渲染    |
+|              | @react-three/fiber                                         | ^9.7.0   | three.js 的 React 渲染器（需 React 19） |
 | **弹窗**     | vaul                                                       | ^1.x     | 移动端 Drawer（底部抽屉，支持拖拽关闭） |
 | **虚拟列表** | @tanstack/react-virtual                                    | ^3.14.9  | 虚拟滚动（歌单详情大列表）              |
 | **工具**     | dayjs                                                      | ^1.11.21 | 日期格式化                              |

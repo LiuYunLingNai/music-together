@@ -266,6 +266,15 @@ codex/windows-native-client
 
 服务器管理员可在“设置 -> 服务器管理 -> 备份”中直接修改开关、备份间隔、保留天数和定期清理开关，保存后即时生效，无需修改环境变量或重启。关闭定期清理后仍会创建备份，但不会自动删除旧备份。备份目录固定为项目根目录的 `backups/`；Docker 部署时，也应将该目录挂载到宿主机，否则替换容器后备份会丢失。
 
+## 致谢
+
+播放器的沉浸式视觉舞台（粒子着色器、镜头运动、封面深度纹理与音频驱动思路）参考并改编自以下开源项目，在此致谢：
+
+- [Mineradio](https://github.com/XxHuberrr/Mineradio) — 由 [@XxHuberrr](https://github.com/XxHuberrr) 开发，以电影镜头、粒子视觉与歌词舞台为核心的沉浸式播放器。本项目据其 GPL-3.0 许可改编了粒子预设的几何与着色器思路。
+- [OpenMusic](https://github.com/qq01-hub/openmusic) — 由 [@qq01-hub](https://github.com/qq01-hub) 开发，将 Mineradio 的部分视觉预设拆分为 React Three Fiber 组件，本项目的 uniform 契约与组件边界参考了它的实现。
+
+本项目自身以 [AGPL-3.0](LICENSE) 分发；上述改编遵循各自的上游许可。
+
 ## 协议
 
 [AGPL-3.0](LICENSE)

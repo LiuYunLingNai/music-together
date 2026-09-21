@@ -67,7 +67,17 @@ src/
 │   │       └── QrLoginDialog.tsx           # 通用 QR 扫码登录弹窗（网易云 + 酷狗 + QQ 音乐）
 │   ├── Player/
 │   │   ├── constants.ts        #     共享动画常量（SPRING / LAYOUT_TRANSITION），NowPlaying 和 SongInfoBar 统一导入
-│   │   ├── AudioPlayer.tsx     #     主播放器布局（桌面：左右分栏；移动：双模式封面/歌词切换）
+│   │   ├── AudioPlayer.tsx     #     播放器外壳：选择经典/Mineradio 舞台 + 模式菜单 + 播放回调透传
+│   │   ├── classic/
+│   │   │   └── ClassicPlayerStage.tsx   # 经典播放器布局（桌面左右分栏；移动双模式封面/歌词切换）
+│   │   ├── mineradio/
+│   │   │   ├── MineradioPlayerStage.tsx # 全屏 3D 舞台：封面采样粒子 + WebGL 歌词
+│   │   │   ├── VisualModeMenu.tsx       # 视觉模式菜单（经典播放器 + 6 个视觉模式）
+│   │   │   ├── MineradioLyricStage.tsx  # AMLL 回退用的 DOM 歌词层
+│   │   │   ├── MineradioControlBar.tsx  # 底部悬浮玻璃控制台（组合专用 Transport）
+│   │   │   ├── lyrics/         #     WebGL 歌词：数据模型 / 栅格化 / 着色器 / 网格
+│   │   │   ├── particles/      #     粒子场、星河、统一轨道相机、3D 队列架 + 分叉着色器
+│   │   │   └── shared/         #     VisualMode / RenderPolicy / AudioAnalyser / 封面纹理
 │   │   ├── LyricDisplay.tsx    #     AMLL 歌词渲染、逐词效果、歌词校准和可配置底栏
 │   │   ├── NowPlaying.tsx      #     当前曲目展示（支持 compact 小封面横排模式 + layoutId 共享动画）
 │   │   ├── SongInfoBar.tsx     #     歌曲信息栏（标题/艺术家 + 音量/聊天按钮，竖屏模式自适应缩放）

@@ -810,6 +810,12 @@ body[data-room-cover-tint='true'] {
     content: '';
   }
 
+  /* Mineradio 舞台是满屏 3D 场景，这条装饰环会横穿粒子与歌词，
+     因此在视觉模式下隐藏它。经典播放器不受影响。 */
+  .mt-player-stage:has(.mt-mineradio-root)::before {
+    display: none;
+  }
+
   .mt-player-stage > * {
     position: relative;
     z-index: 1;
@@ -970,4 +976,419 @@ body[data-room-cover-tint='true'] {
 /* 逐词罗马音注音（word 级别的 ruby 文本） */
 .amll-container [class*='romanWord'] {
   font-size: max(var(--amll-roman-font-size, 0.5em), 8px) !important;
+}
+
+/* ==========================================================================
+   Mineradio 舞台
+   --------------------------------------------------------------------------
+   经典播放器的样式完全不受影响：以下规则全部限定在 mt-mineradio-* 命名空间内。
+
+   构图参照上游：画布全屏铺满，控制栏是底部居中的浮动胶囊，
+   歌词与封面都在 WebGL 场景内（不再有 DOM 歌词层）。
+   ========================================================================== */
+
+/* 舞台根：全屏铺满，作为画布与前景层的定位上下文。
+   注意：这里不能给不透明的纯色底，否则会盖住环境层；
+   底色由 .mt-mineradio-ambient 提供。 */
+.mt-mineradio-root {
+  /* 保底底色：即使环境层未就绪也不会是纯黑 */
+  background-color: #070b14;
+  cursor: default;
+}
+
+/* ------------------------------------------------------------ 环境底色层
+   置于画布之下，提供色彩与封面氛围。
+   参照 Mineradio 的 #album-bg（封面模糊铺底）与 OpenMusic 的
+   RoomAmbientBackground（颜色环境层）。 */
+
+.mt-mineradio-ambient {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* 基色渐变：任何时候都有色彩层次 */
+.mt-mineradio-ambient__base {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(
+      ellipse 78% 62% at 50% 38%,
+      color-mix(in srgb, var(--mt-ambient-tint, #2c4a72) 46%, transparent) 0%,
+      transparent 68%
+    ),
+    radial-gradient(
+      ellipse 52% 44% at 22% 78%,
+      color-mix(in srgb, var(--mt-ambient-tint, #2c4a72) 26%, transparent) 0%,
+      transparent 72%
+    ),
+    linear-gradient(160deg, #0d1626 0%, #080d17 52%, #05080f 100%);
+}
+
+/* 封面放大模糊铺底（Mineradio #album-bg 同款参数） */
+.mt-mineradio-ambient__cover {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: 50% 50%;
+  filter: blur(120px) brightness(0.34) saturate(1.5);
+  transform: scale(1.4);
+  transform-origin: 50% 50%;
+  opacity: 0.85;
+  transition: opacity 760ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* 上一张封面：切歌时交叉淡出，避免瞬间闪黑 */
+.mt-mineradio-ambient__cover--prev {
+  opacity: 0;
+  transition: opacity 760ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* 暗角：轻微压住边缘。真正的可读性暗角在画布之上的
+   .mt-mineradio-vignette，这里只负责让环境层中心更亮。 */
+.mt-mineradio-ambient__vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 78% 72% at 50% 44%, transparent 48%, rgb(0 0 0 / 32%) 100%);
+}
+
+.mt-mineradio-root--low {
+  background-color: #06090f;
+}
+
+/* 低画质档：跳过昂贵的 120px 模糊铺底 */
+.mt-mineradio-root--low .mt-mineradio-ambient__base {
+  background:
+    radial-gradient(
+      ellipse 72% 58% at 50% 40%,
+      color-mix(in srgb, var(--mt-ambient-tint, #2c4a72) 38%, transparent) 0%,
+      transparent 70%
+    ),
+    linear-gradient(160deg, #0b1320 0%, #070b13 55%, #04070d 100%);
+}
+
+/* 舞台切换菜单：位于经典舞台歌单按钮的左侧，两侧都留出安全边距 */
+.mt-mineradio-mode-menu {
+  right: calc(1rem + 2.75rem);
+  transition: right 200ms ease-out;
+}
+
+@media (min-width: 768px) {
+  .mt-mineradio-mode-menu {
+    right: calc(max(1rem, var(--mt-player-safe-right, 0px)) + 2.75rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mt-mineradio-mode-menu {
+    transition-duration: 0.01ms;
+  }
+}
+
+/* 暗角：保证控制栏与歌词的可读性，不参与交互 */
+.mt-mineradio-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  background:
+    radial-gradient(ellipse at 50% 40%, transparent 32%, rgb(0 0 0 / 48%) 100%),
+    linear-gradient(to bottom, rgb(0 0 0 / 40%) 0%, transparent 20%, transparent 62%, rgb(0 0 0 / 62%) 100%);
+}
+
+/* ------------------------------------------------------------ 底部控制台
+   上游用居中浮动胶囊（Mineradio 1120px / OpenMusic 720px），而不是满宽条。
+   这里取 720px，与播放器组件的视觉密度匹配。
+
+   内部是三列 grid（参照 Mineradio 的 `#controls`）：
+     ├── actions    左：封面 52px + 标题/艺术家 + 聊天
+     ├── transport  中：播放模式 / 上一首 / 播放 / 下一首
+     └── modes      右：音量 / 队列
+   进度条跨越整行，位于三列之上。 */
+
+.mt-mineradio-console {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  justify-content: center;
+  padding-inline: clamp(0.5rem, 2vw, 1.5rem);
+  /* 底部手势区与刘海屏安全边距 */
+  padding-block-end: max(clamp(0.75rem, 2vh, 1.5rem), env(safe-area-inset-bottom, 0px));
+  pointer-events: none;
+}
+
+.mt-mineradio-console__inner {
+  pointer-events: auto;
+  width: 100%;
+  /* 胶囊宽度上限，参照上游 */
+  max-width: min(720px, calc(100vw - 3rem));
+  padding: 0.75rem clamp(0.875rem, 2.5vw, 1.5rem);
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 1.5rem;
+  background: rgb(8 12 20 / 62%);
+  /* 悬浮玻璃质感 */
+  backdrop-filter: blur(22px) saturate(1.35);
+  -webkit-backdrop-filter: blur(22px) saturate(1.35);
+  box-shadow:
+    0 18px 48px rgb(0 0 0 / 55%),
+    inset 0 1px 0 rgb(255 255 255 / 8%);
+}
+
+/* ------------------------------------------------------- 三列控制栏本体 */
+
+.mt-mr-transport {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+/* 进度条行：时间在两端，条居中 */
+.mt-mr-progress-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.625rem;
+  width: 100%;
+}
+
+.mt-mr-time {
+  font-size: 11px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: rgb(255 255 255 / 55%);
+  white-space: nowrap;
+}
+
+.mt-mr-time--right {
+  text-align: right;
+}
+
+.mt-mr-progress {
+  width: 100%;
+}
+
+/* 三列主体：与上游同构 */
+.mt-mr-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content minmax(0, 1fr);
+  align-items: center;
+  gap: clamp(0.5rem, 1.7vw, 1.125rem);
+  width: 100%;
+}
+
+.mt-mr-cluster {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  height: 3.5rem;
+}
+
+.mt-mr-cluster--actions {
+  justify-content: flex-start;
+}
+
+.mt-mr-cluster--transport {
+  justify-content: center;
+  gap: 0.25rem;
+}
+
+.mt-mr-cluster--modes {
+  justify-content: flex-end;
+  gap: 0.25rem;
+}
+
+/* 封面：上游 52px / 圆角 12px */
+.mt-mr-cover {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 52px;
+  height: 52px;
+  overflow: hidden;
+  border-radius: 12px;
+  background: rgb(255 255 255 / 6%);
+}
+
+.mt-mr-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.mt-mr-meta {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.mt-mr-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: rgb(255 255 255 / 90%);
+  overflow: hidden;
+}
+
+.mt-mr-artist {
+  font-size: 11.5px;
+  line-height: 1.2;
+  color: rgb(255 255 255 / 48%);
+  overflow: hidden;
+}
+
+/* 次级按钮：上游 36px / 圆角 11px */
+.mt-mr-btn {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 11px;
+  color: rgb(255 255 255 / 75%);
+}
+
+.mt-mr-btn:hover {
+  background: rgb(255 255 255 / 10%);
+  color: rgb(255 255 255 / 95%);
+}
+
+/* 主播放按钮：上游 58px / 圆形 */
+.mt-mr-play {
+  width: 58px;
+  height: 58px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  color: rgb(255 255 255 / 95%);
+  background: rgb(255 255 255 / 10%);
+  backdrop-filter: blur(12px) saturate(1.8) brightness(1.16);
+  -webkit-backdrop-filter: blur(12px) saturate(1.8) brightness(1.16);
+}
+
+.mt-mr-play:hover {
+  background: rgb(255 255 255 / 18%);
+}
+
+/* 未读/队列角标 */
+.mt-mr-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding-inline: 4px;
+  border-radius: 9999px;
+  background: rgb(255 255 255 / 92%);
+  color: #000;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.mt-mineradio-vote {
+  position: absolute;
+  inset-inline: 0;
+  bottom: calc(100% + 0.5rem);
+  z-index: 21;
+  display: flex;
+  justify-content: center;
+  padding-inline: 0.5rem;
+}
+
+/* 窄屏：隐藏曲目信息，压缩控件尺寸（参照上游 920/720px 断点） */
+@media (max-width: 720px) {
+  .mt-mr-cover {
+    width: 44px;
+    height: 44px;
+  }
+
+  .mt-mr-play {
+    width: 54px;
+    height: 54px;
+  }
+
+  .mt-mr-title {
+    font-size: 12.5px;
+  }
+
+  .mt-mr-cluster {
+    height: 3rem;
+  }
+}
+
+/* 更窄：曲目信息让位给播放控制，聊天移入队列区 */
+@media (max-width: 560px) {
+  .mt-mr-controls {
+    grid-template-columns: max-content max-content;
+    justify-content: space-between;
+  }
+
+  .mt-mr-cluster--actions .mt-mr-meta {
+    display: none;
+  }
+}
+
+/* AMLL 回退层：选择 amll 歌词渲染器时，DOM 歌词覆盖在 3D 场景之上。
+   布局参照上游的"歌词占视口高度约 44-52%、垂直居中"。 */
+.mt-mineradio-lyrics-fallback {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-inline: clamp(2rem, 8vw, 9rem);
+  /* 上下留出约 1/4 的呼吸空间，使歌词块约占视口高度一半 */
+  padding-block: 22vh;
+  pointer-events: auto;
+}
+
+/* 空间化容器 —— `MineradioLyricStage` 的两层包装。
+   `__plane` 用透视 + 轻微旋转把 DOM 歌词"推入"场景纵深，
+   与 3D 舞台的立体感保持一致（纯 CSS，不把文字转成纹理，
+   因此 AMLL 的逐字高亮不受影响）。 */
+.mt-mineradio-lyrics {
+  width: 100%;
+  height: 100%;
+  perspective: 1200px;
+}
+
+.mt-mineradio-lyrics__plane {
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transform: rotateX(2.4deg) rotateY(-1.6deg) scale(0.98);
+  filter: drop-shadow(0 18px 42px rgb(0 0 0 / 42%));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mt-mineradio-lyrics__plane {
+    transform: none;
+  }
+}
+
+.mt-mineradio-lyrics-fallback > * {
+  width: 100%;
+  height: 100%;
+}
+
+.mt-mineradio-lyrics-fallback .amll-container {
+  height: 100%;
+}
+
+/* 尊重系统的减少动态效果偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .mt-mineradio-console__inner {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: rgb(8 12 20 / 88%);
+  }
 }

@@ -24,6 +24,7 @@
     "@pixi/filter-bulge-pinch": "^5.1.1",
     "@pixi/filter-color-matrix": "^7.4.3",
     "@pixi/sprite": "^7.4.3",
+    "@react-three/fiber": "^9.7.0",
     "@soundtouchjs/audio-worklet": "2.1.1",
     "@tanstack/react-virtual": "^3.14.9",
     "class-variance-authority": "^0.7.1",
@@ -42,6 +43,7 @@
     "react-router-dom": "^7.18.2",
     "sonner": "^2.0.8",
     "tailwind-merge": "^3.6.0",
+    "three": "^0.186.0",
     "vaul": "^1.1.2",
     "zustand": "^5.0.15"
   },
@@ -52,6 +54,7 @@
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
+    "@types/three": "^0.186.0",
     "@vitejs/plugin-react": "^5.1.1",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",

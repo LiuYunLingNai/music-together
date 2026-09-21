@@ -8,7 +8,7 @@ import { CURRENT_TIME_THROTTLE_MS } from '@/lib/constants'
 import { toast } from 'sonner'
 import { getServerTime } from '@/lib/clockSync'
 import { SERVER_URL } from '@/lib/config'
-import { attachTimeStretch, prepareDirectStreamForTimeStretch, type TimeStretchController } from '@/lib/timeStretch'
+import { attachTimeStretch, prepareDirectStreamForTimeStretch, releaseTimeStretch, type TimeStretchController } from '@/lib/timeStretch'
 import { setHowlPosition } from '@/lib/howlPosition'
 import { registerActivePlaybackStop } from '@/lib/audioPlaybackLifecycle'
 import { lyricPlayerBridge } from '@/lib/lyricPlayerBridge'
@@ -124,6 +124,9 @@ export function useHowl(onTrackEnd: () => void) {
 
   const disposeHowl = useCallback((howl: Howl | null) => {
     if (!howl) return
+    // ★ 先撤回本图发布的分析节点（audioTap 单例），再 unload ——
+    //   旧歌的死 tap 不再锁死视觉层的频谱来源（节拍丢失加固）
+    releaseTimeStretch(howl)
     try {
       howl.unload()
     } catch {

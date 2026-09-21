@@ -3,7 +3,7 @@ import { SYNC_PACKET_INTERVAL_MAX_SECONDS, SYNC_PACKET_INTERVAL_MIN_SECONDS } fr
 
 const PREFIX = 'mt-'
 const SETTINGS_SCHEMA_VERSION_KEY = 'settingsSchemaVersion'
-const SETTINGS_SCHEMA_VERSION = 2
+const SETTINGS_SCHEMA_VERSION = 3
 
 function safeGet(key: string): string | null {
   try {
@@ -92,6 +92,15 @@ function migrateSettings(): void {
     safeSet('playbackHardSeekSyncEnabled', 'false')
   }
 
+  if (storedVersion < 3) {
+    // 画质档从自拟的 low/medium/high 迁移到上游的四档 eco/balanced/high/ultra。
+    // 映射：low→eco、medium→balanced、high→high；'auto' 保持（仍表示自动）。
+    const previous = safeGet('visualQuality')
+    const migrated =
+      previous === 'low' ? 'eco' : previous === 'medium' ? 'balanced' : previous === 'high' ? 'high' : null
+    if (migrated) safeSet('visualQuality', migrated)
+  }
+
   safeSet(SETTINGS_SCHEMA_VERSION_KEY, String(SETTINGS_SCHEMA_VERSION))
 }
 
@@ -99,6 +108,51 @@ migrateSettings()
 
 const LYRIC_ANCHORS = ['top', 'center', 'bottom'] as const
 const LYRIC_MASK_MODES = ['', 'full-mask', 'partial-mask'] as const
+
+/** Mineradio 舞台模式：classic 为默认，始终可无损回退。
+ *  注意：没有 'cover' —— 曾自创的「封面视界」已于第九轮按用户决策删除；
+ *  旧持久化值 'cover' 会因不在白名单内而安全回退到 'classic'。 */
+export const VISUAL_STAGES = [
+  'classic',
+  'emily',
+  'tunnel',
+  'planet',
+  'vinyl',
+  'galaxy',
+  'topography',
+] as const
+export type VisualStageSetting = (typeof VISUAL_STAGES)[number]
+
+/**
+ * 画质档 —— 与上游 Mineradio 的 `performanceQuality` 同域
+ * （`eco / balanced / high / ultra`），`auto` 表示按设备能力自动选择。
+ *
+ * 旧的 `low / medium / high` 已由 settings 迁移（schema v3）映射为
+ * `eco / balanced / high`。
+ */
+export const VISUAL_QUALITIES = ['auto', 'eco', 'balanced', 'high', 'ultra'] as const
+export type VisualQualitySetting = (typeof VISUAL_QUALITIES)[number]
+
+/**
+ * 歌词渲染器。
+ *
+ * - `webgl`：歌词进入 3D 场景（默认），与粒子/封面共享空间与景深
+ * - `amll` ：沿用 AMLL 的 DOM 渲染器（可靠回退路径）
+ */
+export const LYRIC_RENDERERS = ['webgl', 'amll'] as const
+export type LyricRendererSetting = (typeof LYRIC_RENDERERS)[number]
+
+/** 3D 歌词的运动风格 */
+export const LYRIC_MOTIONS = ['float', 'smooth', 'glass', 'quick', 'shine', 'glitch'] as const
+export type LyricMotionSetting = (typeof LYRIC_MOTIONS)[number]
+
+/** 3D 歌词的显示模式 */
+export const LYRIC_DISPLAY_SETTINGS = ['single', 'dual', 'triple', 'cinema', 'custom'] as const
+export type LyricDisplaySetting = (typeof LYRIC_DISPLAY_SETTINGS)[number]
+
+/** 3D 歌词的译词模式 */
+export const LYRIC_TRANSLATION_SETTINGS = ['off', 'current', 'dual', 'multi'] as const
+export type LyricTranslationSetting = (typeof LYRIC_TRANSLATION_SETTINGS)[number]
 
 /** 所有持久化设置项的默认值 — 供 store 层的 resettable 工厂使用 */
 export const SETTING_DEFAULTS = {
@@ -125,6 +179,17 @@ export const SETTING_DEFAULTS = {
   bgFps: 30,
   bgFlowSpeed: 2,
   bgRenderScale: 0.5,
+  visualStage: 'classic' as VisualStageSetting,
+  visualQuality: 'auto' as VisualQualitySetting,
+  /** 粒子溢光（上游 fx.bloom，出厂关闭）。 */
+  visualBloom: false,
+  /** 轮廓高亮（上游 fx.edge，出厂关闭）。 */
+  visualEdge: false,
+  lyricRenderer: 'webgl' as LyricRendererSetting,
+  lyricMotion: 'float' as LyricMotionSetting,
+  lyricDisplayMode3d: 'cinema' as LyricDisplaySetting,
+  lyricCustomLineCount: 5,
+  lyricTranslationMode3d: 'multi' as LyricTranslationSetting,
 } satisfies Record<string, unknown>
 
 export const storage = {
@@ -257,6 +322,43 @@ export const storage = {
     return [0.25, 0.5, 0.75, 1].includes(scale) ? scale : SETTING_DEFAULTS.bgRenderScale
   },
   setBgRenderScale: (v: number) => safeSet('bgRenderScale', String(v)),
+
+  // Mineradio 舞台设置
+  getVisualStage: () => safeEnum('visualStage', VISUAL_STAGES, SETTING_DEFAULTS.visualStage),
+  setVisualStage: (v: VisualStageSetting) => safeSet('visualStage', v),
+
+  getVisualQuality: () => safeEnum('visualQuality', VISUAL_QUALITIES, SETTING_DEFAULTS.visualQuality),
+  setVisualQuality: (v: VisualQualitySetting) => safeSet('visualQuality', v),
+
+  // 粒子溢光（上游 fx.bloom，出厂 false）。与画质档无关 —— 上游把它作为
+  // 独立设置项（04-fx-defaults.js:91），不随 performanceQuality 变。
+  getVisualBloom: () => safeGet('visualBloom') === 'true',
+  setVisualBloom: (v: boolean) => safeSet('visualBloom', String(v)),
+
+  // 轮廓高亮（上游 fx.edge，出厂 false）。同为独立设置，与画质档无关。
+  getVisualEdge: () => safeGet('visualEdge') === 'true',
+  setVisualEdge: (v: boolean) => safeSet('visualEdge', String(v)),
+
+  getLyricRenderer: () => safeEnum('lyricRenderer', LYRIC_RENDERERS, SETTING_DEFAULTS.lyricRenderer),
+  setLyricRenderer: (v: LyricRendererSetting) => safeSet('lyricRenderer', v),
+
+  // 3D 歌词外观
+  getLyricMotion: () => safeEnum('lyricMotion', LYRIC_MOTIONS, SETTING_DEFAULTS.lyricMotion),
+  setLyricMotion: (v: LyricMotionSetting) => safeSet('lyricMotion', v),
+
+  getLyricDisplayMode3d: () =>
+    safeEnum('lyricDisplayMode3d', LYRIC_DISPLAY_SETTINGS, SETTING_DEFAULTS.lyricDisplayMode3d),
+  setLyricDisplayMode3d: (v: LyricDisplaySetting) => safeSet('lyricDisplayMode3d', v),
+
+  getLyricCustomLineCount: () => {
+    const count = safeInt('lyricCustomLineCount', SETTING_DEFAULTS.lyricCustomLineCount)
+    return Math.max(1, Math.min(10, count))
+  },
+  setLyricCustomLineCount: (v: number) => safeSet('lyricCustomLineCount', String(v)),
+
+  getLyricTranslationMode3d: () =>
+    safeEnum('lyricTranslationMode3d', LYRIC_TRANSLATION_SETTINGS, SETTING_DEFAULTS.lyricTranslationMode3d),
+  setLyricTranslationMode3d: (v: LyricTranslationSetting) => safeSet('lyricTranslationMode3d', v),
 
   // Auth cookie persistence
   getAuthCookies: (): StoredCookie[] => safeGetJSON<StoredCookie[]>('auth-cookies') ?? [],

@@ -1,5 +1,14 @@
 import { create } from 'zustand'
-import { storage, SETTING_DEFAULTS } from '@/lib/storage'
+import {
+  storage,
+  SETTING_DEFAULTS,
+  type LyricDisplaySetting,
+  type LyricMotionSetting,
+  type LyricRendererSetting,
+  type LyricTranslationSetting,
+  type VisualQualitySetting,
+  type VisualStageSetting,
+} from '@/lib/storage'
 
 // 重新导出供 UI 层使用
 export { SETTING_DEFAULTS }
@@ -50,7 +59,16 @@ type SettingsStore = ResettableFields<'playbackTempoSyncEnabled', boolean> &
     clearLyricOffset: (key: string) => void
   } & ResettableFields<'bgFps', number> &
   ResettableFields<'bgFlowSpeed', number> &
-  ResettableFields<'bgRenderScale', number>
+  ResettableFields<'bgRenderScale', number> &
+  ResettableFields<'visualStage', VisualStageSetting> &
+  ResettableFields<'visualQuality', VisualQualitySetting> &
+  ResettableFields<'visualBloom', boolean> &
+  ResettableFields<'visualEdge', boolean> &
+  ResettableFields<'lyricRenderer', LyricRendererSetting> &
+  ResettableFields<'lyricMotion', LyricMotionSetting> &
+  ResettableFields<'lyricDisplayMode3d', LyricDisplaySetting> &
+  ResettableFields<'lyricCustomLineCount', number> &
+  ResettableFields<'lyricTranslationMode3d', LyricTranslationSetting>
 
 // ---------------------------------------------------------------------------
 // Store 实现
@@ -146,5 +164,18 @@ export const useSettingsStore = create<SettingsStore>((set) => {
     ...resettable('bgFps', storage.getBgFps, storage.setBgFps),
     ...resettable('bgFlowSpeed', storage.getBgFlowSpeed, storage.setBgFlowSpeed),
     ...resettable('bgRenderScale', storage.getBgRenderScale, storage.setBgRenderScale),
+    ...resettable('visualStage', storage.getVisualStage, storage.setVisualStage),
+    ...resettable('visualQuality', storage.getVisualQuality, storage.setVisualQuality),
+    ...resettable('visualBloom', storage.getVisualBloom, storage.setVisualBloom),
+    ...resettable('visualEdge', storage.getVisualEdge, storage.setVisualEdge),
+    ...resettable('lyricRenderer', storage.getLyricRenderer, storage.setLyricRenderer),
+    ...resettable('lyricMotion', storage.getLyricMotion, storage.setLyricMotion),
+    ...resettable('lyricDisplayMode3d', storage.getLyricDisplayMode3d, storage.setLyricDisplayMode3d),
+    ...resettable('lyricCustomLineCount', storage.getLyricCustomLineCount, storage.setLyricCustomLineCount),
+    ...resettable(
+      'lyricTranslationMode3d',
+      storage.getLyricTranslationMode3d,
+      storage.setLyricTranslationMode3d,
+    ),
   } as SettingsStore
 })

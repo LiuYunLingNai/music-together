@@ -183,6 +183,15 @@ codex/windows-native-client
 - [Android client README](https://github.com/LiuYunLingNai/music-together/tree/codex/android-native-client/packages/android-client)
 - [Windows desktop client README](https://github.com/LiuYunLingNai/music-together/tree/codex/windows-native-client)
 
+## Acknowledgements
+
+The immersive visual stage (particle shaders, camera motion, cover depth textures and audio-reactive driving) is adapted from the following open-source projects:
+
+- [Mineradio](https://github.com/XxHuberrr/Mineradio) — by [@XxHuberrr](https://github.com/XxHuberrr), an immersive player built around cinematic camera work, particle visuals and a lyric stage. This project adapts its particle preset geometry and shader approach under the GPL-3.0 license.
+- [OpenMusic](https://github.com/qq01-hub/openmusic) — by [@qq01-hub](https://github.com/qq01-hub), which splits part of Mineradio's visual presets into React Three Fiber components; this project's uniform contracts and component boundaries reference its implementation.
+
+This project itself is distributed under [AGPL-3.0](LICENSE); the adaptations above follow each upstream's own license.
+
 ## License
 
 [AGPL-3.0](LICENSE)

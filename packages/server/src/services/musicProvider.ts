@@ -301,6 +301,35 @@ async function withTimeout<T>(promise: Promise<T>, ms = API_TIMEOUT_MS): Promise
   }
 }
 
+/** QQ's legacy lyric endpoint can omit translations that its explicit lyric request provides. */
+async function getTencentTranslatedLyric(songMid: string): Promise<string> {
+  const response = await fetch('https://u.y.qq.com/cgi-bin/musicu.fcg', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Referer: 'https://y.qq.com/',
+    },
+    body: JSON.stringify({
+      comm: { ct: 24, cv: 0 },
+      lyric: {
+        module: 'music.musichallSong.PlayLyricInfo',
+        method: 'GetPlayLyricInfo',
+        param: { songMid, type: 1, crypt: 0, trans: 1, trans_t: 0, lrc_t: 0 },
+      },
+    }),
+    signal: AbortSignal.timeout(8_000),
+  })
+  if (!response.ok) throw new Error(`QQ lyric HTTP ${response.status}`)
+  const body = await response.json() as {
+    lyric?: { code?: number; data?: { trans?: string } }
+  }
+  if (body.lyric?.code !== 0) return ''
+  const encoded = body.lyric.data?.trans
+  if (!encoded || !/^[A-Za-z0-9+/=]+$/.test(encoded)) return ''
+  const translated = Buffer.from(encoded, 'base64').toString('utf8')
+  return /\[\d{2}:\d{2}(?:\.\d+)?\]/.test(translated) ? translated : ''
+}
+
 /** Normalize cover URLs returned by Kugou's mobile APIs. */
 function normalizeKugouCoverUrl(value: unknown, size = 300): string {
   let url = String(value || '')
@@ -2670,7 +2699,7 @@ class MusicProvider {
           /* 静默回退到 LRC */
         }
       } else {
-        // QQ 音乐：使用 Meting 默认流程
+        // QQ 音乐：保留 Meting 原词，仅在其未提供译文时补取 QQ 的翻译轨道
         const meting = this.getInstance(source)
         const raw = await withTimeout(meting.lyric(lyricId))
         if (raw === null || raw === undefined) {
@@ -2687,6 +2716,13 @@ class MusicProvider {
           }
         } catch {
           return empty
+        }
+        if (source === 'tencent' && result.lyric && !result.tlyric) {
+          try {
+            result.tlyric = await getTencentTranslatedLyric(lyricId)
+          } catch (err) {
+            logger.debug('QQ 译文补取失败，保留原歌词', { lyricId, err })
+          }
         }
       }
 
