@@ -24,6 +24,10 @@ interface StretchGraph {
   context: AudioContext
   bypassed: boolean
   failed: boolean
+  /** AudioWorklet 注册尚未完成；此时歌曲可能已被快速切走。 */
+  initializing: boolean
+  /** 初始化期间对应的 Howl 已释放，异步任务不得再建图或发布 tap。 */
+  cancelled: boolean
   metricsSnapshots: number
   lastBlockCount: number
   lastUnderrunCount: number
@@ -73,6 +77,8 @@ function createDisabledGraph(context: AudioContext, audio: HTMLMediaElement): St
     context,
     bypassed: true,
     failed: true,
+    initializing: true,
+    cancelled: false,
     metricsSnapshots: 0,
     lastBlockCount: 0,
     lastUnderrunCount: 0,
@@ -148,13 +154,21 @@ function getAudioElement(howl: Howl): HTMLMediaElement | null {
  * 在 Howl unload 时把"本图发布的 tap"撤回为 null，视觉层回落到
  * 未接线状态等待新 tap —— 死节点不再被锁死进单例。
  */
-export function releaseTimeStretch(howl: Howl): void {
+export function releaseTimeStretch(howl: Howl): (() => void) | null {
   const audio = getAudioElement(howl)
-  if (!audio) return
+  if (!audio) return null
   const graph = graphByAudio.get(audio)
   if (graph?.analyser && getAudioTapAnalyser() === graph.analyser) {
     publishStretchAnalyser(null)
   }
+  if (graph?.initializing) {
+    graph.cancelled = true
+    // Howler 会在紧接着的 unload() 中才把元素放回池。返回一个收尾函数，
+    // 让调用方在 unload 后同步摘除，避免下一首在同一调用栈里领到这个仍有
+    // 异步建图任务的元素。
+    return () => retireAudioElement(audio)
+  }
+  return null
 }
 
 function registerProcessor(context: AudioContext): Promise<void> {
@@ -213,12 +227,18 @@ export async function attachTimeStretch(howl: Howl): Promise<TimeStretchControll
 
   const existing = graphByAudio.get(audio)
   if (existing) {
+    // 同一元素的首次异步初始化尚未落定时，不得把占位图当成可用 controller。
+    if (existing.initializing) return null
     // ★ 复用重发布（节拍丢失闭环的另一半）：`releaseTimeStretch` 在切歌时
     //   把全局 tap 撤回为 null，而 Howler 的元素池是 LIFO 复用 —— 下一首歌
     //   很可能领回**同一个**元素，走到这里提前返回。若不重新发布，tap 单例
     //   恒为 null，视觉层只能落到 masterGain 兜底线（恒零）—— "从第二首起
-    //   节拍永久丢失"的回归正是漏了这一半。图未 failed 时重新发布其 analyser。
-    if (existing.analyser && !existing.failed && getAudioTapAnalyser() === null) {
+    //   节拍永久丢失"的回归正是漏了这一半。
+    //
+    // failed 只表示 WSOLA 变速已回退直通；disableGraph 已把 source 同时接到
+    // analyser，因此频谱仍然有效，不能因为 failed 拒绝发布。若全局还残留
+    // 另一首歌的 tap，也必须由当前图主动接管，而不是只在 null 时发布。
+    if (existing.analyser && getAudioTapAnalyser() !== existing.analyser) {
       publishStretchAnalyser(existing.analyser)
     }
     return createController(existing)
@@ -243,16 +263,21 @@ export async function attachTimeStretch(howl: Howl): Promise<TimeStretchControll
   // 修复：attach 一开始就登记占位禁用图 —— 保证缓存里永远是有效条目，
   // 同时失败分支据此把元素从 Howler 复用池永久摘除（retireAudioElement），
   // 杜绝"孤儿 source 元素"再次分配。
-  graphByAudio.set(audio, createDisabledGraph(context, audio))
+  const pendingGraph = createDisabledGraph(context, audio)
+  graphByAudio.set(audio, pendingGraph)
   let source: MediaElementAudioSourceNode | null = null
+  let stretchNode: SoundTouchNode | null = null
 
   try {
     await registerProcessor(context)
+    // 连续切歌可能在 AudioWorklet 注册完成前已经 unload 当前 Howl。旧任务
+    // 此后若继续 createMediaElementSource 并 publish，会用死节点覆盖新歌 tap。
+    if (pendingGraph.cancelled || graphByAudio.get(audio) !== pendingGraph) return null
     source = context.createMediaElementSource(audio)
-    const node = new SoundTouchNode({ context, interpolationStrategy: 'lanczos' })
-    node.setStretchParameters({ sequenceMs: 80, seekWindowMs: 20, overlapMs: 12, quickSeek: true })
-    node.pitch.value = 1
-    source.connect(node)
+    stretchNode = new SoundTouchNode({ context, interpolationStrategy: 'lanczos' })
+    stretchNode.setStretchParameters({ sequenceMs: 80, seekWindowMs: 20, overlapMs: 12, quickSeek: true })
+    stretchNode.pitch.value = 1
+    source.connect(stretchNode)
 
     // 只读分析旁路：worklet 输出 → AnalyserNode（不接回 destination）。
     // 视觉层从这里取频谱 —— 这是唯一一条真正有音频流过的路径。
@@ -263,20 +288,22 @@ export async function attachTimeStretch(howl: Howl): Promise<TimeStretchControll
       analyser.smoothingTimeConstant = 0.58
       analyser.minDecibels = -82
       analyser.maxDecibels = -8
-      node.connect(analyser)
+      stretchNode.connect(analyser)
     } catch {
       analyser = null
     }
 
-    node.connect(context.destination)
+    stretchNode.connect(context.destination)
 
     const graph: StretchGraph = {
       audio,
       source,
-      node,
+      node: stretchNode,
       context,
       bypassed: false,
       failed: false,
+      initializing: false,
+      cancelled: false,
       metricsSnapshots: 0,
       lastBlockCount: 0,
       lastUnderrunCount: 0,
@@ -291,8 +318,8 @@ export async function attachTimeStretch(howl: Howl): Promise<TimeStretchControll
     Howler.autoSuspend = false
     resumeContext(graph)
 
-    node.addEventListener('metrics', () => {
-      const metrics = node.metrics
+    stretchNode.addEventListener('metrics', () => {
+      const metrics = stretchNode?.metrics
       if (!metrics) return
       graph.metricsSnapshots++
       const blockDelta = metrics.blockCount - graph.lastBlockCount
@@ -309,14 +336,43 @@ export async function attachTimeStretch(howl: Howl): Promise<TimeStretchControll
     return createController(graph)
   } catch (error) {
     // 失败分支：缓存里已是占位禁用图。source 若已创建，把它接通
-    // destination（占位图标记 failed，controller 全部 no-op），保证该
-    // 元素的音频链路可用；否则（createMediaElementSource 本身抛错）
-    // 元素不可再入池 —— 摘除它，杜绝"孤儿 source 元素"再次分配。
+    // destination，并直接挂 analyser。变速虽然关闭，节拍输入仍应工作；
+    // 否则一次 WSOLA 初始化失败会连带让后续复用该元素的歌曲都没有频谱。
+    // AudioWorklet 注册可能在 createMediaElementSource 之前失败；只要歌曲还
+    // 没被切走，就补建纯直通 source，让这类浏览器也保留节拍分析能力。
+    if (!source && !pendingGraph.cancelled) {
+      try {
+        source = context.createMediaElementSource(audio)
+      } catch {
+        source = null
+      }
+    }
     if (source) {
+      try {
+        stretchNode?.disconnect()
+        source.disconnect()
+      } catch {
+        /* 节点可能尚未连接 */
+      }
       source.connect(context.destination)
-      const graph = graphByAudio.get(audio)
-      if (graph) graph.failed = true
+      let fallbackAnalyser: AnalyserNode | null = null
+      try {
+        fallbackAnalyser = context.createAnalyser()
+        fallbackAnalyser.fftSize = 2048
+        fallbackAnalyser.smoothingTimeConstant = 0.58
+        fallbackAnalyser.minDecibels = -82
+        fallbackAnalyser.maxDecibels = -8
+        source.connect(fallbackAnalyser)
+        publishStretchAnalyser(fallbackAnalyser)
+      } catch {
+        fallbackAnalyser = null
+      }
+      pendingGraph.source = source
+      pendingGraph.analyser = fallbackAnalyser
+      pendingGraph.initializing = false
+      pendingGraph.failed = true
     } else {
+      pendingGraph.cancelled = true
       retireAudioElement(audio)
     }
     audio.playbackRate = 1

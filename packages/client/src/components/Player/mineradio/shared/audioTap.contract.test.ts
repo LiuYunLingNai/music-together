@@ -46,6 +46,36 @@ describe('音频分析接线契约', () => {
     // 取 anchor 之前 600 字符的窗口：重发布必须落在紧邻 return 之前
     const beforeAnchor = src.slice(Math.max(0, anchorIdx - 600), anchorIdx)
     expect(beforeAnchor).toMatch(/publishStretchAnalyser\s*\(\s*existing\.analyser\s*\)/)
+    // failed 只代表变速回退；直通 source 上的 analyser 仍可用，不能阻止发布。
+    expect(beforeAnchor).not.toMatch(/!existing\.failed/)
+  })
+
+  it('快速切歌会取消尚未完成的异步建图，旧任务不得发布死 tap', () => {
+    const src = stripComments(read('timeStretch.ts'))
+    const awaitIdx = src.indexOf('await registerProcessor(context)')
+    const createIdx = src.indexOf('context.createMediaElementSource(audio)', awaitIdx)
+    const cancelledIdx = src.indexOf('pendingGraph.cancelled', awaitIdx)
+    expect(awaitIdx).toBeGreaterThan(-1)
+    expect(cancelledIdx).toBeGreaterThan(awaitIdx)
+    expect(cancelledIdx).toBeLessThan(createIdx)
+
+    const howlSrc = stripComments(
+      readFileSync(join(CLIENT_SRC, 'hooks', 'useHowl.ts'), 'utf8'),
+    )
+    const unloadIdx = howlSrc.indexOf('howl.unload()')
+    const finalizeIdx = howlSrc.indexOf('finalizeTimeStretchRelease?.()', unloadIdx)
+    expect(unloadIdx).toBeGreaterThan(-1)
+    expect(finalizeIdx).toBeGreaterThan(unloadIdx)
+  })
+
+  it('变速图失败时回退直通音频，但仍建立并发布 analyser', () => {
+    const src = stripComments(read('timeStretch.ts'))
+    const catchIdx = src.indexOf('} catch (error) {')
+    const fallback = src.slice(catchIdx, src.indexOf('return null', catchIdx))
+    expect(fallback).toMatch(/source\.connect\(context\.destination\)/)
+    expect(fallback).toMatch(/fallbackAnalyser\s*=\s*context\.createAnalyser\(\)/)
+    expect(fallback).toMatch(/source\.connect\(fallbackAnalyser\)/)
+    expect(fallback).toMatch(/publishStretchAnalyser\(fallbackAnalyser\)/)
   })
 
   it('分析节点在启用/旁路两条路径上都保持连接（否则切变速会丢频谱）', () => {
@@ -66,5 +96,11 @@ describe('音频分析接线契约', () => {
     expect(tapIdx).toBeGreaterThan(-1)
     expect(masterIdx).toBeGreaterThan(-1)
     expect(tapIdx).toBeLessThan(masterIdx)
+  })
+
+  it('audioTap 为复用同一节点的新播放会话提供发布代次', () => {
+    const src = stripComments(read('audioTap.ts'))
+    expect(src).toMatch(/revision\+\+/)
+    expect(src).toMatch(/export function getAudioTapRevision\s*\(\s*\)/)
   })
 })

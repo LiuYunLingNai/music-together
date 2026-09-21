@@ -357,20 +357,23 @@ interface LyricStageProps {
   motionStyle?: LyricMotionStyle
   /** 译词模式 */
   translationMode?: LyricTranslationMode
-  /** 供父级查询行命中，用于点击跳转 */
-  onLineRects?: (rects: LineHitRect[]) => void
 }
 
-export interface LineHitRect {
-  index: number
-  /** 该行起始时间（秒） */
-  startTime: number
-  /** 归一化屏幕区域（0..1，原点左上） */
-  left: number
-  right: number
-  top: number
-  bottom: number
-}
+/**
+ * ★ 已删除：`onLineRects` / `LineHitRect`（歌词行屏幕命中区域）。
+ *
+ * 上游 Mineradio **没有**"点击歌词跳转"功能 —— 全仓唯一的画布 click 监听
+ * 属于歌单架（`04-shelf/05-card-interactions.js:70`），`02-visual/1*.js`
+ * 里 grep `seek`/`click` 全部零命中。
+ *
+ * 本项目此前为它做了隔帧四角投影（每 2 帧对每行做一次矩阵乘 + 投影），
+ * 而这个入口在视觉舞台下必然误触发：画布同时承载"拖拽转物体"手势，
+ * 拖动途中只要按下点落在某行歌词的投影矩形内，松手就跳转。
+ *
+ * 按"对齐上游"删除整条链路（含逐帧投影开销）。经典播放器的歌词点击跳转
+ * 走的是 AMLL 的 `onLyricLineClick`（`LyricDisplay.tsx`），与本文件无关，
+ * 不受影响。
+ */
 
 /**
  * 单行的三层网格 + 状态（上游 `row` 对象的等价物）。
@@ -585,7 +588,6 @@ export function LyricStage({
   customLineCount = 5,
   motionStyle = 'float',
   translationMode = 'multi',
-  onLineRects,
 }: LyricStageProps) {
   const ttmlLines = usePlayerStore((s) => s.ttmlLines)
   const lyric = usePlayerStore((s) => s.lyric)
@@ -680,8 +682,6 @@ export function LyricStage({
    * sunEnergy 是副歌/高音段落的持续能量检测（上游 lyricSun*，主循环 :502-520）。
    */
   const glowStateRef = useRef({ beatGlow: 0, highBloom: 0, sunAvg: 0, sunPeak: 0.55, sunHold: 0, sunEnergy: 0 })
-  const localLineRectsRef = useRef<{ index: number; startTime: number; row: LyricRow }[]>([])
-  const hitRectFrameRef = useRef(0)
   const colorsRef = useRef(colors)
   colorsRef.current = colors
   const motionRef = useRef(motion)
@@ -1261,10 +1261,8 @@ export function LyricStage({
     }
     rowsRef.current = []
     failedRowsRef.current = new Set()
-    localLineRectsRef.current = []
 
     if (stageLines.length === 0) {
-      onLineRects?.([])
       return
     }
 
@@ -1292,8 +1290,6 @@ export function LyricStage({
         }
       }
       rowsRef.current = []
-      localLineRectsRef.current = []
-      onLineRects?.([])
     }
     // signature 覆盖全部行内容、遮罩字符与外观设置；viewportKey 触发窗口适配重算
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1393,7 +1389,6 @@ export function LyricStage({
      *   半径只决定"建不建行"（这是本案与上游观感差异最大的一处）。
      */
     const allowedOffsets = new Set(lyricSlotOffsets(displayMode, customLineCount).map((o) => Math.round(o)))
-    const rects: { index: number; startTime: number; row: LyricRow }[] = []
     const palette = colorsRef.current
 
     for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
@@ -1697,13 +1692,6 @@ export function LyricStage({
           if (!isActive && nextGlowOpacity < GLOW_ZERO) nextGlowOpacity = 0
           row.glowMaterial.opacity = nextGlowOpacity
         }
-
-        // 行命中区域（隔帧投影）
-        rects.push({
-          index: row.line.index,
-          startTime: row.line.startTime / 1000,
-          row,
-        })
       }
     }
 
@@ -1774,41 +1762,6 @@ export function LyricStage({
     lyricWorldPos.y = group.position.y
     lyricWorldPos.z = group.position.z
     lyricWorldPos.active = true
-
-    // 点击命中必须跟随世界变换 —— 隔帧投影行四角
-    if (onLineRects && ++hitRectFrameRef.current % 2 === 0 && rects.length > 0) {
-      group.updateWorldMatrix(true, true)
-      const projected = rects.map((rect) => {
-        const row = rect.row
-        const geo = row.mesh.geometry as THREE.PlaneGeometry
-        if (!geo.boundingBox) geo.computeBoundingBox()
-        const bb = geo.boundingBox
-        const corners: THREE.Vector3[] = []
-        if (bb) {
-          const { min, max } = bb
-          const pts = [
-            [min.x, max.y, 0],
-            [max.x, max.y, 0],
-            [min.x, min.y, 0],
-            [max.x, min.y, 0],
-          ] as const
-          for (const [x, y, z] of pts) {
-            corners.push(new THREE.Vector3(x, y, z).applyMatrix4(row.mesh.matrixWorld).project(camera))
-          }
-        }
-        const xs = corners.map((p) => (p.x + 1) / 2)
-        const ys = corners.map((p) => (1 - p.y) / 2)
-        return {
-          index: rect.index,
-          startTime: rect.startTime,
-          left: Math.min(...xs),
-          right: Math.max(...xs),
-          top: Math.min(...ys),
-          bottom: Math.max(...ys),
-        }
-      })
-      onLineRects(projected)
-    }
   })
 
   // 卸载兜底清理

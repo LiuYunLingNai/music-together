@@ -1,5 +1,5 @@
 import { Howler } from 'howler'
-import { getAudioTapAnalyser } from '@/lib/audioTap'
+import { getAudioTapAnalyser, getAudioTapRevision } from '@/lib/audioTap'
 import {
   resetSonicAudioMonitor,
   stepSonicAudioMonitor,
@@ -109,6 +109,8 @@ let analyser: AnalyserNode | null = null
 let wiredKind: 'none' | 'tap' | 'masterGain' = 'none'
 let frequencyData: Uint8Array<ArrayBuffer> | null = null
 let failed = false
+/** 最近消费的 tap 发布代次。舞台卸载时保留，用于区分 UI 重挂载和切歌。 */
+let tapRevision = -1
 
 /**
  * 「播放中但频谱持续全零」看门狗（节拍丢失加固）。
@@ -236,21 +238,36 @@ let cached: AudioBands | null = null
  * （`AudioStepDriver`）会在每帧重试，因此 ctx 一就绪就会自动接上。
  */
 export function ensureAudioAnalyser(): boolean {
-  if (failed) return false
-
   try {
     // ★ 首选：`timeStretch` 注册的分析节点。
     //
     // 本项目音频走 HTML5 元素 → SoundTouch → destination，**绕过 masterGain**，
     // 因此只有这个节点能读到真实频谱。详见 `lib/audioTap.ts` 的说明。
     //
-    // ★ 每帧都检查 tap：切歌会新建 Howl 与音频图并发布**新的** tap，
-    //   兜底接线（或旧 tap）必须让位，否则切歌后频谱静默。
+    // ★★ 这一段必须在 `failed` 检查**之前**（真实事故：「从原生切到 mineradio
+    //    就丢节拍」）。
+    //
+    //    `failed` 原本是函数开头的总闸 `if (failed) return false`，于是它一旦
+    //    被置位（那是**兜底路径**专用的判据：Howler 有 ctx 却没有 masterGain、
+    //    或 createAnalyser 抛错），**连 tap 这条完全独立、且唯一有音频的线路
+    //    也一起被挡掉** —— tap 根本不需要 ctx 或 masterGain。
+    //
+    //    现在把 `failed` 降级为**只门控兜底路径**；tap 每帧无条件重试。
+    //    这样任何兜底侧的瞬时失败都不会再拖累真实音频链。
     const tapped = getAudioTapAnalyser()
+    const nextTapRevision = getAudioTapRevision()
     // ★ 挂起自愈：tap 可用但上下文被浏览器挂起时，先尝试恢复。
     //   否则回到页面后频谱恒零、节拍反馈要等切歌才回来。
     if (tapped) tryResumeContext(tapped)
     if (tapped) {
+      if (nextTapRevision !== tapRevision) {
+        // 新播放会话必须丢弃上一首歌的自适应阈值；否则高能歌曲切到安静
+        // 歌曲时，旧 flux history 会让 onset 在约 90 个分析帧内持续偏钝。
+        // 视觉舞台自身的卸载/重挂载不会改变 revision，因此不会误重置。
+        resetSonicAudioMonitor()
+        cached = null
+        tapRevision = nextTapRevision
+      }
       if (analyser !== tapped) {
         // 升级到 tap：拆掉兜底接线（若有），但**不** disconnect tap 本身 ——
         // 它由 timeStretch 拥有，随音频图一起销毁。
@@ -265,6 +282,8 @@ export function ensureAudioAnalyser(): boolean {
         frequencyData = new Uint8Array(new ArrayBuffer(tapped.frequencyBinCount))
         wiredKind = 'tap'
       }
+      // tap 是健康的：兜底侧的失败判据没有意义，顺手清掉闩锁
+      failed = false
       return true
     }
 
@@ -287,6 +306,13 @@ export function ensureAudioAnalyser(): boolean {
     }
     if (wiredKind === 'masterGain') return true // 已在兜底线上；tap 发布后下帧会升级
 
+    // ---- 以下为**兜底路径**专属，`failed` 只在这里生效 ----
+    //
+    // 兜底线路在本项目里**永远没有音频**（音频绕过 masterGain），它只是
+    // "worklet 注册完成前不让画面全黑"的过渡。因此它的失败判据绝不能
+    // 上升到函数级去挡掉 tap —— 见上方 `failed` 降级的说明。
+    if (failed) return false
+
     // 兜底路径：Howler ctx 已就绪但 SoundTouch 图尚未建立。
     // 注意这条线上**可能**没有数据（音频链路绕过 masterGain），
     // 只是让视觉在 worklet 注册完成前不至于完全空白。
@@ -295,7 +321,8 @@ export function ensureAudioAnalyser(): boolean {
     // ctx/masterGain 尚未就绪：**不是**永久失败，下次再试
     if (!ctx) return false
     if (!master || typeof ctx.createAnalyser !== 'function') {
-      // 到这里说明 Web Audio 不可用（或 Howler 走了 HTML5 音频路径），无药可救
+      // Web Audio 不可用（或 Howler 走了 HTML5 音频路径）。
+      // ★ 只关掉兜底路径，**不**影响 tap 重试（tap 每帧仍然会走上面的分支）。
       failed = true
       return false
     }
@@ -412,11 +439,25 @@ export function readAudioBands(): AudioBands {
 
 /** 释放分析节点。舞台卸载时调用。 */
 export function disposeAudioAnalyser(): void {
-  if (!analyser) return
+  // ★ 这里**不能**写 `if (!analyser) return` 提前返回。
+  //
+  //   真实事故（"从原生切到 mineradio 就丢节拍 / 后台放久回来丢节拍"）：
+  //   `analyser` 为 null 是**常见状态** —— 舞台挂载瞬间、tap 尚未发布、
+  //   切歌过渡期、上一次 dispose 之后，都会是 null。此时提前返回会让下面
+  //   的**模块状态清理全部跳过**，其中最要命的是 `failed = false`：
+  //   `failed` 是兜底路径的**不可恢复闩锁**（`ensureAudioAnalyser` 里
+  //   `if (failed) return false`）。一旦它在运行时被置位（Howler 懒建 ctx
+  //   的过渡态、上下文重建抛错），此后兜底接线再也不会被尝试 ——
+  //   且若它曾经升级成函数级总闸，连 tap 路径都会被一起挡掉（只能刷新）。
+  //
+  //   改为：无论 analyser 是否存在，都清理本组件拥有的接线状态与 failed
+  //   闩锁；只有真正的 disconnect 才需要节点存在。节拍自适应状态由音频
+  //   tap 的发布代次管理，不能在单纯切换 UI 舞台时清空。
+  //
   // ★ 只有**本模块自建**的 masterGain 兜底节点才能 disconnect：
   //   tap 由 `timeStretch` 拥有并随音频图一起销毁，这里绝不碰它 ——
   //   否则重新进入舞台时会接到一个已被拆掉连接的死节点（频谱永久静默）。
-  if (wiredKind === 'masterGain') {
+  if (analyser && wiredKind === 'masterGain') {
     try {
       Howler.masterGain?.disconnect?.(analyser)
       analyser.disconnect()
@@ -427,9 +468,11 @@ export function disposeAudioAnalyser(): void {
   analyser = null
   frequencyData = null
   wiredKind = 'none'
+  // 闩锁必须在每次卸载时清掉，否则一次瞬时失败会永久锁死分析（见上）
   failed = false
-  cached = null
+  // 保留最近的投影帧与 SonicAudioMonitor 自适应状态。视觉舞台切回经典时
+  // 音频源仍在播放，清空它们会让再次进入视觉舞台重新经历 90 帧阈值学习，
+  // 表现为节拍忽强忽弱。真实切歌由 tap revision 精确触发重置。
   watchdogSilentFrames = 0
   watchdogWarned = false
-  resetSonicAudioMonitor()
 }

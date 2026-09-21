@@ -2,6 +2,11 @@ import { SERVER_URL } from './config'
 
 const PROXY_COVER_HOSTS = new Set([
   'y.gtimg.cn',
+  // QQ 接口有时返回站点域名而不是图片 CDN 域名；两者都不稳定提供
+  // Access-Control-Allow-Origin，WebGL/Canvas 必须统一走服务端代理。
+  'y.qq.com',
+  'ly.qq.com',
+  'qpic.y.qq.com',
   'p1.music.126.net',
   'p2.music.126.net',
   'p3.music.126.net',

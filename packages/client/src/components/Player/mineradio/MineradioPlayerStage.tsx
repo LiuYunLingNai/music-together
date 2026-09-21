@@ -2,13 +2,12 @@ import { getProxiedCoverUrl } from '@/lib/cover'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { cn } from '@/lib/utils'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { VoteAction, VoteState } from '@music-together/shared'
 import { MineradioControlBar } from './MineradioControlBar'
 import { MineradioLyricStage } from './MineradioLyricStage'
 import { AmbientBackdrop } from './AmbientBackdrop'
 import { ParticleScene } from './particles/ParticleScene'
-import type { LineHitRect } from './lyrics/LyricStage'
 import { extractCoverPalette } from './lyrics/coverPalette'
 import { clearCoverCache, loadCoverAssets, type CoverAssets } from './shared/CoverTextureLoader'
 import {
@@ -102,39 +101,6 @@ export function MineradioPlayerStage({
     return extractCoverPalette(cover.image)
   }, [cover])
 
-  // 歌词行的屏幕命中区域，用于点击跳转
-  const lineRectsRef = useRef<LineHitRect[]>([])
-
-  const handleLineRects = useCallback((rects: LineHitRect[]) => {
-    lineRectsRef.current = rects
-  }, [])
-
-  // 点击画布：命中歌词行则跳转，否则忽略（不干扰粒子交互）
-  const handleStageClick = useCallback(
-    (event: React.MouseEvent<HTMLDivElement>) => {
-      const rects = lineRectsRef.current
-      if (rects.length === 0) return
-
-      const bounds = event.currentTarget.getBoundingClientRect()
-      if (bounds.width === 0 || bounds.height === 0) return
-      const nx = (event.clientX - bounds.left) / bounds.width
-      const ny = (event.clientY - bounds.top) / bounds.height
-
-      // 命中区域来自遮罩画布坐标，需要映射到画布的可见区域。
-      // 歌词网格在画布中垂直居中，这里用近似的中央带做命中判定。
-      for (const rect of rects) {
-        if (nx >= rect.left && nx <= rect.right && ny >= rect.top && ny <= rect.bottom) {
-          // 时间随命中矩形一起上报（LyricStage 已完成 TTML/LRC 兜底），
-          // 因此这里不查 store —— 「只有 LRC、没有 TTML」时 store 是 null，
-          // 查它会表现为点击静默失效。
-          onLyricSeek(rect.startTime)
-          return
-        }
-      }
-    },
-    [onLyricSeek],
-  )
-
   // 封面资源：切歌时异步加载，失败不阻塞舞台渲染
   useEffect(() => {
     if (!coverUrl) return
@@ -164,17 +130,25 @@ export function MineradioPlayerStage({
       <AmbientBackdrop accent={cover?.accent ?? null} lowQuality={policy.perfLevel <= 0} />
 
       {/* 画布层：全屏铺满。歌词默认在 3D 场景内渲染；
-          当用户选择 AMLL 渲染器时由下方 DOM 层接管。 */}
-      {/* 歌词命中只绑定在 WebGL 画布层。控制栏和 AMLL 是它的兄弟节点，
-          点击不会冒泡进这里，避免暂停/进度条操作被误判成歌词跳转。 */}
-      <div className="absolute inset-0" onClick={handleStageClick}>
+          当用户选择 AMLL 渲染器时由下方 DOM 层接管。
+
+          ★ 这里**刻意不挂 onClick**：上游 Mineradio 没有"点击歌词跳转"这个
+            功能（全仓唯一的画布 click 监听属于歌单架，见
+            `04-shelf/05-card-interactions.js:70`；歌词相关零命中）。
+            本项目曾在舞台根上挂一个 click → 歌词跳转，而画布同时承载
+            "拖拽转物体"手势 —— 按住拖动时只要按下点恰好落在某一行歌词的
+            投影矩形内，松手就会误触发跳转（用户实测："旋转相机时很容易
+            误跳转歌词"）。
+
+            拖拽转物体是本项目的核心交互（红线 22），改动它风险更大，
+            因此按"对齐上游"删掉跳转入口本身，而不是给拖拽加更多门控。 */}
+      <div className="absolute inset-0">
         <ParticleScene
           mode={mode}
           cover={cover}
           policy={policy}
           isPlaying={isPlaying}
           onContextLost={onUnavailable}
-          onLineRects={handleLineRects}
           showLyrics={lyricRenderer === 'webgl'}
           onOpenQueue={onOpenQueue}
           lyricOptions={{

@@ -130,8 +130,11 @@ describe('歌词常驻轨道与激活门控契约', () => {
     const timeStretch = stripComments(
       readFileSync(join(__dirname, '../../../../lib/timeStretch.ts'), 'utf8'),
     )
-    // attach 一开始就登记占位禁用图
-    expect(timeStretch).toMatch(/graphByAudio\.set\(audio,\s*createDisabledGraph\(context,\s*audio\)\)/)
+    // attach 一开始就登记占位图；变量形式用于在异步注册返回后校验该次
+    // 初始化是否已经被连续切歌取消。
+    expect(timeStretch).toMatch(/const pendingGraph = createDisabledGraph\(context,\s*audio\)/)
+    expect(timeStretch).toMatch(/graphByAudio\.set\(audio,\s*pendingGraph\)/)
+    expect(timeStretch).toMatch(/pendingGraph\.cancelled/)
     // 失败分支把未接管的元素从 Howler 池里摘除
     expect(timeStretch).toMatch(/retireAudioElement\(audio\)/)
     // retire 函数确实操作 _html5AudioPool

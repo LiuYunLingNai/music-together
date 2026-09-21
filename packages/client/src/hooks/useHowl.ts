@@ -126,11 +126,15 @@ export function useHowl(onTrackEnd: () => void) {
     if (!howl) return
     // ★ 先撤回本图发布的分析节点（audioTap 单例），再 unload ——
     //   旧歌的死 tap 不再锁死视觉层的频谱来源（节拍丢失加固）
-    releaseTimeStretch(howl)
+    const finalizeTimeStretchRelease = releaseTimeStretch(howl)
     try {
       howl.unload()
     } catch {
       /* ignore */
+    } finally {
+      // 初始化尚未完成的元素必须在 unload 放回池后立即摘除，防止下一首歌
+      // 复用它，同时旧异步任务又在后台给同一元素建图并覆盖全局 tap。
+      finalizeTimeStretchRelease?.()
     }
   }, [])
 

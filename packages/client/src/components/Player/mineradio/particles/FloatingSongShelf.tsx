@@ -18,8 +18,13 @@ import {
 } from './floatingSongCard'
 import { clearShelfFocus, orbitCameraState, setShelfCameraFocus } from './orbitCameraState'
 import { registerShelfHitTester } from './shelfHitRegistry'
+import { SHELF_MAX_RENDER, computeShelfWindow } from './shelfWindow'
 
-const MAX_SHELF_ITEMS = 24
+/*
+ * 渲染预算常量（`SHELF_VISIBLE_RADIUS` / `SHELF_MAX_RENDER`）与窗口推导
+ * 已抽到 `./shelfWindow`（带独立回归测试，见 `shelfWindow.test.ts`）。
+ * 这里只保留交互相关的常量。
+ */
 
 /** 退出跟拍的延迟（上游 `exitTimer`，03-focus-cinema-camera.js:246）。 */
 const SHELF_EXIT_DELAY_MS = 120
@@ -27,7 +32,6 @@ const SHELF_EXIT_DELAY_MS = 120
 interface FloatingSongShelfProps {
   accent: string | null
   onOpenQueue: () => void
-  maxItems: number
   motionEnabled: boolean
 }
 
@@ -75,6 +79,25 @@ function shelfWheelZoneWidth(): number {
 function isInShelfHotZone(clientX: number, clientY: number): boolean {
   const edge = shelfHotZoneWidth()
   return clientX > window.innerWidth - edge && clientY > 130 && clientY < window.innerHeight - 150
+}
+
+/**
+ * 预览使用区宽度（上游 `shelfPreviewUseZoneWidth`，`00-layout-hover.js:74-76`）：
+ * `min(820, max(热区宽, 视口宽 × 0.56))` —— 横屏下最多**视口宽的 56%**。
+ *
+ * ★ 这是「跟拍保持」判定缺的那一半。上游 `isSideShelfFocusHit`
+ *   （`05-card-interactions.js:13-21`）的保持分支是
+ *   `shelfVisibility > 0.34 && (isShelfClickZone(e) || isShelfPreviewUseZone(e))` ——
+ *   即**几何区域**，与卡片网格无关。
+ */
+function shelfPreviewUseZoneWidth(): number {
+  return Math.min(820, Math.max(shelfHotZoneWidth(), window.innerWidth * 0.56))
+}
+
+/** 指针是否落在预览使用区内（上游 `isShelfPreviewUseZone`：Y 96 / innerHeight-96）。 */
+function isInShelfPreviewUseZone(clientX: number, clientY: number): boolean {
+  const edge = shelfPreviewUseZoneWidth()
+  return clientX > window.innerWidth - edge && clientY > 96 && clientY < window.innerHeight - 96
 }
 
 /** 指针是否落在滚轮区内（上游 `isShelfWheelZone`：Y 116 / innerHeight-116）。 */
@@ -141,13 +164,21 @@ function projectedCardRect(
 }
 
 /** OpenMusic 的 3D 队列架，交互映射到本项目已有的队列抽屉。 */
-export function FloatingSongShelf({ accent, onOpenQueue, maxItems, motionEnabled }: FloatingSongShelfProps) {
+export function FloatingSongShelf({ accent, onOpenQueue, motionEnabled }: FloatingSongShelfProps) {
   const currentTrack = usePlayerStore((state) => state.currentTrack)
   const queue = useRoomStore((state) => state.room?.queue ?? EMPTY_QUEUE)
   const { camera, gl } = useThree()
   const cardsRef = useRef<FloatingSongCardMesh[]>([])
   const drawKeysRef = useRef<string[]>([])
   const hoversRef = useRef<number[]>([])
+  /**
+   * 槽位「封面刚就绪、需要重绘」标记。
+   *
+   * 与 `drawKeysRef` 平行、按槽位索引。封面加载是异步的，完成时该槽位可能
+   * 已被回收给别的歌；因此回调只置位这里，由渲染循环用**当前**的值重绘
+   *（详见绘制处 `onCoverReady` 的说明）。
+   */
+  const coverDirtyRef = useRef<boolean[]>([])
   const centerTargetRef = useRef(0)
   const centerSmoothRef = useRef(0)
   const hoveredRef = useRef(-1)
@@ -163,78 +194,86 @@ export function FloatingSongShelf({ accent, onOpenQueue, maxItems, motionEnabled
   const hoverCueRef = useRef({ zoneActive: false, enteredAt: 0, exitAt: 0 })
 
   /**
-   * 队列卡片（对照上游 04-shelf/01-manager-core.js currentItems + rebuild）：
+   * 歌单架内容 = **整条队列**（上游 `currentItems()` →
+   * `playQueue.map(...)`，无上限），中心 = 当前曲目的**绝对队列序号**。
    *
-   * 上游的歌单架是"一条按播放顺序排列的队列"，当前曲目在队列中的真实位置
-   * 就是轨道中心（sig() 含 currentIdx，切歌 → rebuild → centerTarget =
-   * currentIdx），卡片随之平滑滚动。本项目房间语义相同：currentTrack 通常
-   * 仍在 queue 中占位（removePlayedTracks 关闭时）。
+   * 对照上游 `rebuild()`（`04-shelf/01-manager-core.js:382-409`）：
+   *   `allItems = currentItems()`；`sig()` 含 `currentIdx`，因此切歌 →
+   *   rebuild → `centerTarget = min(len-1, currentIdx)`，并把 `centerSmooth`
+   *   **直接吸附**到同一个值（`centerSmooth = centerTarget`，`:397-398`）。
    *
-   * ★ 关键差异修复：此前 `queue.slice(0, N)` 从队头截断 —— 当前曲目一旦
-   * 排到窗口外，歌单架就"找不到当前歌、也永不滚动"。现改为**以当前曲目
-   * 为中心取滑动窗口**：窗口随 currentIdx 移动，当前歌永远可见且居中，
-   * 上方是已播历史、下方是待播 —— 与上游"随播放顺序丝滑滚动"一致。
+   * ★ 本项目此前的错法：把「渲染条数」当成「可滚动条数」——
+   *   `queue.slice(start, start + limit)` 取窗口再夹取滚动范围。后果：
+   *     ① 只能滚到这 N 首之内，当前曲目排在窗口外就永远追不上（"只加载
+   *        25 首、跟不上当前歌"）；
+   *     ② 窗口锚点被 `Math.min(idx - history, len - limit)` 夹在端点，
+   *        当前歌贴到窗口首/尾时**一侧完全空**；
+   *     ③ 越界滚动时整列空白。
+   *   上游的结构是「整条队列 + 只渲染 11 张的回收窗口」，现按此对齐。
+   *
+   * 当前曲目不在队列时（`removePlayedTracks` 已把它移除）——
+   * 虚拟插到队首，保证"正在播放"卡片始终存在（上游无此分支：它的
+   * `allItems` 就是队列本身；这是本项目对房间语义的必要补充）。
    */
-  const shelfWindow = useMemo(() => {
-    const limit = Math.min(MAX_SHELF_ITEMS, maxItems)
-    if (queue.length === 0) return { tracks: [] as Track[], start: 0 }
-    if (!currentTrack) return { tracks: queue.slice(0, limit), start: 0 }
+  const items = useMemo(() => {
+    if (!currentTrack) return queue
     const key = trackKey(currentTrack)
-    let idx = queue.findIndex((track) => trackKey(track) === key)
-    if (idx < 0) {
-      // 当前曲目不在队列（removePlayedTracks 已移除等）：虚拟插到窗口顶部，
-      // 保证"正在播放"卡片始终存在
-      return { tracks: [currentTrack, ...queue.slice(0, Math.max(0, limit - 1))], start: -1 }
-    }
-    // 窗口中心尽量对准当前曲目，但允许其偏下（多留待播、少留已播）
-    const history = Math.min(idx, Math.floor(limit / 3))
-    const start = Math.max(0, Math.min(idx - history, queue.length - limit))
-    idx = idx - start
-    return { tracks: queue.slice(start, start + limit), start }
-  }, [currentTrack, maxItems, queue])
-  const tracks = shelfWindow.tracks
-  /** 当前曲目在窗口中的位置（上游 currentIdx），驱动 centerTarget。 */
+    if (queue.some((track) => trackKey(track) === key)) return queue
+    return [currentTrack, ...queue]
+  }, [currentTrack, queue])
+
+  /** 当前曲目在 `items` 中的**绝对**位置（上游 `currentIdx`）。 */
   const currentIdx = useMemo(() => {
     if (!currentTrack) return -1
     const key = trackKey(currentTrack)
-    return tracks.findIndex((track) => trackKey(track) === key)
-  }, [currentTrack, tracks])
+    return items.findIndex((track) => trackKey(track) === key)
+  }, [currentTrack, items])
+
+  /**
+   * 池大小 = 渲染预算（上游 `SHELF_MAX_RENDER`），**与可滚动范围无关**。
+   *
+   * 卡片 mesh 是**固定池 + 逐帧重新绑定到队列序号**（上游
+   * `syncRenderedWindow` 的 `rebindShelfCard` 等价物）。这样 React 侧
+   * 的挂载点是稳定的，窗口滑动时不会再整批卸载/重挂。
+   */
+  const renderCount = Math.min(SHELF_MAX_RENDER, items.length)
 
   useEffect(() => {
-    while (cardsRef.current.length < tracks.length) {
+    while (cardsRef.current.length < renderCount) {
       const card = createFloatingSongCardMesh()
-      card.mesh.userData.cardIndex = cardsRef.current.length
+      card.mesh.userData.cardIndex = -1
       cardsRef.current.push(card)
       drawKeysRef.current.push('')
       hoversRef.current.push(0)
+      coverDirtyRef.current.push(false)
     }
-    while (cardsRef.current.length > tracks.length) {
+    while (cardsRef.current.length > renderCount) {
       const card = cardsRef.current.pop()
       if (card) disposeFloatingSongCardMesh(card)
       drawKeysRef.current.pop()
       hoversRef.current.pop()
+      coverDirtyRef.current.pop()
     }
-    centerTargetRef.current = Math.min(centerTargetRef.current, Math.max(0, tracks.length - 1))
-    setCardCount(tracks.length)
-  }, [tracks.length])
+    setCardCount(cardsRef.current.length)
+  }, [renderCount])
 
   /**
-   * 窗口滑动的滚动动画：窗口起点随当前曲目移动是**离散**的（slice 边界
-   * 跳变），卡片纹理瞬间换位 —— 这里把每次窗口位移量记为待补偿的偏移，
-   * useFrame 里给卡片 y 加上该偏移并缓动回 0，观感即"整列丝滑滚动一格"
-   * （上游 rebuild 的卡片滑动由 centerSmooth 缓动承担，等价补偿）。
+   * 切歌 → 重新锚定到当前曲目（上游 rebuild 的 `centerTarget/centerSmooth`
+   * 吸附语义）。上游是**硬跳**（`centerSmooth = centerTarget`），不做缓动：
+   * 歌单架直接跳到当前歌，而不是把整列滚过去。
+   *
+   * ★ 这里同时**删除了本项目自创的"滚动补偿"**（`scrollOffsetRef`）。
+   *   那是为了掩盖"窗口切片换内容"的离散跳变而引入的机制：它把窗口位移量
+   *   记成偏移、逐帧缓动回 0。真实后果是大跨度跳变时偏移量极大
+   *   （队列 100 首时 ≈ −70），全部卡片一次性超出 ±5.5 剔除距离 ——
+   *   整列空白数百毫秒，正是用户报告的"跨度较大时显示空白"。
+   *   改为上游结构后不存在"切片换内容"，补偿机制也就不需要了。
    */
-  const scrollOffsetRef = useRef(0)
-  const prevStartRef = useRef(-1)
   useEffect(() => {
-    // 窗口起点变化（≥0 → ≥0）= 整列卡片内容位移；差值进入滚动补偿
-    const prev = prevStartRef.current
-    if (prev >= 0 && shelfWindow.start >= 0) {
-      scrollOffsetRef.current += prev - shelfWindow.start
-    }
-    prevStartRef.current = shelfWindow.start
-    if (currentIdx >= 0) centerTargetRef.current = currentIdx
-  }, [currentIdx, shelfWindow.start])
+    if (currentIdx < 0) return
+    centerTargetRef.current = Math.min(currentIdx, Math.max(0, items.length - 1))
+    centerSmoothRef.current = centerTargetRef.current
+  }, [currentIdx, items.length])
 
   useEffect(
     () => () => {
@@ -247,6 +286,13 @@ export function FloatingSongShelf({ accent, onOpenQueue, maxItems, motionEnabled
       registerShelfHitTester(null)
       cardsRef.current.forEach(disposeFloatingSongCardMesh)
       cardsRef.current = []
+      // React StrictMode 会在开发环境重放 effect。mesh 池销毁后，其并行的
+      // 绘制键、悬停状态与封面脏标记也必须同步清空；否则第二次 setup 会把
+      // 新槽位追加到旧数组末尾，前 11 个旧 drawKey 可能让新纹理跳过首次绘制
+      // 而显示空白。
+      drawKeysRef.current = []
+      hoversRef.current = []
+      coverDirtyRef.current = []
       clearFloatingSongCardCoverCache()
     },
     [gl],
@@ -331,7 +377,7 @@ export function FloatingSongShelf({ accent, onOpenQueue, maxItems, motionEnabled
   useEffect(() => {
     const canvas = gl.domElement
     // 上游 `canInteract()`：有内容才允许交互。
-    const canInteract = () => tracks.length > 0
+    const canInteract = () => items.length > 0
 
     const stopCardEvent = (event: PointerEvent) => {
       if (!canInteract()) return
@@ -356,15 +402,19 @@ export function FloatingSongShelf({ accent, onOpenQueue, maxItems, motionEnabled
       // ★ 关键：上游 `inShelfArea = isShelfWheelZone(e) || !!cardWheelHit`
       //   —— 屏幕矩形**或**射线命中都能滚，因此相机变换后依然可滚。
       //   此前只用射线，相机一移就滚不动且事件穿透给相机缩放。
-      if (!canInteract() || tracks.length < 2) return
+      if (!canInteract() || items.length < 2) return
       const hitCard = raycastCardAt(event.clientX, event.clientY) >= 0
       const inWheelZone = isInShelfWheelZone(event.clientX, event.clientY)
       if (!hitCard && !inWheelZone) return
       event.stopImmediatePropagation()
       event.preventDefault()
+      // ★ 夹取到**整条队列**（上游 `step()`：`centerTarget = Math.max(0,
+      //   Math.min(allItems.length - 1, centerTarget + direction))`，
+      //   `01-manager-core.js:679`）。滚到两端即停，不会滚出列表 ——
+      //   这是"越界滚动导致显示空白"的另一半修复。
       centerTargetRef.current = Math.max(
         0,
-        Math.min(tracks.length - 1, centerTargetRef.current + (event.deltaY > 0 ? 1 : -1)),
+        Math.min(items.length - 1, centerTargetRef.current + (event.deltaY > 0 ? 1 : -1)),
       )
     }
     canvas.addEventListener('pointerdown', stopCardEvent, true)
@@ -375,11 +425,11 @@ export function FloatingSongShelf({ accent, onOpenQueue, maxItems, motionEnabled
       canvas.removeEventListener('click', onClick, true)
       canvas.removeEventListener('wheel', onWheel, true)
     }
-  }, [gl, raycastCardAt, onOpenQueue, tracks.length])
+  }, [gl, raycastCardAt, onOpenQueue, items.length])
 
   /* eslint-disable react-hooks/immutability -- Three.js scene objects are mutable render-loop handles. */
-  useFrame((state, delta) => {
-    if (!currentTrack || tracks.length === 0) {
+  useFrame((state) => {
+    if (!currentTrack || items.length === 0) {
       cardsRef.current.forEach((card) => {
         card.mesh.visible = false
       })
@@ -395,29 +445,31 @@ export function FloatingSongShelf({ accent, onOpenQueue, maxItems, motionEnabled
 
     // ---- 悬停判定（对照上游 tickShelfHoverCue + isSideShelfFocusHit）----
     //
-    // 触发条件（上游 isSideShelfFocusHit，05-card-interactions.js:13-21）：
-    // 本项目卡片常驻（无 shelfVisibility 淡入淡出），等价于上游的
-    // `shelfAlwaysVisible()` 分支 —— **只认卡片实际命中**（射线 OR 屏幕
-    // AABB，pad 18）。屏幕热区矩形只在上游「卡片半可见的过渡期」作辅助，
-    // 卡片常驻时不存在这个状态；此前把热区矩形当主判定，导致右侧大片
-    // 空白区域也会召唤相机。
-    // UI 之上（模式菜单/控制栏等 DOM）不触发 —— 上游 isPointerOverUi 否决。
+    // ★ 跟拍生效后的保持判定（上游 `isSideShelfFocusHit`，
+    //   `05-card-interactions.js:13-21`）：
     //
-    // ★ 跟拍生效后的保持判定（OpenMusic focusCard 的 engaged 分支，
-    //   GalaxyFloatingSongCard.tsx:513-518）：`hoveringCenter ||
-    //   (shelfFocusEngaged && pointerInShelfZone)` —— 一旦跟拍激活，只看
-    //   指针还在不在歌单架**屏幕热区**，不再重判卡片命中。注释原文：
-    //   "镜头推近本身会让卡片滑离指针，若这时判定为没悬停就会进入
-    //    跟拍→丢失→回位→再跟拍 的抽搐循环"。屏幕热区是固定矩形，
-    //   不随相机移动 —— 指针静止在卡片右侧时跟拍稳定保持。
+    //     保持 = `shelfVisibility > 0.34 && (isShelfClickZone || isShelfPreviewUseZone)`
+    //
+    //   即**两个屏幕几何区**，与卡片网格**完全无关**。卡片在视觉上会伸出
+    //   窄热区之外（横屏热区最宽 360px，而预览使用区可达 **820px / 视口宽
+    //   56%**），所以只认窄热区时会出现：
+    //     镜头推近 → 卡片滑离指针射线 → cardHit 变假、且指针在窄热区外
+    //     → 退出跟拍 → 相机回位 → 卡片又回到指针下 → 再次进入跟拍 …
+    //   这正是用户报告的"相机抽搐"。补上预览使用区后，指针只要还在歌单架
+    //   那一侧的宽区域内，跟拍就稳定保持。
+    //
+    //   触发（进入）仍然用卡片命中 —— 与上游一致：触发是"贴在卡上"，
+    //   保持是"还在这个区域里"。
     const slot = orbitCameraState.pointerSlot
     const pointerOverUi = slot != null && isPointerOverUi(slot.x, slot.y)
     const cardHit = slot != null && !pointerOverUi && raycastCardAt(slot.x, slot.y, 18) >= 0
     const shelfFocused = orbitCameraState.focus.active && orbitCameraState.focus.type === 'shelf'
-    const inZone =
+    // 保持区 = 热区 ∪ 预览使用区（上游 isSideShelfFocusHit 的宽分支）
+    const inShelfHoldZone =
       slot != null &&
       !pointerOverUi &&
-      (cardHit || (shelfFocused && isInShelfHotZone(slot.x, slot.y)))
+      (isInShelfHotZone(slot.x, slot.y) || isInShelfPreviewUseZone(slot.x, slot.y))
+    const inZone = cardHit || (shelfFocused && inShelfHoldZone)
 
     // 指针视差推进（上游 11-main-loop.js:346-347）：NDC 目标 → 0.040 低通。
     // 卡片姿态据此做轻微位移/旋转（见 floatingSongCard.applyFloatingSongCardPose）
@@ -428,29 +480,61 @@ export function FloatingSongShelf({ accent, onOpenQueue, maxItems, motionEnabled
     }
     stepShelfPointerParallax()
 
-    if (inZone && !hoverCue.zoneActive) {
-      hoverCue.zoneActive = true
+    // ★ 迟滞用**变化检测器**，不是"每帧重新计时"。
+    //
+    //   上游 `setFocusZone`（03-focus-cinema-camera.js:232-261）里，260ms 的
+    //   `pendingTimer` 只在 `wantType` **发生变化**时才会重新武装 ——
+    //   同一状态下的后续 mousemove 直接 early-return（`if (focusHover.wantType
+    //   === type) return`），计时不被重置。OpenMusic 的重写同样是"布尔量变化
+    //   才重置开始时刻"（GalaxyFloatingSongCard.tsx:521-526 的
+    //   `focusWantRef`/`focusSinceRef` + `>= (focusCard ? 260 : 120)`）。
+    //
+    //   本项目此前写 `now - enteredAt > 260`，而 `enteredAt` 会随 `inZone`
+    //   每次翻转重置。`cardHit` 是逐帧对**活矩阵**射线求交的（卡片自身还在
+    //   随 hover 位移/缩放、还带呼吸与滚动补偿），因此它会以亚帧频率抖动，
+    //   把计时不断清零 —— 跟拍永远"差一点"才进入或退出，表现为抽动。
+    //   改成"只记状态与状态开始时刻"，抖动就不再影响判定。
+    if (inZone !== hoverCue.zoneActive) {
+      hoverCue.zoneActive = inZone
       hoverCue.enteredAt = now
-      hoverCue.exitAt = 0
-    } else if (!inZone && hoverCue.zoneActive) {
-      hoverCue.zoneActive = false
-      hoverCue.enteredAt = 0
-      // 记录离开时刻：退出跟拍要等 120ms（上游 exitTimer 语义），
-      // 避免指针擦过热区边缘时镜头来回抖动。
-      hoverCue.exitAt = now
+      // 进入时清掉离开时刻；离开时记录它，供 120ms 退出延迟用
+      hoverCue.exitAt = inZone ? 0 : now
     }
 
     centerSmoothRef.current += (centerTargetRef.current - centerSmoothRef.current) * 0.16
-    const centerRounded = Math.round(centerSmoothRef.current)
+    // 上游有"吸附落定"：`if (abs(centerSmooth - centerTarget) < 0.001) centerSmooth = centerTarget`
+    //（01-manager-core.js:748-749），避免无限逼近却永不相等。
+    if (Math.abs(centerSmoothRef.current - centerTargetRef.current) < 0.001) {
+      centerSmoothRef.current = centerTargetRef.current
+    }
+    // ★ 两个中心各司其职（与上游一致）：
+    //   · 姿态用 `centerSmooth` —— 上游 `placeCard`
+    //     （01-manager-core.js:419 `var delta = card.index - centerSmooth`），
+    //     决定"卡片画在什么位置"，是缓动后的值；
+    //   · 窗口本该用 `round(centerTarget)` —— 上游 `syncRenderedWindow`
+    //     （01-manager-core.js:344 `var center = Math.round(centerTarget)`）。
+    //
+    // ★★ 但这里**刻意改用 `centerSmooth`**（本项目唯一一处与上游的窗口锚点
+    //    差异，登记于 HANDOFF §2 D8），原因是上游这两个值会短暂脱节：
+    //    滚轮逐格改 `centerTarget`，而 `centerSmooth` 以 0.16/帧追赶，
+    //    稳态滞后 ≈ `5.25 × 每帧格数`。窗口若锚在 `centerTarget`、剔除却按
+    //    `centerSmooth` 的 ±5.5 判，快速滚动时窗口内**全部**卡片会一次性
+    //    超出剔除距离 —— 整列空白。锚在 `centerSmooth` 后，窗口半径 5 恒小于
+    //    剔除半径 5.5，**结构上不可能全空**。
+    //    静止时二者相等，观感与上游一致；差异只在亚秒级过渡中，且方向是
+    //    "更不容易出错"。
+    const center = centerSmoothRef.current
+    const centerRounded = Math.round(center)
 
-    // 悬停的是「当前居中那张卡」：上游同样只在中心卡上做跟拍
+    // 悬停的是「当前**视觉**居中那张卡」：与 placeCard 的 delta 判据同源
+    //（上游同样只在中心卡上做跟拍）。存**绝对队列序号**（与 items 同坐标系）。
     hoveredRef.current = inZone ? centerRounded : -1
 
-    // 跟拍：热区内停留超过 260ms 才激活（上游 `setFocusZone` 的 pendingTimer），
-    // 一旦激活就锁在固定的跟拍目标上；离开热区后**再等 120ms** 才退出
-    //（上游 `exitTimer`，03-focus-cinema-camera.js:246-248）。
+    // 跟拍：进入要在区域内**连续**停留超过 260ms（上游 `setFocusZone` 的
+    // `pendingTimer`）；一旦激活就锁在固定跟拍目标上；离开后**再等 120ms**
+    // 才退出（上游 `exitTimer`，03-focus-cinema-camera.js:245-249）。
     const shouldFocus = hoverCue.zoneActive && now - hoverCue.enteredAt > 260
-    // 未在热区内时，退出跟拍还要再等 120ms（上游 exitTimer）
+    // 未在区域内时，退出跟拍还要再等 120ms（上游 exitTimer）
     const shouldExit =
       !shouldFocus &&
       shelfFocused &&
@@ -475,28 +559,39 @@ export function FloatingSongShelf({ accent, onOpenQueue, maxItems, motionEnabled
     const bands = readAudioBands()
     const color = accent ?? '#9db8cf'
 
-    tracks.forEach((track, index) => {
-      const card = cardsRef.current[index]
-      if (!card) return
-      // 窗口滑动的滚动补偿：scrollOffset 是"窗口内容位移"的残差，
-      // 逐帧缓动回 0 —— 卡片列整体呈现丝滑滚动的过渡
-      const scrollOffset = scrollOffsetRef.current
-      if (Math.abs(scrollOffset) > 0.0005) {
-        scrollOffsetRef.current = scrollOffset * Math.pow(0.88, Math.min(3, Math.max(0.25, delta * 60)))
-      } else if (scrollOffset !== 0) {
-        scrollOffsetRef.current = 0
+    // ---- 回收窗口（上游 `syncRenderedWindow`，01-manager-core.js:341-380）----
+    //
+    // 只有 `SHELF_MAX_RENDER` 个卡片 mesh，逐帧把它们**重新绑定**到围绕中心的
+    // 连续队列序号上。窗口推导抽到 `shelfWindow.ts`（有独立回归测试）。
+    //
+    // 用 `center`（缓动值）而非 `centerTarget` 作锚点 —— 理由见上方 `center`
+    // 处的说明（HANDOFF §2 D8）。
+    const { start: windowStart, end: windowEnd } = computeShelfWindow(center, items.length)
+
+    cardsRef.current.forEach((card, slotIndex) => {
+      const index = windowStart + slotIndex
+      if (slotIndex >= SHELF_MAX_RENDER || index > windowEnd) {
+        card.mesh.visible = false
+        return
       }
-      const isCenter = Math.abs(index + scrollOffset - centerSmoothRef.current) < 0.5
+      const track = items[index]
+      if (!track) {
+        card.mesh.visible = false
+        return
+      }
+      // mesh 在窗口内换了队列序号 —— 命中判定要跟着走
+      card.mesh.userData.cardIndex = slotIndex
+      const isCenter = Math.abs(index - center) < 0.5
       const targetHover = hoveredRef.current === index ? 1 : 0
-      hoversRef.current[index] += (targetHover - hoversRef.current[index]) * 0.14
+      hoversRef.current[slotIndex] += (targetHover - hoversRef.current[slotIndex]) * 0.14
+      // 传**绝对队列序号** index 与 center —— 上游 placeCard 用的就是
+      // `allItems` 上的绝对序号（`delta = card.index - centerSmooth`）。
       const distance = applyFloatingSongCardPose(
         card.mesh,
         motionEnabled ? state.clock.elapsedTime : 0,
         index,
-        // 滚动补偿进入布局 delta：窗口位移的残差让整列卡片在过渡期
-        // 停在"多滚一格"的位置，随偏移缓动归零呈现丝滑滚动
-        centerSmoothRef.current + scrollOffset,
-        hoversRef.current[index],
+        center,
+        hoversRef.current[slotIndex],
       )
       if (!card.mesh.visible) return
       card.mesh.renderOrder = (isCenter ? 300 : 30) + Math.round((6 - Math.min(distance, 6)) * 4)
@@ -515,36 +610,47 @@ export function FloatingSongShelf({ accent, onOpenQueue, maxItems, motionEnabled
         color,
         hoveredRef.current === index ? 1 : 0,
       ].join('|')
-      if (drawKey !== drawKeysRef.current[index]) {
-        drawKeysRef.current[index] = drawKey
-        const redraw = () => {
-          drawFloatingSongCard(
-            card,
-            {
-              title: track.title,
-              artist: track.artist.join(' / ') || '未知歌手',
-              coverUrl: track.cover ? getProxiedCoverUrl(track.cover) : null,
-              // 上游 tag 语义（01-manager-core.js:90）：idx===currentIdx →
-              // '正在播放'，否则 '#'+(idx+1)。这里保留"下一首"的中文标注，
-              // 相对当前曲目位置计算而不是固定第 1 位。
-              tag: isCurrent
-                ? '正在播放'
-                : currentIdx >= 0 && index === currentIdx + 1
-                  ? '下一首'
-                  : `#${index + 1}`,
-              meta: isCurrent ? track.album || '当前曲目' : `${track.requestedBy ?? '房间成员'} 点歌`,
-              progress: itemProgress,
-              bass: isCurrent ? bands.bass : 0,
-              centered: isCenter,
-            },
-            color,
-            motionEnabled ? state.clock.elapsedTime : 0,
-            hoveredRef.current === index,
-            redraw,
-          )
-          card.texture.needsUpdate = true
-        }
-        redraw()
+      if (drawKey !== drawKeysRef.current[slotIndex] || coverDirtyRef.current[slotIndex]) {
+        drawKeysRef.current[slotIndex] = drawKey
+        coverDirtyRef.current[slotIndex] = false
+        drawFloatingSongCard(
+          card,
+          {
+            title: track.title,
+            artist: track.artist.join(' / ') || '未知歌手',
+            coverUrl: track.cover ? getProxiedCoverUrl(track.cover) : null,
+            // 上游 tag 语义（01-manager-core.js:90）：idx===currentIdx →
+            // '正在播放'，否则 '#'+(idx+1)。这里保留"下一首"的中文标注，
+            // 相对当前曲目位置计算而不是固定第 1 位。
+            tag: isCurrent
+              ? '正在播放'
+              : currentIdx >= 0 && index === currentIdx + 1
+                ? '下一首'
+                : `#${index + 1}`,
+            meta: isCurrent ? track.album || '当前曲目' : `${track.requestedBy ?? '房间成员'} 点歌`,
+            progress: itemProgress,
+            bass: isCurrent ? bands.bass : 0,
+            centered: isCenter,
+          },
+          color,
+          motionEnabled ? state.clock.elapsedTime : 0,
+          hoveredRef.current === index,
+          // ★ 封面异步完成时**只标脏**，由下一帧用**当前**的 item/color/hover
+          //   重绘 —— 而不是把本次的绘制闭包回放一遍。
+          //
+          //   为什么不能回放闭包：`requestCover` 在封面仍处于 `'loading'` 时
+          //   会**直接 return 并丢弃新回调**。若本槽位在封面加载期间换了
+          //   drawKey（比如卡片变成居中、或切歌），新回调不会被登记，图片
+          //   加载完成时触发的仍是**旧**闭包；而旧闭包一旦发现 drawKey 已变
+          //   就什么都不画 —— 若此后 drawKey 不再变化（非当前歌卡片 progress
+          //   恒为 0），封面就**永远不会出现**（只剩暗色占位块）。
+          //   标脏后由渲染循环统一重绘，可同时满足两个目标：
+          //   既不用旧数据覆盖新内容，也不会漏掉这次封面就绪。
+          () => {
+            coverDirtyRef.current[slotIndex] = true
+          },
+        )
+        card.texture.needsUpdate = true
       }
       const material = card.mesh.material as THREE.MeshBasicMaterial
       material.opacity += ((isCenter ? 0.96 : Math.max(0.22, 1 - distance * 0.3)) - material.opacity) * 0.12
@@ -554,8 +660,17 @@ export function FloatingSongShelf({ accent, onOpenQueue, maxItems, motionEnabled
 
   return (
     <group>
-      {Array.from({ length: cardCount }, (_, index) => (
-        <primitive key={tracks[index] ? trackKey(tracks[index]) : index} object={cardsRef.current[index]?.mesh} />
+      {/*
+        key 必须是**槽位序号**，不能是 trackKey。
+        卡片 mesh 是固定池 + 逐帧重绑定（上游 syncRenderedWindow 的
+        rebindShelfCard 等价物）；若用 trackKey 作 key，窗口滑动时
+        24 个 key 会整批变化，React 会把它们全部卸载重挂 —— 而 mesh 由
+        `cardsRef` 持有、且已被 `<primitive>` 交付给 three 管理，重挂会让
+        场景树反复摘挂同一批对象（渲染抖动 + 命中判定读到空对象）。
+        槽位稳定 ⇒ 挂载点稳定 ⇒ 只有纹理内容随窗口更新。
+      */}
+      {Array.from({ length: cardCount }, (_, slotIndex) => (
+        <primitive key={slotIndex} object={cardsRef.current[slotIndex]?.mesh} />
       ))}
     </group>
   )

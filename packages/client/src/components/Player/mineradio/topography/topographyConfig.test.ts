@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_FLOATING_BLOCK_COUNT,
+  DEFAULT_GROUND_BANDS,
   DEFAULT_TERRAIN_DENSITY,
   QUALITY_GRID_CAP,
   RIPPLE_LIFETIME,
   RIPPLE_SOFT_FADE_START,
   TERRAIN_MAX_GRID_SIZE,
   TERRAIN_MIN_GRID_SIZE,
+  applyGroundEqBandValue,
   clampAnimationBlend,
   deriveKickFollowLowBands,
   deriveTerrainGridSettings,
@@ -66,6 +68,54 @@ describe('声波地形 · 网格推导', () => {
     expect(deriveTerrainGridSettings(DEFAULT_TERRAIN_DENSITY, 'balanced').gridSize).toBe(156)
     expect(deriveTerrainGridSettings(DEFAULT_TERRAIN_DENSITY, 'high').gridSize).toBe(156)
     expect(deriveTerrainGridSettings(DEFAULT_TERRAIN_DENSITY, 'ultra').gridSize).toBe(156)
+  })
+})
+
+describe('声波地形 · 逐频段 EQ 出厂档位', () => {
+  /**
+   * 频段顺序必须严格等于上游 `GROUND_BAND_KEYS`
+   * （`sonic-topography-preset.js:41-50`），取值必须等于上游**活路径**
+   * `readBands(fx)` 的结果 —— 即 `fx` 里的值，而不是 preset 文件里那个
+   * 从未被采用的 fallback 数组。
+   */
+  it('顺序与取值对齐上游 readBands(fx)', () => {
+    // 出厂 fx（00-state/04-fx-defaults.js:111-118），按 GROUND_BAND_KEYS 顺序：
+    // subBass/bass/lowMid/mid/highMid/presence/brilliance/air
+    const upstreamFxBands = [90, 92, 50, 50, 50, 25, 50, 48]
+    expect([...DEFAULT_GROUND_BANDS]).toEqual(upstreamFxBands)
+  })
+
+  it('presence 是被压低的频段、brilliance 是中性（不得互换）', () => {
+    const PRESENCE_INDEX = 5
+    const BRILLIANCE_INDEX = 6
+    expect(DEFAULT_GROUND_BANDS[PRESENCE_INDEX]).toBe(25)
+    expect(DEFAULT_GROUND_BANDS[BRILLIANCE_INDEX]).toBe(50)
+
+    // 方向性断言：同样的输入，presence 必须被衰减、brilliance 必须原样通过。
+    // 这两项一旦互换，下面的不等式立刻失败 —— 正是此前漏掉的回归。
+    const input = 0.5
+    expect(applyGroundEqBandValue(input, DEFAULT_GROUND_BANDS, PRESENCE_INDEX)).toBeLessThan(input)
+    expect(applyGroundEqBandValue(input, DEFAULT_GROUND_BANDS, BRILLIANCE_INDEX)).toBeCloseTo(input, 6)
+  })
+
+  it('EQ 公式与上游 applyGroundEqBandValue 一致（50 中性 / >=50 增益 / <50 变闷）', () => {
+    const bands = [0, 25, 50, 75, 100]
+    // 50 = 中性
+    expect(applyGroundEqBandValue(0.6, bands, 2)).toBeCloseTo(0.6, 6)
+    // >=50：value * (1 + delta * 1.8)，delta = (eq-50)/50
+    // （max 默认 1，因此高增益档要放宽 max 才能观察到未夹取的乘积）
+    expect(applyGroundEqBandValue(0.5, bands, 3, 2)).toBeCloseTo(0.5 * (1 + 0.5 * 1.8), 6)
+    expect(applyGroundEqBandValue(0.5, bands, 4, 2)).toBeCloseTo(0.5 * (1 + 1.0 * 1.8), 6)
+    // 默认 max=1 时，×2.8 的结果被夹到 1
+    expect(applyGroundEqBandValue(0.5, bands, 4)).toBe(1)
+    // <50：先减 dullness*0.35 再乘 (1-dullness*0.35)
+    const dullness = 0.5
+    expect(applyGroundEqBandValue(0.5, bands, 1)).toBeCloseTo(
+      Math.max(0, 0.5 - dullness * 0.35) * (1 - dullness * 0.35),
+      6,
+    )
+    // 夹到 max
+    expect(applyGroundEqBandValue(0.9, [100, 0, 0, 0, 0], 0, 1)).toBe(1)
   })
 })
 

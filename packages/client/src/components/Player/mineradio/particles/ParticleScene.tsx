@@ -5,7 +5,7 @@ import { disposeAudioAnalyser, ensureAudioAnalyser, stepAudioFrame } from '../sh
 import type { CoverAssets } from '../shared/CoverTextureLoader'
 import { resolveFrameloop, type RenderPolicy } from '../shared/RenderPolicy'
 import { getVisualMode, isTopographyMode, type VisualModeId } from '../shared/VisualMode'
-import { LyricStage, type LineHitRect } from '../lyrics/LyricStage'
+import { LyricStage } from '../lyrics/LyricStage'
 import type { CoverPalette } from '../lyrics/coverPalette'
 import { TopographyScene } from '../topography/TopographyScene'
 import type {
@@ -25,8 +25,6 @@ interface ParticleSceneProps {
   isPlaying: boolean
   /** WebGL 上下文丢失时通知上层降级 */
   onContextLost?: () => void
-  /** 歌词行命中区域回调，供点击跳转使用 */
-  onLineRects?: (rects: LineHitRect[]) => void
   /** 是否在 3D 场景内渲染歌词（关闭时由 DOM 回退层接管） */
   showLyrics?: boolean
   /** 3D 歌词的外观设置 */
@@ -53,7 +51,7 @@ export interface LyricStageOptions {
  * 上游在主循环里也是每帧只算一次音频再分发；本项目此前让 6 个组件各自
  * 触发分析，破坏了共享的峰值/节拍状态（详见 SonicAudioMonitor 顶部）。
  */
-function AudioStepDriver({ policy }: { policy: RenderPolicy }) {
+function AudioStepDriver({ policy, documentVisible }: { policy: RenderPolicy; documentVisible: boolean }) {
   // ★ 音频接线必须在这里，**不能**放在 `ParticleField` 里。
   //
   // 曾经的致命错误：`ensureAudioAnalyser()` 只在 `ParticleField` 的 effect 里
@@ -92,6 +90,15 @@ function AudioStepDriver({ policy }: { policy: RenderPolicy }) {
   const targetAudioFps = Math.max(30, Math.round(54 * policy.audioAnalysisScale))
   const analysisInterval = 1 / targetAudioFps
 
+  // 后台时 Canvas 使用 demand，useFrame 不会运行。页面恢复可见时先在 React
+  // effect 中主动唤醒 AudioContext，并让恢复后的第一帧立即分析，避免还要等
+  // 下一次帧累加或下一首歌才重新出现节拍反馈。
+  useEffect(() => {
+    if (!documentVisible) return
+    ensureAudioAnalyser()
+    analysisAccumulatorRef.current = analysisInterval
+  }, [analysisInterval, documentVisible])
+
   useFrame((_, delta) => {
     ensureAudioAnalyser()
     analysisAccumulatorRef.current += delta
@@ -128,7 +135,6 @@ export function ParticleScene({
   policy,
   isPlaying,
   onContextLost,
-  onLineRects,
   showLyrics = true,
   lyricOptions,
   onOpenQueue,
@@ -216,7 +222,7 @@ export function ParticleScene({
             上游在主循环里每帧只算一次音频，再分发给所有视觉层；本项目
             此前让 6 个组件各自触发分析，破坏了共享状态（详见
             SonicAudioMonitor 顶部说明）。 */}
-        <AudioStepDriver policy={policy} />
+        <AudioStepDriver policy={policy} documentVisible={documentVisible} />
 
         <CameraRig
           mode={mode}
@@ -247,11 +253,15 @@ export function ParticleScene({
           </>
         )}
 
-        {/* OpenMusic 的完整 3D 队列架：滚轮浏览、悬停放大、相机跟拍。 */}
+        {/* OpenMusic 的完整 3D 队列架：滚轮浏览、悬停放大、相机跟拍。
+            ★ 不再传 `maxItems`：卡片池现在是上游固定的 `SHELF_MAX_RENDER`
+              （11 张，= 可见半径 5 的 ±1），**与画质档无关** —— 上游
+              `01-manager-core.js:6-7` 里它就是个渲染预算常量，不是画质档
+              派生值。此前按 `particleGrid` 分档给 24/12/6，会让低画质档
+              连"当前歌 ±2 首"都看不到。 */}
         <FloatingSongShelf
           accent={cover?.accent ?? null}
           onOpenQueue={onOpenQueue}
-          maxItems={policy.particleGrid >= 149 ? 24 : policy.particleGrid >= 119 ? 12 : 6}
           motionEnabled={policy.beatCamera}
         />
 
@@ -264,7 +274,6 @@ export function ParticleScene({
             customLineCount={lyricOptions?.customLineCount}
             motionStyle={lyricOptions?.motionStyle}
             translationMode={lyricOptions?.translationMode}
-            onLineRects={onLineRects}
           />
         )}
 

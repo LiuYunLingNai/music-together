@@ -332,6 +332,9 @@ router.get(
 // ---------------------------------------------------------------------------
 const ALLOWED_COVER_HOSTS = [
   'y.gtimg.cn',
+  'y.qq.com',
+  'ly.qq.com',
+  'qpic.y.qq.com',
   'p1.music.126.net',
   'p2.music.126.net',
   'p3.music.126.net',

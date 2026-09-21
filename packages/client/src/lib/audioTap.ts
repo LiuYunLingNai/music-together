@@ -19,13 +19,23 @@
  */
 
 let analyser: AnalyserNode | null = null
+let revision = 0
 
 /** 由 `timeStretch` 在建立音频图时调用。 */
 export function publishStretchAnalyser(node: AnalyserNode | null): void {
   analyser = node
+  // 即使复用同一个 HTMLMediaElement / AnalyserNode，先撤回再重新发布也代表
+  // 已切到一条新的播放会话。revision 让视觉层能重置上一首歌的自适应阈值，
+  // 避免安静歌曲沿用上一首高能歌曲的历史后长时间检测不到节拍。
+  revision++
 }
 
 /** 由视觉层读取。未接线时返回 null（此时应静默降级，而不是报错）。 */
 export function getAudioTapAnalyser(): AnalyserNode | null {
   return analyser
+}
+
+/** 当前 tap 发布代次；用于区分“舞台重挂载”和“真实音频源切换”。 */
+export function getAudioTapRevision(): number {
+  return revision
 }

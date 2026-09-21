@@ -32,7 +32,9 @@ export function MineradioLyricStage({ mode, onLyricSeek, accent }: MineradioLyri
     >
       {/* 空间化容器：把歌词平面推入场景纵深 */}
       <div className="mt-mineradio-lyrics__plane">
-        <LyricDisplay onSeek={onLyricSeek} />
+        {/* `seekEnabled={false}`：上游 Mineradio 无"点击歌词跳转"，
+            且视觉舞台的拖拽手势会被行命中判定误触发（见 LyricDisplay 说明）。 */}
+        <LyricDisplay onSeek={onLyricSeek} seekEnabled={false} />
       </div>
     </div>
   )

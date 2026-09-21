@@ -19,6 +19,18 @@ interface LyricLine {
 
 interface LyricDisplayProps {
   onSeek: (time: number) => void
+  /**
+   * 是否允许点击歌词行跳转。
+   *
+   * 默认 `true` —— 经典播放器保持既有行为不变。
+   *
+   * Mineradio 视觉舞台传 `false`：上游 Mineradio **没有**"点击歌词跳转"
+   * 这个功能（全仓唯一的画布 click 属于歌单架，歌词相关零命中），而且
+   * 画布同时承载"拖拽转物体"手势，命中判定会在拖动时误触发跳转
+   * （用户实测："旋转相机时很容易误跳转歌词"）。按"对齐上游"在视觉舞台
+   * 下关闭该入口；经典播放器不受影响。
+   */
+  seekEnabled?: boolean
 }
 
 function parseLRC(lrc: string): { time: number; text: string }[] {
@@ -103,7 +115,7 @@ function toAMLLLines(lines: LyricLine[]): AMLLLyricLine[] {
   })
 }
 
-export function LyricDisplay({ onSeek }: LyricDisplayProps) {
+export function LyricDisplay({ onSeek, seekEnabled = true }: LyricDisplayProps) {
   const lyric = usePlayerStore((s) => s.lyric)
   const tlyric = usePlayerStore((s) => s.tlyric)
   const lyricLoading = usePlayerStore((s) => s.lyricLoading)
@@ -144,7 +156,7 @@ export function LyricDisplay({ onSeek }: LyricDisplayProps) {
   // TTML 优先，LRC 回退
   const seekableLines = ttmlLines ?? lrcAmllLines
   const hasLyrics = ttmlLines ? ttmlLines.length > 0 : lrcLines.length > 0
-  const lyricSeekEnabled = canSeek && !isCalibrating && duration > 0
+  const lyricSeekEnabled = seekEnabled && canSeek && !isCalibrating && duration > 0
 
   const handleLyricLineClick = useCallback(
     (event: LyricLineMouseEvent) => {

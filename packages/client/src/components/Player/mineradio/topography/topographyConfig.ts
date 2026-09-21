@@ -115,13 +115,27 @@ export function topographyQualityFor(policy: Pick<RenderPolicy, 'quality'>): Top
 }
 
 /**
- * 逐频段 EQ 的出厂档位（上游 `DEFAULT_GROUND_BANDS`，`01-fx-defaults.js`）。
+ * 逐频段 EQ 的出厂档位。
  *
- * 8 个值对应 subBass/bass/lowMid/mid/highMid/presence/brilliance/air，
- * `50` 为中性。注意低端被刻意抬高（90/92）—— 这让鼓点的抬升量几乎翻倍，
- * 是本项目此前**完全缺失**的一环（表现为地形低端"抬不起来"）。
+ * 索引严格对应上游 `GROUND_BAND_KEYS`（`sonic-topography-preset.js:41-50`）：
+ *   0 subBass / 1 bass / 2 lowMid / 3 mid / 4 highMid / 5 presence / 6 brilliance / 7 air
+ *
+ * 取值必须按上游**活路径** `readBands(fx)` 取（`sonic-topography-preset.js:205-210`）：
+ *   `bands[i] = sonicNumber(fx, GROUND_BAND_KEYS[i], DEFAULT_GROUND_BANDS[i])`
+ * 即 `fx` 有该键时**以 `fx` 为准**，preset 文件内那个默认数组只是 `fx` 缺键时的
+ * fallback。出厂 `fx`（`00-state/04-fx-defaults.js:111-118`）为
+ *   `sonicGroundPresence: 25` / `sonicGroundBrilliance: 50`，
+ * 因此第 5 项是 **25**、第 6 项是 **50**。
+ *
+ * ★ 本项目此前把这两项写反了（`…, 50, 25, 48`）：presence 被当中性（50）放行、
+ *   brilliance 反而被误压（25）。按 `applyGroundEqBandValue` 逐档实测，
+ *   低能量段 presence 响应被放大到上游的 **4.0×**、brilliance 被压到 **0.25×**。
+ *   上游 preset 文件里那行 `DEFAULT_GROUND_BANDS = [90,92,50,50,50,50,50,48]`
+ *   是**未被采用的 fallback**，不要照它取。
+ *
+ * `50` 为中性；低端出厂抬到 90/92（×2.44/×2.51），是鼓点抬升量的主要来源。
  */
-export const DEFAULT_GROUND_BANDS = [90, 92, 50, 50, 50, 50, 25, 48] as const
+export const DEFAULT_GROUND_BANDS = [90, 92, 50, 50, 50, 25, 50, 48] as const
 
 /**
  * 单频段 EQ 整形（上游 `applyGroundEqBandValue`，preset:213-220）。

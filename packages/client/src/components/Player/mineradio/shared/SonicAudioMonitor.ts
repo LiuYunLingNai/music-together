@@ -494,6 +494,44 @@ const state = {
   lastAudioTime: 0,
 }
 
+/**
+ * 重置与当前音频内容绑定的瞬态检测器，保持上游
+ * `sonicAudioResetTransientState`（`06-sonic-audio-monitor.js:221-247`）的完整范围：
+ * beat / kick / trigger / autoTrack **四者一起**重置。
+ *
+ * ★ 只重置 `beat` 是不够的（真实缺陷）：`trigger` 的 `history` 是 40 格
+ *   自适应阈值窗口、`autoTrack` 记录"当前歌最像鼓的频段"。切歌时留着它们，
+ *   上一首高能歌曲的历史会让新歌的 onset 在约 90 个分析帧内持续偏钝 ——
+ *   表现为「随机切歌时节拍忽强忽弱」。
+ */
+function resetTransientState(meta: AnalysisMeta | null): void {
+  state.beat = createBeatState()
+  state.kick = { noiseFloor: 0, kickLevel: 0, kickOnset: 0, kickEnvelope: 0 }
+  state.trigger = {
+    smoothedFlux: 0,
+    previousSmoothedFlux: 0,
+    history: new Array(40).fill(0),
+    historyIndex: 0,
+    beatHold: 0,
+    cooldownRemaining: 0,
+    lastEnergy: 0,
+    lastThreshold: 0,
+    pulse: 0,
+  }
+  state.autoTrack = {
+    frames: [],
+    lastAt: 0,
+    // 上游无 meta 时兜底 `start: 1 / end: 3`（`06-sonic-audio-monitor.js:244-245`）；
+    // 有 meta 时按 46/118 Hz 换算，取整模式用 round（`sonicAudioHzToBase`）。
+    start: meta ? hzToBin(meta, 46, 'round') : 1,
+    end: meta ? hzToBin(meta, 118, 'round') : 3,
+    windowIndex: 1,
+    hzStart: 46,
+    hzEnd: 118,
+    sensitivity: 0.85,
+  }
+}
+
 function ensureBuffers(len: number): void {
   if (state.raw.length !== len) {
     state.raw = new Uint8Array(len)
@@ -801,9 +839,11 @@ export function stepSonicAudioMonitor(data: Uint8Array | null, opts: StepOptions
 
   const currentTime = Number(opts.currentTime)
   if (Number.isFinite(currentTime)) {
-    // 检测回绕/seek：时间倒退超过 0.3s 就重置瞬态，避免 flux 出现假冲击
+    // 检测回绕/seek：时间倒退超过 0.3s 就完整重置瞬态，避免沿用上一首歌
+    // 的 trigger / autoTrack 阈值。此前只重置 beat，漏掉了上游同函数覆盖的
+    // kick、trigger 与 autoTrack，随机切歌时会出现节拍忽强忽弱。
     if (state.lastAudioTime > 0 && currentTime + 0.3 < state.lastAudioTime) {
-      state.beat = createBeatState()
+      resetTransientState(meta)
       state.prev.fill(0)
       state.smooth = {}
     }
@@ -884,33 +924,11 @@ export function getSonicAudioFrame(): SonicAudioFrame | null {
   return state.frame
 }
 
-/** 重置引擎（切换舞台/停止播放时调用）。 */
+/** 重置引擎（真实音频源切换或测试隔离时调用）。 */
 export function resetSonicAudioMonitor(): void {
   state.prev.fill(0)
   state.smooth = {}
-  state.beat = createBeatState()
-  state.kick = { noiseFloor: 0, kickLevel: 0, kickOnset: 0, kickEnvelope: 0 }
-  state.trigger = {
-    smoothedFlux: 0,
-    previousSmoothedFlux: 0,
-    history: new Array(40).fill(0),
-    historyIndex: 0,
-    beatHold: 0,
-    cooldownRemaining: 0,
-    lastEnergy: 0,
-    lastThreshold: 0,
-    pulse: 0,
-  }
-  state.autoTrack = {
-    frames: [],
-    lastAt: 0,
-    start: 1,
-    end: 2,
-    windowIndex: 1,
-    hzStart: 52,
-    hzEnd: 165,
-    sensitivity: 0.85,
-  }
+  resetTransientState(state.meta)
   state.frame = null
   state.lastAudioTime = 0
 }
