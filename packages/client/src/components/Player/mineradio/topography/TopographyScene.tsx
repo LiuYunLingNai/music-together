@@ -9,6 +9,7 @@ import { gestureRotationState, tickGestureRotation } from '../particles/gestureR
 import { orbitCameraState } from '../particles/orbitCameraState'
 import {
   DEFAULT_FLOATING_BLOCK_COUNT,
+  DEFAULT_TERRAIN_DENSITY,
   RIPPLE_LIFETIME,
   RIPPLE_SOFT_FADE_START,
   TOPOGRAPHY_WORLD_SCALE,
@@ -182,10 +183,9 @@ export function TopographyScene({
     themeRef.current = resolveTopographyTheme(palette, accent)
   }, [palette, accent])
 
-  // 地形密度按画质档推导；低画质档会显著降网格，保证移动端可用
+  // 上游以固定出厂密度 46 生成地形，再由 performanceQuality 限制网格上限。
   const quality = topographyQualityFor(policy)
-  const density = policy.particleGrid >= 149 ? 62 : policy.particleGrid >= 100 ? 50 : 38
-  const grid = useMemo(() => deriveTerrainGridSettings(density, quality), [density, quality])
+  const grid = useMemo(() => deriveTerrainGridSettings(DEFAULT_TERRAIN_DENSITY, quality), [quality])
 
   // 涟漪槽：Vector4(x, z, startTime, signedStrength)。
   //

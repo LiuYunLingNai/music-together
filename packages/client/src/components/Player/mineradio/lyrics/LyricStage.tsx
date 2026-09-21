@@ -965,7 +965,7 @@ export function LyricStage({
     readabilityTexture.minFilter = THREE.LinearMipmapLinearFilter
     readabilityTexture.magFilter = THREE.LinearFilter
     readabilityTexture.generateMipmaps = true
-    readabilityTexture.anisotropy = Math.min(8, maxAnisotropy)
+    readabilityTexture.anisotropy = lyricAnisotropy
     const readabilityMaterial = new THREE.MeshBasicMaterial({
       map: readabilityTexture,
       transparent: true,
@@ -1006,7 +1006,7 @@ export function LyricStage({
     glowTexture.minFilter = THREE.LinearMipmapLinearFilter
     glowTexture.magFilter = THREE.LinearFilter
     glowTexture.generateMipmaps = true
-    glowTexture.anisotropy = Math.min(8, maxAnisotropy)
+    glowTexture.anisotropy = lyricAnisotropy
 
     const lineWorldH = (row.mesh.geometry as THREE.PlaneGeometry).parameters.height
     // 上游 lineTextWorldW：worldW × (textWidth/canvasWidth)，夹 [0.10, 1.00]×worldW

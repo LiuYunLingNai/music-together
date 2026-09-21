@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_FLOATING_BLOCK_COUNT,
+  DEFAULT_TERRAIN_DENSITY,
   QUALITY_GRID_CAP,
   RIPPLE_LIFETIME,
   RIPPLE_SOFT_FADE_START,
@@ -10,6 +11,7 @@ import {
   deriveKickFollowLowBands,
   deriveTerrainGridSettings,
   smoothstep01,
+  topographyQualityFor,
 } from './topographyConfig'
 
 describe('声波地形 · 网格推导', () => {
@@ -53,6 +55,17 @@ describe('声波地形 · 网格推导', () => {
       expect(Number.isFinite(boxWidth)).toBe(true)
       expect(gridSize).toBeGreaterThan(0)
     }
+  })
+
+  it('直接使用用户画质档限制地形网格', () => {
+    for (const quality of ['eco', 'balanced', 'high', 'ultra'] as const) {
+      expect(topographyQualityFor({ quality })).toBe(quality)
+    }
+
+    expect(deriveTerrainGridSettings(DEFAULT_TERRAIN_DENSITY, 'eco').gridSize).toBe(112)
+    expect(deriveTerrainGridSettings(DEFAULT_TERRAIN_DENSITY, 'balanced').gridSize).toBe(156)
+    expect(deriveTerrainGridSettings(DEFAULT_TERRAIN_DENSITY, 'high').gridSize).toBe(156)
+    expect(deriveTerrainGridSettings(DEFAULT_TERRAIN_DENSITY, 'ultra').gridSize).toBe(156)
   })
 })
 

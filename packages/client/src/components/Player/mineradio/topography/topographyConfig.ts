@@ -8,7 +8,6 @@ import type { RenderPolicy } from '../shared/RenderPolicy'
  *
  * - `TERRAIN_BASE_SIZE = 168`、`TERRAIN_MIN_GRID_SIZE = 96`、`TERRAIN_MAX_GRID_SIZE = 224`
  * - 画质档网格上限 `QUALITY_GRID_CAP`：eco 112 / balanced 160 / high 192 / ultra 224
- *   （ultra 与 TERRAIN_MAX_GRID_SIZE 一样是上游枚举/显存上限，见 topographyQualityFor —— 当前映射下不可达）
  * - 世界锚定按 range/lower/depth 出厂值推导：
  *   `TOPOGRAPHY_WORLD_SCALE ≈ 0.15504 / Y ≈ -6.362 / Z ≈ -7.61`
  */
@@ -16,6 +15,8 @@ import type { RenderPolicy } from '../shared/RenderPolicy'
 export const TERRAIN_BASE_SIZE = 168
 export const TERRAIN_MIN_GRID_SIZE = 96
 export const TERRAIN_MAX_GRID_SIZE = 224
+/** 上游 sonicGroundDensity 出厂值。 */
+export const DEFAULT_TERRAIN_DENSITY = 46
 
 /** 上游 performanceQuality 的网格上限。 */
 export const QUALITY_GRID_CAP = {
@@ -108,15 +109,9 @@ export function deriveTerrainGridSettings(
   }
 }
 
-/** 把本项目的画质档映射到上游的 performanceQuality。
- *
- *  本项目粒子画质最高为 high（183×183 → 'high' 档），因此 `ultra`（224）
- *  仅作为上游 performanceQuality 的完整枚举保留，当前映射不可达；
- *  `TERRAIN_MAX_GRID_SIZE = 224` 同理是显存压缩上限而非可达档位。 */
-export function topographyQualityFor(policy: RenderPolicy): TopographyQuality {
-  if (policy.particleGrid >= 149) return 'high'
-  if (policy.particleGrid >= 100) return 'balanced'
-  return 'eco'
+/** 地形直接使用用户选择的 performanceQuality，与上游一致。 */
+export function topographyQualityFor(policy: Pick<RenderPolicy, 'quality'>): TopographyQuality {
+  return policy.quality
 }
 
 /**
@@ -208,4 +203,3 @@ export function deriveKickFollowLowBands({
  * `shared/SonicAudioMonitor.ts` 的 `stepKickEnvelope` 统一实现 ——
  * 地形直接消费引擎产出的 `kickEnvelope`，不再在本地重复跑一遍。
  */
-
