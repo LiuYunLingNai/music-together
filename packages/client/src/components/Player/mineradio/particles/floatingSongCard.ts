@@ -240,6 +240,172 @@ export function stepShelfPointerParallax(): void {
   shelfPointerParallax.y += (shelfPointerParallax.targetY - shelfPointerParallax.y) * 0.04
 }
 
+/**
+ * 歌单架侧栏基准位置（上游 `shelfLayoutProfile()` 的基础三元组）。
+ *
+ * 导出为函数，供**跟拍相机**（`orbitCameraState.setShelfCameraFocus`）读取 ——
+ * 卡片的实际横向位置与相机的注视点必须来自同一个数，否则改了一处忘了另一处
+ * 就会让跟拍推近后整列偏心。见 `SHELF_CENTER` 处的说明。
+ *
+ * ★ 视口尺寸作为**可选参数**传入（默认取 `window`）：单测环境（node）没有
+ *   `window`，直接读会让任何 import 本模块的测试在 import 期就崩。无 `window`
+ *   时退回横屏基准值 —— 那是桌面默认档，也是测试断言的目标档位。
+ */
+/**
+ * 歌单架的**竖屏/窄屏分档** —— 单一事实来源（第三十四轮统一，§5.4 C4）。
+ *
+ * ★ 上游 `isPortraitShelfViewport()`（`04-shelf/00-layout-hover.js:24-26`）是
+ *   `innerHeight > innerWidth * 1.08`（**带 1.08 系数**），而 `shelfLayoutProfile()`
+ *   就是用它同时决定 `sideX` 档位与卡片姿势的（`:28-46`）。
+ *
+ *   本项目此前**两处判据不一致**：
+ *     · 本文件（`shelfSideX` 与 `applyFloatingSongCardPose`）用裸 `height > width`
+ *     · `FloatingSongShelf` 的热区判定用上游的 `* 1.08`
+ *   于是 1.00–1.08 这个比例带里，**卡片姿势走竖屏档、热区却走横屏档** ——
+ *   卡片列与命中区错档。
+ *
+ *   现统一为上游口径（1.08），且三处共用本函数，杜绝再次分叉。
+ */
+export const SHELF_PORTRAIT_ASPECT = 1.08
+
+/** 上游 `isPortraitShelfViewport()`。传 viewport 以便单测（node 无 `window`）。 */
+export function isPortraitShelfViewport(viewport?: { width: number; height: number }): boolean {
+  const view =
+    viewport ?? (typeof window === 'undefined' ? null : { width: window.innerWidth, height: window.innerHeight })
+  if (!view) return false
+  return view.height > view.width * SHELF_PORTRAIT_ASPECT
+}
+
+/** 上游 `shelfLayoutProfile()` 的 `narrow`（横屏且宽度 < 980）。 */
+export function isNarrowShelfViewport(viewport?: { width: number; height: number }): boolean {
+  const view =
+    viewport ?? (typeof window === 'undefined' ? null : { width: window.innerWidth, height: window.innerHeight })
+  if (!view) return false
+  return !isPortraitShelfViewport(view) && view.width < 980
+}
+
+export function shelfSideX(viewport?: { width: number; height: number }): number {
+  // `window` 本身就是 `{ innerWidth, innerHeight }` 的形状，但类型上没有
+  // `width`/`height` 字段，直接放进联合体会让下面的读取报错 —— 这里显式
+  // 归一化成同一个形状。`typeof window === 'undefined'` 是 node（单测）环境。
+  const view =
+    viewport ?? (typeof window === 'undefined' ? null : { width: window.innerWidth, height: window.innerHeight })
+  if (!view) return 3.18
+  // ★ 判据统一走 `isPortraitShelfViewport`（上游口径，含 1.08 系数）——
+  //   与 `applyFloatingSongCardPose`、`FloatingSongShelf` 的热区**同源**。
+  //   此前这里与姿势用裸 `height > width`，而热区用 `* 1.08`，在临界比例上错档。
+  const portrait = isPortraitShelfViewport(view)
+  const narrow = isNarrowShelfViewport(view)
+  return portrait ? 1.56 : narrow ? 2.48 : 3.18
+}
+
+/** 卡片平面的世界宽度（与 `createFloatingSongCardMesh` 的 PlaneGeometry 一致）。 */
+export const SHELF_CARD_WIDTH = 2.05
+
+/**
+ * 侧栏基准位姿的用户偏移（上游 `shelfLayoutProfile()` 的 `shelfCtl` 四项）。
+ *
+ * 上游出厂见 `04-fx-defaults.js:157-160`：
+ *   shelfSize 0.92 / shelfOffsetX −0.34 / shelfOffsetY −0.20 / shelfOffsetZ +0.12
+ * `sideY` 的基础值为 0（非 skull 档），因此出厂即 **−0.20**。
+ *
+ * ★★ 本项目把 `x` 由上游出厂 **−0.34 改为 0**（第三十三轮用户决策，第二次调整）。
+ *
+ *   上游歌单架默认**自动隐藏**（`fx.shelfPresence: 'auto'`），只在指针移到
+ *   右侧热区时才带着淡入浮现，因此与封面重叠不构成问题。本项目未移植悬停
+ *   召唤包络（§5.1），歌单架**常驻可见** —— 按上游 −0.34 摆放时卡片左缘
+ *   67.4%，压住封面盘（69.3%）与 `emily` 方盘（70.0%）。
+ *
+ *   取值过程（实测 1600×900，各分辨率比例一致）：
+ *
+ *     x      卡片列              与 `emily` 方盘(70.04%) 的间距
+ *     −0.34  67.4% .. 86.4%     −2.6%（压住）
+ *     **0    70.7% .. 89.6%     +0.6%**（用户选定：贴上但不重叠）
+ *     0.20   72.5% .. 91.5%     +2.5%（曾用值，用户觉"偏右、不和谐"）
+ *
+ *   用户先要求让开（→ 0.20），看到实际效果后判断"歌曲架偏右、不和谐"，
+ *   再要求回到 **0** —— 即保留上游侧栏基准位（3.18，不含额外偏移），
+ *   只消掉上游那个负偏移，让卡片与封面**贴着但不压住**。这是观感取舍，
+ *   不是几何推导的结果。
+ *
+ *   `y` / `z` 仍严格取上游出厂值（−0.20 / +0.12）。
+ *
+ *   ★ 注意残余：`emily` 方盘在拖拽旋转到约 45° 时对角展宽到 78.3%，会
+ *     探入卡片列。这不新引入问题 —— 粒子无硬边（唱片盘 `recordAlpha` 在
+ *     `recordR` 附近 smoothstep 淡出），且卡片 `depthTest: false` +
+ *     `renderOrder 300` 本就在粒子之上，重叠处表现为卡片遮挡粒子。
+ *
+ *   ★ 跟拍注视点必须同步（见 `SHELF_FOCUS_LOOK_AT_OFFSET`），否则推近后
+ *     整列偏出画面中心。
+ *
+ *   ★ 歌词**不**跟着位移，恒定居中在封面正上方。上游的 `shelfLyricAvoid`
+ *     （x −1.36 / y +0.06 / z +0.72）是配合 `fx.lyricCameraLock` 用的
+ *     （歌词推到一边、相机锁过去）；本项目没有该开关、相机恒定看向封面，
+ *     单独套用位移会让歌词离开封面轴心 —— 封面旋转时明显错位。
+ *     让位改由歌单架侧承担。
+ */
+export const SHELF_CENTER = { x: 0, y: -0.2, z: 0.12 }
+
+/**
+ * 跟拍注视点相对卡片列中心的横向偏移（由上游出厂值倒推）—— **分档**。
+ *
+ * ============================ 推导（第三十四轮修，§5.4 C5） ============================
+ *
+ * 上游 `03-focus-cinema-camera.js:192-195` 的跟拍档：
+ *
+ *     orbit.focus.lookAt.set(shelfProfile.portrait ? 1.08 : 2.32, …)
+ *     orbit.focus.theta = portrait ? 0.24 : 0.42
+ *     orbit.focus.radius = portrait ? 5.28 : 4.20
+ *
+ * 即注视点 x **只有两档**（竖屏 1.08 / 其余 2.32），而卡片列的 `sideX`
+ * 有**三档**（1.56 / 2.48 / 3.18）。把 `shelfCtl.x = −0.34` 算进列中心后：
+ *
+ *     列中心 = sideX − 0.34
+ *     offset = 列中心 − lookAt.x
+ *
+ *     竖屏  1.56 − 0.34 = 1.22  →  1.22 − 1.08 = **+0.14**
+ *     窄屏  2.48 − 0.34 = 2.14  →  2.14 − 2.32 = **−0.18**
+ *     宽屏  3.18 − 0.34 = 2.84  →  2.84 − 2.32 = **+0.52**
+ *
+ * ★ 此前本项目对**所有档位**用同一个 0.52 —— 那是**宽屏档**的推导。
+ *   于是窄屏下注视点落到 `2.48 − 0.52 = 1.96`，而上游是 2.32：**差 0.36 world**，
+ *   推近后整列在构图里偏左。竖屏则恰好接近（1.56 − 0.52 = 1.04 vs 上游 1.08），
+ *   所以只在窄屏上明显。
+ */
+export const SHELF_FOCUS_LOOK_AT_OFFSET = 0.52
+/** 窄屏档的偏移（上游该档复用宽屏 lookAt.x 2.32，故为负）。 */
+export const SHELF_FOCUS_LOOK_AT_OFFSET_NARROW = -0.18
+/** 竖屏档的偏移。 */
+export const SHELF_FOCUS_LOOK_AT_OFFSET_PORTRAIT = 0.14
+
+/** 按当前视口取跟拍注视点的横向偏移（分档，见上）。 */
+export function shelfFocusLookAtOffset(viewport?: { width: number; height: number }): number {
+  if (isPortraitShelfViewport(viewport)) return SHELF_FOCUS_LOOK_AT_OFFSET_PORTRAIT
+  if (isNarrowShelfViewport(viewport)) return SHELF_FOCUS_LOOK_AT_OFFSET_NARROW
+  return SHELF_FOCUS_LOOK_AT_OFFSET
+}
+
+/**
+ * 跟拍相机的档位参数（上游 `03-focus-cinema-camera.js:192-195`）。
+ *
+ * ★ 竖屏档此前**完全没移植**（§5.4 C5）：本项目对所有档位用宽屏的
+ *   `theta 0.42 / radius 4.20`，于是竖屏上拉近幅度与侧角都比上游大。
+ *   上游竖屏是 `theta 0.24 / radius 5.28` —— 更正面、更远。
+ *
+ * ★ `phi` / `lookAt.y` 仍取 0，那是**已登记的偏离 §2 D3**（"齐平"：
+ *   悬停时整列卡片上下间隙必须对称）。上游竖屏是 `phi −0.06 / lookAt.y −0.18`，
+ *   但 D3 的对称原则对所有档位一致，故不随档位变化。
+ */
+export interface ShelfFollowTier {
+  theta: number
+  radius: number
+}
+
+export function shelfFollowTier(viewport?: { width: number; height: number }): ShelfFollowTier {
+  if (isPortraitShelfViewport(viewport)) return { theta: 0.24, radius: 5.28 }
+  return { theta: 0.42, radius: 4.2 }
+}
+
 export function applyFloatingSongCardPose(
   mesh: THREE.Mesh,
   time: number,
@@ -247,8 +413,12 @@ export function applyFloatingSongCardPose(
   center: number,
   hover: number,
 ): number {
-  const portrait = window.innerHeight > window.innerWidth
-  const narrow = window.innerWidth < 980
+  // ★ 分档判据统一走 `isPortraitShelfViewport` / `isNarrowShelfViewport`
+  //   （上游口径，含 1.08 系数）—— 与 `shelfSideX`、`FloatingSongShelf` 的热区
+  //   **同源**（第三十四轮统一，§5.4 C4）。此前这里用裸 `height > width`，
+  //   在 1.00–1.08 比例带上与热区判定错档。
+  const portrait = isPortraitShelfViewport()
+  const narrow = isNarrowShelfViewport()
   const delta = cardIndex - center
   const distance = Math.abs(delta)
   if (distance > 5.5) {
@@ -256,20 +426,10 @@ export function applyFloatingSongCardPose(
     return distance
   }
   mesh.visible = true
-  /**
-   * 侧栏基准位姿 —— 上游 `shelfLayoutProfile()`（`04-shelf/00-layout-hover.js:35-45`）
-   * 在基础值上**再加用户偏移**，出厂偏移见 `04-fx-defaults.js:157-160`：
-   *   shelfSize 0.92 / shelfOffsetX −0.34 / shelfOffsetY −0.20 / shelfOffsetZ +0.12
-   * 而 `sideY` 的基础值是 0（非 skull 档），因此 `sideY` 出厂即 **−0.20**。
-   *
-   * 此前本项目只照搬了基础三元组（3.18 / 0.86 / scale 1），把四项出厂偏移
-   * 整个漏掉 —— 于是整列卡片偏右 0.34、偏上 0.20、偏后 0.12，且每张卡片
-   * **大 8.7%**（侧栏缩放 1 vs 出厂 0.92）。相对固定的跟拍机位
-   * （lookAt(2.32,0,0.72) / radius 4.2）这是可见的位置与比例偏差。
-   */
-  const SHELF_CENTER = { x: -0.34, y: -0.2, z: 0.12 }
+  // 侧栏基准位姿：位置/尺寸常量见模块顶部 `SHELF_CENTER` / `shelfSideX()`
+  //（跟拍相机的注视点也读同一组常量，避免两处漂移）。
   const SHELF_SIZE = 0.92
-  const sideX = (portrait ? 1.56 : narrow ? 2.48 : 3.18) + SHELF_CENTER.x
+  const sideX = shelfSideX() + SHELF_CENTER.x
   const sideY = SHELF_CENTER.y
   const sideScale = (portrait ? 0.7 : narrow ? 0.86 : 1) * SHELF_SIZE
   // 三轴步长（上游 04-shelf/00-layout-hover.js:35-37 sideXStep/sideYStep/sideZStep，
@@ -295,15 +455,8 @@ export function applyFloatingSongCardPose(
   const breath = Math.sin(time * 0.92 + cardIndex * 0.64) * 0.052 * breathWeight
   const breathZ = Math.cos(time * 0.78 + cardIndex * 0.52) * 0.03 * breathWeight
   mesh.position.set(
-    sideX +
-      distance * stepX -
-      hover * (portrait ? 0.065 : 0.145) +
-      parX * 0.06 * parWeight,
-    sideY +
-      -delta * stepY +
-      breath +
-      hover * (portrait ? 0.075 : 0.105) +
-      parY * 0.046 * parWeight,
+    sideX + distance * stepX - hover * (portrait ? 0.065 : 0.145) + parX * 0.06 * parWeight,
+    sideY + -delta * stepY + breath + hover * (portrait ? 0.075 : 0.105) + parY * 0.046 * parWeight,
     (portrait ? 0.78 : 0.86) +
       SHELF_CENTER.z -
       distance * stepZ +

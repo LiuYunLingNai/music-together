@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import type { VisualModeId } from '../shared/VisualMode'
 import { resetGestureRotation } from './gestureRotationState'
+import { SHELF_CENTER, shelfFocusLookAtOffset, shelfFollowTier, shelfSideX } from './floatingSongCard'
 
 /**
  * 轨道相机状态 —— 对照 Mineradio `01-scene/01-orbit-free-camera.js` 与
@@ -128,7 +129,11 @@ export function shortestAngleDelta(from: number, to: number): number {
   return Math.atan2(Math.sin(to - from), Math.cos(to - from))
 }
 
-function applyBaseline(state: OrbitCameraState, base: { radius: number; phi: number; theta: number }, sync: boolean): void {
+function applyBaseline(
+  state: OrbitCameraState,
+  base: { radius: number; phi: number; theta: number },
+  sync: boolean,
+): void {
   state.baselineTheta = base.theta
   state.baselinePhi = clamp(base.phi, MIN_PHI, MAX_PHI)
   state.baselineRadius = clamp(base.radius, MIN_RADIUS, MAX_RADIUS)
@@ -298,6 +303,20 @@ export function setShelfCameraFocus(active: boolean): void {
   unlockCenteredView()
   state.focus.active = true
   state.focus.type = 'shelf'
+  // ★ lookAt.x 必须**跟随歌单架的横向位置**（第三十三轮），且偏移**分档**
+  //   （第三十四轮修 §5.4 C5）。
+  //
+  //   卡片列由 `floatingSongCard.ts` 的 `SHELF_CENTER.x` 定位；跟拍时相机
+  //   推近，若注视点仍停在旧的 x，整列就会偏出画面中心。
+  //   上游的 `lookAt.x` 只有两档（竖屏 1.08 / 其余 2.32），而卡片列 `sideX`
+  //   有三档 —— 因此偏移**必须按档位取**（见 `shelfFocusLookAtOffset` 的推导）：
+  //     竖屏 +0.14 ／ 窄屏 −0.18 ／ 宽屏 +0.52
+  //   此前对所有档位用宽屏的 0.52：窄屏下注视点落到 1.96、上游是 2.32，
+  //   差 0.36 world，推近后整列在构图里偏左。
+  const shelfLookAtX = shelfSideX() + SHELF_CENTER.x - shelfFocusLookAtOffset()
+  // 跟拍档位参数也分档（上游竖屏 theta 0.24 / radius 5.28 —— 更正面、更远）。
+  // `phi` / `lookAt.y` 取 0 是已登记的 §2 D3"齐平"偏离，不随档位变化。
+  const tier = shelfFollowTier()
   if (state.mode === 'topography') {
     // 地形档：与粒子档同一"齐平"原则（phi 0 / lookAt.y 0 → 列中心 0.000、
     // 上下间隙差 0.000）。半径 5.2 保留第二十二轮的"拉近幅度减半"——
@@ -305,15 +324,15 @@ export function setShelfCameraFocus(active: boolean): void {
     // 注：第二十二轮曾把 lookAt.y 抬到 0.30 去对齐"抬升后的歌词/地形视觉
     // 中心"，但那会让列中心回到 −0.134、上下间隙差 0.267 —— 与"齐平对称"
     // 直接冲突，故一并归零。
-    state.focus.theta = 0.42
+    state.focus.theta = tier.theta
     state.focus.phi = 0.0
     state.focus.radius = 5.2
-    state.focus.lookAt.set(2.32, 0.0, 0.72)
+    state.focus.lookAt.set(shelfLookAtX, 0.0, 0.72)
   } else {
-    state.focus.theta = 0.42
+    state.focus.theta = tier.theta
     state.focus.phi = 0.0
-    state.focus.radius = 4.2
-    state.focus.lookAt.set(2.32, 0.0, 0.72)
+    state.focus.radius = tier.radius
+    state.focus.lookAt.set(shelfLookAtX, 0.0, 0.72)
   }
 }
 

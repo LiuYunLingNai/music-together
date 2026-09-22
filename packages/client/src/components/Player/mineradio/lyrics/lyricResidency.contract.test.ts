@@ -13,14 +13,8 @@ import { describe, expect, it } from 'vitest'
  * 这些错误都源于"把运行时状态当成了构建时状态"。本测试不跑运行时，
  * 只做静态检查：读源码，断言关键结构存在。
  */
-const LYRIC_STAGE = readFileSync(
-  join(__dirname, 'LyricStage.tsx'),
-  'utf8',
-)
-const LYRIC_SHADERS = readFileSync(
-  join(__dirname, 'lyricShaders.ts'),
-  'utf8',
-)
+const LYRIC_STAGE = readFileSync(join(__dirname, 'LyricStage.tsx'), 'utf8')
+const LYRIC_SHADERS = readFileSync(join(__dirname, 'lyricShaders.ts'), 'utf8')
 
 /** 去掉注释，避免把说明文字里的代码也算进去。 */
 function stripComments(source: string): string {
@@ -96,6 +90,55 @@ describe('歌词常驻轨道与激活门控契约', () => {
     }
   })
 
+  it('懒建行必须传**行号**锚点，不得传槽位值（量纲错位）', () => {
+    // 真实事故：`buildRow(lineIndex, anchorIndex)` 的第二个参数是**行号**
+    // （内部 `distance = |lineIndex - anchorIndex|` 决定上下文缩放、
+    // targetAlpha、builtAsActive），但懒建调用曾错传 `Math.round(newScroll)` ——
+    // 那是**槽位**值。有译词的歌 `slotStart[i] ≈ 2.1214·i`，于是第 20 行拿到
+    // anchor≈42、distance≈22 → targetAlpha 被压到地板 0.16（而非 0.54），
+    // 且它同时喂给激活行的辉光 → 懒建行偏暗、激活行辉光弱约 3.4×。
+    // 无译词的歌 slotStart[i] === i，所以手工抽查会漏掉。
+    const source = stripComments(LYRIC_STAGE)
+    // 不得把槽位值当行号传
+    expect(source, 'buildRow 的锚点参数不得传槽位值 newScroll').not.toMatch(
+      /buildRow\(lineIndex,\s*Math\.round\(newScroll\)\)/,
+    )
+    // 必须传行号锚点（与初始建行的 anchor = activeIndex 语义一致）
+    expect(source).toMatch(/buildRow\(lineIndex,\s*active\s*>=\s*0\s*\?\s*active\s*:\s*0\)/)
+    // 初始建行的锚点也必须是行号（守住参照系）
+    expect(source).toMatch(/const anchor = activeIndex >= 0 \? activeIndex : 0/)
+  })
+
+  it('故障脉冲必须对每一行更新（不得只写在 isActive 分支里）', () => {
+    // 真实事故：`uGlitchBurst` 曾只在 `if (isActive)` 内更新，于是**激活过的
+    // 行失活后冻结在最后一次峰值**。它驱动 glitchWidth ×(0.55+1.85·burst)
+    // 与 glitchGate +0.28·burst → "非激活行比激活行闪得更凶"，且永不消退。
+    //
+    // 上游 `12-lyrics-row-layers.js:1663` 对所有行都写：
+    //   uGlitchBurst = isActive ? glitchPulse : glitchPulse * 0.35
+    // 因此断言：写入语句必须位于 isActive 的 if/else **之外**，
+    // 且非激活行取 0.35 倍（不是 0）。
+    const source = stripComments(LYRIC_STAGE)
+    expect(source).toMatch(/uGlitchBurst\.value\s*\+=/)
+    // 非激活行必须拿到 0.35 倍目标（而不是 0）
+    expect(source).toMatch(/bassHit\s*\?\s*\(isActive\s*\?\s*1\s*:\s*0\.35\)/)
+  })
+
+  it('重建依赖不得含视口尺寸（否则 resize 每帧全量拆建 + 重栅格化）', () => {
+    // 真实事故：`viewportKey = \`${size.width}x${size.height}\`` 曾作为重建
+    // effect 的依赖，注释写"触发窗口适配重算" —— 但重建路径**从不读 size**：
+    // 逐行视口适配是**每帧**用实时 `size.width` 算的。于是拖动窗口边缘时
+    // 每个 resize 事件都会拆掉整条常驻轨道（rowsRef=[] + 全部 detach/dispose
+    // + 重栅格化 ±7 行，每行 2048 宽画布）→ 数秒卡顿且常驻性丢失。
+    const source = stripComments(LYRIC_STAGE)
+    // 不得再有 viewportKey 这种"视口尺寸派生值"
+    expect(source, 'viewportKey 已移除，不应复活').not.toMatch(/viewportKey/)
+    // 重建依赖必须只剩 signature
+    expect(source).toMatch(/\}, \[signature\]\)/)
+    // 但逐行 fit 仍必须逐帧用实时宽度（不能把功能一起删掉）
+    expect(source).toMatch(/lyricRowFitRatio\(mesh, row\.raster, size\.width, camera\)/)
+  })
+
   it('显示模式必须真正门控行数（上游 lyricLineAllowedForDisplayMode）', () => {
     // 真实缺陷：`lyricSlotOffsets` 存在且被单测覆盖，但**生产路径从不调用** ——
     // 只用 stackLines 算了一个对称可见半径。后果：
@@ -127,9 +170,7 @@ describe('歌词常驻轨道与激活门控契约', () => {
   })
 
   it('时间Stretch 失败时元素不得回池（孤儿 source 防护）', () => {
-    const timeStretch = stripComments(
-      readFileSync(join(__dirname, '../../../../lib/timeStretch.ts'), 'utf8'),
-    )
+    const timeStretch = stripComments(readFileSync(join(__dirname, '../../../../lib/timeStretch.ts'), 'utf8'))
     // attach 一开始就登记占位图；变量形式用于在异步注册返回后校验该次
     // 初始化是否已经被连续切歌取消。
     expect(timeStretch).toMatch(/const pendingGraph = createDisabledGraph\(context,\s*audio\)/)

@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { gestureRotationState } from './gestureRotationState'
+import { SHELF_CENTER, shelfFocusLookAtOffset, shelfFollowTier, shelfSideX } from './floatingSongCard'
 import {
   MAX_PHI,
   boostCameraPunch,
@@ -129,6 +130,49 @@ describe('轨道相机状态机', () => {
     expect(orbitCameraState.focus.radius).toBeCloseTo(4.2, 6)
   })
 
+  it('★ 跟拍注视点 x 必须跟随歌单架位置（第三十三轮：歌单架右移后同步）', () => {
+    // 卡片列中心世界 x = shelfSideX() + SHELF_CENTER.x；偏移按**档位**取
+    // （第三十四轮 §5.4 C5：上游 lookAt.x 只有两档，而 sideX 有三档）。
+    const expectedX = shelfSideX() + SHELF_CENTER.x - shelfFocusLookAtOffset()
+    setShelfCameraFocus(true)
+    expect(orbitCameraState.focus.lookAt.x).toBeCloseTo(expectedX, 6)
+    // 且必须**不是**上游旧值（否则说明跟随逻辑失效）
+    expect(orbitCameraState.focus.lookAt.x).not.toBeCloseTo(2.32, 3)
+    // 纵/横都与卡片列中心保持**该档位**的偏移关系
+    expect(shelfSideX() + SHELF_CENTER.x - orbitCameraState.focus.lookAt.x).toBeCloseTo(shelfFocusLookAtOffset(), 6)
+  })
+
+  it('★ 跟拍偏移与档位参数按分档取（§5.4 C5：窄屏 −0.18 / 竖屏 +0.14 / 宽屏 +0.52）', () => {
+    // 偏移表本身（纯函数，传 viewport 避开 node 无 window 的问题）
+    expect(shelfFocusLookAtOffset({ width: 1600, height: 900 })).toBeCloseTo(0.52, 6)
+    expect(shelfFocusLookAtOffset({ width: 900, height: 600 })).toBeCloseTo(-0.18, 6)
+    expect(shelfFocusLookAtOffset({ width: 390, height: 844 })).toBeCloseTo(0.14, 6)
+
+    // 档位参数：上游竖屏更正面（theta 0.24）、更远（radius 5.28）
+    const portrait = shelfFollowTier({ width: 390, height: 844 })
+    const wide = shelfFollowTier({ width: 1600, height: 900 })
+    expect(portrait.theta).toBeCloseTo(0.24, 6)
+    expect(portrait.radius).toBeCloseTo(5.28, 6)
+    expect(wide.theta).toBeCloseTo(0.42, 6)
+    expect(wide.radius).toBeCloseTo(4.2, 6)
+
+    // ★ 三档偏移必须**不全相同** —— 此前对所有档位都用宽屏的 0.52
+    const offsets = [
+      shelfFocusLookAtOffset({ width: 1600, height: 900 }),
+      shelfFocusLookAtOffset({ width: 900, height: 600 }),
+      shelfFocusLookAtOffset({ width: 390, height: 844 }),
+    ]
+    expect(new Set(offsets).size, '三档偏移被压成了同一个值').toBe(3)
+  })
+
+  it('跟拍档位参数必须真的被 setShelfCameraFocus 使用（不是定义了不用）', () => {
+    // node 环境无 window，shelfFollowTier() 走横屏档 ⇒ theta 0.42 / radius 4.2
+    setOrbitMode('emily')
+    setShelfCameraFocus(true)
+    expect(orbitCameraState.focus.theta).toBeCloseTo(0.42, 6)
+    expect(orbitCameraState.focus.radius).toBeCloseTo(4.2, 6)
+  })
+
   it('地形模式跟拍分档：与粒子档同采齐平档，仅拉近幅度减半', () => {
     setOrbitMode('topography')
     setShelfCameraFocus(true)
@@ -156,7 +200,13 @@ describe('轨道相机状态机', () => {
   it('齐平档下歌单架列的上下间隙对称（列中心落在画面中线）', () => {
     const aspect = 16 / 9
     const fov = 45
-    const project = (look: { x: number; y: number; z: number }, theta: number, phi: number, radius: number, y: number) => {
+    const project = (
+      look: { x: number; y: number; z: number },
+      theta: number,
+      phi: number,
+      radius: number,
+      y: number,
+    ) => {
       const cy = Math.cos(phi)
       const sy = Math.sin(phi)
       const cam = {

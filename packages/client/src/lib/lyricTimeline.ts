@@ -205,15 +205,12 @@ export function evaluateLyricAnimationQuality(
   for (const [text, count] of repeatedReferenceCounts) {
     if (count < 2) continue
     const characterCount = Array.from(text).length
-    const animatedMatches = candidateLines.filter(
-      (line) => line.animated && textMatchScore(line.text, text) > 0,
-    ).length
+    const animatedMatches = candidateLines.filter((line) => line.animated && textMatchScore(line.text, text) > 0).length
     repeatedCharacterCount += characterCount * count
     animatedRepeatedCharacterCount += characterCount * Math.min(count, animatedMatches)
   }
-  const repeatedSectionCoverage = repeatedCharacterCount >= 20
-    ? animatedRepeatedCharacterCount / repeatedCharacterCount
-    : 1
+  const repeatedSectionCoverage =
+    repeatedCharacterCount >= 20 ? animatedRepeatedCharacterCount / repeatedCharacterCount : 1
 
   const requiredAnimatedLines = Math.min(3, Math.max(1, Math.ceil(meaningfulLineCount * 0.1)))
   const hasWordAnimation =
@@ -362,9 +359,10 @@ function textMatchScore(target: string, source: string): number {
     let diagonal = 0
     for (let sourceIndex = 1; sourceIndex <= sourceCharacters.length; sourceIndex++) {
       const previous = row[sourceIndex]
-      row[sourceIndex] = targetCharacter === sourceCharacters[sourceIndex - 1]
-        ? diagonal + 1
-        : Math.max(row[sourceIndex], row[sourceIndex - 1])
+      row[sourceIndex] =
+        targetCharacter === sourceCharacters[sourceIndex - 1]
+          ? diagonal + 1
+          : Math.max(row[sourceIndex], row[sourceIndex - 1])
       diagonal = previous
     }
   }
@@ -416,10 +414,8 @@ function alignAuxiliarySource(
       const timeDistance = Math.abs(target.startTime - (original[sourceIndex - 1].startTime + offset))
       const tolerance = 6_000
       if (timeDistance > tolerance) continue
-      const alignedScore = scores[(targetIndex - 1) * width + sourceIndex - 1]
-        + matchScore * 10
-        + 1
-        - timeDistance / tolerance
+      const alignedScore =
+        scores[(targetIndex - 1) * width + sourceIndex - 1] + matchScore * 10 + 1 - timeDistance / tolerance
       if (alignedScore > scores[cell]) {
         scores[cell] = alignedScore
         decisions[cell] = 3
@@ -479,9 +475,7 @@ function completeAuxiliaryMapping(
     for (let lineIndex = previousTarget + 1; lineIndex < upperBound; lineIndex++) {
       const line = lines[lineIndex]
       if (mapping[lineIndex] >= 0 || line.isBG || !isValidRange(line.startTime, line.endTime)) continue
-      const distance = Math.abs(
-        line.startTime - (source.original[sourceIndex].startTime + source.alignment.offset),
-      )
+      const distance = Math.abs(line.startTime - (source.original[sourceIndex].startTime + source.alignment.offset))
       if (distance < bestDistance) {
         bestDistance = distance
         bestTarget = lineIndex
@@ -498,9 +492,7 @@ function completeAuxiliaryMapping(
 function auxiliarySourceScore(source: PreparedAuxiliarySource, values: readonly string[]): number {
   const availableCount = values.filter(Boolean).length
   if (availableCount === 0) return -1
-  const matchedCount = source.alignment.mapping.filter(
-    (sourceIndex) => sourceIndex >= 0 && values[sourceIndex],
-  ).length
+  const matchedCount = source.alignment.mapping.filter((sourceIndex) => sourceIndex >= 0 && values[sourceIndex]).length
   return matchedCount + matchedCount / availableCount
 }
 
@@ -519,7 +511,10 @@ export function enrichLyricStructure(
   })
   if (sourceEntries.length === 0) return { lines: enriched, changed: false }
 
-  const alignment = alignAuxiliarySource(enriched, sourceEntries.map((entry) => entry.original))
+  const alignment = alignAuxiliarySource(
+    enriched,
+    sourceEntries.map((entry) => entry.original),
+  )
   const matchedCount = alignment.mapping.filter((sourceIndex) => sourceIndex >= 0).length
   if (matchedCount < Math.min(3, Math.ceil(sourceEntries.length * 0.2))) {
     return { lines: enriched, changed: false }
@@ -555,38 +550,43 @@ export function enrichLyricAuxiliary(
   let changed = false
 
   const preparedSources = sources.flatMap((source, order): PreparedAuxiliarySource[] => {
-    const sourceLines = source.lines?.flatMap((line) => {
-      const text = lineText(line).trim()
-      const normalizedText = normalizeLyricText(text)
-      return !line.isBG && isValidRange(line.startTime, line.endTime) && normalizedText
-        ? [{ line, original: { text, normalizedText, startTime: line.startTime } }]
-        : []
-    }) ?? []
-    const original = sourceLines.length > 0
-      ? sourceLines.map((entry) => entry.original)
-      : parseTimedLyricText(source.lyric ?? '')
+    const sourceLines =
+      source.lines?.flatMap((line) => {
+        const text = lineText(line).trim()
+        const normalizedText = normalizeLyricText(text)
+        return !line.isBG && isValidRange(line.startTime, line.endTime) && normalizedText
+          ? [{ line, original: { text, normalizedText, startTime: line.startTime } }]
+          : []
+      }) ?? []
+    const original =
+      sourceLines.length > 0 ? sourceLines.map((entry) => entry.original) : parseTimedLyricText(source.lyric ?? '')
     if (original.length === 0) return []
-    const translations = sourceLines.length > 0
-      ? sourceLines.map((entry) => entry.line.translatedLyric?.trim() ?? '')
-      : pairAuxiliaryLines(original, source.tlyric ?? '')
-    const romanizations = sourceLines.length > 0
-      ? sourceLines.map((entry) => entry.line.romanLyric?.trim() ?? '')
-      : pairAuxiliaryLines(original, source.romalrc ?? '')
+    const translations =
+      sourceLines.length > 0
+        ? sourceLines.map((entry) => entry.line.translatedLyric?.trim() ?? '')
+        : pairAuxiliaryLines(original, source.tlyric ?? '')
+    const romanizations =
+      sourceLines.length > 0
+        ? sourceLines.map((entry) => entry.line.romanLyric?.trim() ?? '')
+        : pairAuxiliaryLines(original, source.romalrc ?? '')
     if (!translations.some(Boolean) && !romanizations.some(Boolean)) return []
-    return [{
-      original,
-      translations,
-      romanizations,
-      alignment: alignAuxiliarySource(enriched, original),
-      order,
-    }]
+    return [
+      {
+        original,
+        translations,
+        romanizations,
+        alignment: alignAuxiliarySource(enriched, original),
+        order,
+      },
+    ]
   })
 
   for (const field of ['translatedLyric', 'romanLyric'] as const) {
     const valuesKey = field === 'translatedLyric' ? 'translations' : 'romanizations'
-    const rankedSources = [...preparedSources].sort((left, right) =>
-      auxiliarySourceScore(right, right[valuesKey]) - auxiliarySourceScore(left, left[valuesKey]) ||
-      left.order - right.order,
+    const rankedSources = [...preparedSources].sort(
+      (left, right) =>
+        auxiliarySourceScore(right, right[valuesKey]) - auxiliarySourceScore(left, left[valuesKey]) ||
+        left.order - right.order,
     )
     for (const source of rankedSources) {
       const values = source[valuesKey]
@@ -610,7 +610,10 @@ export function enrichLyricAuxiliary(
 }
 
 export function needsLyricAuxiliary(lines: readonly LyricLine[]): boolean {
-  const text = lines.filter((line) => !line.isBG).map(lineText).join('')
+  const text = lines
+    .filter((line) => !line.isBG)
+    .map(lineText)
+    .join('')
   const hasKoreanOrJapanese = /[\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(text)
   const latinCount = text.match(/\p{Script=Latin}/gu)?.length ?? 0
   const cjkCount = text.match(/\p{Script=Han}/gu)?.length ?? 0

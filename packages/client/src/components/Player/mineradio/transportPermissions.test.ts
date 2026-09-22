@@ -102,16 +102,12 @@ describe('模式切换的决策（Bug 1 回归）', () => {
 
   it('admin（可 set-mode）→ 直接切换', () => {
     const admin = defineAbilityFor('admin')
-    expect(decideModeToggle(admin.can('set-mode', 'Player'), admin.can('vote', 'Player'))).toBe(
-      'direct',
-    )
+    expect(decideModeToggle(admin.can('set-mode', 'Player'), admin.can('vote', 'Player'))).toBe('direct')
   })
 
   it('member（不可 set-mode、可投票）→ 发起投票', () => {
     const member = defineAbilityFor('member')
-    expect(decideModeToggle(member.can('set-mode', 'Player'), member.can('vote', 'Player'))).toBe(
-      'vote',
-    )
+    expect(decideModeToggle(member.can('set-mode', 'Player'), member.can('vote', 'Player'))).toBe('vote')
   })
 
   it('无任何权限 → 不做任何事', () => {

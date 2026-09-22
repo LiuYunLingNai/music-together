@@ -247,7 +247,9 @@ describe('enrichLyricAuxiliary', () => {
     const result = enrichLyricAuxiliary(lines, [source])
 
     expect(result.lines.map((line) => line.translatedLyric)).toEqual([
-      'Uh huh 听着 男孩', '真的真的好帅', '耀眼得睁不开眼',
+      'Uh huh 听着 男孩',
+      '真的真的好帅',
+      '耀眼得睁不开眼',
     ])
     expect(result.lines[1].romanLyric).toBe('neomu neomu meotjyeo')
     expect(result.lines.map((line) => line.startTime)).toEqual([11_200, 14_200, 17_200])
@@ -260,10 +262,15 @@ describe('enrichLyricAuxiliary', () => {
     main.translatedLyric = '已有翻译'
     const background = lyricLine('baby baby', 5_100, 5_800, { isBG: true })
 
-    const result = enrichLyricAuxiliary([main, background], [{
-      lyric: '[00:05.00]Gee Gee\n[00:05.10]baby baby',
-      tlyric: '[00:05.00]新的翻译\n[00:05.10]宝贝 宝贝',
-    }])
+    const result = enrichLyricAuxiliary(
+      [main, background],
+      [
+        {
+          lyric: '[00:05.00]Gee Gee\n[00:05.10]baby baby',
+          tlyric: '[00:05.00]新的翻译\n[00:05.10]宝贝 宝贝',
+        },
+      ],
+    )
 
     expect(result.lines[0]).toMatchObject({ translatedLyric: '已有翻译', isDuet: true, startTime: 5_000 })
     expect(result.lines[0].words).toEqual(words)
@@ -302,10 +309,12 @@ describe('enrichLyricAuxiliary', () => {
 
   it('does not reuse one auxiliary timestamp for adjacent source lines', () => {
     const lines = [lyricLine('첫째 줄', 10_000, 11_000), lyricLine('둘째 줄', 11_000, 12_000)]
-    const result = enrichLyricAuxiliary(lines, [{
-      lyric: '[00:10.00]첫째 줄\n[00:11.00]둘째 줄',
-      tlyric: '[00:10.50]唯一译文',
-    }])
+    const result = enrichLyricAuxiliary(lines, [
+      {
+        lyric: '[00:10.00]첫째 줄\n[00:11.00]둘째 줄',
+        tlyric: '[00:10.50]唯一译文',
+      },
+    ])
 
     expect(result.lines.map((line) => line.translatedLyric)).toEqual(['唯一译文', ''])
   })

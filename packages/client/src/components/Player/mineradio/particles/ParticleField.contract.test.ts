@@ -53,18 +53,12 @@ describe('事故 A：uAlpha 全局淡入链', () => {
 
 describe('事故 B：点尺寸与 uPixel', () => {
   it('点尺寸公式与上游逐字一致', () => {
-    expect(PARTICLE_VERTEX_SHADER).toMatch(
-      new RegExp(`${POINT_SIZE_BASE}\\.0\\s*\\/\\s*max\\(0\\.5,\\s*-mvPos\\.z\\)`),
-    )
-    expect(PARTICLE_VERTEX_SHADER).toContain(
-      `clamp(depthSize * audioBoost, ${POINT_SIZE_MIN}, ${POINT_SIZE_MAX})`,
-    )
+    expect(PARTICLE_VERTEX_SHADER).toMatch(new RegExp(`${POINT_SIZE_BASE}\\.0\\s*\\/\\s*max\\(0\\.5,\\s*-mvPos\\.z\\)`))
+    expect(PARTICLE_VERTEX_SHADER).toContain(`clamp(depthSize * audioBoost, ${POINT_SIZE_MIN}, ${POINT_SIZE_MAX})`)
   })
 
   it('gl_PointSize 由 sz * uPixel * uPointScale 构成', () => {
-    expect(PARTICLE_VERTEX_SHADER).toMatch(
-      /gl_PointSize\s*=\s*sz\s*\*\s*uPixel\s*\*\s*uPointScale\s*;/,
-    )
+    expect(PARTICLE_VERTEX_SHADER).toMatch(/gl_PointSize\s*=\s*sz\s*\*\s*uPixel\s*\*\s*uPointScale\s*;/)
   })
 
   it('泛光顶点派生后额外乘 uBloomSize', () => {
@@ -90,11 +84,7 @@ describe('事故 C：几何平面尺寸', () => {
 
 describe('着色器精度（共享 uniform 必须同精度）', () => {
   it('三个着色器都使用 highp，不用 mediump/lowp', () => {
-    for (const src of [
-      PARTICLE_VERTEX_SHADER,
-      PARTICLE_FRAGMENT_SHADER,
-      PARTICLE_BLOOM_FRAGMENT_SHADER,
-    ]) {
+    for (const src of [PARTICLE_VERTEX_SHADER, PARTICLE_FRAGMENT_SHADER, PARTICLE_BLOOM_FRAGMENT_SHADER]) {
       expect(src).toMatch(/precision\s+highp\s+float/)
       expect(src).not.toMatch(/precision\s+(mediump|lowp)/)
     }

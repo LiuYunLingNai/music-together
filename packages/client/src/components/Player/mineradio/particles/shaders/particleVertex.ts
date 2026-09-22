@@ -626,10 +626,7 @@ void main(){
 export const PARTICLE_BLOOM_VERTEX_SHADER = PARTICLE_VERTEX_SHADER.replace(
   'uniform float uMouseActive, uPixel, uColorMixT, uLoading;',
   'uniform float uMouseActive, uPixel, uColorMixT, uLoading, uBloomSize;',
-).replace(
-  'gl_PointSize = sz * uPixel * uPointScale;',
-  'gl_PointSize = sz * uPixel * uPointScale * uBloomSize;',
-)
+).replace('gl_PointSize = sz * uPixel * uPointScale;', 'gl_PointSize = sz * uPixel * uPointScale * uBloomSize;')
 
 /**
  * 泛光片元着色器 —— 对照上游同名片元。

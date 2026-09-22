@@ -17,11 +17,7 @@ import {
   tickGestureRotation,
 } from './gestureRotationState'
 import { boostCameraPunch, orbitCameraState } from './orbitCameraState'
-import {
-  ALPHA_FADE_DURATION_SECONDS,
-  PARTICLE_PLANE_SIZE,
-  RENDER_FX,
-} from './particleContract'
+import { ALPHA_FADE_DURATION_SECONDS, PARTICLE_PLANE_SIZE, RENDER_FX } from './particleContract'
 import {
   beginPresetTransition,
   createPresetTransition,
@@ -375,10 +371,7 @@ export function ParticleField({ mode, cover, policy, isPlaying }: ParticleFieldP
     const onMove = (event: PointerEvent) => {
       const rect = canvas.getBoundingClientRect()
       if (rect.width === 0 || rect.height === 0) return
-      pointerRef.current.set(
-        (event.clientX - rect.left) / rect.width,
-        1 - (event.clientY - rect.top) / rect.height,
-      )
+      pointerRef.current.set((event.clientX - rect.left) / rect.width, 1 - (event.clientY - rect.top) / rect.height)
     }
     // 指针离开画布：焦点回中心，uMouse 会逐帧缓动过去，推挤随之淡出。
     const onLeave = () => pointerRef.current.set(0.5, 0.5)
@@ -558,10 +551,7 @@ export function ParticleField({ mode, cover, policy, isPlaying }: ParticleFieldP
 
     u.uMouse.value.lerp(pointerRef.current, 0.06)
     // 鼠标世界坐标：把 0..1 的归一化位置映射到舞台平面
-    u.uMouseXY.value.set(
-      (u.uMouse.value.x - 0.5) * PLANE_SIZE,
-      (u.uMouse.value.y - 0.5) * PLANE_SIZE,
-    )
+    u.uMouseXY.value.set((u.uMouse.value.x - 0.5) * PLANE_SIZE, (u.uMouse.value.y - 0.5) * PLANE_SIZE)
 
     // 上游 GalaxyParticles.tsx:848 —— uPixel 取的是 **devicePixelRatio**：
     //     uniforms.uPixel.value = state.gl.getPixelRatio();
@@ -593,9 +583,7 @@ export function ParticleField({ mode, cover, policy, isPlaying }: ParticleFieldP
       // 泛光层与主层共享姿态（上游 `bloomParticles.rotation.copy(particles.rotation)`）
       bloomPointsRef.current?.rotation.copy(mainPoints.rotation)
       // rebase 时把偏移同步减到本层，避免长时间拖拽后跳变
-      rebaseParticleRotationIfNeeded(
-        [mainPoints, bloomPointsRef.current].filter(Boolean) as THREE.Points[],
-      )
+      rebaseParticleRotationIfNeeded([mainPoints, bloomPointsRef.current].filter(Boolean) as THREE.Points[])
 
       // 把封面世界姿态发布给歌词层（上游歌词每帧采样 particles 的世界四元数
       // 与其世界位置作为锚点）。只写分量，不分配对象。
@@ -649,13 +637,7 @@ export function ParticleField({ mode, cover, policy, isPlaying }: ParticleFieldP
         />
       )}
 
-      <points
-        ref={mainPointsRef}
-        geometry={geometry}
-        material={mainMaterial}
-        frustumCulled={false}
-        renderOrder={1}
-      />
+      <points ref={mainPointsRef} geometry={geometry} material={mainMaterial} frustumCulled={false} renderOrder={1} />
     </>
   )
 }

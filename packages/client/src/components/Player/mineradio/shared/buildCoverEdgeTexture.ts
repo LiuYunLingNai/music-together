@@ -80,9 +80,14 @@ export function buildCoverEdgeTexture(source: CanvasImageSource): HTMLCanvasElem
     for (let y = 1; y < size - 1; y++) {
       for (let x = 1; x < size - 1; x++) {
         const i = y * size + x
-        const tl = blurred[i - size - 1], t = blurred[i - size], tr = blurred[i - size + 1]
-        const l = blurred[i - 1], r = blurred[i + 1]
-        const bl = blurred[i + size - 1], b = blurred[i + size], br = blurred[i + size + 1]
+        const tl = blurred[i - size - 1],
+          t = blurred[i - size],
+          tr = blurred[i - size + 1]
+        const l = blurred[i - 1],
+          r = blurred[i + 1]
+        const bl = blurred[i + size - 1],
+          b = blurred[i + size],
+          br = blurred[i + size + 1]
         const gx = tl + 2 * l + bl - (tr + 2 * r + br)
         const gy = tl + 2 * t + tr - (bl + 2 * b + br)
         edge[i] = Math.min(1, Math.sqrt(gx * gx + gy * gy) * 1.4)
@@ -150,7 +155,9 @@ export function sampleCoverAccent(source: CanvasImageSource): string | null {
       [0.78, 0.22],
     ]
 
-    let r = 0, g = 0, b = 0
+    let r = 0,
+      g = 0,
+      b = 0
     for (const [px, py] of points) {
       const x = Math.min(size - 1, Math.round(px * size))
       const y = Math.min(size - 1, Math.round(py * size))

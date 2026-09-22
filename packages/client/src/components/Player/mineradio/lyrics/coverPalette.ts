@@ -122,9 +122,7 @@ export function extractCoverPalette(image: CanvasImageSource): CoverPalette {
 
     const mean: Rgb = { r: r / count, g: g / count, b: b / count }
     const bright: Rgb =
-      brightCount > 0
-        ? { r: brightR / brightCount, g: brightG / brightCount, b: brightB / brightCount }
-        : mean
+      brightCount > 0 ? { r: brightR / brightCount, g: brightG / brightCount, b: brightB / brightCount } : mean
 
     // 正文与高亮必须够亮才能在深色舞台上可读
     const primary = lift(mean, 190)

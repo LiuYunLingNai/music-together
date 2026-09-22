@@ -10,10 +10,7 @@ import {
 } from './stageLyricModel'
 
 /** 构造一行逐字歌词：words 为 [文字, 起始ms, 结束ms] */
-function line(
-  words: Array<[string, number, number]>,
-  extra: Partial<AMLLLyricLine> = {},
-): AMLLLyricLine {
+function line(words: Array<[string, number, number]>, extra: Partial<AMLLLyricLine> = {}): AMLLLyricLine {
   return {
     words: words.map(([word, startTime, endTime]) => ({
       word,
@@ -61,7 +58,12 @@ describe('foldConsecutiveBackgroundLines', () => {
 
 describe('buildStageLines', () => {
   it('为每个字累加字符区间', () => {
-    const lines = buildStageLines([line([['你好', 0, 500], ['世界', 500, 1000]])])
+    const lines = buildStageLines([
+      line([
+        ['你好', 0, 500],
+        ['世界', 500, 1000],
+      ]),
+    ])
     expect(lines).toHaveLength(1)
 
     const [first, second] = lines[0].words
@@ -73,7 +75,13 @@ describe('buildStageLines', () => {
   })
 
   it('字符区间能正确覆盖整行（含空格与标点）', () => {
-    const lines = buildStageLines([line([['Hel', 0, 300], ['lo ', 300, 600], ['world', 600, 900]])])
+    const lines = buildStageLines([
+      line([
+        ['Hel', 0, 300],
+        ['lo ', 300, 600],
+        ['world', 600, 900],
+      ]),
+    ])
     const words = lines[0].words
     expect(words[words.length - 1].charEnd).toBe(lines[0].charCount)
     expect(lines[0].charCount).toBe('Hello world'.length)
@@ -148,7 +156,13 @@ describe('buildStageLines', () => {
 })
 
 describe('computeLineProgress', () => {
-  const stageLine = (): StageLine => buildStageLines([line([['ab', 1000, 2000], ['cd', 2000, 3000]])])[0]
+  const stageLine = (): StageLine =>
+    buildStageLines([
+      line([
+        ['ab', 1000, 2000],
+        ['cd', 2000, 3000],
+      ]),
+    ])[0]
 
   it('行开始前为 0', () => {
     expect(computeLineProgress(stageLine(), 0.5, 4)).toBe(0)
@@ -213,20 +227,30 @@ describe('hasWordTiming', () => {
   })
 
   it('多个字各有独立区间时为 true', () => {
-    expect(hasWordTiming(stage([['a', 0, 500], ['b', 500, 1000]]).words)).toBe(true)
+    expect(
+      hasWordTiming(
+        stage([
+          ['a', 0, 500],
+          ['b', 500, 1000],
+        ]).words,
+      ),
+    ).toBe(true)
   })
 
   it('多字但时间完全相同为 false', () => {
-    expect(hasWordTiming(stage([['a', 0, 1000], ['b', 0, 1000]]).words)).toBe(false)
+    expect(
+      hasWordTiming(
+        stage([
+          ['a', 0, 1000],
+          ['b', 0, 1000],
+        ]).words,
+      ),
+    ).toBe(false)
   })
 })
 
 describe('findActiveLineIndex', () => {
-  const lines = buildStageLines([
-    line([['一', 0, 1000]]),
-    line([['二', 1000, 2000]]),
-    line([['三', 2000, 3000]]),
-  ])
+  const lines = buildStageLines([line([['一', 0, 1000]]), line([['二', 1000, 2000]]), line([['三', 2000, 3000]])])
 
   it('未开始时返回 -1', () => {
     expect(findActiveLineIndex(lines, -1)).toBe(-1)
@@ -249,5 +273,87 @@ describe('findActiveLineIndex', () => {
     ])
     // 1.5s 时应仍激活第一个主行（下标 0），而不是背景行
     expect(findActiveLineIndex(withBg, 1.5)).toBe(0)
+  })
+
+  /**
+   * ★ 第三十四轮：`findActiveLineIndex` 由**线性扫描改为二分**
+   *   （§5.4 D4 —— 它在逐帧循环里被调用）。
+   *
+   *   二分只有在"主行按 startTime 递增"时才对，因此这里用**穷举对拍**把
+   *   新实现钉在旧语义上：对整条轨道上的每个时刻（含相邻行的边界、背景行
+   *   前后、首尾之外），逐一与原线性语义比对。
+   */
+  it('★ 与"原线性语义"逐点对拍一致（含背景行与边界）', () => {
+    // 旧实现（从 git 历史取回的语义，逐字保留）
+    const linear = (ls: StageLine[], now: number): number => {
+      let result = -1
+      for (let i = 0; i < ls.length; i++) {
+        const l = ls[i]
+        if (l.role !== 'main') continue
+        if (l.startTime / 1000 <= now) result = i
+        else break
+      }
+      return result
+    }
+
+    const scenarios: StageLine[][] = [
+      // 纯主行
+      buildStageLines([line([['一', 0, 1000]]), line([['二', 1000, 2000]]), line([['三', 2000, 3000]])]),
+      // 背景行插在中间
+      buildStageLines([
+        line([['一', 0, 1000]]),
+        line([['背景', 1000, 2000]], { isBG: true }),
+        line([['二', 2000, 3000]]),
+        line([['背景2', 3000, 4000]], { isBG: true }),
+      ]),
+      // 背景行在**最后**（二分时 hi 会落在非 main 行上）
+      buildStageLines([
+        line([['一', 0, 1000]]),
+        line([['二', 1000, 2000]]),
+        line([['背景尾', 2000, 3000]], { isBG: true }),
+      ]),
+      // 背景行在**最前**
+      buildStageLines([
+        line([['背景首', 0, 1000]], { isBG: true }),
+        line([['一', 1000, 2000]]),
+        line([['二', 2000, 3000]]),
+      ]),
+      // 只有背景行（没有任何主行）
+      buildStageLines([line([['背景', 0, 1000]], { isBG: true })]),
+      // 空轨道
+      [],
+    ]
+
+    for (const ls of scenarios) {
+      // 覆盖 −0.5s 到 末行+0.5s，步长取到能命中所有边界
+      const last = ls.length ? ls[ls.length - 1].startTime / 1000 : 0
+      for (let t = -0.5; t <= last + 0.5; t += 0.05) {
+        expect(
+          findActiveLineIndex(ls, t),
+          `轨道(${ls.map((l) => `${l.role}@${l.startTime / 1000}`).join(',')}) t=${t.toFixed(2)}`,
+        ).toBe(linear(ls, t))
+      }
+      // 边界：每行 startTime 的**前后一瞬**
+      for (const l of ls) {
+        const s = l.startTime / 1000
+        for (const t of [s - 0.001, s, s + 0.001]) {
+          expect(findActiveLineIndex(ls, t), `边界 t=${t}`).toBe(linear(ls, t))
+        }
+      }
+      // 极值
+      expect(findActiveLineIndex(ls, -99)).toBe(linear(ls, -99))
+      expect(findActiveLineIndex(ls, 9999)).toBe(linear(ls, 9999))
+    }
+  })
+
+  it('★ 缓存必须随轨道数组更换而失效（不得跨曲目复用）', () => {
+    const a = buildStageLines([line([['一', 0, 1000]])])
+    const b = buildStageLines([line([['甲', 0, 1000]]), line([['乙', 1000, 2000]]), line([['丙', 2000, 3000]])])
+    // 先查 a（建立缓存），再查 b —— 若缓存没失效，b 会按 a 的表算
+    expect(findActiveLineIndex(a, 0.5)).toBe(0)
+    expect(findActiveLineIndex(b, 2.5)).toBe(2)
+    // 回到 a 也必须正确（缓存只保留最后一份，重算即可）
+    expect(findActiveLineIndex(a, 0.5)).toBe(0)
+    expect(findActiveLineIndex(a, 99)).toBe(0)
   })
 })

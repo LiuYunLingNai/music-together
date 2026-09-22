@@ -83,20 +83,13 @@ export interface TerrainGridSettings {
  * 密度取 [0,100]（上游滑杆语义），映射到 [96, 224] 的网格边长，
  * 再被画质档上限夹取，最后按 168 的基准尺寸换算方块间距。
  */
-export function deriveTerrainGridSettings(
-  density: number,
-  quality: TopographyQuality,
-): TerrainGridSettings {
+export function deriveTerrainGridSettings(density: number, quality: TopographyQuality): TerrainGridSettings {
   const clamped = Math.max(0, Math.min(100, Number.isFinite(density) ? density : 46))
-  const target =
-    TERRAIN_MIN_GRID_SIZE + (TERRAIN_MAX_GRID_SIZE - TERRAIN_MIN_GRID_SIZE) * (clamped / 100)
+  const target = TERRAIN_MIN_GRID_SIZE + (TERRAIN_MAX_GRID_SIZE - TERRAIN_MIN_GRID_SIZE) * (clamped / 100)
   const cap = QUALITY_GRID_CAP[quality] ?? QUALITY_GRID_CAP.balanced
   // 上游先把原始网格吸附到 4 的整数倍，再夹到 [96, 画质上限]
   // （sonic-topography-preset.js:226）。
-  const gridSize = Math.max(
-    TERRAIN_MIN_GRID_SIZE,
-    Math.min(cap, Math.round(target / 4) * 4),
-  )
+  const gridSize = Math.max(TERRAIN_MIN_GRID_SIZE, Math.min(cap, Math.round(target / 4) * 4))
   const spacing = TERRAIN_BASE_SIZE / gridSize
   // 方块略窄于间距，留出缝隙让地形保持"柱阵"而非连续平面。
   // 上游用 spacing * (0.9 / 1.05) ≈ 0.857·spacing（不是 0.82）。
@@ -143,12 +136,7 @@ export const DEFAULT_GROUND_BANDS = [90, 92, 50, 50, 50, 25, 50, 48] as const
  * 滑杆 50 = ×1.0；>=50 时线性增益最高 ×2.8；<50 时先减 `dullness*0.35`
  * 再乘 `(1-dullness*0.35)`，即衰减比单纯缩放更"闷"。
  */
-export function applyGroundEqBandValue(
-  value: number,
-  bands: readonly number[],
-  index: number,
-  max = 1,
-): number {
+export function applyGroundEqBandValue(value: number, bands: readonly number[], index: number, max = 1): number {
   const eq = Number.isFinite(bands[index]) ? bands[index] : 50
   const delta = (eq - 50) / 50
   const safe = Number.isFinite(value) ? value : 0

@@ -126,13 +126,7 @@ interface ParticleSlot {
  * 音频来源复用本项目既有的 `readAudioBands`（只读旁路 AnalyserNode），
  * 因此不需要引入上游那套 galaxy 音频引擎，也不会碰到播放链路。
  */
-export function TopographyScene({
-  policy,
-  palette,
-  accent,
-  motionEnabled,
-  onRippleReady,
-}: TopographySceneProps) {
+export function TopographyScene({ policy, palette, accent, motionEnabled, onRippleReady }: TopographySceneProps) {
   const meshRef = useRef<THREE.InstancedMesh>(null)
   const floatingRef = useRef<THREE.InstancedMesh>(null)
   const meteorRef = useRef<THREE.InstancedMesh>(null)
@@ -193,9 +187,7 @@ export function TopographyScene({
   // （`mapMaterial.uniforms.uRipples.value`）。这样 `syncRippleUniforms`
   // 直接改元素即可上传，不需要逐帧重新赋值（重新赋值会让 three 重新
   // 建立 GPU 侧绑定，且改动 vec4 元素本身就已经标记了 needsUpdate）。
-  const ripplesRef = useRef<TopographyRippleSlot[]>(
-    mapMaterial.uniforms.uRipples.value as TopographyRippleSlot[],
-  )
+  const ripplesRef = useRef<TopographyRippleSlot[]>(mapMaterial.uniforms.uRipples.value as TopographyRippleSlot[])
   const rippleIndexRef = useRef(0)
   /** CPU 侧记录每个槽的位置/强度/白/起始时间，用于逐帧回填带符号的 uniform。 */
   const rippleMetaRef = useRef(
@@ -462,12 +454,7 @@ export function TopographyScene({
     if (kickActive && !lastKickTriggerRef.current) {
       const angle = Math.random() * Math.PI * 2
       const dist = Math.random() * 20
-      addRipple(
-        Math.cos(angle) * dist,
-        Math.sin(angle) * dist,
-        Math.min(kickEnvelopeValue * 2.0, 3.0),
-        false,
-      )
+      addRipple(Math.cos(angle) * dist, Math.sin(angle) * dist, Math.min(kickEnvelopeValue * 2.0, 3.0), false)
     }
     lastKickTriggerRef.current = kickEnvelopeValue > 0.32
 
@@ -549,9 +536,7 @@ export function TopographyScene({
     // EQ 平均值参与 uEnergy 与 uAmplitude 的缩放（上游 preset:788-790）
     const eqAvg = eq.reduce((sum, v) => sum + v, 0) / eq.length
     // 上游：uEnergy = clamp01(energy * (0.25 + eqAvg/50*0.75))
-    u.uEnergy.value = clampAnimationBlend(
-      (monitorFrame?.energy ?? bands.energy) * (0.25 + (eqAvg / 50) * 0.75),
-    )
+    u.uEnergy.value = clampAnimationBlend((monitorFrame?.energy ?? bands.energy) * (0.25 + (eqAvg / 50) * 0.75))
     // uSmoothness / uDensity 由音频**引擎**推导（上游 frame 直接给出），
     // 不再本地硬编码，也不再重复推导。
     u.uSmoothness.value = monitorFrame?.smoothness ?? 0.5
@@ -559,8 +544,7 @@ export function TopographyScene({
     // 上游：amplitude<=50 时 ampMul = amplitude/50；>50 时 1+((a-50)/50)²*14。
     // 出厂 amplitude=50 → 1.0。本项目暂未暴露该滑杆，取出厂值。
     const amplitude = 50
-    u.uAmplitude.value =
-      amplitude <= 50 ? amplitude / 50 : 1 + Math.pow((amplitude - 50) / 50, 2) * 14
+    u.uAmplitude.value = amplitude <= 50 ? amplitude / 50 : 1 + Math.pow((amplitude - 50) / 50, 2) * 14
 
     const total = smoothed.subBass + smoothed.bass + smoothed.lowMid + smoothed.mid
     const high = smoothed.presence + smoothed.brilliance + smoothed.air
@@ -578,11 +562,7 @@ export function TopographyScene({
     if (floatingMesh) {
       // 上游 speed 出厂 59（FLOATING_SPEED），speedRate = lerp(3, 36, 59/100) = 22.47
       const pulseBlend = clampAnimationBlend(1 - Math.exp(-FLOATING_SPEED_RATE * delta))
-      floatingPulseRef.current = THREE.MathUtils.lerp(
-        floatingPulseRef.current,
-        kickEnvelopeValue,
-        pulseBlend,
-      )
+      floatingPulseRef.current = THREE.MathUtils.lerp(floatingPulseRef.current, kickEnvelopeValue, pulseBlend)
       const pulse = floatingPulseRef.current
       floatingMaterial.uniforms.uTime.value = time
       floatingMaterial.uniforms.uPulse.value = pulse
@@ -613,14 +593,8 @@ export function TopographyScene({
       // 此前直接用 lerp(0.5, 1.6, pulse)，忽略了整条尺寸链，方块起伏不明显；
       // 脉冲跟随率也写死 18（上游 speed=59 应为 22.47），鼓点胀缩偏慢。
       const minVisualScale = THREE.MathUtils.lerp(0.12, 0.75, FLOATING_MIN_SIZE / 100)
-      const maxVisualScale = Math.max(
-        minVisualScale + 0.05,
-        THREE.MathUtils.lerp(0.45, 3.2, FLOATING_MAX_SIZE / 100),
-      )
-      const sizeMix = Math.max(
-        0,
-        Math.min(1, pulse * (0.5 + (FLOATING_INTENSITY / 100) * 1.7)),
-      )
+      const maxVisualScale = Math.max(minVisualScale + 0.05, THREE.MathUtils.lerp(0.45, 3.2, FLOATING_MAX_SIZE / 100))
+      const sizeMix = Math.max(0, Math.min(1, pulse * (0.5 + (FLOATING_INTENSITY / 100) * 1.7)))
       const pulseScale = THREE.MathUtils.lerp(minVisualScale, maxVisualScale, sizeMix)
       const pulseLift = pulse * (FLOATING_INTENSITY / 100) * 1.4
 
@@ -742,11 +716,7 @@ export function TopographyScene({
             <primitive object={mapMaterial} attach="material" />
           </instancedMesh>
 
-          <instancedMesh
-            ref={floatingRef}
-            args={[undefined, undefined, floatingBlocks.length]}
-            frustumCulled={false}
-          >
+          <instancedMesh ref={floatingRef} args={[undefined, undefined, floatingBlocks.length]} frustumCulled={false}>
             <boxGeometry args={[1, 1, 1]} />
             <primitive object={floatingMaterial} attach="material" />
           </instancedMesh>

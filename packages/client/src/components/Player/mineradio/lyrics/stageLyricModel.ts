@@ -224,16 +224,52 @@ export function hasWordTiming(words: readonly StageWord[]): boolean {
 }
 
 /** 找出当前激活的主行索引（在 stageLines 中的下标），无匹配返回 -1。 */
-export function findActiveLineIndex(lines: readonly StageLine[], nowSeconds: number): number {
-  let result = -1
+/**
+ * 主行下标的缓存（第三十四轮性能修复，§5.4 D4）。
+ *
+ * `findActiveLineIndex` 在 **WebGL 歌词的逐帧循环**里被调用（第 31 轮起读逐帧
+ * 时钟），原来每次都对整条轨道线性扫描。120 行的歌即 7200 次比较/秒。
+ *
+ * 主行下标表只随 `lines` 数组本身变化，因此按**引用**缓存：
+ * 轨道重建时 `stageLines` 是新数组，缓存自动失效。
+ * 只保留最后一份 —— 同时只有一条轨道在用。
+ */
+let mainIndexCacheFor: readonly StageLine[] | null = null
+let mainIndexCache: number[] = []
 
-  // stageLines 已按时间递增，但背景行插在其主行之后，因此跳过背景行比较
+function mainLineIndices(lines: readonly StageLine[]): number[] {
+  if (mainIndexCacheFor === lines) return mainIndexCache
+  const out: number[] = []
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-    if (line.role !== 'main') continue
-    if (line.startTime / 1000 <= nowSeconds) result = i
-    else break
+    if (lines[i].role === 'main') out.push(i)
   }
+  mainIndexCacheFor = lines
+  mainIndexCache = out
+  return out
+}
 
+export function findActiveLineIndex(lines: readonly StageLine[], nowSeconds: number): number {
+  // ★ 二分查找：在**主行**下标表上找"最后一个 startTime ≤ now"的主行。
+  //
+  //   ★ 这是**等价**变换而非近似 —— 原实现的 `else break` 本身就依赖
+  //     "主行按 startTime 递增"，与二分要求的单调性是**同一条不变量**。
+  //     若该前提被破坏，原实现会提前 break 掉后面的命中、同样是错的，
+  //     因此本改动不引入新前提。
+  //
+  //   背景行（`role !== 'main'`）插在主行之后，必须先滤掉再二分 ——
+  //   在原始下标上直接二分是错的（合格下标集合不是连续区间）。
+  const main = mainLineIndices(lines)
+  let lo = 0
+  let hi = main.length - 1
+  let result = -1
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1
+    if (lines[main[mid]].startTime / 1000 <= nowSeconds) {
+      result = main[mid]
+      lo = mid + 1
+    } else {
+      hi = mid - 1
+    }
+  }
   return result
 }

@@ -8,7 +8,12 @@ import { CURRENT_TIME_THROTTLE_MS } from '@/lib/constants'
 import { toast } from 'sonner'
 import { getServerTime } from '@/lib/clockSync'
 import { SERVER_URL } from '@/lib/config'
-import { attachTimeStretch, prepareDirectStreamForTimeStretch, releaseTimeStretch, type TimeStretchController } from '@/lib/timeStretch'
+import {
+  attachTimeStretch,
+  prepareDirectStreamForTimeStretch,
+  releaseTimeStretch,
+  type TimeStretchController,
+} from '@/lib/timeStretch'
 import { setHowlPosition } from '@/lib/howlPosition'
 import { registerActivePlaybackStop } from '@/lib/audioPlaybackLifecycle'
 import { lyricPlayerBridge } from '@/lib/lyricPlayerBridge'
@@ -136,6 +141,9 @@ export function useHowl(onTrackEnd: () => void) {
       // 复用它，同时旧异步任务又在后台给同一元素建图并覆盖全局 tap。
       finalizeTimeStretchRelease?.()
     }
+    // 换歌/卸载时逐帧时钟也必须作废：`releaseTimeStretch` 之后 rAF 可能仍在
+    // 旧 Howl 上跑一拍，留下上一首的位置。清掉后消费方立刻回退到 store。
+    lyricPlayerBridge.clearFrameTime()
   }, [])
 
   const pausePlayback = useCallback(
@@ -342,11 +350,19 @@ export function useHowl(onTrackEnd: () => void) {
           if (howlRef.current !== howl) return
           usePlayerStore.getState().setIsPlaying(false)
           stopTimeUpdate()
+          // ★ 逐帧时钟必须**主动清空**，不能只靠 250ms 新鲜度窗口兜底。
+          //   暂停后 rAF 停摆、`frameTimeStamp` 不再刷新，窗口内（最多 250ms）
+          //   的消费方仍会读到"暂停前那一刻"的时间；紧接着拖动进度条时
+          //   那条路径只更新 store（`usePlayer.seek`），于是节拍相机与 WebGL
+          //   歌词会在这一小段里用**旧位置**推进。清掉即立刻回退到 store。
+          //   只影响这条只读旁路时钟，不触碰播放语义。
+          lyricPlayerBridge.clearFrameTime()
         },
         onend: () => {
           if (howlRef.current !== howl) return
           usePlayerStore.getState().setIsPlaying(false)
           stopTimeUpdate()
+          lyricPlayerBridge.clearFrameTime()
           onTrackEnd()
         },
         onloaderror: (_id, msg) => {

@@ -42,7 +42,9 @@ describe('歌单架卡片 · 封面异步就绪契约', () => {
   it('存在按槽位的封面脏标记，且参与绘制判定', () => {
     expect(body).toMatch(/coverDirtyRef\s*=\s*useRef<boolean\[\]>/)
     // 必须进入绘制条件（否则标脏无人消费）
-    expect(body).toMatch(/drawKey\s*!==\s*drawKeysRef\.current\[slotIndex\]\s*\|\|\s*coverDirtyRef\.current\[slotIndex\]/)
+    expect(body).toMatch(
+      /drawKey\s*!==\s*drawKeysRef\.current\[slotIndex\]\s*\|\|\s*coverDirtyRef\.current\[slotIndex\]/,
+    )
   })
 
   it('绘制后必须清掉脏标记（否则每帧重绘）', () => {

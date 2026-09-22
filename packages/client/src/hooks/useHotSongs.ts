@@ -134,7 +134,8 @@ export function useHotSongs(roomId: string | undefined, source: HotSongsSource, 
       })
       .then((data) => {
         setState((current) => {
-          if (current.roomId !== roomId || current.source !== source || current.refreshToken !== refreshToken) return current
+          if (current.roomId !== roomId || current.source !== source || current.refreshToken !== refreshToken)
+            return current
           return {
             ...current,
             tracks: [...current.tracks, ...data.tracks],
@@ -146,7 +147,8 @@ export function useHotSongs(roomId: string | undefined, source: HotSongsSource, 
       .catch((error: unknown) => {
         if (controller.signal.aborted) return
         setState((current) => {
-          if (current.roomId !== roomId || current.source !== source || current.refreshToken !== refreshToken) return current
+          if (current.roomId !== roomId || current.source !== source || current.refreshToken !== refreshToken)
+            return current
           return { ...current, error: error instanceof Error ? error.message : '加载更多失败' }
         })
       })

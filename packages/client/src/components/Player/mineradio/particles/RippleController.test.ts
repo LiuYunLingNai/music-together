@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  BASS_THRESHOLD,
-  RIPPLE_COOLDOWN,
-  RIPPLE_LIFETIME,
-  RIPPLE_MAX,
-  RippleController,
-} from './RippleController'
+import { BASS_THRESHOLD, RIPPLE_COOLDOWN, RIPPLE_LIFETIME, RIPPLE_MAX, RippleController } from './RippleController'
 
 /** 以固定步长推进控制器（恒定 bass 电平），返回每帧的活跃数。 */
 function step(controller: RippleController, seconds: number, bass: number, stepSeconds = 1 / 60) {

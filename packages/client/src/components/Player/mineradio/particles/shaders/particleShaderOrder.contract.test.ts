@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  PARTICLE_BLOOM_FRAGMENT_SHADER,
-  PARTICLE_FRAGMENT_SHADER,
-  PARTICLE_VERTEX_SHADER,
-} from './particleVertex'
+import { PARTICLE_BLOOM_FRAGMENT_SHADER, PARTICLE_FRAGMENT_SHADER, PARTICLE_VERTEX_SHADER } from './particleVertex'
 
 /**
  * 回归：GLSL 函数**必须先声明后使用**（无前向引用）。
@@ -51,14 +47,7 @@ function firstCallIndex(source: string, name: string): number {
 
 describe('粒子顶点着色器：函数声明顺序（GLSL 无前向引用）', () => {
   /** 着色器里全部自定义 helper（顺序即上游顺序）。 */
-  const HELPERS = [
-    'snoise',
-    'hash11',
-    'safeCoverUv',
-    'samplePrevCoverColor',
-    'mixCoverColor',
-    'rippleSumAt',
-  ] as const
+  const HELPERS = ['snoise', 'hash11', 'safeCoverUv', 'samplePrevCoverColor', 'mixCoverColor', 'rippleSumAt'] as const
 
   it('每个 helper 都在首次调用之前定义', () => {
     for (const name of HELPERS) {

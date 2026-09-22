@@ -174,6 +174,33 @@ export interface SonicHzBands {
   lowDominance: number
   energy: number
   bassBand: number
+  /**
+   * ★ 拍点相机的**专属频段**（第三十四轮补，对齐上游 `beatBandRms` 的取法）。
+   *
+   * 上游 `processRealtimeBeatEngine`（`02-beat-camera-runtime.js:399-403`）
+   * 自己从频域算五个频段，**范围与加权方式都与八频段表不同**：
+   *
+   *     sub   = beatBandRms(38, 74)
+   *     kick  = beatBandRms(52, 165)
+   *     mInst = beatBandRms(2600, 6200)     ← melody
+   *
+   * 而 `beatBandRms` 是**不加权**的均方根（`:366-390`：`v = data[i]/255; sum += v*v`）。
+   *
+   * 本项目此前直接把八频段表里的 `subBass`(32–58) / `bass`(58–118) / `mid`(260–720)
+   * 喂给引擎 —— 三处都不对：
+   *   · `subBass` 的 32–58 比上游的 38–74 **窄且偏低**；
+   *   · `bass` 只是 58–118 那**一段**，而上游的 `low` 是
+   *     `min(1, kick*0.86 + sub*0.42)`（踢鼓 52–165 加权 0.86）；
+   *   · `mid`(260–720) 被当作 melody 用，而上游的 melody 是 **2600–6200Hz** ——
+   *     拿低中频冒充高中频，`vocalSoft`（人声弱化）会在低频重的歌上判错。
+   *
+   * 因此这里补上三者的**同源同名**量。数值口径仍走本项目的平滑链
+   * （与其余频段一致），残余差异（上游逐帧读原始 FFT、本项目读平滑值）
+   * 登记为 §5.4 A7。
+   */
+  beatSub: number
+  beatKick: number
+  beatMelody: number
 }
 export function computeHzBands(data: Uint8Array, meta: AnalysisMeta): SonicHzBands {
   const values: Record<string, number> = {}
@@ -191,11 +218,15 @@ export function computeHzBands(data: Uint8Array, meta: AnalysisMeta): SonicHzBan
   values.vocal = hzRangeAverage(data, meta, 420, 2600, false)
   values.snap = hzRangeAverage(data, meta, 1800, 9200, false)
   values.lowDrive = clamp01(values.kickCore * 0.86 + values.kickSub * 0.42 + values.body * 0.1)
-  values.lowDominance =
-    values.lowDrive / Math.max(0.001, values.vocal * 0.72 + values.body * 0.34 + values.snap * 0.12)
+  values.lowDominance = values.lowDrive / Math.max(0.001, values.vocal * 0.72 + values.body * 0.34 + values.snap * 0.12)
   values.energy = clamp01((energySum / MONITOR_BAND_EDGES.length) * 0.82 + values.lowDrive * 0.18)
   // 58-118Hz 频段本身，与聚合的 lowDrive 区分开
   values.bassBand = values.bass
+  // ★ 拍点相机专属频段：范围与加权都对齐上游 `beatBandRms`（见接口注释）。
+  //   三个都走**不加权**（`weighted = false`），与上游的均方根一致。
+  values.beatSub = hzRangeAverage(data, meta, 38, 74, false)
+  values.beatKick = hzRangeAverage(data, meta, 52, 165, false)
+  values.beatMelody = hzRangeAverage(data, meta, 2600, 6200, false)
   return values as unknown as SonicHzBands
 }
 
@@ -333,6 +364,12 @@ export interface SonicAudioFrame {
   snap: number
   lowDrive: number
   lowDominance: number
+  /** 拍点相机专属频段 38–74Hz（上游 `beatBandRms(38,74)`，不加权）。 */
+  beatSub: number
+  /** 拍点相机专属频段 52–165Hz（上游叫 `kick`，不加权）。 */
+  beatKick: number
+  /** 拍点相机专属频段 2600–6200Hz（上游叫 `mInst`，即 melody）。 */
+  beatMelody: number
   // 聚合
   treble: number
   energy: number
@@ -384,6 +421,9 @@ function emptyFrame(): SonicAudioFrame {
     snap: 0,
     lowDrive: 0,
     lowDominance: 0,
+    beatSub: 0,
+    beatKick: 0,
+    beatMelody: 0,
     treble: 0,
     energy: 0,
     beat: 0,
@@ -429,6 +469,9 @@ const DECAY_KEYS: Array<keyof SonicAudioFrame> = [
   'vocal',
   'snap',
   'lowDrive',
+  'beatSub',
+  'beatKick',
+  'beatMelody',
   'treble',
   'energy',
   'kickEnvelope',
@@ -590,9 +633,7 @@ function stepBeatDetector(
 ): BeatData {
   const s = state.beat
   const params = beatParams(settings.sensitivity)
-  const windowLevels = SONIC_BEAT_WINDOWS.map((win) =>
-    hzRangeAverage(data, meta, win.startHz, win.endHz, true),
-  )
+  const windowLevels = SONIC_BEAT_WINDOWS.map((win) => hzRangeAverage(data, meta, win.startHz, win.endHz, true))
   const nextScores = s.windowScores.map((score, index) => {
     const fluxValue = Math.max(0, windowLevels[index] - (s.previousWindowLevels[index] || 0))
     const win = SONIC_BEAT_WINDOWS[index]
@@ -600,9 +641,7 @@ function stepBeatDetector(
     return score * 0.945 + fluxValue * (win.bias || 1) * (0.7 + dominanceBoost * 0.7)
   })
   let activeWindowIndex =
-    settings.autoTrack && state.autoTrack.windowIndex != null
-      ? state.autoTrack.windowIndex
-      : s.activeWindowIndex || 0
+    settings.autoTrack && state.autoTrack.windowIndex != null ? state.autoTrack.windowIndex : s.activeWindowIndex || 0
   for (let i = 0; i < nextScores.length; i++) {
     if (nextScores[i] > nextScores[activeWindowIndex] * 1.1) activeWindowIndex = i
   }
@@ -731,9 +770,7 @@ function evaluateSelectedTrigger(
   let end = settings.autoTrack ? state.autoTrack.end : settings.bandEnd
   start = Math.round(clamp(start, 0, BASE_BINS - 2))
   end = Math.round(clamp(end, start + 1, BASE_BINS))
-  const hzStart = settings.autoTrack
-    ? state.autoTrack.hzStart
-    : (clamp(start, 0, BASE_BINS) / BASE_BINS) * meta.nyquist
+  const hzStart = settings.autoTrack ? state.autoTrack.hzStart : (clamp(start, 0, BASE_BINS) / BASE_BINS) * meta.nyquist
   const hzEnd = settings.autoTrack ? state.autoTrack.hzEnd : (clamp(end, 0, BASE_BINS) / BASE_BINS) * meta.nyquist
   const energy = settings.autoTrack && beatData ? beatData.kickLevel : hzRangeAverage(data, meta, hzStart, hzEnd, false)
   const startBin = hzToBin(meta, hzStart, 'floor')
@@ -758,8 +795,7 @@ function evaluateSelectedTrigger(
     const thresholdMultiplier = Math.max(0.1, 5.0 - state.autoTrack.sensitivity * 4.0)
     const adaptiveThreshold = Math.max(0.01, stats.avg + stats.stdDev * thresholdMultiplier)
     const isPeak =
-      (beatData && beatData.kickOnset > 0) ||
-      (flux > adaptiveThreshold && flux > trigger.previousSmoothedFlux * 1.04)
+      (beatData && beatData.kickOnset > 0) || (flux > adaptiveThreshold && flux > trigger.previousSmoothedFlux * 1.04)
     if (trigger.beatHold > 0) trigger.beatHold--
     else if (isPeak) {
       triggered = true
@@ -783,10 +819,7 @@ function evaluateSelectedTrigger(
     trigger.lastEnergy = energy
     trigger.lastThreshold = threshold
   }
-  trigger.pulse = Math.max(
-    trigger.pulse * Math.pow(0.1, Math.max(0.001, dt || 1 / 60)),
-    triggered ? strength : 0,
-  )
+  trigger.pulse = Math.max(trigger.pulse * Math.pow(0.1, Math.max(0.001, dt || 1 / 60)), triggered ? strength : 0)
   return {
     triggerBandStart: start,
     triggerBandEnd: end,

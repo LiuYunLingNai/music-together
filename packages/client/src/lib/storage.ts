@@ -112,15 +112,7 @@ const LYRIC_MASK_MODES = ['', 'full-mask', 'partial-mask'] as const
 /** Mineradio 舞台模式：classic 为默认，始终可无损回退。
  *  注意：没有 'cover' —— 曾自创的「封面视界」已于第九轮按用户决策删除；
  *  旧持久化值 'cover' 会因不在白名单内而安全回退到 'classic'。 */
-export const VISUAL_STAGES = [
-  'classic',
-  'emily',
-  'tunnel',
-  'planet',
-  'vinyl',
-  'galaxy',
-  'topography',
-] as const
+export const VISUAL_STAGES = ['classic', 'emily', 'tunnel', 'planet', 'vinyl', 'galaxy', 'topography'] as const
 export type VisualStageSetting = (typeof VISUAL_STAGES)[number]
 
 /**

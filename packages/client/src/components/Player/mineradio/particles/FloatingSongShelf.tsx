@@ -12,6 +12,7 @@ import {
   createFloatingSongCardMesh,
   disposeFloatingSongCardMesh,
   drawFloatingSongCard,
+  isPortraitShelfViewport,
   shelfPointerParallax,
   stepShelfPointerParallax,
   type FloatingSongCardMesh,
@@ -53,14 +54,14 @@ function trackKey(track: Track): string {
  * 本文件此前把点击/滚轮都门控在射线命中上，正是「相机变换后无法滚动」的根因。
  */
 
-/** 竖屏判定（上游 `isPortraitShelfViewport`）。 */
-function isPortraitShelfViewport(): boolean {
-  return window.innerHeight > window.innerWidth * 1.08
+/** 竖屏判定 —— 统一走 `floatingSongCard` 的单一事实来源（§5.4 C4）。 */
+function isPortrait(): boolean {
+  return isPortraitShelfViewport()
 }
 
 /** 悬停热区宽度（上游 `shelfHotZoneWidth`）：竖屏 26% / 横屏 18%，夹 [148, 280/360]。 */
 function shelfHotZoneWidth(): number {
-  const portrait = isPortraitShelfViewport()
+  const portrait = isPortrait()
   const ratio = portrait ? 0.26 : 0.18
   return Math.min(portrait ? 280 : 360, Math.max(148, window.innerWidth * ratio))
 }
@@ -70,7 +71,7 @@ function shelfHotZoneWidth(): number {
  * `min(竖屏 280 / 横屏 360, max(热区宽, 视口宽 * 竖屏 0.24 / 横屏 0.18))`。
  */
 function shelfWheelZoneWidth(): number {
-  const portrait = isPortraitShelfViewport()
+  const portrait = isPortrait()
   const ratioWidth = window.innerWidth * (portrait ? 0.24 : 0.18)
   return Math.min(portrait ? 280 : 360, Math.max(shelfHotZoneWidth(), ratioWidth))
 }
@@ -462,12 +463,31 @@ export function FloatingSongShelf({ accent, onOpenQueue, motionEnabled }: Floati
     //   保持是"还在这个区域里"。
     const slot = orbitCameraState.pointerSlot
     const pointerOverUi = slot != null && isPointerOverUi(slot.x, slot.y)
-    const cardHit = slot != null && !pointerOverUi && raycastCardAt(slot.x, slot.y, 18) >= 0
+    // ★ 拖拽（转物体）期间**不得**进入歌单架跟拍。
+    //
+    //   用户实测："旋转封面时鼠标误触到歌曲架判定，会进入歌曲架的相机"。
+    //   拖拽转物体是"按住并大幅划动"的手势，指针很容易扫过右侧热区；
+    //   而热区宽达视口 18%（保持区更达 56%），260ms 的停留门槛在**慢速
+    //   划动**下会被满足 → 相机突然被拉去跟拍，把正在进行的旋转打断。
+    //
+    //   上游没有这个显式守卫，是因为它的歌单架默认**自动隐藏**
+    //   （`fx.shelfPresence` 出厂 `'auto'`），跟拍入口 `isSideShelfFocusHit`
+    //   要求 `shelfVisibility > 0.34` —— 平时根本不满足，误触概率极低。
+    //   而本项目**未移植悬停召唤包络**（登记于 §5.1），歌单架**常驻可见**，
+    //   那个隐含门槛不存在，同样的手势就会误触。因此这里补一条显式守卫，
+    //   属于"因未移植项而产生的必要补偿"，登记为 §2 D11。
+    //
+    //   实现上只改 `inZone` 的取值，状态机自然处理：拖拽中 `inZone=false`
+    //   → 退出既有跟拍（120ms 延迟）；松手后若指针仍在区内，260ms 停留
+    //   重新计时后正常进入跟拍 —— 不影响"拖完顺手去点卡片"。
+    const rotating = orbitCameraState.rotating
+    const cardHit = slot != null && !pointerOverUi && !rotating && raycastCardAt(slot.x, slot.y, 18) >= 0
     const shelfFocused = orbitCameraState.focus.active && orbitCameraState.focus.type === 'shelf'
     // 保持区 = 热区 ∪ 预览使用区（上游 isSideShelfFocusHit 的宽分支）
     const inShelfHoldZone =
       slot != null &&
       !pointerOverUi &&
+      !rotating &&
       (isInShelfHotZone(slot.x, slot.y) || isInShelfPreviewUseZone(slot.x, slot.y))
     const inZone = cardHit || (shelfFocused && inShelfHoldZone)
 
@@ -622,11 +642,7 @@ export function FloatingSongShelf({ accent, onOpenQueue, motionEnabled }: Floati
             // 上游 tag 语义（01-manager-core.js:90）：idx===currentIdx →
             // '正在播放'，否则 '#'+(idx+1)。这里保留"下一首"的中文标注，
             // 相对当前曲目位置计算而不是固定第 1 位。
-            tag: isCurrent
-              ? '正在播放'
-              : currentIdx >= 0 && index === currentIdx + 1
-                ? '下一首'
-                : `#${index + 1}`,
+            tag: isCurrent ? '正在播放' : currentIdx >= 0 && index === currentIdx + 1 ? '下一首' : `#${index + 1}`,
             meta: isCurrent ? track.album || '当前曲目' : `${track.requestedBy ?? '房间成员'} 点歌`,
             progress: itemProgress,
             bass: isCurrent ? bands.bass : 0,

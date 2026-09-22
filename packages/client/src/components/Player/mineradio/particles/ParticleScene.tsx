@@ -1,18 +1,16 @@
-import { Canvas, useFrame } from '@react-three/fiber'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { usePlayerStore } from '@/stores/playerStore'
+import { lyricPlayerBridge } from '@/lib/lyricPlayerBridge'
 import { disposeAudioAnalyser, ensureAudioAnalyser, stepAudioFrame } from '../shared/AudioAnalyser'
 import type { CoverAssets } from '../shared/CoverTextureLoader'
-import { resolveFrameloop, type RenderPolicy } from '../shared/RenderPolicy'
+import { PAUSED_TARGET_FPS, resolveFrameloop, type RenderPolicy } from '../shared/RenderPolicy'
 import { getVisualMode, isTopographyMode, type VisualModeId } from '../shared/VisualMode'
 import { LyricStage } from '../lyrics/LyricStage'
 import type { CoverPalette } from '../lyrics/coverPalette'
 import { TopographyScene } from '../topography/TopographyScene'
-import type {
-  LyricDisplayMode,
-  LyricMotionStyle,
-  LyricTranslationMode,
-} from '../lyrics/lyricDisplayConfig'
+import type { LyricDisplayMode, LyricMotionStyle, LyricTranslationMode } from '../lyrics/lyricDisplayConfig'
+import { stepBeatCameraAudio } from './beatCamera'
 import { CameraRig } from './CameraRig'
 import { FloatingSongShelf } from './FloatingSongShelf'
 import { ParticleField } from './ParticleField'
@@ -109,7 +107,65 @@ function AudioStepDriver({ policy, documentVisible }: { policy: RenderPolicy; do
     analysisAccumulatorRef.current = 0
     const player = usePlayerStore.getState()
     stepAudioFrame(step, player.currentTime, player.isPlaying)
+    // ★ 拍点相机的 ①④ 两步必须**跟音频分析同频**（不是每帧）。
+    //
+    //   上游把 `processRealtimeBeatEngine` / `updateCinemaDynamics` 放在
+    //   `if (audioStepDt > 0)` 里（`11-main-loop.js:361-362`），而包络求值
+    //   `updateCinema(dt)` 在门外每帧跑（`:617`）。
+    //
+    //   分频是**正确性**要求，不只是性能：① 的 flux/rise 用"本帧 − 上帧"
+    //   算，而本项目音频帧只在 `stepAudioFrame` 时更新 —— 若每帧都调 ①，
+    //   未更新帧会拿到同一个 frame，flux 恒为 0，节拍检测直接失效。
+    //   必须在 `stepAudioFrame` **之后**调用（拿到本帧的新数据）。
+    //
+    //   ★ 时钟同样要用逐帧的 `getFrameTime()`（第三十四轮修，§5.4 B1）：
+    //     上游引擎里读的是 `audio.currentTime`（`:465`），**不是**节流值。
+    //     引擎用它算 `gapRaw` / `lockedWindow`（70–110ms）与 `warmupUntil`，
+    //     10Hz 量化（100ms）与判定窗口同量级，会直接干扰节奏接受。
+    const frameTime = lyricPlayerBridge.getFrameTime()
+    stepBeatCameraAudio(step, frameTime === null ? player.currentTime : frameTime, player.isPlaying)
   }, -1)
+  return null
+}
+
+/**
+ * 暂停时的帧泵（第三十四轮新增，配合 §5.4 D1 的省电改动）。
+ *
+ * ★ 为什么需要它：`resolveFrameloop` 在**暂停且页面可见**时返回 `'demand'`
+ *   （省电，对齐上游非播放档的 24fps）。但 `demand` 只在 `invalidate()`
+ *   被调用时才渲染一帧，而本舞台的全部动态（uniform 推进、涟漪、节拍相机、
+ *   星河流、歌词呼吸）都写在 `useFrame` 里 —— 没有任何东西会自己
+ *   `invalidate()`。
+ *
+ *   历史事故正是如此：曾经的 `demand` 没有帧泵，导致**整块纯黑舞台**
+ *   （实测 clear=0 / drawArrays=0）。所以 `demand` 与帧泵是**成对**的契约，
+ *   缺一不可。
+ *
+ * ★ 为什么是 24fps 而不是停摆：上游暂停时也继续出画（`11-main-loop.js:262-277`
+ *   非播放档返回 24），因为暂停态下粒子/呼吸/漂移仍在动，画面变黑是错的。
+ *   24fps 已把负载压到 vsync 的约 1/3。
+ *
+ * ★ 用 `requestAnimationFrame` + 时间累加而不是 `setInterval`：
+ *   标签页不可见时 rAF 自动停摆（省电），且与渲染节奏天然对齐。
+ */
+function PausedFramePump({ active }: { active: boolean }) {
+  const { invalidate } = useThree()
+  useEffect(() => {
+    if (!active) return
+    let raf = 0
+    let last = performance.now()
+    const intervalMs = 1000 / PAUSED_TARGET_FPS
+    const tick = () => {
+      const now = performance.now()
+      if (now - last >= intervalMs) {
+        last = now
+        invalidate()
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [active, invalidate])
   return null
 }
 
@@ -152,12 +208,9 @@ export function ParticleScene({
    * 持有一个 ref，把 TerrainScene 暴露的 addRipple 桥接给 CameraRig。
    */
   const rippleRef = useRef<((nx: number, nz: number, strength: number) => void) | null>(null)
-  const handleCanvasClick = useCallback(
-    (nx: number, nz: number, strength: number) => {
-      rippleRef.current?.(nx, nz, strength)
-    },
-    [],
-  )
+  const handleCanvasClick = useCallback((nx: number, nz: number, strength: number) => {
+    rippleRef.current?.(nx, nz, strength)
+  }, [])
 
   // WebGL 上下文丢失：只监听一次，交给上层决定回退目标
   useEffect(() => {
@@ -172,11 +225,7 @@ export function ParticleScene({
   }, [onContextLost])
 
   return (
-    <div
-      ref={containerRef}
-      className="mt-mineradio-canvas-layer absolute inset-0"
-      aria-hidden="true"
-    >
+    <div ref={containerRef} className="mt-mineradio-canvas-layer absolute inset-0" aria-hidden="true">
       <Canvas
         // ★ 用上游 `getRenderPixelRatio` 的**计算结果**作为唯一 DPR，
         //   而不是 `[1, cap]` 区间 —— R3F 的区间形式会让 `window.devicePixelRatio`
@@ -224,11 +273,11 @@ export function ParticleScene({
             SonicAudioMonitor 顶部说明）。 */}
         <AudioStepDriver policy={policy} documentVisible={documentVisible} />
 
-        <CameraRig
-          mode={mode}
-          enabled={policy.beatCamera}
-          onCanvasClick={topography ? handleCanvasClick : undefined}
-        />
+        {/* ★ 暂停时的帧泵：与 `resolveFrameloop` 的 `'demand'` 成对
+            （见 `PausedFramePump` 说明）。缺了它舞台会整块变黑。 */}
+        <PausedFramePump active={documentVisible && !isPlaying} />
+
+        <CameraRig mode={mode} enabled={policy.beatCamera} onCanvasClick={topography ? handleCanvasClick : undefined} />
 
         {/* 声波地形是独立模块：整片 instanced 地形取代粒子层。
             它自带世界锚定与雾，因此与粒子层互斥，不会同时渲染。 */}
@@ -259,11 +308,7 @@ export function ParticleScene({
               `01-manager-core.js:6-7` 里它就是个渲染预算常量，不是画质档
               派生值。此前按 `particleGrid` 分档给 24/12/6，会让低画质档
               连"当前歌 ±2 首"都看不到。 */}
-        <FloatingSongShelf
-          accent={cover?.accent ?? null}
-          onOpenQueue={onOpenQueue}
-          motionEnabled={policy.beatCamera}
-        />
+        <FloatingSongShelf accent={cover?.accent ?? null} onOpenQueue={onOpenQueue} motionEnabled={policy.beatCamera} />
 
         {/* 歌词与 Mineradio 主视觉共享中央舞台。OpenMusic 仅作为多人房间
             适配和右侧 3D 卡片的参考，不反向改变 Mineradio 的构图轴心。 */}
@@ -276,7 +321,6 @@ export function ParticleScene({
             translationMode={lyricOptions?.translationMode}
           />
         )}
-
       </Canvas>
     </div>
   )

@@ -1337,7 +1337,24 @@ body[data-room-cover-tint='true'] {
 }
 
 /* AMLL 回退层：选择 amll 歌词渲染器时，DOM 歌词覆盖在 3D 场景之上。
-   布局参照上游的"歌词占视口高度约 44-52%、垂直居中"。 */
+   布局参照上游的"歌词占视口高度约 44-52%、垂直居中"。
+
+   ★ `pointer-events: none` 是必需的，不是可选优化。
+
+   这一层是 `inset: 0` + `z-index: 12`，而画布层
+   （`.mt-mineradio-canvas-layer`）没有任何 z-index 规则 —— 于是本层整体
+   盖在画布之上。舞台的全部交互监听都挂在 **canvas 元素**上：
+     · CameraRig：pointerdown / wheel / dblclick（拖拽转物体、滚轮缩放、双击回正）
+     · FloatingSongShelf：pointerdown / click / wheel（卡片点击、队列滚动）
+   指针落在本层上时事件目标是本层的后代，canvas 的监听器**不会触发** ——
+   AMLL 模式下这些交互会全部失效；`isPointerOverUi()` 也会恒判为 true。
+
+   上游的 `UI_HIT_SELECTOR`（`02-visual/00-pointer-cover-particles.js:16`）
+   **不含歌词层** —— 即上游歌词从不遮挡画布交互。这里与之一致。
+
+   注：视觉舞台下 `LyricDisplay` 传的是 `seekEnabled={false}`，
+   `onLyricLineClick` 为 undefined，因此本层**不需要**接收指针事件；
+   歌词文字的可见性不受影响（只影响命中测试）。 */
 .mt-mineradio-lyrics-fallback {
   position: absolute;
   inset: 0;
@@ -1348,7 +1365,20 @@ body[data-room-cover-tint='true'] {
   padding-inline: clamp(2rem, 8vw, 9rem);
   /* 上下留出约 1/4 的呼吸空间，使歌词块约占视口高度一半 */
   padding-block: 22vh;
-  pointer-events: auto;
+  pointer-events: none;
+}
+
+/* ★ 必须同时压住**后代**的 pointer-events。
+   AMLL 自己的样式表在 `.FmKaba_bgWrapper` 上显式写了 `pointer-events: auto`
+   （core/dist/style.css:190），后代可以重新打开命中测试 —— 只设父级 `none`
+   仍会被它穿透回来。视觉舞台下歌词不需要任何指针交互
+   （`LyricDisplay` 传 `seekEnabled={false}`，`onLyricLineClick` 为 undefined），
+   因此整棵子树一律放行给画布。
+   ⚠️ 作用域限定在 `.mt-mineradio-lyrics-fallback` 内 —— 经典播放器的 AMLL
+   歌词仍可点击跳转，不受影响。 */
+.mt-mineradio-lyrics-fallback,
+.mt-mineradio-lyrics-fallback * {
+  pointer-events: none !important;
 }
 
 /* 空间化容器 —— `MineradioLyricStage` 的两层包装。

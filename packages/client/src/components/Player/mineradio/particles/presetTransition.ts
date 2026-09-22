@@ -51,9 +51,7 @@ export const NEUTRAL_PULSE: PresetPulse = { scatter: 0, burst: 0, pointScaleMul:
 
 /** 该预设的过渡时长。 */
 export function presetTransitionDuration(toPreset: number): number {
-  return toPreset === WALLPAPER_PRESET
-    ? PRESET_TRANSITION_DURATION_WALLPAPER
-    : PRESET_TRANSITION_DURATION
+  return toPreset === WALLPAPER_PRESET ? PRESET_TRANSITION_DURATION_WALLPAPER : PRESET_TRANSITION_DURATION
 }
 
 /**
@@ -108,11 +106,7 @@ export function createPresetTransition(): PresetTransitionState {
 }
 
 /** 开始一次过渡（上游 `triggerPresetParticleTransition` 的状态部分）。 */
-export function beginPresetTransition(
-  state: PresetTransitionState,
-  toPreset: number,
-  now: number,
-): PresetPulse {
+export function beginPresetTransition(state: PresetTransitionState, toPreset: number, now: number): PresetPulse {
   state.active = true
   state.toPreset = toPreset
   state.startAt = now
@@ -126,10 +120,7 @@ export function beginPresetTransition(
  * `syncFxUniforms()` 把 uniform 复位，这里等价于返回 null 后
  * 由调用方保留基准值。
  */
-export function tickPresetTransition(
-  state: PresetTransitionState,
-  now: number,
-): PresetPulse | null {
+export function tickPresetTransition(state: PresetTransitionState, now: number): PresetPulse | null {
   if (!state.active) return null
 
   const raw = (now - state.startAt) / presetTransitionDuration(state.toPreset)

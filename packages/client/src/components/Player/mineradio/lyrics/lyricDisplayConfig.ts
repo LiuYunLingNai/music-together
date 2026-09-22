@@ -65,13 +65,73 @@ export interface LyricMotionProfile {
 }
 
 const MOTION_PROFILES: Record<LyricMotionStyle, LyricMotionProfile> = {
-  float: { sweep: 0.36, shimmer: 0.14, edgeBoost: 1.04, glitch: 0, glitchSlice: 0, glitchChroma: 0, glitchRate: 1, floatAmp: 1.45, breathe: 1 },
-  smooth: { sweep: 0.18, shimmer: 0.05, edgeBoost: 0.62, glitch: 0, glitchSlice: 0, glitchChroma: 0, glitchRate: 1, floatAmp: 0.55, breathe: 0.6 },
+  float: {
+    sweep: 0.36,
+    shimmer: 0.14,
+    edgeBoost: 1.04,
+    glitch: 0,
+    glitchSlice: 0,
+    glitchChroma: 0,
+    glitchRate: 1,
+    floatAmp: 1.45,
+    breathe: 1,
+  },
+  smooth: {
+    sweep: 0.18,
+    shimmer: 0.05,
+    edgeBoost: 0.62,
+    glitch: 0,
+    glitchSlice: 0,
+    glitchChroma: 0,
+    glitchRate: 1,
+    floatAmp: 0.55,
+    breathe: 0.6,
+  },
   // glass 走上游的 else 分支（未单列的风格）
-  glass: { sweep: 0.72, shimmer: 0.22, edgeBoost: 1.18, glitch: 0, glitchSlice: 0, glitchChroma: 0, glitchRate: 1, floatAmp: 1.0, breathe: 1.0 },
-  quick: { sweep: 0.28, shimmer: 0.10, edgeBoost: 0.70, glitch: 0, glitchSlice: 0, glitchChroma: 0, glitchRate: 1, floatAmp: 0.62, breathe: 1.4 },
-  shine: { sweep: 1.22, shimmer: 0.34, edgeBoost: 1.42, glitch: 0, glitchSlice: 0, glitchChroma: 0, glitchRate: 1, floatAmp: 0.82, breathe: 0.8 },
-  glitch: { sweep: 0.54, shimmer: 0.28, edgeBoost: 1.18, glitch: 1.0, glitchSlice: 1.0, glitchChroma: 1.0, glitchRate: 1.4, floatAmp: 0.70, breathe: 1.0 },
+  glass: {
+    sweep: 0.72,
+    shimmer: 0.22,
+    edgeBoost: 1.18,
+    glitch: 0,
+    glitchSlice: 0,
+    glitchChroma: 0,
+    glitchRate: 1,
+    floatAmp: 1.0,
+    breathe: 1.0,
+  },
+  quick: {
+    sweep: 0.28,
+    shimmer: 0.1,
+    edgeBoost: 0.7,
+    glitch: 0,
+    glitchSlice: 0,
+    glitchChroma: 0,
+    glitchRate: 1,
+    floatAmp: 0.62,
+    breathe: 1.4,
+  },
+  shine: {
+    sweep: 1.22,
+    shimmer: 0.34,
+    edgeBoost: 1.42,
+    glitch: 0,
+    glitchSlice: 0,
+    glitchChroma: 0,
+    glitchRate: 1,
+    floatAmp: 0.82,
+    breathe: 0.8,
+  },
+  glitch: {
+    sweep: 0.54,
+    shimmer: 0.28,
+    edgeBoost: 1.18,
+    glitch: 1.0,
+    glitchSlice: 1.0,
+    glitchChroma: 1.0,
+    glitchRate: 1.4,
+    floatAmp: 0.7,
+    breathe: 1.0,
+  },
 }
 
 export function getMotionProfile(style: LyricMotionStyle): LyricMotionProfile {
@@ -226,10 +286,7 @@ export function translationStackFraction(lineCount: number, mode: LyricTranslati
  * @param lineCount 当前显示模式的歌词行数
  * @returns 实际生效的档位
  */
-export function retractTranslationMode(
-  requested: LyricTranslationMode,
-  lineCount: number,
-): LyricTranslationMode {
+export function retractTranslationMode(requested: LyricTranslationMode, lineCount: number): LyricTranslationMode {
   if (requested === 'off') return 'off'
   const start = RETRACT_LADDER.indexOf(requested)
   if (start < 0) return requested

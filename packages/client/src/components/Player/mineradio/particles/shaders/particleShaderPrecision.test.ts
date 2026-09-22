@@ -56,11 +56,7 @@ describe('粒子着色器精度', () => {
   })
 
   it('三个着色器都不使用 mediump（共享 uniform 精度必须一致）', () => {
-    for (const src of [
-      PARTICLE_VERTEX_SHADER,
-      PARTICLE_FRAGMENT_SHADER,
-      PARTICLE_BLOOM_FRAGMENT_SHADER,
-    ]) {
+    for (const src of [PARTICLE_VERTEX_SHADER, PARTICLE_FRAGMENT_SHADER, PARTICLE_BLOOM_FRAGMENT_SHADER]) {
       expect(src).not.toMatch(/precision\s+mediump/)
       expect(src).not.toMatch(/precision\s+lowp/)
     }
@@ -139,14 +135,7 @@ describe('泛光顶点着色器派生', () => {
 
 describe('六个预设槽位齐全', () => {
   it('包含全部 6 个预设分支（0-5）', () => {
-    for (const marker of [
-      'Preset 0',
-      'Preset 1',
-      'Preset 2',
-      'Preset 3',
-      'Preset 4',
-      'Preset 5',
-    ]) {
+    for (const marker of ['Preset 0', 'Preset 1', 'Preset 2', 'Preset 3', 'Preset 4', 'Preset 5']) {
       expect(PARTICLE_VERTEX_SHADER).toContain(marker)
     }
   })

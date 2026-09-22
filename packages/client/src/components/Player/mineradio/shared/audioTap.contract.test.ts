@@ -59,9 +59,7 @@ describe('音频分析接线契约', () => {
     expect(cancelledIdx).toBeGreaterThan(awaitIdx)
     expect(cancelledIdx).toBeLessThan(createIdx)
 
-    const howlSrc = stripComments(
-      readFileSync(join(CLIENT_SRC, 'hooks', 'useHowl.ts'), 'utf8'),
-    )
+    const howlSrc = stripComments(readFileSync(join(CLIENT_SRC, 'hooks', 'useHowl.ts'), 'utf8'))
     const unloadIdx = howlSrc.indexOf('howl.unload()')
     const finalizeIdx = howlSrc.indexOf('finalizeTimeStretchRelease?.()', unloadIdx)
     expect(unloadIdx).toBeGreaterThan(-1)

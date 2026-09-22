@@ -1,6 +1,7 @@
 import { Component, Suspense, lazy, useCallback, useMemo, type ReactNode } from 'react'
 import { useSettingsStore } from '@/stores/settingsStore'
 import type { VoteAction, VoteState } from '@music-together/shared'
+import { useVisualStageSupport } from '@/hooks/useVisualStageSupport'
 import { ClassicPlayerStage } from './classic/ClassicPlayerStage'
 import { VisualModeMenu, type StageMode } from './mineradio/VisualModeMenu'
 import { detectDefaultQuality, type VisualQuality } from './mineradio/shared/RenderPolicy'
@@ -95,8 +96,8 @@ interface AudioPlayerProps {
 export function AudioPlayer(props: AudioPlayerProps) {
   const { view, onToggleView } = props
 
-  const visualStage = useSettingsStore((s) => s.visualStage)
   const setVisualStage = useSettingsStore((s) => s.setVisualStage)
+  const { disabled: visualDisabled, effectiveVisualStage } = useVisualStageSupport()
   const visualQuality = useSettingsStore((s) => s.visualQuality)
 
   // WebGL 上下文丢失或不可用时，回退到经典播放器。
@@ -109,6 +110,18 @@ export function AudioPlayer(props: AudioPlayerProps) {
     [visualQuality],
   )
 
+  /**
+   * ★ 本设备实际渲染的舞台由 `useVisualStageSupport` 给出，**不是**直接读
+   *   `visualStage`：触摸设备（移动端）上层已把 `visualStage` 归为 classic
+   *   并把持久化值回写，因此这里两个来源是一致的。
+   *
+   *   为什么用 hook 的返回值而不是再读一次 store：这个组件在 `visualStage`
+   *   被上层回写的**同一个提交**里重渲染时，store 值已是 'classic'，但
+   *   `VisualModeMenu` 的高亮若依赖 store 会在回写的 effect 之前闪一帧
+   *   "已选 Emily"。用 hook 的推导值可让菜单高亮、渲染分支、`stageKey`
+   *   三者来自同一个数，不会分叉。
+   */
+  const visualStage = effectiveVisualStage
   const isMineradio = visualStage !== 'classic' && isVisualStageId(visualStage)
   const stageMode: StageMode = isMineradio ? visualStage : 'classic'
 
@@ -121,6 +134,13 @@ export function AudioPlayer(props: AudioPlayerProps) {
    */
   const handleSelectStage = useCallback(
     (next: StageMode) => {
+      // ★ 移动端（触摸设备）**没有**视觉舞台入口，这里也必须拒绝写入。
+      //   菜单本身已不渲染，但 `AppearanceSection` 的「播放器模式」下拉仍在
+      //   同一份 store 上，且两处共享 `setVisualStage` —— 只藏菜单不拦写入，
+      //   会让设置面板成为绕过入口限制的后门（选了 → 存储变 emily → 回写
+      //   effect 再把它改回 classic，表现为"选了没反应"）。这里显式早退，
+      //   让"不可用"的语义在所有入口一致。
+      if (visualDisabled) return
       setVisualStage(next)
       // ★ 视觉舞台只在 `view === 'player'` 时渲染（整页播放列表是经典舞台
       //   独有的概念）。若用户当前停在经典舞台的整页歌单里再选视觉模式，
@@ -131,7 +151,7 @@ export function AudioPlayer(props: AudioPlayerProps) {
       //   player），避免为此新增一个 prop 或改动上层状态所有权。
       if (next !== 'classic' && view !== 'player') onToggleView()
     },
-    [setVisualStage, view, onToggleView],
+    [setVisualStage, view, onToggleView, visualDisabled],
   )
 
   const stageProps = {
@@ -153,10 +173,19 @@ export function AudioPlayer(props: AudioPlayerProps) {
     <div className="relative h-full">
       {/* 舞台切换菜单。
           经典舞台自带的歌单切换按钮位于右上角，这里把菜单放在它的左侧，
-          避免两个按钮重叠，同时保留相同的安全边距处理。 */}
-      <div className="mt-mineradio-mode-menu absolute top-4 z-30">
-        <VisualModeMenu mode={stageMode} onSelect={handleSelectStage} />
-      </div>
+          避免两个按钮重叠，同时保留相同的安全边距处理。
+
+          ★ 移动端（触摸设备）**整个容器不渲染**。
+            这里是把条件写在容器外、连空壳一起省掉，而不是在容器内藏按钮：
+            `.mt-mineradio-mode-menu` 的定位只有 `top`/`right`（无宽高），
+            容器本身在空置时是 0×0、不会挡指针，所以两种写法**都不会**
+            挡住经典舞台的按钮 —— 选前者只是少留一层无意义的 DOM 与一个
+            绝对定位层。见 `lib/visualStageSupport.ts`。 */}
+      {!visualDisabled && (
+        <div className="mt-mineradio-mode-menu absolute top-4 z-30">
+          <VisualModeMenu mode={stageMode} onSelect={handleSelectStage} />
+        </div>
+      )}
 
       {isMineradio && view === 'player' ? (
         <StageErrorBoundary stageKey={visualStage} onUnavailable={handleUnavailable}>

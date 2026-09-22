@@ -167,7 +167,8 @@ export function stepAudioNormalize(
     const ringMidGain = wallpaperAudio ? 1.16 : 1.82
     const ringTrebleGain = wallpaperAudio ? 1.34 : 2.28
     const ringBeatGain = wallpaperAudio ? 0.18 : 0.42
-    const ringBass = state.smoothBass * ringBassGain + beat * ringBeatGain - state.smoothMid * 0.16 - state.smoothTreb * 0.06
+    const ringBass =
+      state.smoothBass * ringBassGain + beat * ringBeatGain - state.smoothMid * 0.16 - state.smoothTreb * 0.06
     const ringMid = state.smoothMid * ringMidGain - state.smoothBass * 0.14 - state.smoothTreb * 0.07
     const ringTreble = state.smoothTreb * ringTrebleGain - state.smoothMid * 0.1 - state.smoothBass * 0.05
     bass = Math.pow(clamp01((ringBass - 0.05) / 0.58), 0.72) * intensity

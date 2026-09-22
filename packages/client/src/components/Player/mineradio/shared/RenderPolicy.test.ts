@@ -1,31 +1,42 @@
 import { describe, expect, it } from 'vitest'
-import { detectDefaultQuality, getRenderPolicy, particleGridForResolution, resolveFrameloop } from './RenderPolicy'
+import {
+  PAUSED_TARGET_FPS,
+  detectDefaultQuality,
+  getRenderPolicy,
+  particleGridForResolution,
+  resolveFrameloop,
+} from './RenderPolicy'
 
 /**
  * 回归测试：帧循环策略。
  *
- * 背景（真实事故）：
+ * ============================ 两次事故，方向相反 ============================
  *
- * `resolveFrameloop` 曾在 `isPlaying === false` 时返回 `'demand'`。
- * 但整个舞台的动态（uniform 推进、涟漪、节拍相机、星河流）都写在
+ * **第一次（变黑）**：`resolveFrameloop` 曾在 `isPlaying === false` 时返回
+ * `'demand'`，但整个舞台的动态（uniform 推进、涟漪、节拍相机、星河流）都写在
  * `useFrame` 里，而代码**从不调用 `invalidate()`**。于是房间没有歌曲时：
- *
  *   - 渲染循环整帧不跑 → drawArrays / clear 长期为 0
  *   - 画布停留在初始状态 → 用户看到的是一块**纯黑舞台**
  *
- * 实测证据（无头 CDP 探针）：
- *   修复前：clear=0,  drawArrays=0        —— 一帧都没渲染
- *   修复后：clear=69, drawArrays=207      —— 持续渲染
+ * **第二次（空转）**：为修上面那条，改成了"只要页面可见就 `always`"，
+ * 首个参数写成 `_isPlaying` —— **根本没用**。于是暂停时仍按 vsync 满帧渲染，
+ * GPU/CPU 持续满载。上游明确按播放态降频（`11-main-loop.js:262-277`：
+ * 非播放返回 **24**，播放 60，交互 120）。
  *
- * 因此只要页面可见，就必须连续渲染；只有页面不可见（后台标签页）
- * 才用 demand 停摆省电。
+ * **现在的契约（两件事必须成对）**：
+ *   · 播放且可见 → `always`（vsync）
+ *   · 暂停且可见 → `demand` + **调用方必须挂 `PausedFramePump`**
+ *   · 页面不可见 → `demand`（且 rAF 本就被浏览器停摆，无需帧泵）
+ *
+ * `PausedFramePump` 的存在性由 `pausedFramePump.contract.test.ts` 单独钉住 ——
+ * 单测钉不住 DOM，但能钉住"源码里确实有这一对"。
  */
 describe('resolveFrameloop', () => {
-  it('暂停时仍然连续渲染（页面可见）—— 否则舞台全黑', () => {
-    expect(resolveFrameloop(false, true)).toBe('always')
+  it('★ 暂停时不得再按 vsync 满帧渲染（降频到 demand + 帧泵）', () => {
+    expect(resolveFrameloop(false, true)).toBe('demand')
   })
 
-  it('播放且可见时连续渲染', () => {
+  it('播放且可见时连续渲染（跟随 vsync）', () => {
     expect(resolveFrameloop(true, true)).toBe('always')
   })
 
@@ -34,8 +45,14 @@ describe('resolveFrameloop', () => {
     expect(resolveFrameloop(false, false)).toBe('demand')
   })
 
-  it('播放状态不应影响可见页面的帧循环（暂停也必须继续画）', () => {
-    expect(resolveFrameloop(true, true)).toBe(resolveFrameloop(false, true))
+  it('★ 播放状态必须影响可见页面的帧循环（否则暂停时仍在满帧空转）', () => {
+    expect(resolveFrameloop(true, true)).not.toBe(resolveFrameloop(false, true))
+  })
+
+  it('暂停目标帧率是上游非播放档的 24', () => {
+    expect(PAUSED_TARGET_FPS).toBe(24)
+    // 必须显著低于 vsync，否则"降频"没有意义
+    expect(PAUSED_TARGET_FPS).toBeLessThan(60)
   })
 })
 
@@ -126,6 +143,36 @@ describe('getRenderPolicy：上游四档', () => {
     expect(low.beatCamera).toBe(false)
   })
 
+  /**
+   * 回归：`lowPower` 必须与 `perfLevel` **解耦**，且必须被透出。
+   *
+   * 真实事故：消费者需要判断"低功耗"时拿不到这个标志（它只活在
+   * `detectPowerContext()` 内部），于是用 `perfLevel <= 0` 当替身。
+   * 而 `perfLevel` 是**画质档**派生值，出厂 `eco` 恒为 0 ——
+   * 结果是**默认配置下所有用户**都被当成低功耗：
+   * `AmbientBackdrop` 跳过上游 Mineradio 的 `#album-bg` 封面模糊铺底，
+   * 舞台只剩基色渐变。上游对 `#album-bg` 无任何画质档门控。
+   *
+   * 本用例钉住两点：① 标志被透出；② 它与画质档无关（任何档位、任何硬件
+   * 都只由 `PowerContext` 决定）。若有人改回 `perfLevel <= 0` 的替身写法，
+   * 第二条会立刻失败。
+   */
+  it('lowPower 必须透出，且与画质档/perfLevel 无关', () => {
+    // ① 标志存在且跟随 PowerContext
+    expect(getRenderPolicy('eco', PROFILE, NORMAL).lowPower).toBe(false)
+    expect(getRenderPolicy('eco', PROFILE, LOW_POWER).lowPower).toBe(true)
+
+    // ② 出厂默认档（eco，perfLevel 恒 0）**不得**被判成低功耗 —— 这正是事故点
+    for (const q of ['eco', 'balanced', 'high', 'ultra'] as const) {
+      const p = getRenderPolicy(q, PROFILE, NORMAL)
+      expect(p.lowPower, `${q} 档在正常上下文下不应是低功耗`).toBe(false)
+    }
+    // 低端硬件同样只是压低 perfLevel，不等于低功耗上下文
+    const lowSpec = { ...PROFILE, lowSpec: true, balancedSpec: true }
+    expect(getRenderPolicy('eco', lowSpec, NORMAL).lowPower).toBe(false)
+    expect(getRenderPolicy('high', lowSpec, NORMAL).perfLevel).toBe(0)
+  })
+
   it('粒子总数与网格自洽且为奇数边长', () => {
     for (const q of ['eco', 'balanced', 'high', 'ultra'] as const) {
       const p = getRenderPolicy(q, PROFILE, NORMAL)
@@ -152,7 +199,9 @@ describe('getRenderPolicy：上游四档', () => {
     // 默认（未开启）→ 关闭，与上游出厂一致
     expect(getRenderPolicy('high', PROFILE, NORMAL).bloom).toBe(false)
     // 用户开启 → 打开
-    expect(getRenderPolicy('high', PROFILE, { lowPower: false, bloomEnabled: true, edgeEnabled: false }).bloom).toBe(true)
+    expect(getRenderPolicy('high', PROFILE, { lowPower: false, bloomEnabled: true, edgeEnabled: false }).bloom).toBe(
+      true,
+    )
     // 低功耗档强制关闭（第二遍渲染在移动 GPU 上代价最大）
     expect(getRenderPolicy('high', PROFILE, LOW_POWER).bloom).toBe(false)
   })
@@ -170,6 +219,34 @@ describe('getRenderPolicy：上游四档', () => {
     const eco = getRenderPolicy('eco', PROFILE, NORMAL)
     const ultra = getRenderPolicy('ultra', PROFILE, NORMAL)
     expect(eco.analysisStrideWideBand).toBeGreaterThan(ultra.analysisStrideWideBand)
+  })
+
+  /**
+   * 回归：dt 钳制必须是上游的**固定 0.05**，且**与画质档无关**。
+   *
+   * 真实事故：曾按 `1 / (90 × perfScale)` 推导 dt 上限（high 11.1ms、
+   * eco 15.4ms），全都小于 60Hz 的 16.7ms 帧时长 —— 于是 60Hz 屏上粒子层
+   * 每个时钟（uTime、唱片自旋、burst 衰减、预设切换脉冲、手势惯性）都被
+   * 按 0.62~0.92 倍缩放，表现为**整体慢放**；而地形层用 1/20，两层时钟
+   * 不一致（同一首歌切模式会看到速度跳变）。
+   *
+   * 上游 `11-main-loop.js:309` 是 `Math.min(dt, 0.05)`：固定值，不看画质档。
+   * 开销由帧率**门控**（`capMainLoopFpsForBudget`）控制，而那个门控在播放中
+   * （vsync 模式）返回 0 = 不限制。
+   */
+  it('dt 上限是上游固定 0.05，且不随画质档变化', () => {
+    for (const q of ['eco', 'balanced', 'high', 'ultra'] as const) {
+      expect(getRenderPolicy(q, PROFILE, NORMAL).maxDeltaSeconds, `${q} 档 dt 上限`).toBeCloseTo(0.05, 6)
+    }
+    // 低端硬件 / 低功耗同样不改变它（上游是固定值）
+    const lowSpec = { ...PROFILE, lowSpec: true, balancedSpec: true }
+    expect(getRenderPolicy('eco', lowSpec, NORMAL).maxDeltaSeconds).toBeCloseTo(0.05, 6)
+    expect(getRenderPolicy('ultra', PROFILE, LOW_POWER).maxDeltaSeconds).toBeCloseTo(0.05, 6)
+  })
+
+  it('dt 上限必须 >= 60Hz 帧时长（否则 60Hz 屏上动画慢放）', () => {
+    // 60Hz → 16.7ms；dt 上限若小于它，每帧都被压缩 => 慢放
+    expect(getRenderPolicy('eco', PROFILE, NORMAL).maxDeltaSeconds).toBeGreaterThanOrEqual(1 / 60)
   })
 })
 

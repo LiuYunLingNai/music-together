@@ -420,38 +420,55 @@ export function useLyric() {
       const requestSupplement = async (): Promise<LyricSupplementData | null> => {
         const params = new URLSearchParams({
           source: track.metadataSource ?? track.source,
-          lyricId: track.lyricId!, title: track.title, duration: String(track.duration),
+          lyricId: track.lyricId!,
+          title: track.title,
+          duration: String(track.duration),
         })
         for (const artist of track.artist) params.append('artists', artist)
         try {
           const response = await fetch(`${SERVER_URL}/api/music/lyric-supplement?${params}`, {
-            signal: request.controller.signal, credentials: 'include',
+            signal: request.controller.signal,
+            credentials: 'include',
           })
           return response.ok ? await response.json() : null
-        } catch { return null }
+        } catch {
+          return null
+        }
       }
       // Start matching while a slow TTML provider is still pending. Only one supplement request is used.
-      const earlySupplement = canSupplement && (
-        !initialPresentation.quality.hasWordAnimation ||
-        needsLyricAuxiliary(initialPresentation.lines ?? [])
-      )
-        ? requestSupplement() : null
+      const earlySupplement =
+        canSupplement &&
+        (!initialPresentation.quality.hasWordAnimation || needsLyricAuxiliary(initialPresentation.lines ?? []))
+          ? requestSupplement()
+          : null
       let baseCompleted = false
-      const earlyPublication = earlySupplement?.then((supplement) => {
-        if (!supplement || !isCurrent() || baseCompleted) return
-        const candidates = supplement.candidates?.length ? supplement.candidates : supplement.source ? [supplement] : []
-        const characterCount = Math.max(initialPresentation.quality.meaningfulCharacterCount,
-          ...candidates.map((candidate) => buildNativePresentation(candidate).quality.meaningfulCharacterCount))
-        const referenceLrc = firstCandidate?.type === 'platform' ? firstCandidate.data.lyric : initialPresentation.lyric
-        const best = candidates.map((candidate) => buildNativePresentation(candidate, characterCount, referenceLrc))
-          .filter((candidate) => candidate.quality.hasWordAnimation)
-          .sort((a, b) => b.quality.confidence - a.quality.confidence)[0]
-        if (best && isPresentationBetter(best, initialPresentation)) {
-          initialPresentation = best
-          setTtmlLines(best.lines)
-          setLyric(best.lyric, best.tlyric)
-        }
-      }).catch(() => { /* An unusable supplement must not block the base lyrics. */ })
+      const earlyPublication = earlySupplement
+        ?.then((supplement) => {
+          if (!supplement || !isCurrent() || baseCompleted) return
+          const candidates = supplement.candidates?.length
+            ? supplement.candidates
+            : supplement.source
+              ? [supplement]
+              : []
+          const characterCount = Math.max(
+            initialPresentation.quality.meaningfulCharacterCount,
+            ...candidates.map((candidate) => buildNativePresentation(candidate).quality.meaningfulCharacterCount),
+          )
+          const referenceLrc =
+            firstCandidate?.type === 'platform' ? firstCandidate.data.lyric : initialPresentation.lyric
+          const best = candidates
+            .map((candidate) => buildNativePresentation(candidate, characterCount, referenceLrc))
+            .filter((candidate) => candidate.quality.hasWordAnimation)
+            .sort((a, b) => b.quality.confidence - a.quality.confidence)[0]
+          if (best && isPresentationBetter(best, initialPresentation)) {
+            initialPresentation = best
+            setTtmlLines(best.lines)
+            setLyric(best.lyric, best.tlyric)
+          }
+        })
+        .catch(() => {
+          /* An unusable supplement must not block the base lyrics. */
+        })
       const [rawTtmlLines, lyricData] = completeWithinGrace?.value ?? (await completeBasePromise)
       baseCompleted = true
       if (!isCurrent()) return
@@ -485,17 +502,17 @@ export function useLyric() {
               : supplement.source
                 ? [supplement]
                 : []
-            const preliminarySupplements = supplementCandidates.map((candidate) =>
-              buildNativePresentation(candidate),
-            )
+            const preliminarySupplements = supplementCandidates.map((candidate) => buildNativePresentation(candidate))
             const comparisonCharacterCount = Math.max(
               preferredPresentation.quality.meaningfulCharacterCount,
               ...preliminarySupplements.map((presentation) => presentation.quality.meaningfulCharacterCount),
             )
-            const supplementalPresentations = supplementCandidates.map((candidate) => preserveTtmlStructure(
-              buildNativePresentation(candidate, comparisonCharacterCount, lyricData?.lyric ?? ''),
-              baseTtmlPresentation,
-            ))
+            const supplementalPresentations = supplementCandidates.map((candidate) =>
+              preserveTtmlStructure(
+                buildNativePresentation(candidate, comparisonCharacterCount, lyricData?.lyric ?? ''),
+                baseTtmlPresentation,
+              ),
+            )
             const supplementalPresentation = supplementalPresentations
               .filter((presentation) => presentation.quality.hasWordAnimation)
               .sort((left, right) => right.quality.confidence - left.quality.confidence)[0]

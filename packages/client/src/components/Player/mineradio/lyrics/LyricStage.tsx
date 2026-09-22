@@ -36,6 +36,8 @@ import { coverPose, lyricWorldPos } from '../particles/gestureRotationState'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { getLyricOffsetKey } from '@/lib/lyricOffset'
+import { lyricPlayerBridge } from '@/lib/lyricPlayerBridge'
+import { maskObsceneLine, type ObsceneMaskMode } from './obsceneMask'
 
 /** 世界尺寸，参照 Mineradio 的 worldW（上游 6.10） */
 const WORLD_W = 6.1
@@ -228,10 +230,7 @@ function glyphTouchDistance(upperFontWorld: number, lowerFontWorld: number): num
  */
 const TRANS_GAP = 2.1214 / 2
 /** 译词行的字形高度（世界单位），供间距校验与测试使用。 */
-export const TRANS_GLYPH_TOUCH_WORLD = glyphTouchDistance(
-  MAIN_FONT_WORLD,
-  MAIN_FONT_WORLD * TRANS_FONT_SCALE,
-)
+export const TRANS_GLYPH_TOUCH_WORLD = glyphTouchDistance(MAIN_FONT_WORLD, MAIN_FONT_WORLD * TRANS_FONT_SCALE)
 /** 译词与主歌词之间的实际字形边缘间距（世界单位；负值 = 重叠）。 */
 export const TRANS_GLYPH_GAP_WORLD = TRANS_GAP * LYRIC_LINE_STEP_WORLD - TRANS_GLYPH_TOUCH_WORLD
 
@@ -293,7 +292,22 @@ const READABILITY_KEEP_AFTER = 24
 
 /**
  * 歌词避让侧栏的偏移链（上游 `shelfLyricAvoid` 分支）：缩放 ×0.72、
- * x −1.36、y +0.06、z +0.72。本项目 3D 歌单架常驻挂载，歌词恒定应用。
+ * x −1.36、y +0.06、z +0.72。
+ *
+ * ★★ 本项目**只取其中的缩放 ×0.72，位移三项刻意不用**（第三十三轮定案）。
+ *
+ *   上游那三项位移是配合 `fx.lyricCameraLock`（相机锁定在歌词上）用的：
+ *   歌词被推到一边，相机跟着锁过去，构图重心因此整体移到左侧。本项目
+ *   没有 camera-lock 开关，歌词恒定**世界锚定在封面中心**、相机也恒定
+ *   看向封面 —— 若单独套用位移，歌词就会离开封面中心飘到左上方，
+ *   而封面仍在原地旋转：**转起来明显是错位的**，构图也不再有轴心。
+ *
+ *   因此歌词保持在封面正上方居中；与歌单架的让位改由**歌单架侧**承担
+ *   （见 `particles/floatingSongCard.ts` 的 `SHELF_CENTER`）与侧栏退让
+ *   （`particles/stageSafeArea.ts`）。
+ *
+ *   `SHELF_AVOID_X/Z` 仍被地形固定姿态分支引用（无封面 / 无 camera-lock，
+ *   上游无对应场景，属本项目自有布局）。
  */
 const SHELF_AVOID_SCALE = 0.72
 const SHELF_AVOID_X = 1.36
@@ -492,16 +506,6 @@ function lyricFeatherFor(line: StageLine): number {
 }
 
 /**
- * 按逐字 obscene 标记替换敏感词（保持字符数不变，区间不错位）。
- */
-function maskObsceneLine(line: StageLine, maskChar: string): string {
-  const char = maskChar || '*'
-  return line.words
-    .map((word) => (word.obscene ? Array.from(word.text).map(() => char).join('') : word.text))
-    .join('')
-}
-
-/**
  * 译词/音译的展示策略 —— 返回该行的附属行列表（独立行，见虚拟槽位说明）。
  */
 function translationSubEntries(line: StageLine, mode: LyricTranslationMode): string[] {
@@ -543,9 +547,7 @@ function lrcToAmllLines(lyric: string, tlyric: string) {
     const startMs = Math.round(line.time * 1000)
     const endMs = Math.round((arr[i + 1]?.time ?? line.time + 5) * 1000)
     return {
-      words: [
-        { word: line.text, startTime: startMs, endTime: endMs, romanWord: '', obscene: false },
-      ],
+      words: [{ word: line.text, startTime: startMs, endTime: endMs, romanWord: '', obscene: false }],
       translatedLyric: translations.get(Math.round(line.time * 10) / 10) ?? '',
       romanLyric: '',
       startTime: startMs,
@@ -658,8 +660,11 @@ export function LyricStage({
     return { slotStart, transSlot, transOffset }
   }, [stageLines, effectiveTranslationMode])
 
-  // 遮罩字符：仅在启用遮罩模式时替换
-  const obsceneChar = maskMode ? maskObsceneChar || '*' : ''
+  // 掩码字符：仅在启用掩码模式时替换。
+  // ★ 三态（'' / full-mask / partial-mask）必须完整透传 —— 折叠成布尔会让
+  //   partial-mask 与 full-mask 表现相同（见 `maskObsceneLine` 说明）。
+  const obsceneMode: ObsceneMaskMode = maskMode || ''
+  const obsceneChar = obsceneMode ? maskObsceneChar || '*' : ''
 
   const groupRef = useRef<THREE.Group>(null)
   /** 复用的四元数缓冲 */
@@ -718,15 +723,30 @@ export function LyricStage({
           return `${line.index}|${line.isDuet ? 1 : 0}|${line.text}|${subs}`
         })
         .join('\u0002') +
-      `#${obsceneChar}` +
+      // ★ 必须含**掩码模式**，不能只放掩码字符：full-mask 与 partial-mask
+      //   用的是同一个字符，只放字符的话两者切换不会触发重建 ——
+      //   纹理仍是旧模式画的，设置看起来"没生效"。
+      `#${obsceneMode}:${obsceneChar}` +
       // 用**生效档位**而不是用户档位：自适应收缩改变译词行数时必须重建
       `#${effectiveTranslationMode}` +
       `#${displayMode}:${customLineCount}` +
       `#${motionStyle}`,
-    [stageLines, obsceneChar, effectiveTranslationMode, displayMode, customLineCount, motionStyle],
+    [stageLines, obsceneMode, obsceneChar, effectiveTranslationMode, displayMode, customLineCount, motionStyle],
   )
 
-  const viewportKey = `${Math.round(size.width)}x${Math.round(size.height)}`
+  // ★ 这里**不要**把视口尺寸放进重建依赖。
+  //
+  //   曾经的错法：`const viewportKey = \`${size.width}x${size.height}\`` 并
+  //   作为重建 effect 的依赖，注释写"触发窗口适配重算"。但重建路径**从不
+  //   读 size** —— 逐行视口适配（`lyricRowFitRatio`）是在**每帧**用实时
+  //   `size.width` 算的（见 `stepRow` 与主循环）。于是拖动窗口边缘时，
+  //   每个 resize 事件（每秒数十次）都会把整条常驻轨道拆掉重建：
+  //   `rowsRef.current = []` + 全部行 detach/dispose + 重新栅格化 ±7 行
+  //   （每行一张 2048 宽画布 + 文字测量 + 可读性/辉光多遍）—— 表现为
+  //   数秒卡顿，且刚建好的行全部丢弃（常驻轨道的意义被抹掉）。
+  //
+  //   逐行 fit 已经是逐帧的，因此视口变化**不需要**重建：行会在下一帧
+  //   自动适配新宽度。
 
   // ---------------------------------------------------------------- 资源释放
   const disposeRow = (row: LyricRow) => {
@@ -784,7 +804,7 @@ export function LyricStage({
     //   不再画进主行纹理：内嵌小字让行纹理变高但轨道行距不变，相邻行
     //   直接重叠（用户实测的"副歌词与主歌词重叠"根因）。
     const raster = rasterizeLyricLineMask({
-      text: obsceneChar ? maskObsceneLine(line, obsceneChar) : line.text,
+      text: obsceneChar ? maskObsceneLine(line, obsceneMode, obsceneChar) : line.text,
       scale: distance === 0 ? 1 : contextScaleFor(distance, contextStyle),
       duet: line.isDuet,
     })
@@ -904,7 +924,7 @@ export function LyricStage({
     if (!group || row.builtAsActive) return
     const line = row.line
     const raster = rasterizeLyricLineMask({
-      text: obsceneChar ? maskObsceneLine(line, obsceneChar) : line.text,
+      text: obsceneChar ? maskObsceneLine(line, obsceneMode, obsceneChar) : line.text,
       scale: 1,
       duet: line.isDuet,
     })
@@ -1020,18 +1040,11 @@ export function LyricStage({
     // 上游 rowGlowWorldW：clamp(max(textW + pad, textW×ratio), textW + pad×0.62, worldW×1.08)
     const glowWorldW = Math.min(
       WORLD_W * 1.08,
-      Math.max(
-        lineTextWorldW + glowPad,
-        lineTextWorldW * rowGlowTextureRatio,
-        lineTextWorldW + glowPad * 0.62,
-      ),
+      Math.max(lineTextWorldW + glowPad, lineTextWorldW * rowGlowTextureRatio, lineTextWorldW + glowPad * 0.62),
     )
     // 上游 rowGlowAspect：纹理真实宽高比（防止长行辉光变成过厚的扇贝带）
     const glowAspect = Math.max(0.001, glowCanvas.height / Math.max(1, glowCanvas.width))
-    const glowWorldH = Math.min(
-      lineWorldH * 1.36,
-      Math.max(lineWorldH * 0.66, glowWorldW * glowAspect),
-    )
+    const glowWorldH = Math.min(lineWorldH * 1.36, Math.max(lineWorldH * 0.66, glowWorldW * glowAspect))
 
     const glowMaterial = new THREE.MeshBasicMaterial({
       map: glowTexture,
@@ -1046,7 +1059,7 @@ export function LyricStage({
       toneMapped: false,
     })
     const glow = new THREE.Mesh(new THREE.PlaneGeometry(glowWorldW, glowWorldH, 1, 1), glowMaterial)
-    glow.position.set(0, row.mesh.position.y, row.mesh.position.z - 0.030)
+    glow.position.set(0, row.mesh.position.y, row.mesh.position.z - 0.03)
     glow.scale.copy(row.mesh.scale)
     glow.visible = false
     // 上游主行辉光 renderOrder = 42.48（相对组 base 43 固定 −0.52）
@@ -1184,7 +1197,7 @@ export function LyricStage({
 
     const clampedDelta = Math.min(ROW_MAX_DELTA, absT)
     const zTarget = ROW_Z_BASE - Math.pow(clampedDelta, ROW_Z_POW) * ROW_Z_GAIN
-    const floatY = Math.sin(nowMs / 1000 * 0.68 + slot * 0.71) * 0.008
+    const floatY = Math.sin((nowMs / 1000) * 0.68 + slot * 0.71) * 0.008
     const yTarget = -transDelta * LYRIC_LINE_STEP_WORLD + floatY
     const depthScale = Math.max(ROW_SCALE_MIN, 1 - clampedDelta * ROW_SCALE_FALLOFF)
     const fitRatio = lyricRowFitRatio(mesh, row.raster, size.width, camera)
@@ -1223,21 +1236,16 @@ export function LyricStage({
       const transBoost = 1 + BACKDROP_ADAPT * 0.66
       const target = opacityTarget * 0.86 * transMix * transBoost
       row.readabilityMaterial.opacity += (Math.min(1, target) - row.readabilityMaterial.opacity) * ease
-      row.readabilityMaterial.color.set('#ffffff').lerp(
-        readabilityDarkColor,
-        Math.min(0.92, BACKDROP_ADAPT * 0.92),
-      )
+      row.readabilityMaterial.color.set('#ffffff').lerp(readabilityDarkColor, Math.min(0.92, BACKDROP_ADAPT * 0.92))
     }
     // 译词辉光：淡得多（上游 translation 辉光分支 0.30 基准）
     if (!row.glow) ensureRowGlow(row)
     if (row.glow && row.glowMaterial) {
       row.glow.position.copy(mesh.position)
-      row.glow.position.z = mesh.position.z - 0.030
+      row.glow.position.z = mesh.position.z - 0.03
       row.glow.scale.copy(mesh.scale)
       row.glowMaterial.color.set(glowColorForPalette(colorsRef.current))
-      const glowOpacityTarget = isCurrentParent
-        ? targetAlpha * currentLineGlow * 0.46 * parentFade * depthFade
-        : 0
+      const glowOpacityTarget = isCurrentParent ? targetAlpha * currentLineGlow * 0.46 * parentFade * depthFade : 0
       const g = row.glowMaterial.opacity
       let nextGlow = g + (glowOpacityTarget - g) * (glowOpacityTarget > g ? GLOW_RISE : GLOW_FALL)
       if (!isCurrentParent && nextGlow < GLOW_ZERO) nextGlow = 0
@@ -1246,7 +1254,8 @@ export function LyricStage({
   }
 
   /** 译词行可见半径（主行同款公式；独立函数避免每帧闭包差异）。 */
-  const visibleRadiusForTrans = () => Math.max(0.85, stackLines * 0.5 * (effectiveTranslationMode !== 'off' ? SLOT_WITH_TRANS : 1))
+  const visibleRadiusForTrans = () =>
+    Math.max(0.85, stackLines * 0.5 * (effectiveTranslationMode !== 'off' ? SLOT_WITH_TRANS : 1))
 
   // ---------------------------------------------------------------- 全量重建
   useEffect(() => {
@@ -1268,9 +1277,9 @@ export function LyricStage({
 
     // 常驻轨道：槽位覆盖整首歌；初始只建激活行 ±INITIAL_BUILD_RADIUS，
     // 其余行由 useFrame 按接近窗口懒建补齐（上游 trackPersistent 结构）
-    rowsRef.current = new Array(
-      stageLines.length + slotInfo.transSlot.reduce((n, t) => n + (t?.length ?? 0), 0),
-    ).fill(null)
+    rowsRef.current = new Array(stageLines.length + slotInfo.transSlot.reduce((n, t) => n + (t?.length ?? 0), 0)).fill(
+      null,
+    )
     const anchor = activeIndex >= 0 ? activeIndex : 0
     const start = Math.max(0, anchor - INITIAL_BUILD_RADIUS)
     const end = Math.min(stageLines.length - 1, anchor + INITIAL_BUILD_RADIUS)
@@ -1291,9 +1300,11 @@ export function LyricStage({
       }
       rowsRef.current = []
     }
-    // signature 覆盖全部行内容、遮罩字符与外观设置；viewportKey 触发窗口适配重算
+    // signature 覆盖全部行内容、遮罩字符与外观设置。
+    // ★ **不含视口尺寸**：逐行 fit 是逐帧算的，resize 不需要重建
+    //   （见上方 `viewportKey` 移除处的说明）。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signature, viewportKey])
+  }, [signature])
 
   // ---------------------------------------------------------------- 每帧驱动
   useFrame((_, delta) => {
@@ -1301,9 +1312,22 @@ export function LyricStage({
     if (!group) return
 
     const rows = rowsRef.current
-    const { nowSeconds: now, activeIndex: active, stageLines: lines } = runtimeRef.current
+    const runtime = runtimeRef.current
+    const { stageLines: lines } = runtime
     const dt = Math.min(delta, 1 / 20)
     const nowMs = performance.now()
+
+    // ★ 逐帧时钟优先（见 `lyricPlayerBridge.getFrameTime` 说明）。
+    //
+    //   store 的 `currentTime` 被 `useHowl` 按 100ms 节流（10Hz），逐字填充
+    //   会按 ~100ms 离散跳变、激活行切换最多滞后 100ms；而 AMLL 走每帧
+    //   `setCurrentTime`。同一首歌切到经典播放器就变顺滑 —— 是肉眼可见的
+    //   不一致。这里读同一份逐帧值；取不到时（尚未起播 / 已停止）回退到
+    //   构建时算好的 store 值，行为与之前一致。
+    const frameTime = lyricPlayerBridge.getFrameTime()
+    const now = frameTime === null ? runtime.nowSeconds : Math.max(0, frameTime - offsetMs / 1000)
+    // 激活行随之逐帧重判（原来只在 store 更新时随 useMemo 重算）
+    const active = frameTime === null ? runtime.activeIndex : findActiveLineIndex(lines, now)
 
     // ---- 滚动轨道（上游 :1395-1414）----
     // 轨道目标 = 激活行的**槽位**（译词行占用额外槽位，行距随内容展开）
@@ -1359,7 +1383,8 @@ export function LyricStage({
       0,
       Math.min(
         1.45,
-        (0.18 + glowBreath * 0.16 + musicBloom * 0.9 + glow.beatGlow * 1.18 + Math.sin(t * 0.37 + 1.2) * 0.035) * GLOW_DRIVE,
+        (0.18 + glowBreath * 0.16 + musicBloom * 0.9 + glow.beatGlow * 1.18 + Math.sin(t * 0.37 + 1.2) * 0.035) *
+          GLOW_DRIVE,
       ),
     )
     glow.highBloom += (solarBloom - glow.highBloom) * (solarBloom > glow.highBloom ? 0.075 : 0.05)
@@ -1390,6 +1415,11 @@ export function LyricStage({
      */
     const allowedOffsets = new Set(lyricSlotOffsets(displayMode, customLineCount).map((o) => Math.round(o)))
     const palette = colorsRef.current
+    // ★ 辉光色每帧**算一次**，不在行循环里逐行算（第三十四轮性能修复，§5.4 D5）。
+    //   `glowColorForPalette` 内部跑正则 `/^#?([0-9a-f]{6})$/i.exec` 加三次
+    //   `toString(16).padStart` —— 而调色板在两次换封面之间是**常量**。
+    //   此前它在行循环里被调用（每行每帧），行多时纯属浪费。
+    const glowColor = glowColorForPalette(palette)
 
     for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
       const slot = slotInfo.slotStart[lineIndex] ?? lineIndex
@@ -1401,7 +1431,51 @@ export function LyricStage({
       // 译词行跟随父行的推进推进自己的位置/揭示/透明度链；dual 模式下
       // 只有当前行与下一行有译词（上游 :1483-1487）。
       const subs = slotInfo.transSlot[lineIndex]
+      // ★ 窗口门控必须按**距离**判，绝不能按 alpha 判（第二十五轮性能修复）★★
+      //
+      // 上游 `contextAlpha` 的 multi 分支有 `clamp(..., 0.08, ...)` 下界，
+      // 因此**远行的 alpha 恒 ≥0.08、永远不为 0**。若拿 `transAlpha > 0.002`
+      // 当窗口门控，就等于"整首歌的每一行译词都算在窗口内"：
+      //   · 第 1 帧就把整首歌的译词行全部建出来（每行 3 个网格：主/描边/辉光）
+      //   · 而效果层裁剪窗口只有 active−6 … active+24，窗口外的行每帧被
+      //     dispose、下一帧又被 ensureRowReadability/ensureRowGlow 重建 ——
+      //     形成**永久性的逐帧栅格化 + 纹理上传抖动**
+      // 这正是用户报告的"有副歌词时整个界面更卡顿"的直接原因
+      // （multi 是出厂默认译词模式，所以默认就命中）。
+      //
+      // 上游没有这个问题：它的译词行同样只按可见窗口建/裁
+      // （14-stage-lyrics-rendering.js 的 visibleFade/裁剪窗口），
+      // alpha 下界只影响**已建**行的显示亮度，不参与"要不要建"。
+      //
+      // 窗口取**有向**区间（前 6 / 后 24），与下方效果层裁剪窗口同源 ——
+      // 用对称 ±24 会让"前方 24 行"建了又被裁，抖动只是减轻而非消除。
+      const lineOffset = lineIndex - active
+      const transWindowActive = lineOffset >= -TRANS_KEEP_BEFORE && lineOffset <= TRANS_KEEP_AFTER
+      // ★ 窗口外且**一行都没建**时整块跳过（第三十四轮性能修复，§5.4 D2）。
+      //
+      //   此前无条件走下面的 `translationSubEntries`（**每行每帧新建一个数组**）
+      //   与 `transAlpha` 闭包 —— 120 行的歌就是 7200 个数组/秒，而其中绝大多数
+      //   是离屏几百槽位、连行都还没建的行。
+      //
+      //   ★ 判据必须是"**该行的译词行一个都没建**"而不是"窗口外"：
+      //     窗口外但**已建**的行仍需逐帧推进（把 opacity 衰到 0、维持位置），
+      //     跳过会让它冻结在上一次的值。
+      //     `subs &&` 保留在此处（不是靠标志位）以便 TS 收窄类型。
+      let transRowBuilt = false
       if (subs) {
+        if (transWindowActive) {
+          transRowBuilt = true
+        } else {
+          const base = lines.length + (slotInfo.transOffset[lineIndex] ?? 0)
+          for (let k = 0; k < subs.length; k++) {
+            if (rows[base + k]) {
+              transRowBuilt = true
+              break
+            }
+          }
+        }
+      }
+      if (subs && transRowBuilt) {
         const isCurrentParent = isActive
         // ★ 父行淡出按**行距**（上游 parentDistance 语义，行单位），不是槽位差
         //   —— 槽位空间被译词展开到 1.9，(0.82−Δ)/0.34 在槽位单位下永远为 0，
@@ -1464,8 +1538,7 @@ export function LyricStage({
         //
         // 窗口取**有向**区间（前 6 / 后 24），与下方效果层裁剪窗口同源 ——
         // 用对称 ±24 会让"前方 24 行"建了又被裁，抖动只是减轻而非消除。
-        const lineOffset = lineIndex - active
-        const transWindowActive = lineOffset >= -TRANS_KEEP_BEFORE && lineOffset <= TRANS_KEEP_AFTER
+        // （`lineOffset` / `transWindowActive` 已在块外算好，此处复用。）
         for (let k = 0; k < subs.length && k < subTexts.length; k++) {
           const slotIndex = lines.length + (slotInfo.transOffset[lineIndex] ?? 0) + k
           const transDelta = subs[k] - newScroll
@@ -1489,8 +1562,22 @@ export function LyricStage({
       // 行接近窗口（可见半径 + 预建余量）时补建；栅格化失败的行不再重试
       let row = rows[lineIndex]
       if (!row) {
+        // ★ `absDelta` 是**槽位**空间的距离（`liveDelta = slot - newScroll`），
+        //   用于判断"这一行是否接近可见窗口" —— 这是对的，保持不变。
         if (absDelta > visibleRadius + PREBUILD_MARGIN || failedRowsRef.current.has(lineIndex)) continue
-        row = buildRow(lineIndex, Math.round(newScroll))
+        // ★ 但 `buildRow` 的第二个参数是**行号**（内部算 `|lineIndex - anchor|`
+        //   来决定上下文缩放、`targetAlpha` 与 `builtAsActive`），
+        //   曾经错传 `Math.round(newScroll)`（**槽位**值）。
+        //
+        //   有译词的歌里 `slotStart[i] ≈ 2.1214·i`，于是第 20 行会拿到
+        //   `anchor≈42`、`distance≈22`：`targetAlpha` 被压到地板 0.16
+        //   （而非 0.54），而它同时喂给**激活行的辉光** → 懒建出来的行
+        //   上下文偏暗、激活行辉光弱约 3.4×。无译词的歌 `slotStart[i] === i`，
+        //   所以手工抽查会漏掉。
+        //
+        //   锚点语义与初始建行一致（那里传的是 `activeIndex`）：
+        //   即"当前激活行"本身。首行之前 `activeIndex` 为 -1，回退到 0。
+        row = buildRow(lineIndex, active >= 0 ? active : 0)
         if (!row) {
           failedRowsRef.current.add(lineIndex)
           continue
@@ -1518,7 +1605,7 @@ export function LyricStage({
       const clampedDelta = Math.min(ROW_MAX_DELTA, absDelta)
       const zTarget = ROW_Z_BASE - Math.pow(clampedDelta, ROW_Z_POW) * ROW_Z_GAIN
       // 每行轻微错相浮动（上游 verticalFloat：sin(t*0.68 + seed + index*0.71)）
-      const floatPhase = t * 0.68 + (lineIndex * 0.71)
+      const floatPhase = t * 0.68 + lineIndex * 0.71
       const floatY = Math.sin(floatPhase) * 0.008
       const yTarget = -liveDelta * LYRIC_LINE_STEP_WORLD + floatY
 
@@ -1584,7 +1671,8 @@ export function LyricStage({
         // ★ 激活门控逐帧重判（上游 isActive = rowLineIndex === presentationLineIndex）：
         //   逐字进度、节拍泛光、故障只属于当前激活行；行一旦失活立即回落 ——
         //   此前这些状态被冻结在构建时刻，"激活行高亮不消失"的逐帧侧根因。
-        uniforms.uActiveMix.value += ((isActive ? 1 : 0) - (uniforms.uActiveMix.value as number)) * (isActive ? 0.34 : 0.62)
+        uniforms.uActiveMix.value +=
+          ((isActive ? 1 : 0) - (uniforms.uActiveMix.value as number)) * (isActive ? 0.34 : 0.62)
         if (isActive) {
           // ★ 行首次激活时按 active 规格重建（上游 asActive 语义）——
           //   懒建的行带着上下文规格（scale 0.82 / alpha 0.54），不重建
@@ -1620,12 +1708,23 @@ export function LyricStage({
           // 此前跟 bands.beat（逐拍闪烁），观感节奏与上游不同。
           const solarTarget = glow.highBloom
           uniforms.uSolar.value += (solarTarget - (uniforms.uSolar.value as number)) * 0.12
-          const burstTarget = bands.bassHit ? 1 : 0
-          uniforms.uGlitchBurst.value += (burstTarget - (uniforms.uGlitchBurst.value as number)) * 0.25
         } else {
           uniforms.uProgress.value = 0
           uniforms.uSolar.value += (0 - (uniforms.uSolar.value as number)) * 0.48
         }
+
+        // ★ 故障脉冲必须对**每一行、每一帧**更新（上游 `12-lyrics-row-layers.js:1663`）：
+        //
+        //     uGlitchBurst = isActive ? glitchPulse : glitchPulse * 0.35
+        //
+        //   注意上游那行**没有** isActive 守卫 —— 所有行都写，非激活行取 0.35 倍。
+        //   此前本项目把它写在 `if (isActive)` 里，于是**激活过的行失活后
+        //   uGlitchBurst 冻结在最后一次的峰值**（可到 ~1.0），而它驱动
+        //   `glitchWidth ×(0.55 + 1.85·burst)` 与 `glitchGate +0.28·burst` ——
+        //   表现为"非激活行比激活行闪得更凶"，且永不消退（故障风格下最明显）。
+        //   放在 if/else 之外即同时修好"冻结"与"非激活行更强"两个症状。
+        const burstTarget = bands.bassHit ? (isActive ? 1 : 0.35) : 0
+        uniforms.uGlitchBurst.value += (burstTarget - (uniforms.uGlitchBurst.value as number)) * 0.25
 
         // 透明度（上游 :1465 + :1660）：
         //   上下文 alpha 链 = target × (1 − max(0,|Δ|−0.25)×0.070)，夹 [0.16, 0.92]
@@ -1638,7 +1737,10 @@ export function LyricStage({
           ? 0
           : isActive
             ? 1
-            : Math.max(CONTEXT_ALPHA_MIN, Math.min(0.92, row.targetAlpha - Math.max(0, absDelta - 0.25) * CONTEXT_ALPHA_FALLOFF))
+            : Math.max(
+                CONTEXT_ALPHA_MIN,
+                Math.min(0.92, row.targetAlpha - Math.max(0, absDelta - 0.25) * CONTEXT_ALPHA_FALLOFF),
+              )
         const depthFade = isActive ? 1 : Math.max(0.54, 1 - absDelta * 0.055) * visibleFade
         const opacityTarget = contextAlpha * depthFade
         uniforms.uOpacity.value += (opacityTarget - (uniforms.uOpacity.value as number)) * ease
@@ -1660,13 +1762,9 @@ export function LyricStage({
           const readabilityMix = Math.max(baseMix, 0.6 + BACKDROP_ADAPT * 0.12)
           const readabilityBoost = 1 + BACKDROP_ADAPT * 0.78
           const readabilityTarget = opacityTarget * 0.86 * readabilityMix * readabilityBoost
-          row.readabilityMaterial.opacity +=
-            (Math.min(1, readabilityTarget) - row.readabilityMaterial.opacity) * ease
+          row.readabilityMaterial.opacity += (Math.min(1, readabilityTarget) - row.readabilityMaterial.opacity) * ease
           // 描边颜色向近黑 lerp（亮底避光，上游 lyricReadabilityColorForBrightBackdrop）
-          row.readabilityMaterial.color.set('#ffffff').lerp(
-            readabilityDarkColor,
-            Math.min(0.92, BACKDROP_ADAPT * 0.92),
-          )
+          row.readabilityMaterial.color.set('#ffffff').lerp(readabilityDarkColor, Math.min(0.92, BACKDROP_ADAPT * 0.92))
         }
 
         // ---- 辉光层（上游 :1708-1729）----
@@ -1677,18 +1775,17 @@ export function LyricStage({
           row.glow.visible = mesh.visible
           row.glow.position.x = mesh.position.x
           row.glow.position.y = mesh.position.y
-          row.glow.position.z = mesh.position.z - 0.030
+          row.glow.position.z = mesh.position.z - 0.03
           row.glow.scale.copy(mesh.scale)
           // 辉光颜色跟随封面调色板（上游 setLyricMaterialColor 每帧同步）
-          row.glowMaterial.color.set(glowColorForPalette(palette))
+          row.glowMaterial.color.set(glowColor)
           const rowGlowBeat = Math.max(0, Math.min(1.5, glow.beatGlow))
           const glowOpacityTarget = isActive
             ? row.targetAlpha * currentLineGlow * (1 + rowGlowBeat * 0.46) * depthFade
             : 0
           const glowOpacity = row.glowMaterial.opacity
           let nextGlowOpacity =
-            glowOpacity +
-            (glowOpacityTarget - glowOpacity) * (glowOpacityTarget > glowOpacity ? GLOW_RISE : GLOW_FALL)
+            glowOpacity + (glowOpacityTarget - glowOpacity) * (glowOpacityTarget > glowOpacity ? GLOW_RISE : GLOW_FALL)
           if (!isActive && nextGlowOpacity < GLOW_ZERO) nextGlowOpacity = 0
           row.glowMaterial.opacity = nextGlowOpacity
         }
@@ -1703,6 +1800,21 @@ export function LyricStage({
     //   全部判为窗口外，每帧 dispose/重建造成抖动。
     const keepLo = active - READABILITY_KEEP_BEFORE
     const keepHi = active + READABILITY_KEEP_AFTER
+    // ★ 译词行 → 父行索引的**反查表**，每帧建一次（第三十四轮性能修复，§5.4 D2）。
+    //
+    //   此前在裁剪循环内**逐行线性扫描 `lines`** 反查父行 —— 最坏 O(槽位数 × 行数)，
+    //   120 行的歌配译词即 ~14400 次比较/帧。而这张表只由 `slotInfo` 决定，
+    //   与 `active` 无关，因此每帧建一次即 O(行数)，之后查询 O(1)。
+    const translationParentOf = new Int32Array(rows.length).fill(-1)
+    for (let i = 0; i < lines.length; i++) {
+      const count = slotInfo.transSlot[i]?.length ?? 0
+      if (count <= 0) continue
+      const base = lines.length + (slotInfo.transOffset[i] ?? 0)
+      for (let k = 0; k < count; k++) {
+        const slot = base + k
+        if (slot >= 0 && slot < translationParentOf.length) translationParentOf[slot] = i
+      }
+    }
     for (let slotIndex = 0; slotIndex < rows.length; slotIndex++) {
       const row = rows[slotIndex]
       if (!row) continue
@@ -1710,16 +1822,8 @@ export function LyricStage({
       if (slotIndex < lines.length) {
         inKeepWindow = slotIndex === active || (slotIndex >= keepLo && slotIndex <= keepHi)
       } else {
-        // 译词行：父行索引 = transOffset 反查（保持线性扫描，行数有限）
-        let parent = -1
-        for (let i = 0; i < lines.length; i++) {
-          const off = slotInfo.transOffset[i] ?? 0
-          const count = slotInfo.transSlot[i]?.length ?? 0
-          if (count > 0 && slotIndex >= lines.length + off && slotIndex < lines.length + off + count) {
-            parent = i
-            break
-          }
-        }
+        // 译词行：直接查反查表（O(1)）
+        const parent = translationParentOf[slotIndex]
         inKeepWindow = parent >= 0 && parent >= keepLo && parent <= keepHi
       }
       if (inKeepWindow) continue
@@ -1738,18 +1842,9 @@ export function LyricStage({
     const layoutScale = 1
 
     if (coverPose.active) {
-      coverQuat.set(
-        coverPose.quaternion.x,
-        coverPose.quaternion.y,
-        coverPose.quaternion.z,
-        coverPose.quaternion.w,
-      )
+      coverQuat.set(coverPose.quaternion.x, coverPose.quaternion.y, coverPose.quaternion.z, coverPose.quaternion.w)
       group.quaternion.copy(coverQuat)
-      group.position.set(
-        coverPose.position.x,
-        coverPose.position.y + floatYGroup,
-        coverPose.position.z + LYRIC_PLANE_Z,
-      )
+      group.position.set(coverPose.position.x, coverPose.position.y + floatYGroup, coverPose.position.z + LYRIC_PLANE_Z)
     } else {
       group.quaternion.identity()
       // 固定姿态分支 = 地形模式专属；抬升量让主行落在舞台视觉中心

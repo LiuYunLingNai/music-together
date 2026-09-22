@@ -1,16 +1,20 @@
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
-import { readAudioBands } from '../shared/AudioAnalyser'
+import { usePlayerStore } from '@/stores/playerStore'
+import { lyricPlayerBridge } from '@/lib/lyricPlayerBridge'
 import type { VisualModeId } from '../shared/VisualMode'
+import { consumePrimeCamPunch, stepBeatCameraFrame } from './beatCamera'
 import { applyParticleSpinDrag, lyricWorldPos } from './gestureRotationState'
 import { isPointerOverShelfCard } from './shelfHitRegistry'
+import { stageProjectionShiftX, stepStageSafeArea } from './stageSafeArea'
 import {
   MAX_PHI,
   MAX_RADIUS,
   MIN_PHI,
   MIN_RADIUS,
   SHELF_CAMERA_SPEED,
+  boostCameraPunch,
   clampOrbit,
   orbitCameraState,
   recenterCamera,
@@ -60,7 +64,6 @@ interface CameraRigProps {
 export function CameraRig({ mode, enabled = true, onCanvasClick }: CameraRigProps) {
   const { camera, gl } = useThree()
   const cinemaTimeRef = useRef(0)
-  const kickRef = useRef({ theta: 0, phi: 0, radius: 0, roll: 0, punch: 0 })
 
   /** 拖拽会话：记录按下点、上一帧位置与时间，用于判定 drag 并计算 spinDt。 */
   const dragRef = useRef<{
@@ -217,31 +220,56 @@ export function CameraRig({ mode, enabled = true, onCanvasClick }: CameraRigProp
     const delta = Math.min(rawDelta, 1 / 20)
     cinemaTimeRef.current += delta
     const state = orbitCameraState
-    const bands = readAudioBands()
-    const kick = kickRef.current
+    const player = usePlayerStore.getState()
 
-    if (enabled && bands.bassHit) {
-      // ★ theta（环绕角）**不**在普通曲目上累积。
-      //
-      //   上游 `applyBeatCameraKick`（02-beat-camera-runtime.js:998-1002）只在
-      //   `leadEvent.dj` 为真时才累加 thetaKick，而 `dj` 来自 `djMode.active`，
-      //   其出厂值是 **false**（00-state/03-beat-dj-state.js:87），且只对
-      //   直播/DJ 音源才可能为真。因此上游播普通歌曲时**没有任何** theta 冲击。
-      //
-      //   此前本项目每个鼓点都累加一个固定 theta（0.0022），而 theta 衰减很慢
-      //   （2.6/s 指数），连续鼓点下会累积成一个持续的左右摇摆 —— 这是
-      //   上游没有的运动，属于"相机自己漂移"的观感来源。
-      //   （`kick.theta` 仍保留为 0，供 DJ 路径将来接入时复用。）
-      kick.phi = Math.max(kick.phi, 0.0048)
-      kick.radius = Math.max(kick.radius, 0.085)
-      kick.roll = Math.max(kick.roll, 0.0035)
-      kick.punch = 1
+    // ★ 节拍冲击改由**事件调度器**给出（`beatCamera.ts`）。
+    //
+    //   上游不是"命中即踢一脚"，而是把每次命中排成带 `attack/hold/release`
+    //   包络的事件，逐帧对**所有在飞事件**求包络、取最强者为 lead，再按
+    //   `combo`（downbeat/push/drop/rebound/accent）分配
+    //   radius/phi/roll —— 每一拍的形态因此不同，并有整曲自适应振幅。
+    //
+    //   此前本项目是"4 个常数 + 指数衰减"（`kick.phi = max(kick.phi, 0.0048)`
+    //   等），于是**每一拍看起来都一样**，抒情歌与炸歌完全相同。
+    //
+    //   ★ 仍然是**单点驱动**（红线 33）：包络求值在这里（每帧一次，与上游
+    //     `updateCinema(dt)` 的调用位置一致）；①④ 两步（引擎与整曲自适应）
+    //     在 `AudioStepDriver` 里按**音频分析频率**推进（上游把它们放在
+    //     `if (audioStepDt > 0)` 之内）—— 分频是**正确性**要求，见
+    //     `stepBeatCameraAudio` 的说明。
+    //
+    //   注意 `enabled`（节拍相机开关）关闭时传 `playing=false`，让包络
+    //   照常衰减到 0，避免关掉开关后镜头仍停在上一拍的推镜上。
+    //
+    //   ★ 时钟必须用**逐帧**的 `getFrameTime()`，不能用 `player.currentTime`
+    //     （第三十四轮修，§5.4 B1）。后者被 `useHowl` 按
+    //     `CURRENT_TIME_THROTTLE_MS = 100` 节流成 **10Hz**，而上游读的是
+    //     逐帧精确的 `audio.currentTime`（`02-beat-camera-runtime.js:921`）。
+    //
+    //     10Hz 的量化步长（100ms）比包络的 `attack`（14–38ms）**还长**，
+    //     于是攻击段实际退化成"一步到位"；`lockedWindow`（70–110ms）也与
+    //     量化步长同量级，节奏接受判定会被量化误差干扰。
+    //
+    //     同一个时钟歌词侧已在用（第 31 轮为"10Hz 不流畅"专门加的），
+    //     节拍相机此前漏了 —— 同一个问题只修了一半。
+    //     取不到时（未起播 / 已停止）回退到 store 值，行为与之前一致。
+    const frameTime = lyricPlayerBridge.getFrameTime()
+    const audioClock = frameTime === null ? player.currentTime : frameTime
+    const kick = stepBeatCameraFrame(delta, audioClock, player.isPlaying && enabled)
+
+    // ★ 切歌入场推镜的 `camPunch` 抬高（§5.4 A8）。
+    //   上游 `primeCinemaAfterTrackStart` 会 `camPunch = max(camPunch, 0.11)`
+    //   配合 `punch/radiusKick/phiKick` 打一记入场冲击。`camPunch` 住在
+    //   `orbitCameraState`，而 `beatCamera` 不反向依赖相机模块 —— 因此由
+    //   它暴露一个**一次性**的待消费值，在这里取走（读后清零）。
+    if (enabled) {
+      const primePunch = consumePrimeCamPunch()
+      if (primePunch > 0) boostCameraPunch(primePunch)
     }
-    kick.theta *= Math.max(0, 1 - 2.6 * delta)
-    kick.phi *= Math.max(0, 1 - 3 * delta)
-    kick.radius *= Math.max(0, 1 - 2.2 * delta)
-    kick.roll *= Math.max(0, 1 - 3.4 * delta)
-    kick.punch *= Math.max(0, 1 - 4.2 * delta)
+
+    // theta（环绕角）在普通曲目上恒为 0：上游只在 `leadEvent.dj` 为真时累加
+    // thetaKick，而 `djMode.active` 出厂 false 且只对直播/DJ 音源为真。
+    // 本项目无直播音源，故 `kick.thetaKick` 恒为 0 —— 保留读取以对齐上游合成式。
 
     // ---- 回正：向基准姿态平滑收敛（上游 updateCamera 的 recentering 分支）----
     if (state.recentering) {
@@ -249,9 +277,7 @@ export function CameraRig({ mode, enabled = true, onCanvasClick }: CameraRigProp
       const phiDelta = state.baselinePhi - state.userPhi
       const radiusDelta = state.baselineRadius - state.userRadius
       const distance = Math.sqrt(
-        thetaDelta * thetaDelta +
-          phiDelta * phiDelta +
-          Math.pow(radiusDelta / Math.max(1, state.baselineRadius), 2),
+        thetaDelta * thetaDelta + phiDelta * phiDelta + Math.pow(radiusDelta / Math.max(1, state.baselineRadius), 2),
       )
       // 上游：ease 随偏离量增大而略增，夹在 [0.052, 0.135]
       const ease = Math.max(0.05 + distance * 0.08, 0.052)
@@ -270,10 +296,7 @@ export function CameraRig({ mode, enabled = true, onCanvasClick }: CameraRigProp
         Math.abs(shortestAngleDelta(state.theta, visualThetaTarget)) < 0.0016 &&
         Math.abs(state.phi - visualPhiTarget) < 0.0016 &&
         Math.abs(state.radius - visualRadiusTarget) < 0.018
-      const settled =
-        Math.abs(thetaDelta) < 0.0012 &&
-        Math.abs(phiDelta) < 0.0012 &&
-        Math.abs(radiusDelta) < 0.014
+      const settled = Math.abs(thetaDelta) < 0.0012 && Math.abs(phiDelta) < 0.0012 && Math.abs(radiusDelta) < 0.014
       const timedOut = state.recenterStartedAt > 0 && performance.now() - state.recenterStartedAt > 1800
       if ((settled && visualSettled) || timedOut) {
         state.userTheta = state.baselineTheta
@@ -284,17 +307,20 @@ export function CameraRig({ mode, enabled = true, onCanvasClick }: CameraRigProp
       }
     }
 
-    // 上游 `updateCinema` 的阻尼语义（03-focus-cinema-camera.js）：
-    //   shake    = clamp(fx.cinemaShake, 0, 1.8)  // 出厂默认 0.5
-    //   idleDamp = (rotating ? 0.25 : 1) * shake  // 旋转时仍保留 1/4 漂移，不硬停
-    //   beatDamp = shake                          // 非聚焦态
+    // 上游 `updateCinema` 的阻尼语义（03-focus-cinema-camera.js:275-284）：
+    //   shake    = clamp(fx.cinemaShake, 0, 1.8)        // 出厂默认 0.5
+    //   idleDamp = (rotating ? 0.25 : 1) * shake        // 旋转时仍保留 1/4 漂移
+    //   beatDamp = (focus.active ? 0.55 : 1.0) * shake  // ★ 跟拍时压低节拍冲击
+    //
+    // ★ `beatDamp` 在**跟拍激活时压到 0.55** —— 此前本项目漏了这一档，
+    //   一律用 `shake`，于是歌单架跟拍/歌词 lookAt 期间镜头仍在满幅推拉，
+    //   与"跟拍时画面应当稳定"的上游意图相反。
     const shake = enabled ? CINEMA_SHAKE : 0
     const idleDamp = (state.rotating ? 0.25 : 1) * shake
-    const beatDamp = shake
-    const cineTheta = Math.sin(cinemaTimeRef.current * 0.08) * 0.012 * idleDamp + kick.theta * beatDamp
-    const cinePhi = Math.sin(cinemaTimeRef.current * 0.06 + 1) * 0.01 * idleDamp + kick.phi * beatDamp
-    const cineRadius =
-      Math.sin(cinemaTimeRef.current * 0.04 + 2) * 0.08 * idleDamp - kick.radius * beatDamp * 1.18
+    const beatDamp = (state.focus.active ? 0.55 : 1.0) * shake
+    const cineTheta = Math.sin(cinemaTimeRef.current * 0.08) * 0.012 * idleDamp + kick.thetaKick * beatDamp
+    const cinePhi = Math.sin(cinemaTimeRef.current * 0.06 + 1) * 0.01 * idleDamp + kick.phiKick * beatDamp
+    const cineRadius = Math.sin(cinemaTimeRef.current * 0.04 + 2) * 0.08 * idleDamp - kick.radiusKick * beatDamp * 1.18
 
     // focus 优先；否则若有基准锁用 baseline，否则用 user（上游三分支）。
     const focus = state.focus
@@ -304,9 +330,7 @@ export function CameraRig({ mode, enabled = true, onCanvasClick }: CameraRigProp
     const baseRadius = locked ? state.baselineRadius : state.userRadius
 
     const targetTheta = focus.active ? focus.theta : baseTheta + cineTheta
-    const targetPhi = focus.active
-      ? focus.phi
-      : Math.max(MIN_PHI, Math.min(MAX_PHI, basePhi + cinePhi))
+    const targetPhi = focus.active ? focus.phi : Math.max(MIN_PHI, Math.min(MAX_PHI, basePhi + cinePhi))
     const targetRadius = focus.active
       ? focus.radius
       : Math.max(MIN_RADIUS, Math.min(MAX_RADIUS, baseRadius + cineRadius))
@@ -376,20 +400,54 @@ export function CameraRig({ mode, enabled = true, onCanvasClick }: CameraRigProp
       state.lookAt.z + state.radius * cy * ct,
     )
     camera.lookAt(state.lookAt)
-    camera.rotation.z += kick.roll * shake
 
-    // FOV 冲击按上游合成：cameraPunch = max(camPunch*0.55, punch*0.54 + radiusKick*0.16) * shake，
-    // 再压到 targetFov = 45 - cameraPunch*2.35（03-focus-cinema-camera.js:137-140）。
-    // camPunch 是独立全局（预设切换/跟拍注入），逐帧 *= 0.86。
+    // 节拍滚转（上游 updateCinema 的 rollKick，逐帧叠加在 lookAt 之后 ——
+    // `lookAt` 会重算四元数，放在它前面会被整个覆盖掉）。
+    camera.rotation.z += kick.rollKick * shake
+
+    // ---- 侧栏安全区退让（第三十三轮，HANDOFF §2 D12）----
+    //
+    // 侧栏（热歌榜/聊天）展开时整幅 3D 内容横向让开，等价于经典播放器的
+    // `padding-inline` —— 画布是 absolute inset-0，CSS 内边距对 WebGL 无效，
+    // 只能在相机侧表达。见 `stageSafeArea.ts` 顶部说明。
+    //
+    // ★ 用**离轴投影**（叠加到 `projectionMatrix.elements[8]`），**不是**平移机位。
+    //
+    //   相机平移是**世界空间**的，而透视会按深度缩放世界尺度：同一个世界
+    //   位移在近处（歌曲架 z≈0.98）与远处（歌词 z≈2.24）产生的**屏幕**
+    //   位移不等。要让近处的歌曲架刚好清开面板，挑任何单一深度做换算都会
+    //   给其他深度留下残差（实测：挑 lookAt 深度在 1366 上残差 1.05%）。
+    //
+    //   离轴投影把整个视锥横移，**所有深度得到完全相同的屏幕平移**
+    //   （实测四个深度 Δ 均为精确 5.000%），这才是"内边距"的语义。
+    //   射线拾取读的是相机矩阵 + 投影矩阵，`elements[8]` 会被计入，
+    //   因此歌单架的命中判定与画面同步，无需另改。
+    //
+    // ★★ 必须放在 `updateProjectionMatrix()` **之后**。
+    //
+    //   那个调用会用 `fov/aspect/near/far` **重建**投影矩阵，把叠加值覆盖掉。
+    //   放在它前面 = 每帧白改（画面纹丝不动），且不报任何错 —— 典型的静默失效。
+    //   本组件末尾本来就有一次重建，因此这里在其后追加。
     const perspective = camera as THREE.PerspectiveCamera
     const globalPunch = tickCameraPunch()
-    const cameraPunch = Math.max(
-      globalPunch * 0.55,
-      (kick.punch * 0.54 + kick.radius * 0.16) * shake,
-    )
+    const cameraPunch = Math.max(globalPunch * 0.55, (kick.punch * 0.54 + kick.radiusKick * 0.16) * shake)
     const targetFov = 45 - cameraPunch * 2.35
     perspective.fov += (targetFov - perspective.fov) * (targetFov < perspective.fov ? 0.24 : 0.12)
     perspective.updateProjectionMatrix()
+
+    // ↑ 重建之后才能叠加离轴偏移（顺序不可调换，见上）
+    //
+    // ★ 退让量走 `stepStageSafeArea`（200ms `ease-out` 缓动），不是直接把
+    //   目标值用上 —— 经典播放器的 padding 是 `transition: 200ms ease-out`，
+    //   3D 侧必须复刻同样的"滑过去"，否则开关面板时画面是硬切。
+    //   缓动与投影叠加都在这里（每帧唯一的相机写入者）—— 单点驱动。
+    const projectionShift = stageProjectionShiftX(stepStageSafeArea(delta))
+    if (projectionShift !== 0) {
+      perspective.projectionMatrix.elements[8] += projectionShift
+      // 逆矩阵要跟着更新：`Raycaster.setFromCamera` 与部分 R3F 内部逻辑
+      // 会用它做反投影，不同步会让拾取与画面错位。
+      perspective.projectionMatrixInverse.copy(perspective.projectionMatrix).invert()
+    }
   })
   /* eslint-enable react-hooks/immutability */
 

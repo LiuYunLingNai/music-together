@@ -82,15 +82,12 @@ function useSeekPreview(currentTime: number) {
     setSeekTime(target)
   }, [])
 
-  const commitSeek = useCallback(
-    (target: number, onSeek: (t: number) => void) => {
-      onSeek(target)
-      // 与经典播放器一致：提交后立即释放。
-      // 此时 store 已被 seek() 同步设为 target，不会回退。
-      setIsSeeking(false)
-    },
-    [],
-  )
+  const commitSeek = useCallback((target: number, onSeek: (t: number) => void) => {
+    onSeek(target)
+    // 与经典播放器一致：提交后立即释放。
+    // 此时 store 已被 seek() 同步设为 target，不会回退。
+    setIsSeeking(false)
+  }, [])
 
   return {
     displayTime: isSeeking ? seekTime : currentTime,
@@ -299,10 +296,7 @@ export function MineradioTransport({
     }
     setPlayCooldown(true)
     if (playCooldownTimer.current) clearTimeout(playCooldownTimer.current)
-    playCooldownTimer.current = setTimeout(
-      () => setPlayCooldown(false),
-      TIMING.PLAYER_NEXT_DEBOUNCE_MS,
-    )
+    playCooldownTimer.current = setTimeout(() => setPlayCooldown(false), TIMING.PLAYER_NEXT_DEBOUNCE_MS)
   }, [playCooldown, disabled, canPlay, canVote, effectivePlaying, setIntent, onPlay, onPause, onStartVote])
 
   /**
@@ -323,10 +317,7 @@ export function MineradioTransport({
       }
       setSkipCooldown(true)
       if (skipCooldownTimer.current) clearTimeout(skipCooldownTimer.current)
-      skipCooldownTimer.current = setTimeout(
-        () => setSkipCooldown(false),
-        TIMING.PLAYER_NEXT_DEBOUNCE_MS,
-      )
+      skipCooldownTimer.current = setTimeout(() => setSkipCooldown(false), TIMING.PLAYER_NEXT_DEBOUNCE_MS)
     },
     [skipCooldown, disabled, ability, canVote, onNext, onPrev, onStartVote],
   )
@@ -374,7 +365,9 @@ export function MineradioTransport({
               <MarqueeText>{currentTrack?.title ?? '暂无歌曲'}</MarqueeText>
             </div>
             <div className="mt-mr-artist">
-              <MarqueeText>{currentTrack ? currentTrack.artist.filter(Boolean).join(' / ') : '点击搜索添加歌曲'}</MarqueeText>
+              <MarqueeText>
+                {currentTrack ? currentTrack.artist.filter(Boolean).join(' / ') : '点击搜索添加歌曲'}
+              </MarqueeText>
             </div>
           </div>
           <MiniChatButton onOpenChat={onOpenChat} chatUnreadCount={chatUnreadCount} />
@@ -422,7 +415,11 @@ export function MineradioTransport({
             disabled={disabled || playCooldown || (!canPlay && !canVote)}
             aria-label={effectivePlaying ? '暂停' : '播放'}
           >
-            {effectivePlaying ? <Pause className="size-4" fill="currentColor" /> : <Play className="ml-0.5 size-4" fill="currentColor" />}
+            {effectivePlaying ? (
+              <Pause className="size-4" fill="currentColor" />
+            ) : (
+              <Play className="ml-0.5 size-4" fill="currentColor" />
+            )}
           </Button>
 
           <Tooltip delayDuration={300}>
@@ -493,9 +490,7 @@ export function MineradioTransport({
                 aria-label="播放列表"
               >
                 <ListMusic className="size-4" />
-                {queueLength > 0 && (
-                  <span className="mt-mr-badge">{queueLength > 99 ? '99+' : queueLength}</span>
-                )}
+                {queueLength > 0 && <span className="mt-mr-badge">{queueLength > 99 ? '99+' : queueLength}</span>}
               </Button>
             </TooltipTrigger>
             <TooltipContent>播放列表</TooltipContent>
@@ -511,17 +506,9 @@ function MiniChatButton({ onOpenChat, chatUnreadCount }: { onOpenChat: () => voi
   return (
     <Tooltip delayDuration={300}>
       <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn('mt-mr-btn shrink-0')}
-          onClick={onOpenChat}
-          aria-label="聊天"
-        >
+        <Button variant="ghost" size="icon" className={cn('mt-mr-btn shrink-0')} onClick={onOpenChat} aria-label="聊天">
           <MessageSquare className="size-4" />
-          {chatUnreadCount > 0 && (
-            <span className="mt-mr-badge">{chatUnreadCount > 99 ? '99+' : chatUnreadCount}</span>
-          )}
+          {chatUnreadCount > 0 && <span className="mt-mr-badge">{chatUnreadCount > 99 ? '99+' : chatUnreadCount}</span>}
         </Button>
       </TooltipTrigger>
       <TooltipContent>聊天</TooltipContent>

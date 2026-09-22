@@ -21,9 +21,18 @@ export interface CoverAssets {
   accent: string | null
 }
 
+/**
+ * 已加载封面的缓存（Promise 复用 + LRU 上限）。
+ *
+ * ★ 这里**只保留一份**缓存。曾经另有一个 `resolved: Map<string, CoverAssets>`
+ *   用于"同步读取已完成的资源"（配 `peekResolvedCoverAssets`），但：
+ *     ① 它的唯一读取者 `peekResolvedCoverAssets` **全仓零调用方**（死导出）；
+ *     ② 它**只写不清理** —— `MAX_CACHE` 的 LRU 只作用于本 map，`resolved`
+ *        会随每个新封面 URL 无界增长（每条 = 解码后的 `HTMLImageElement`
+ *        + 256×256 RGBA canvas，约 256KB），长时间连续切歌只增不减。
+ *   即"防止内存无限增长"的注释与实际行为相反。删掉后 LRU 才真正生效。
+ */
 const cache = new Map<string, Promise<CoverAssets | null>>()
-/** 已成功加载的资源，供同步读取。 */
-const resolved = new Map<string, CoverAssets>()
 const MAX_CACHE = 12
 
 /**
@@ -53,18 +62,28 @@ export function loadCoverAssets(coverUrl: string | undefined | null): Promise<Co
           edge: buildCoverEdgeTexture(image),
           accent: sampleCoverAccent(image),
         }
-        resolved.set(proxied, assets)
         resolve(assets)
       })
     }
 
-    image.onerror = () => resolve(null)
+    image.onerror = () => {
+      // ★ 失败必须把缓存项**摘掉**，否则这个 URL 被永久"投毒"：
+      //   `cache` 里留着一个已 resolve 成 null 的 Promise，之后所有
+      //   `loadCoverAssets(同一 URL)` 都直接命中它并立刻拿到 null ——
+      //   哪怕只是瞬时网络抖动/代理超时，这首歌的封面、调色板、
+      //   accent 在本会话内**再也不会重试**，只能刷新页面。
+      //   摘掉后下一次调用会重新发起请求（失败仍然只降级为"无封面"，
+      //   不影响渲染）。
+      cache.delete(proxied)
+      resolve(null)
+    }
     image.src = proxied
   })
 
   cache.set(proxied, promise)
 
-  // 简单的 LRU 上限，防止长时间连续切歌无限增长。
+  // LRU：淘汰最旧的条目，防止长时间连续切歌时无限增长。
+  // （现在这是唯一的缓存，因此上限真正生效。）
   while (cache.size > MAX_CACHE) {
     const oldest = cache.keys().next().value
     if (oldest === undefined) break
@@ -74,20 +93,7 @@ export function loadCoverAssets(coverUrl: string | undefined | null): Promise<Co
   return promise
 }
 
-/**
- * 同步读取已缓存的封面资源（仅在已加载完成时可用）。
- *
- * 命中时返回 Promise 已 resolve 的资源；未加载或失败返回 null。
- * 供渲染循环在切歌瞬间取用上一张封面，避免舞台闪黑。
- */
-export function peekResolvedCoverAssets(coverUrl: string | undefined | null): CoverAssets | null {
-  if (!coverUrl) return null
-  const entry = resolved.get(getProxiedCoverUrl(coverUrl))
-  return entry ?? null
-}
-
 /** 清空封面缓存。舞台卸载时调用。 */
 export function clearCoverCache(): void {
   cache.clear()
-  resolved.clear()
 }

@@ -68,15 +68,7 @@ export const coverPose = {
 }
 
 /** 由 `ParticleField` 每帧写入封面姿态与位置。 */
-export function publishCoverPose(
-  x: number,
-  y: number,
-  z: number,
-  w: number,
-  px = 0,
-  py = 0,
-  pz = 0,
-): void {
+export function publishCoverPose(x: number, y: number, z: number, w: number, px = 0, py = 0, pz = 0): void {
   coverPose.quaternion.x = x
   coverPose.quaternion.y = y
   coverPose.quaternion.z = z
@@ -194,9 +186,7 @@ export function rebaseParticleRotationAxis(
 }
 
 /** 对两个轴各做一次 rebase。 */
-export function rebaseParticleRotationIfNeeded(
-  consumers: Array<{ rotation: { x: number; y: number } }> = [],
-): void {
+export function rebaseParticleRotationIfNeeded(consumers: Array<{ rotation: { x: number; y: number } }> = []): void {
   rebaseParticleRotationAxis('x', consumers)
   rebaseParticleRotationAxis('y', consumers)
 }
@@ -207,9 +197,7 @@ export function rebaseParticleRotationIfNeeded(
  * 双击回正、切歌、准备销毁时调用。传 `syncVisual` 的消费者会被直接
  * 归零，避免下一次挂载带着旧角度进入。
  */
-export function resetGestureRotation(
-  consumers: Array<{ rotation: { x: number; y: number; z?: number } }> = [],
-): void {
+export function resetGestureRotation(consumers: Array<{ rotation: { x: number; y: number; z?: number } }> = []): void {
   const state = gestureRotationState
   state.x = 0
   state.y = 0

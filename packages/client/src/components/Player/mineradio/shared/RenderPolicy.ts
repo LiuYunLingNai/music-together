@@ -43,8 +43,17 @@ export const VISUAL_QUALITY_LABELS: Record<VisualQuality, string> = {
 const RENDER_DPR_CAP = 1.35
 const RENDER_PIXEL_BUDGET = 5_200_000
 const RENDER_MIN_DPR = 0.72
-/** 上游主循环的活跃帧率基准（`RENDER_ACTIVE_FPS`）。 */
-const RENDER_ACTIVE_FPS = 90
+/**
+ * 每帧允许推进的模拟时间上限（秒）。
+ *
+ * 上游 `11-main-loop.js:309` 的 `dt` 钳制值，**固定常量、与画质档无关**：
+ *
+ *     var dt = Math.min((now - prevTime) / 1000, 0.05);
+ *
+ * 与地形层（`TopographyScene` 用 `Math.min(rawDelta, 1/20)`）取同一值，
+ * 保证粒子层与地形层的时钟一致。
+ */
+const MAX_DELTA_SECONDS = 0.05
 
 /** 硬件画像 —— 上游 `detectRuntimeHardwareProfile`（08-desktop-render-power.js:41-58）。 */
 export interface HardwareProfile {
@@ -191,6 +200,17 @@ export interface RenderPolicy {
   maxDeltaSeconds: number
 
   // ---- 以下**不**由画质档控制（上游是独立设置）----
+  /**
+   * 低功耗上下文（触摸设备 / `prefers-reduced-motion`）。
+   *
+   * ★ 必须**显式透出**：消费者需要区分"低功耗"与"低画质档"。
+   *   此前该标志只存在于 `detectPowerContext()` 内部，消费者拿不到，
+   *   于是用 `perfLevel <= 0` 当替身 —— 而 `perfLevel` 是**画质档派生值**，
+   *   出厂 `eco` 恒为 0，导致**默认配置下所有用户**都走进低功耗分支
+   *   （上游 Mineradio 的 `#album-bg` 封面模糊铺底被静默跳过）。
+   *   这同时违反红线 8（不得用画质档门控视觉特性）。
+   */
+  lowPower: boolean
   /** 粒子网格边长（奇数）—— 来自 `fx.coverResolution` 出厂 1.55 */
   particleGrid: number
   /** 粒子总数 = grid² */
@@ -276,10 +296,22 @@ export function getRenderPolicy(
     audioAnalysisScale: runtimeAudioAnalysisScale(level, profile.deviceMemoryGB > 0 && profile.deviceMemoryGB <= 4),
     analysisStrideTime: runtimeAnalysisStride('time', 1024, level),
     analysisStrideWideBand: runtimeAnalysisStride('wide-band', 1024, level),
-    // 上游主循环帧率 = RENDER_ACTIVE_FPS × perfScale；delta 上限取其倒数。
-    // 旧实现用 1/20~1/60 的固定档，这里对齐上游的实际帧率预算。
-    maxDeltaSeconds: 1 / Math.max(30, Math.round(RENDER_ACTIVE_FPS * perfScale)),
+    // 每帧可推进的模拟时间上限（秒）—— 上游 `11-main-loop.js:309`：
+    //   `var dt = Math.min((now - prevTime) / 1000, 0.05)`
+    //
+    // ★ 这是**固定常量 0.05（1/20）**，与画质档**无关**。
+    //   此前误按 `1 / (90 × perfScale)` 推导（high 档 11.1ms、eco 15.4ms），
+    //   全都**小于 60Hz 的 16.7ms 帧时长** —— 于是 60Hz 屏上粒子层每个
+    //   时钟（uTime、唱片自旋、burst 衰减、预设切换脉冲、手势惯性）都被
+    //   按 0.62~0.92 倍缩放，表现为**整体慢放**；而地形层用的是 1/20，
+    //   两层的时钟因此不一致（同一首歌切模式会看到速度跳变）。
+    //
+    //   上游用帧率**门控**（`capMainLoopFpsForBudget`）控制开销，而不是
+    //   压缩 dt；那个门控在播放中（vsync 模式）返回 0 = 不限制。
+    maxDeltaSeconds: MAX_DELTA_SECONDS,
 
+    // 低功耗上下文原样透出（见接口注释：消费者不得用 perfLevel 代替它）
+    lowPower: power.lowPower,
     particleGrid,
     particleCount: particleGrid * particleGrid,
     coverResolutionScale: coverResolution,
@@ -317,9 +349,7 @@ export function getRenderPolicy(
  *   以便将来若要"自动"真正分档时有唯一落点，且**不会**再出现
  *   "文档说会自动、实际写死"的错配。
  */
-export function detectDefaultQuality(
-  profile: HardwareProfile = detectHardwareProfile(),
-): VisualQuality {
+export function detectDefaultQuality(profile: HardwareProfile = detectHardwareProfile()): VisualQuality {
   // 上游出厂即 eco；低端硬件也只是把预算等级压到 0（见 runtimePerfBudgetLevel），
   // 不改变档位本身。保留 profile 入参以免调用方误以为"与硬件无关"。
   void profile
@@ -327,27 +357,36 @@ export function detectDefaultQuality(
 }
 
 /**
- * 帧循环模式：
- * - 页面可见 → always（连续渲染）
- * - 页面不可见（切到别的标签页）→ demand（完全停摆，不空转耗电）
+ * 暂停且页面可见时的帧循环。
  *
- * 为什么**不能**在"暂停"时用 demand：
+ * ★ 第三十四轮修（§5.4 D1）：此前本函数的首个参数是 `_isPlaying` —— **根本没用**。
+ *   于是暂停且页面可见时仍按 vsync 满帧渲染，GPU/CPU 持续满载。
+ *   上游明确按播放态降频：`targetMainStageLyricsFps` / `targetMainLyricsParticleFps`
+ *   在非播放时返回 **24**（播放时 60、交互时 120，`11-main-loop.js:262-277`）。
  *
- * `demand` 只在 `invalidate()` 被调用时渲染一帧。但本舞台的全部动态
- * 都写在 `useFrame` 里（uniform 推进、涟漪、节拍相机、星河流…），
- * 而这套代码**没有任何地方调用 `invalidate()`**。因此一旦进入 demand：
+ * ★ 但**不能**简单地"暂停就停摆"。历史事故（见下方旧说明）：本舞台的全部动态
+ *   （uniform 推进、涟漪、节拍相机、星河流）都写在 `useFrame` 里，一旦进入
+ *   `demand` 就没有任何东西会再 `invalidate()` —— 用户看到的是一块**纯黑舞台**
+ *   （实测 clear=0 / drawArrays=0）。
  *
- *   1. 最多渲染一帧（还是初始化那一帧），之后再也不渲染
- *   2. useFrame 永不执行 → uTime 停在 0 → 粒子静止且极暗
- *   3. 表现为**用户看到一块纯黑画布，直到按下播放才可能亮起来**
+ *   因此暂停时返回 `'demand'` 的**前提**是调用方同时挂一个帧泵
+ *   （`ParticleScene` 的 `PausedFramePump`，以 24fps 主动 `invalidate()`）。
+ *   帧泵保证"照常出画"，而降频把负载压到 vsync 的约 1/3。
  *
- * 这正是"看不出变化/没有粒子"的一层原因：房间没有歌曲时 isPlaying=false，
- * 舞台挂载了、着色器也编译成功了，但画布从头到尾没有被画过。
+ *   两处的常量必须一致：`PAUSED_TARGET_FPS`。
  *
- * 舞台的粒子/涟漪/封面呼吸都是**持续动画**，暂停时也应继续（视觉上更好，
- * 且是本项目与上游一致的行为），所以这里只看页面可见性。
- * 真正需要省电的场景是后台标签页，那时浏览器本就节流 rAF。
+ * 旧的错误实现与证据（保留，防止后人改回）：
+ *   `resolveFrameloop` 曾在 `isPlaying === false` 时返回 `'demand'` 且**没有帧泵**：
+ *   渲染循环整帧不跑 → 画布停留在初始状态 → 纯黑。修复后实测
+ *   clear=69, drawArrays=207（持续渲染）。
  */
-export function resolveFrameloop(_isPlaying: boolean, isDocumentVisible: boolean): 'always' | 'demand' {
-  return isDocumentVisible ? 'always' : 'demand'
+export function resolveFrameloop(isPlaying: boolean, isDocumentVisible: boolean): 'always' | 'demand' {
+  if (!isDocumentVisible) return 'demand'
+  // 播放中：连续渲染（跟随 vsync）
+  if (isPlaying) return 'always'
+  // 暂停但可见：交给帧泵按 PAUSED_TARGET_FPS 驱动（见上方说明）
+  return 'demand'
 }
+
+/** 暂停且可见时的目标帧率 —— 上游非播放档的 24fps（`11-main-loop.js:262-277`）。 */
+export const PAUSED_TARGET_FPS = 24

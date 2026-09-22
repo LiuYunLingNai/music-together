@@ -240,17 +240,13 @@ export function rasterizeLyricMask(options: LyricRasterOptions): LyricMask | nul
   const activeMeasuredIndex = measured.findIndex((m) => m.active)
   const activeAnchor =
     activeMeasuredIndex >= 0
-      ? measured
-          .slice(0, activeMeasuredIndex)
-          .reduce((sum, m) => sum + m.blockHeight, 0) +
+      ? measured.slice(0, activeMeasuredIndex).reduce((sum, m) => sum + m.blockHeight, 0) +
         measured[activeMeasuredIndex].lineHeight / 2
       : totalHeight / 2
   const verticalPadding = 48
   // 以“当前主歌词行”而不是“主行 + 翻译/音译块”作为视觉中心。
   // 同时给上下两侧留出对称空间，副歌词再多也不会把主行向上顶偏。
-  const anchoredHeight = Math.ceil(
-    Math.max(activeAnchor, totalHeight - activeAnchor) * 2 + verticalPadding * 2,
-  )
+  const anchoredHeight = Math.ceil(Math.max(activeAnchor, totalHeight - activeAnchor) * 2 + verticalPadding * 2)
   const H = Math.max(presetHeight, Math.ceil(totalHeight + verticalPadding * 2), anchoredHeight)
 
   canvas.width = W
@@ -400,13 +396,7 @@ export function rasterizeLyricLineMask(options: {
   fontFamily?: string
   fontWeight?: number
 }): LyricLineRaster | null {
-  const {
-    text,
-    subLines = [],
-    scale = 1,
-    fontFamily = DEFAULT_FONT_FAMILY,
-    fontWeight = 750,
-  } = options
+  const { text, subLines = [], scale = 1, fontFamily = DEFAULT_FONT_FAMILY, fontWeight = 750 } = options
 
   const canvas = document.createElement('canvas')
   const ctx = canvas.getContext('2d', { willReadFrequently: false })
@@ -582,8 +572,20 @@ interface ReadabilityPhase {
 
 function readabilityPhases(baseFontSize: number): ReadabilityPhase[] {
   return [
-    { blur: 14, alpha: 0.18, width: Math.max(18, baseFontSize * 0.16), color: 'rgba(0,0,0,1)', dy: baseFontSize * 0.018 },
-    { blur: 5, alpha: 0.32, width: Math.max(9, baseFontSize * 0.075), color: 'rgba(0,0,0,1)', dy: baseFontSize * 0.012 },
+    {
+      blur: 14,
+      alpha: 0.18,
+      width: Math.max(18, baseFontSize * 0.16),
+      color: 'rgba(0,0,0,1)',
+      dy: baseFontSize * 0.018,
+    },
+    {
+      blur: 5,
+      alpha: 0.32,
+      width: Math.max(9, baseFontSize * 0.075),
+      color: 'rgba(0,0,0,1)',
+      dy: baseFontSize * 0.012,
+    },
     { blur: 4, alpha: 0.15, width: Math.max(9, baseFontSize * 0.07), color: 'rgba(255,255,255,1)', dy: 0 },
     { blur: 1.2, alpha: 0.26, width: Math.max(3.2, baseFontSize * 0.03), color: 'rgba(255,255,255,1)', dy: 0 },
   ]
@@ -733,10 +735,10 @@ export function rasterizeLineGlowMask(line: LyricLineRaster): HTMLCanvasElement 
   }
 
   // 0-3. 四级模糊
-  blurPass(`blur(${Math.max(1, 14 * pixelScale).toFixed(2)}px)`, 0.46, Math.max(10 * pixelScale, fontSize * 0.10))
+  blurPass(`blur(${Math.max(1, 14 * pixelScale).toFixed(2)}px)`, 0.46, Math.max(10 * pixelScale, fontSize * 0.1))
   blurPass(`blur(${Math.max(1.5, 34 * pixelScale).toFixed(2)}px)`, 0.34, Math.max(18 * pixelScale, fontSize * 0.18))
   blurPass(`blur(${Math.max(2, 78 * pixelScale).toFixed(2)}px)`, 0.22, Math.max(28 * pixelScale, fontSize * 0.26))
-  blurPass(`blur(${Math.max(3, 116 * pixelScale).toFixed(2)}px)`, 0.13, Math.max(42 * pixelScale, fontSize * 0.40))
+  blurPass(`blur(${Math.max(3, 116 * pixelScale).toFixed(2)}px)`, 0.13, Math.max(42 * pixelScale, fontSize * 0.4))
 
   // 4-11. 八向径向描边（lighter 合成）
   ctx.save()
@@ -801,6 +803,9 @@ export function glowColorForPalette(palette: CoverPalette | null): string {
     g = Math.min(1, g + lift)
     b = Math.min(1, b + lift)
   }
-  const to255 = (v: number) => Math.round(v * 255).toString(16).padStart(2, '0')
+  const to255 = (v: number) =>
+    Math.round(v * 255)
+      .toString(16)
+      .padStart(2, '0')
   return `#${to255(r)}${to255(g)}${to255(b)}`
 }

@@ -20,7 +20,12 @@ import {
  */
 
 /** 构造一帧频谱：把给定频段区间填成某个能量，其余为 0。 */
-function spectrumWith(entries: Array<[number, number, number]>, len = 1024, sampleRate = 44100, fftSize = 2048): Uint8Array {
+function spectrumWith(
+  entries: Array<[number, number, number]>,
+  len = 1024,
+  sampleRate = 44100,
+  fftSize = 2048,
+): Uint8Array {
   const data = new Uint8Array(len)
   const binHz = sampleRate / fftSize
   for (const [lo, hi, value] of entries) {

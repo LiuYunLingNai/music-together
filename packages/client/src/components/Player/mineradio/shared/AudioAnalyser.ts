@@ -1,10 +1,6 @@
 import { Howler } from 'howler'
 import { getAudioTapAnalyser, getAudioTapRevision } from '@/lib/audioTap'
-import {
-  resetSonicAudioMonitor,
-  stepSonicAudioMonitor,
-  type SonicAudioFrame,
-} from './SonicAudioMonitor'
+import { resetSonicAudioMonitor, stepSonicAudioMonitor, type SonicAudioFrame } from './SonicAudioMonitor'
 
 /**
  * 为 Mineradio 舞台提供频谱数据。

@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  SHELF_CULL_DISTANCE,
-  SHELF_MAX_RENDER,
-  SHELF_VISIBLE_RADIUS,
-  computeShelfWindow,
-} from './shelfWindow'
+import { SHELF_CULL_DISTANCE, SHELF_MAX_RENDER, SHELF_VISIBLE_RADIUS, computeShelfWindow } from './shelfWindow'
 
 /**
  * 回归：歌单架回收窗口必须满足三条用户实测的不变量。
