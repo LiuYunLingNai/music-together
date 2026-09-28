@@ -233,11 +233,12 @@ function PlaylistDetailView({ playlistId, onBack }: { playlistId: string; onBack
   const [detail, setDetail] = useState<UserPlaylistDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const onBackRef = useRef(onBack)
-  onBackRef.current = onBack
+  useEffect(() => {
+    onBackRef.current = onBack
+  })
 
   useEffect(() => {
     let active = true
-    setLoading(true)
     fetchUserPlaylistDetail(playlistId)
       .then((data) => {
         if (active) setDetail(data)
@@ -273,8 +274,14 @@ function PlaylistDetailView({ playlistId, onBack }: { playlistId: string; onBack
         cover: tracks[0]?.thumbnailCover ?? tracks[0]?.cover ?? null,
       }
       setDetail(next)
-      const { tracks: _tracks, ...meta } = next
-      upsertPlaylist(meta)
+      upsertPlaylist({
+        id: next.id,
+        name: next.name,
+        cover: next.cover,
+        trackCount: next.trackCount,
+        createdAt: next.createdAt,
+        updatedAt: next.updatedAt,
+      })
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : '移除失败')
     }
