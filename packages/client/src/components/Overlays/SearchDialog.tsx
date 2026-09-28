@@ -15,6 +15,7 @@ import { useRoomStore } from '@/stores/roomStore'
 import { useSearch } from '@/hooks/useSearch'
 import { useRecommendations } from '@/hooks/useRecommendations'
 import { usePlaylist } from '@/hooks/usePlaylist'
+import { useAddToPlaylist } from '@/hooks/useAddToPlaylist'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useSocketContext } from '@/providers/socket-context'
 import { EVENTS, LIMITS } from '@music-together/shared'
@@ -116,6 +117,8 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
   } | null>(null)
   const [keyword, setKeyword] = useState('')
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set())
+  const { addToPlaylist, canUse: canAddToPlaylist } = useAddToPlaylist()
+  const onAddToPlaylist = canAddToPlaylist ? (track: Track) => addToPlaylist(track, track.title) : undefined
   const listRef = useRef<VirtualTrackListRef>(null)
   const dialogContentRef = useRef<HTMLDivElement>(null)
   const sourceContainerRef = useRef<HTMLDivElement>(null)
@@ -558,6 +561,7 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                     isTrackAdded={isTrackAdded}
                     onAddTrack={handleAdd}
                     onInsertAfterCurrent={handleInsertAfterCurrent}
+                    onAddToPlaylist={onAddToPlaylist}
                     onArtistClick={(artist) => {
                       setSearchType('song')
                       handleSearch(artist)
@@ -596,6 +600,7 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                         isTrackAdded={isTrackAdded}
                         onAddTrack={handleAdd}
                         onInsertAfterCurrent={handleInsertAfterCurrent}
+                        onAddToPlaylist={onAddToPlaylist}
                         onArtistClick={(artist) => {
                           setSearchType('song')
                           handleSearch(artist)
@@ -663,6 +668,7 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                     isTrackAdded={isTrackAdded}
                     onAddTrack={handleAdd}
                     onInsertAfterCurrent={handleInsertAfterCurrent}
+                    onAddToPlaylist={onAddToPlaylist}
                     onArtistClick={(artist) => {
                       setSearchType('song')
                       handleSearch(artist)

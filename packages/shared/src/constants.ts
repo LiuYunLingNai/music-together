@@ -15,6 +15,12 @@ export const LIMITS = {
   SEARCH_PAGE_SIZE_MAX: 50,
   SEARCH_PAGE_MAX: 100,
   PLAYLIST_ID_MAX_LENGTH: 200,
+  /** 每个账号最多可创建的本地歌单数量。 */
+  USER_PLAYLIST_MAX: 100,
+  /** 单个本地歌单最多容纳的曲目数量。 */
+  USER_PLAYLIST_TRACKS_MAX: 1000,
+  /** 本地歌单名称最大长度。 */
+  USER_PLAYLIST_NAME_MAX: 100,
 } as const
 
 /** 房间可选择的跨平台最高音质策略。 */

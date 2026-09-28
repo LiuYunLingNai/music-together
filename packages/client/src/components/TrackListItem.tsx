@@ -4,7 +4,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { formatDuration } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import type { Track } from '@music-together/shared'
-import { ArrowUpToLine, Check, Plus } from 'lucide-react'
+import { ArrowUpToLine, Check, ListPlus, Plus } from 'lucide-react'
 import { memo } from 'react'
 
 export interface TrackListItemProps {
@@ -13,6 +13,7 @@ export interface TrackListItemProps {
   isAdded: boolean
   onAdd: (track: Track) => void
   onInsertAfterCurrent?: (track: Track) => void
+  onAddToPlaylist?: (track: Track) => void
   onArtistClick?: (artist: string) => void
   style?: React.CSSProperties
   className?: string
@@ -24,6 +25,7 @@ export const TrackListItem = memo(function TrackListItem({
   isAdded,
   onAdd,
   onInsertAfterCurrent,
+  onAddToPlaylist,
   onArtistClick,
   style,
   className,
@@ -110,6 +112,23 @@ export const TrackListItem = memo(function TrackListItem({
               </Button>
             </TooltipTrigger>
             <TooltipContent>置顶到当前播放下方</TooltipContent>
+          </Tooltip>
+        )}
+
+        {onAddToPlaylist && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8 shrink-0"
+                onClick={() => onAddToPlaylist(track)}
+                aria-label={`将 ${track.title} 加入我的歌单`}
+              >
+                <ListPlus className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>加入我的歌单</TooltipContent>
           </Tooltip>
         )}
       </div>

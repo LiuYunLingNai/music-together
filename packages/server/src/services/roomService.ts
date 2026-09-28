@@ -95,6 +95,23 @@ function upsertRoomMember(room: RoomData, user: User, role: UserRole): RoomMembe
 }
 
 /**
+ * 是否把该用户写入持久成员名册。访客（无密码、非服务器管理员）默认只作为在线用户
+ * 存在于 `room.users`，不进入 `room.members`——但房主与持久管理员即便是访客也始终
+ * 入册，以保证权限协调与永久房间正常运作。已在名册中的用户维持不变（在线状态更新）。
+ */
+function shouldPersistMember(room: RoomData, user: User): boolean {
+  if (user.id === room.creatorId || room.adminUserIds.has(user.id)) return true
+  if (room.members.some((member) => member.id === user.id)) return true
+  return !userRepo.isGuest(user.id)
+}
+
+/** 仅在 {@link shouldPersistMember} 允许时写入名册；访客普通成员被跳过。 */
+function upsertRoomMemberIfPersistable(room: RoomData, user: User, role: UserRole): void {
+  if (!shouldPersistMember(room, user)) return
+  upsertRoomMember(room, user, role)
+}
+
+/**
  * 保证非空房间始终至少有一个具备管理能力的在线用户。
  *
  * - creator 在线：creator 为 owner，清除临时管理员
@@ -297,7 +314,7 @@ export function joinRoom(
     existing.isServerAdmin = userRepo.isServerAdmin(userId)
     roomRepo.setSocketMapping(socketId, roomId, userId, client)
     syncActiveClients(room, existing)
-    upsertRoomMember(room, existing, resolveRole())
+    upsertRoomMemberIfPersistable(room, existing, resolveRole())
     const roleChanged = reconcileRoomRoles(room)
     const hostChanged = electConductor(room)
     roomRepo.persist(roomId)
@@ -317,7 +334,7 @@ export function joinRoom(
   room.users.push(user)
   roomRepo.setSocketMapping(socketId, roomId, userId, client)
   syncActiveClients(room, user)
-  upsertRoomMember(room, user, role)
+  upsertRoomMemberIfPersistable(room, user, role)
 
   // Reconcile roles first so owner/admin returning clears any temporary admin.
   const roleChanged = reconcileRoomRoles(room)
@@ -365,7 +382,7 @@ export function leaveRoom(
   if (roomRepo.hasOtherSocketForUser(roomId, userId, socketId)) {
     roomRepo.deleteSocketMapping(socketId)
     syncActiveClients(room, user)
-    upsertRoomMember(room, user, user.role)
+    upsertRoomMemberIfPersistable(room, user, user.role)
     logger.debug('忽略用户旧连接的断开事件（已有新连接）', { roomId, userId, socketId })
     return { roomId, user, room, hostChanged: false, roleChanged: false, voteUpdated: false, staleSocketOnly: true }
   }

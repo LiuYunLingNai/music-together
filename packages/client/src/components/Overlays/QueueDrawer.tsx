@@ -10,10 +10,11 @@ import type { BilibiliMetadataSource, Track } from '@music-together/shared'
 import { EVENTS } from '@music-together/shared'
 import { useHasHover } from '@/hooks/useHasHover'
 import { useIsMobile } from '@/hooks/useIsMobile'
+import { useAddToPlaylist } from '@/hooks/useAddToPlaylist'
 import { useCallback, useContext, useEffect, useRef, useState, type MouseEvent } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { AbilityContext } from '@/providers/ability-context'
-import { ArrowUpToLine, ChevronDown, ChevronUp, ListX, Music, Play, RefreshCw, Trash2, User, X } from 'lucide-react'
+import { ArrowUpToLine, ChevronDown, ChevronUp, ListPlus, ListX, Music, Play, RefreshCw, Trash2, User, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { MarqueeText } from '@/components/ui/marquee-text'
 import { BilibiliMetadataDialog } from './BilibiliMetadataDialog'
@@ -72,6 +73,7 @@ export function QueueDrawer({
   const canReorder = ability.can('reorder', 'Queue')
   const canPlay = ability.can('play', 'Player')
   const canVote = ability.can('vote', 'Player')
+  const { addToPlaylist, canUse: canAddToPlaylist } = useAddToPlaylist()
   const [confirmClear, setConfirmClear] = useState(false)
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Mobile: track which item has its action toolbar visible
@@ -204,6 +206,22 @@ export function QueueDrawer({
               播放列表 ({queue.length})
             </DrawerTitle>
             <div className="flex items-center gap-1">
+              {canAddToPlaylist && queue.length > 0 && (
+                <Tooltip delayDuration={300}>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={() => addToPlaylist(queue, '房间队列')}
+                      aria-label="将播放列表存入我的歌单"
+                    >
+                      <ListPlus className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>存入我的歌单</TooltipContent>
+                </Tooltip>
+              )}
               {canClearQueue && queue.length > 0 && (
                 <Tooltip delayDuration={300}>
                   <TooltipTrigger asChild>
@@ -411,6 +429,23 @@ export function QueueDrawer({
                               <TooltipContent side="bottom">置顶到当前播放下方</TooltipContent>
                             </Tooltip>
                           </>
+                        )}
+
+                        {canAddToPlaylist && (
+                          <Tooltip delayDuration={400}>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 min-h-9 min-w-9 sm:min-h-0 sm:min-w-0"
+                                onClick={() => addToPlaylist(track, track.title)}
+                                aria-label={`将 ${track.title} 加入我的歌单`}
+                              >
+                                <ListPlus className="h-3 w-3" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom">加入我的歌单</TooltipContent>
+                          </Tooltip>
                         )}
 
                         {(canRemoveTrack || canVote) && (

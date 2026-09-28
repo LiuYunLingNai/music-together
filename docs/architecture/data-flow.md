@@ -308,6 +308,7 @@ B站没有与房间 128K、320K 完全对应的普通 DASH 音轨，因此分别
 14. **大厅重连刷新**：`useLobby` 监听 socket `connect` 事件，断线重连后自动重新拉取房间列表
 15. **投票执行**：决定产生后先按 vote ID 原子领取并移出活动表，再 `await` 执行动作，避免多个决定票或旧超时回调重复执行/取消新投票。成员加入、离开或主持人变化时会重算多数门槛、清理离线票并更新否决权；动作完成后才广播 `VOTE_RESULT`
 16. **密码安全隔离**：`toPublicRoomState()` 默认不含密码明文；`toPublicRoomStateForOwner()` 仅在发送给 owner 的 socket 时使用（创建房间、加入房间、设置变更、conductor/角色变更）。非 owner 成员仅能看到 `hasPassword` 布尔标记，无法获取密码明文。设置广播通过 `socket.emit`（owner） + `socket.to(roomId).emit`（其他成员）分别发送。owner 在线且 conductor/角色变更时，通过 `roomRepo.getSocketIdForUser()` 反查 owner 的 socketId 定向发送含密码版本；没有 owner 在线（仅临时管理员）时广播不含密码版本
+17. **访客与成员名册**：`userRepo.isGuest(id)`（`存在 && !passwordHash && !isServerAdmin`）判定访客。`joinRoom` / `leaveRoom` 通过 `shouldPersistMember(room, user)` 决定是否写入持久名册 `room.members`——房主（`creatorId`）、持久 admin（`adminUserIds`）、已在名册者、以及非访客账号始终写入；普通访客**只进 `room.users`（在线态、鉴权、投票、conductor 选举均正常），不进 `room.members`**，离线即从在线列表消失、不留痕。鉴权与角色协调只读 `room.users`，故访客移出名册不影响权限；`reconcileRoomRoles` 对不在名册的成员为 no-op。客户端 `MembersSection` 由"在 `room.users` 但不在 `room.members`"推导在线访客并加访客徽标，不新增协议字段
 
 ## REST API
 
@@ -323,6 +324,13 @@ B站没有与房间 128K、320K 完全对应的普通 DASH 音轨，因此分别
 | `/api/music/hot`                | GET   | 获取房间内可见的官方热歌榜；校验 HTTP 身份和房间成员身份，支持 `source=netease|tencent|kugou` 及 `limit`/`offset` 分页，服务端分别缓存网易云热歌榜、QQ 热歌榜和酷狗热歌榜，`refresh=true` 可强制刷新 |
 | `/api/rooms/:roomId/check`      | GET   | 房间预检（存在性 + 是否需要密码），用于分享链接直接访问时的前置校验                                     |
 | `/api/rooms/:roomId/share/qr`   | GET   | 校验并生成当前浏览器访问域名下的 `/join?ROMMid=...` 房间分享二维码                                      |
+| `/api/playlists`                | GET   | 列出当前账号的本地歌单（元信息 + 派生封面 + 曲目数）；仅对已设置密码的账号开放，访客返回 403                |
+| `/api/playlists`                | POST  | 新建本地歌单（`{ name }`），封顶 `USER_PLAYLIST_MAX`                                                     |
+| `/api/playlists/:id`            | GET   | 获取歌单详情（含按顺序排列的 `tracks`）                                                                 |
+| `/api/playlists/:id`            | PATCH | 重命名歌单（`{ name }`）                                                                                |
+| `/api/playlists/:id`            | DELETE| 删除歌单及其曲目                                                                                        |
+| `/api/playlists/:id/tracks`     | POST  | 向歌单追加曲目（`{ tracks }`，单曲/整队通用）；按 `Track.id` 去重、封顶 `USER_PLAYLIST_TRACKS_MAX`、写入前剥离 `streamUrl` 等短时效字段 |
+| `/api/playlists/:id/tracks/:trackId` | DELETE | 从歌单移除单曲                                                                                    |
 | `/api/admin/audio-proxy-policy` | GET   | 服务器管理员读取酷狗全局强制代理策略                                                                    |
 | `/api/admin/audio-proxy-policy` | PATCH | 服务器管理员部分更新代理策略并广播完整结果                                                              |
 | `/api/health`                   | GET   | 健康检查                                                                                                |
@@ -337,3 +345,9 @@ B站没有与房间 128K、320K 完全对应的普通 DASH 音轨，因此分别
 - 永久房间保持现有 SQLite JSON 格式；使用事务和已落盘快照跳过重复写入，成员只写变化项，单独的播放变化通过 JSON 字段更新持久化。
 - 房间密码解密或记录加载失败时，保留原始记录且不将该房间载入可访问列表；修复记录或恢复原密钥后重启可重新加载。
 - WebSocket 待发送数据限制为 4 MiB，超过上限会终止慢连接，由客户端重连获取新快照；不改变原生 /ws 信封协议。
+
+### 2026-09 账户本地歌单与访客名册
+
+- 新增账户级本地歌单：SQLite `user_playlists`（`id` / `user_id` / `name` / `cover` / 时间戳，`user_id` 外键级联删除）与 `user_playlist_tracks`（`(playlist_id, track_id)` 主键去重、`track_json` 存完整跨音源曲目、`position` 排序），两表均为 `CREATE TABLE IF NOT EXISTS` 幂等建表。歌单封面未显式设置时读取时派生自首曲 `thumbnailCover ?? cover`，不落库。
+- 歌单能力仅对已设置密码的账号开放（`/api/playlists*` 经 `requireAccount` 守卫，访客 401/403）；写入前经 `trackSchema` 校验并剥离 `streamUrl` / `requiresServerProxy` / `streamFormat` 等短时效字段，容量受 `USER_PLAYLIST_MAX` / `USER_PLAYLIST_TRACKS_MAX` / `USER_PLAYLIST_NAME_MAX` 限制。歌单 CRUD 走 REST，"加入房间"复用现有 `QUEUE_ADD_BATCH`（`{ tracks, playlistName }`），不新增 WS 事件，旧原生客户端不受影响。
+- 访客（无密码且非服务器管理员）不写入持久成员名册 `room.members`，仅存在于在线 `room.users`；房主与持久 admin 即使是访客也始终保留在名册，详见上文交互要点第 17 条。

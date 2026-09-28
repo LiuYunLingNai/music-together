@@ -6,10 +6,11 @@ import {
 } from '@/components/ui/responsive-dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
-import { Disc3, Gauge, Palette, Settings2, Shield, Type, UserRound, Users, type LucideIcon } from 'lucide-react'
+import { Disc3, Gauge, ListMusic, Palette, Settings2, Shield, Type, UserRound, Users, type LucideIcon } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { RoomSettingsSection } from './Settings/RoomSettingsSection'
 import { MembersSection } from './Settings/MembersSection'
+import { MyPlaylistsSection } from './Settings/MyPlaylistsSection'
 import { AppearanceSection } from './Settings/AppearanceSection'
 import { LyricsSection } from './Settings/LyricsSection'
 import { PlatformHub } from './Settings/PlatformHub'
@@ -22,7 +23,16 @@ import { useAccountStore } from '@/stores/accountStore'
 // Types
 // ---------------------------------------------------------------------------
 
-export type SettingsTab = 'room' | 'members' | 'playback' | 'account' | 'accounts' | 'appearance' | 'lyrics' | 'admin'
+export type SettingsTab =
+  | 'room'
+  | 'members'
+  | 'playback'
+  | 'playlists'
+  | 'account'
+  | 'accounts'
+  | 'appearance'
+  | 'lyrics'
+  | 'admin'
 
 interface SettingsDialogProps {
   open: boolean
@@ -83,6 +93,7 @@ const BASE_TABS: { id: SettingsTab; icon: LucideIcon; label: string }[] = [
   { id: 'room', icon: Settings2, label: '房间' },
   { id: 'members', icon: Users, label: '成员' },
   { id: 'playback', icon: Gauge, label: '播放' },
+  { id: 'playlists', icon: ListMusic, label: '我的歌单' },
   { id: 'account', icon: UserRound, label: '账号' },
   { id: 'accounts', icon: Disc3, label: '音源账号' },
   { id: 'appearance', icon: Palette, label: '外观' },
@@ -169,6 +180,7 @@ export function SettingsDialog({
                 {tab === 'room' && <RoomSettingsSection onUpdateSettings={onUpdateSettings} />}
                 {tab === 'members' && <MembersSection onSetUserRole={onSetUserRole} />}
                 {tab === 'playback' && <PlaybackSection />}
+                {tab === 'playlists' && <MyPlaylistsSection onNavigate={setTab} />}
                 {tab === 'account' && <AccountSection />}
                 {tab === 'admin' && isServerAdmin && <AdminSection />}
                 {tab === 'lyrics' && <LyricsSection />}

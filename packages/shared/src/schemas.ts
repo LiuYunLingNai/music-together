@@ -130,6 +130,20 @@ export const queueAddBatchSchema = z.object({
   playlistName: z.string().max(200).optional(),
 })
 
+// ---------------------------------------------------------------------------
+// Account local playlists
+// ---------------------------------------------------------------------------
+
+export const userPlaylistCreateSchema = z.object({
+  name: z.string().trim().min(1, '歌单名称不能为空').max(LIMITS.USER_PLAYLIST_NAME_MAX, '歌单名称过长'),
+})
+
+export const userPlaylistRenameSchema = userPlaylistCreateSchema
+
+export const userPlaylistAddTracksSchema = z.object({
+  tracks: z.array(trackSchema).min(1).max(LIMITS.USER_PLAYLIST_TRACKS_MAX),
+})
+
 export const queueRemoveSchema = z.object({ trackId: z.string().max(200) })
 export const queueReorderSchema = z.object({
   trackIds: z.array(z.string().max(200)).max(LIMITS.QUEUE_MAX_SIZE),

@@ -239,4 +239,14 @@ export const userRepo = {
   isServerAdmin(userId: string): boolean {
     return config.serverAdminIds.has(userId) || this.get(userId)?.role === 'admin'
   },
+
+  /**
+   * 访客身份：存在对应用户、但既没有设置账号密码、也不是服务器管理员。
+   * 用于决定是否写入房间持久成员名册，以及本地歌单等仅限已登录账号的能力。
+   */
+  isGuest(userId: string): boolean {
+    const user = this.get(userId)
+    if (!user) return false
+    return !user.passwordHash && !this.isServerAdmin(userId)
+  },
 }

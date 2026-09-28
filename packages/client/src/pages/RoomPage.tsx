@@ -14,6 +14,7 @@ import { RoomHeader } from '@/components/Room/RoomHeader'
 import { SearchDialog } from '@/components/Overlays/SearchDialog'
 import { QueueDrawer } from '@/components/Overlays/QueueDrawer'
 import { SettingsDialog, type SettingsTab } from '@/components/Overlays/SettingsDialog'
+import { AddToPlaylistDialog } from '@/components/Overlays/AddToPlaylistDialog'
 import { PasswordDialog } from '@/components/Lobby/PasswordDialog'
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from '@/components/ui/drawer'
 import { cn } from '@/lib/utils'
@@ -737,6 +738,7 @@ export default function RoomPage() {
             onSetUserRole={setUserRole}
             initialTab={settingsInitialTab}
           />
+          <AddToPlaylistDialog />
         </div>
 
         {/* Fallback password dialog for edge cases (password changed after pre-check) */}

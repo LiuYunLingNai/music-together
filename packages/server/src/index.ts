@@ -16,6 +16,7 @@ import { createAdminRoutes } from './routes/admin.js'
 import { createAdminSetupRoutes } from './routes/adminSetup.js'
 import { createAccountRoutes } from './routes/account.js'
 import musicRoutes from './routes/music.js'
+import { createPlaylistRoutes } from './routes/playlists.js'
 import roomRoutes from './routes/rooms.js'
 import settingsRoutes from './routes/settings.js'
 import { clearAllTimers } from './services/roomLifecycleService.js'
@@ -56,6 +57,7 @@ app.use('/api/admin', createAdminSetupRoutes())
 app.use('/api/admin', createAdminRoutes(io))
 app.use('/api/settings', settingsRoutes)
 app.use('/api/music', musicRoutes)
+app.use('/api/playlists', createPlaylistRoutes())
 app.use('/api/rooms', roomRoutes)
 
 // Health check

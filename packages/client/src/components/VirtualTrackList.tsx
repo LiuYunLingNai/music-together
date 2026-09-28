@@ -18,6 +18,7 @@ export interface VirtualTrackListProps {
   isTrackAdded: (track: Track) => boolean
   onAddTrack: (track: Track) => void
   onInsertAfterCurrent?: (track: Track) => void
+  onAddToPlaylist?: (track: Track) => void
   onArtistClick?: (artist: string) => void
   emptyIcon?: React.ReactNode
   emptyMessage?: string
@@ -54,6 +55,7 @@ export const VirtualTrackList = forwardRef<VirtualTrackListRef, VirtualTrackList
     isTrackAdded,
     onAddTrack,
     onInsertAfterCurrent,
+    onAddToPlaylist,
     onArtistClick,
     emptyIcon,
     emptyMessage = '暂无内容',
@@ -161,6 +163,7 @@ export const VirtualTrackList = forwardRef<VirtualTrackListRef, VirtualTrackList
               isAdded={isTrackAdded(track)}
               onAdd={onAddTrack}
               onInsertAfterCurrent={onInsertAfterCurrent}
+              onAddToPlaylist={onAddToPlaylist}
               onArtistClick={onArtistClick}
               style={{
                 position: 'absolute',

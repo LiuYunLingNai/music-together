@@ -10,6 +10,15 @@ process.env.DATABASE_URL = `file:${path.join(testDataDir, 'test.db')}`
 const roomService = await import('../src/services/roomService.js')
 const { db } = await import('../src/repositories/database.js')
 const { InMemoryRoomRepository, roomRepo } = await import('../src/repositories/roomRepository.js')
+const { userRepo } = await import('../src/repositories/userRepository.js')
+
+// Offline-roster retention applies to accounts (owner / admin / password-holders); anonymous
+// guests are online-only. Register the joining members as accounts so these tests exercise the
+// retained capability rather than the guest-exclusion path.
+for (const accountId of ['member-id', 'member-role-id', 'member-empty-id']) {
+  userRepo.ensure(accountId)
+  userRepo.setPasswordHash(accountId, 'hashed-password-placeholder')
+}
 
 after(() => {
   db.close()

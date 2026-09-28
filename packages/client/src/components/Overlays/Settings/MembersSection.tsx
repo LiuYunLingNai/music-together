@@ -3,7 +3,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator'
 import { useRoomStore } from '@/stores/roomStore'
 import { useAccountStore } from '@/stores/accountStore'
-import type { ClientInfo, UserRole } from '@music-together/shared'
+import type { ClientInfo, RoomMember, UserRole } from '@music-together/shared'
 import { Crown, Globe2, Monitor, Shield, ShieldCheck, Smartphone, User as UserIcon } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { resolveAvatarUrl } from '@/lib/profileApi'
@@ -11,6 +11,9 @@ import { resolveAvatarUrl } from '@/lib/profileApi'
 interface MembersSectionProps {
   onSetUserRole?: (userId: string, role: 'admin' | 'member') => void
 }
+
+/** A member roster entry, plus online-only guests synthesized from `room.users`. */
+type MemberEntry = RoomMember & { isGuest: boolean }
 
 const ROLE_LABELS: Record<UserRole, string> = {
   owner: '房主',
@@ -58,16 +61,33 @@ export function MembersSection({ onSetUserRole }: MembersSectionProps) {
   const currentUser = useRoomStore((s) => s.currentUser)
   const isServerAdmin = useAccountStore((state) => state.profile?.role === 'admin')
   const isOwner = currentUser?.role === 'owner' || isServerAdmin
-  const members = [...(room?.members ?? [])].sort(compareMembers)
+
+  // 访客不写入名册，只作为在线用户存在。凡是在 `room.users` 里但不在 `room.members`
+  // 的账号，都是在线访客——合成一条临时条目展示（带「访客」标记），离线即消失。
+  const roster = room?.members ?? []
+  const rosterIds = new Set(roster.map((member) => member.id))
+  const onlineGuests: MemberEntry[] = (room?.users ?? [])
+    .filter((user) => !rosterIds.has(user.id))
+    .map((user) => ({
+      ...user,
+      isOnline: true,
+      joinedAt: 0,
+      lastSeenAt: null,
+      isGuest: true,
+    }))
+  const members: MemberEntry[] = [
+    ...roster.map((member) => ({ ...member, isGuest: false })),
+    ...onlineGuests,
+  ].sort(compareMembers)
 
   return (
     <div className="space-y-6">
       <div>
         <div className="flex items-center justify-between gap-3">
-          <h3 className="text-base font-semibold">
-            房间成员 ({room?.users.length ?? 0}/{members.length})
-          </h3>
-          <span className="text-xs text-muted-foreground">离线成员会保留在名单中</span>
+          <h3 className="text-base font-semibold">房间成员</h3>
+          <span className="text-xs text-muted-foreground">
+            在线 {room?.users.length ?? 0} · 名册 {roster.length}
+          </span>
         </div>
         <Separator className="mt-2 mb-4" />
 
@@ -102,6 +122,11 @@ export function MembersSection({ onSetUserRole }: MembersSectionProps) {
                     <Badge variant="outline" className="text-xs">
                       {user.isServerAdmin ? '服务器管理员' : ROLE_LABELS[user.role]}
                     </Badge>
+                    {user.isGuest && (
+                      <Badge variant="secondary" className="text-xs">
+                        访客
+                      </Badge>
+                    )}
                   </div>
                   {clients.length > 0 && (
                     <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
@@ -118,9 +143,11 @@ export function MembersSection({ onSetUserRole }: MembersSectionProps) {
                     </div>
                   )}
                 </div>
-                {/* Owner can change other users' roles (not their own, not other owners) */}
+                {/* Owner can change other users' roles (not their own, not other owners,
+                    not transient guests — guests never receive a persistent role). */}
                 {isOwner &&
                   !user.isServerAdmin &&
+                  !user.isGuest &&
                   user.role !== 'owner' &&
                   user.id !== currentUser?.id &&
                   onSetUserRole && (

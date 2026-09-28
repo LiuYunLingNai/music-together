@@ -347,3 +347,22 @@ export interface Playlist {
   creator?: string
   description?: string
 }
+
+/**
+ * 账户本地歌单元数据。与平台 {@link Playlist} 不同：本地歌单跨音源、归属账号、
+ * 由服务端持久化，因此没有 `source` 字段，封面按首曲派生（可为空）。
+ */
+export interface UserPlaylist {
+  id: string
+  name: string
+  /** 派生自首曲缩略图/封面，可能为空。 */
+  cover: string | null
+  trackCount: number
+  createdAt: number
+  updatedAt: number
+}
+
+/** 账户本地歌单详情（含完整曲目）。 */
+export interface UserPlaylistDetail extends UserPlaylist {
+  tracks: Track[]
+}

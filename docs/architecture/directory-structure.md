@@ -45,16 +45,18 @@ src/
 │   │   ├── HeroSection.tsx     #     首页 Hero 标题区域
 │   │   ├── ActionCards.tsx     #     创建/加入房间卡片
 │   │   └── RoomListSection.tsx #     活跃房间列表区域
-│   ├── TrackListItem.tsx        #   共享曲目行渲染（序号+封面+标题VIP+歌手可点击+时长+isAdded 添加按钮，memo 优化）
-│   ├── VirtualTrackList.tsx     #   共享虚拟滚动曲目列表（@tanstack/react-virtual + 无限加载 + skeleton + 空态，forwardRef 暴露 scrollToTop）
+│   ├── TrackListItem.tsx        #   共享曲目行渲染（序号+封面+标题VIP+歌手可点击+时长+isAdded 添加按钮+可选加入歌单按钮 onAddToPlaylist，memo 优化）
+│   ├── VirtualTrackList.tsx     #   共享虚拟滚动曲目列表（@tanstack/react-virtual + 无限加载 + skeleton + 空态，forwardRef 暴露 scrollToTop；透传 onAddToPlaylist）
 │   ├── Overlays/
-│   │   ├── QueueDrawer.tsx     #     播放队列抽屉（vaul Drawer，移动端底部/桌面端右侧）
+│   │   ├── QueueDrawer.tsx     #     播放队列抽屉（vaul Drawer，移动端底部/桌面端右侧；登录账号可逐曲/整队"加入我的歌单"）
+│   │   ├── AddToPlaylistDialog.tsx #  加入本地歌单选择器（accountPlaylistStore 驱动，内联新建 + 选择目标歌单，RoomPage 挂载一次）
 │   │   ├── SearchDialog.tsx    #     音乐搜索弹窗（VirtualTrackList 虚拟滚动 + 自动无限加载 + AbortController 竞态防护）
-│   │   ├── SettingsDialog.tsx  #     设置弹窗（壳，Tab 导航：房间/成员/账号/个人/外观，移动端 nav scrollbar-hide）
+│   │   ├── SettingsDialog.tsx  #     设置弹窗（壳，Tab 导航：房间/成员/播放/我的歌单/账号/音源账号/外观/歌词，移动端 nav scrollbar-hide）
 │   │   └── Settings/
 │   │       ├── SettingRow.tsx              # 设置行共享组件
 │   │       ├── RoomSettingsSection.tsx     # 房间设置（名称、密码）
-│   │       ├── MembersSection.tsx          # 成员列表（角色管理）
+│   │       ├── MembersSection.tsx          # 成员列表（角色管理；名册成员 + 在线访客合并展示，访客加徽标且角色下拉隐藏）
+│   │       ├── MyPlaylistsSection.tsx       # 我的歌单（本地账户歌单：增删改 + 详情 + 添加到房间/队列；访客显示设置密码引导）
 │   │       ├── PlatformAuthSection.tsx     # 平台账号认证（VIP Cookie，旧版，已被 PlatformHub 替代）
 │   │       ├── PlatformHub.tsx            # 平台中心（登录 + 歌单浏览 + 导入，替代 PlatformAuthSection）
 │   │       ├── LoginSection.tsx           # 精简版平台登录区域（PlatformHub 子组件）
@@ -131,6 +133,7 @@ src/
 │   ├── useLobby.ts             #   大厅房间列表与操作（使用 useSocketEvent）
 │   ├── useQueue.ts             #   播放队列操作（含 addBatchTracks 批量添加）
 │   ├── usePlaylist.ts          #   歌单管理（用户歌单列表、分页曲目获取 + 无限加载、URL 解析、批量导入）
+│   ├── useAddToPlaylist.ts      #   打开"加入我的歌单"选择器（登录守卫：访客 toast 引导，返回 canUse）
 │   ├── useIsMobile.ts          #   布局维度：orientation 检测（portrait=竖屏布局，landscape=横屏布局）
 │   ├── useHasHover.ts          #   交互维度：hover 能力检测（(hover: hover) 媒体查询，触控设备=false）
 │   ├── useContainerPortrait.ts #   容器宽高比检测（ResizeObserver，用于播放器横竖屏切换）
@@ -141,7 +144,8 @@ src/
 │   ├── roomStore.ts            #   房间状态（room, currentUser, users）
 │   ├── chatStore.ts            #   聊天（messages, unreadCount, isChatOpen）
 │   ├── lobbyStore.ts           #   大厅（rooms 列表, isLoading）
-│   └── settingsStore.ts        #   设置（歌词参数、背景参数，持久化到 localStorage）
+│   ├── settingsStore.ts        #   设置（歌词参数、背景参数，持久化到 localStorage）
+│   └── accountPlaylistStore.ts #   本地账户歌单缓存 + "加入歌单"选择器目标曲目（跨设置页与各入口共享，断线仅关闭选择器保留缓存）
 │
 ├── providers/                  # React Context Provider
 │   ├── SocketProvider.tsx      #   原生 WebSocket 连接管理，提供 socket + isConnected + 断线/重连 Toast
@@ -162,6 +166,7 @@ src/
     ├── platform.ts             #   平台常量（PLATFORM_LABELS / PLATFORM_SHORT_LABELS / PLATFORM_COLORS / VIP_LABELS / 状态查找函数）
     ├── format.ts               #   格式化工具（时间、文本等）
     ├── audioUnlock.ts          #   浏览器音频自动播放解锁
+    ├── playlistApi.ts          #   本地账户歌单 REST 客户端（credentials:'include' 封装 /api/playlists*）
     └── utils.ts                #   cn() + trackKey() 等通用工具
 ```
 
@@ -208,6 +213,7 @@ src/
 │   ├── types.ts                #   接口定义（RoomRepository, ChatRepository）
 │   ├── roomRepository.ts       #   房间数据 + Socket 映射 + per-socket RTT + roomToSockets 反向索引（Map<string, RoomData>）
 │   ├── chatRepository.ts       #   聊天记录（内存最多 200 条；永久房间同步持久化到 SQLite）
+│   ├── playlistRepository.ts   #   本地账户歌单仓储（user_playlists / user_playlist_tracks；按 user_id 归属隔离、track_id 去重、position 排序、封顶、写入前剥离 streamUrl，封面派生自首曲）
 │   └── audioProxyPolicyRepository.ts # 全局酷狗音频代理策略（SQLite server_settings）
 │
 ├── middleware/                  # WebSocket 事件中间件
@@ -220,6 +226,7 @@ src/
 ├── routes/                     # Express REST 路由
 │   ├── music.ts                #   GET /api/music/search|url|lyric|cover|playlist|ttml（统一 validated() 路由包装器消除重复 try/catch + Zod 模式）
 │   ├── rooms.ts                #   GET /api/rooms/:roomId/check（房间预检）
+│   ├── playlists.ts            #   /api/playlists* 本地账户歌单 CRUD + 加歌/移歌（requireAccount 守卫：仅已设密码账号，访客 401/403）
 │   ├── admin.ts                #   /api/admin/* 管理端点（用户/平台授权/房间详情与移出/备份文件/代理策略/背景，均需服务器管理员）
 │   └── adminSetup.ts           #   GET /api/admin/setup-status、POST /api/admin/setup（公开，仅初始化窗口可用；需挂载在受保护的 admin 路由之前）
 │
