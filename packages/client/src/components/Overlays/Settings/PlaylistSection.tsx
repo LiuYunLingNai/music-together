@@ -9,6 +9,7 @@ interface PlaylistSectionProps {
   myStatus?: MyPlatformAuth
   playlists: Playlist[]
   loading: boolean
+  loaded: boolean
   onFetchMyPlaylists: () => void
   onSelectPlaylist: (playlist: Playlist) => void
   title?: string
@@ -30,6 +31,7 @@ export function PlaylistSection({
   myStatus,
   playlists,
   loading,
+  loaded,
   onFetchMyPlaylists,
   onSelectPlaylist,
   title = '我的歌单',
@@ -38,10 +40,10 @@ export function PlaylistSection({
 
   // Auto-fetch playlists when logged in and no playlists loaded
   useEffect(() => {
-    if (isLoggedIn && playlists.length === 0 && !loading) {
+    if (isLoggedIn && !loaded && playlists.length === 0 && !loading) {
       onFetchMyPlaylists()
     }
-  }, [isLoggedIn, playlists.length, loading, onFetchMyPlaylists])
+  }, [isLoggedIn, loaded, playlists.length, loading, onFetchMyPlaylists])
 
   return (
     <div className="min-w-0 space-y-4 overflow-hidden">

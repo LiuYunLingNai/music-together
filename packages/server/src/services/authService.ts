@@ -84,6 +84,37 @@ function getPlatformEntries(roomId: string, platform: MusicSource): CookieEntry[
 // Pool management
 // ---------------------------------------------------------------------------
 
+const authorizationVersions = new Map<string, number>()
+let authorizationRevision = 0
+
+function authorizationKey(userId: string, platform: MusicSource, roomId?: string): string {
+  return JSON.stringify([userId, platform, roomId ?? null])
+}
+
+/** Runtime-only invalidation: never changes persisted credentials or encryption. */
+export function getAuthorizationVersion(userId: string, platform: MusicSource, roomId?: string): string {
+  const global = authorizationVersions.get(authorizationKey(userId, platform)) ?? 0
+  const room = roomId ? authorizationVersions.get(authorizationKey(userId, platform, roomId)) ?? 0 : 0
+  return `${global}:${room}`
+}
+
+export function invalidateAuthorization(userId: string, platform: MusicSource, roomId?: string): void {
+  authorizationVersions.set(authorizationKey(userId, platform, roomId), ++authorizationRevision)
+}
+
+/** Administrator revocation removes offline as well as online room contributions. */
+export function revokeUserAuthorization(userId: string, platform: MusicSource): string[] {
+  invalidateAuthorization(userId, platform)
+  const affectedRooms: string[] = []
+  for (const [roomId, pool] of roomCookiePool) {
+    if (pool.get(platform)?.some((entry) => entry.userId === userId)) {
+      removeCookie(roomId, platform, userId, false)
+      affectedRooms.push(roomId)
+    }
+  }
+  return affectedRooms
+}
+
 export function addCookie(
   roomId: string,
   platform: MusicSource,
@@ -123,8 +154,12 @@ export function addCookie(
 }
 
 export function removeCookie(roomId: string, platform: MusicSource, userId: string, persist = true): boolean {
+  invalidateAuthorization(userId, platform, roomId)
   membershipRefreshHistory.delete(`${roomId}:${platform}:${userId}`)
   if (persist) {
+    // Logout removes the global persisted authorization. Invalidate pending
+    // writers in every room, while retaining their existing pool contributions.
+    invalidateAuthorization(userId, platform)
     platformAuthRepo.remove(userId, platform)
   }
   const pool = roomCookiePool.get(roomId)
@@ -165,6 +200,7 @@ async function refreshMembershipEntry(
   cookie: string,
   loadInfo: MembershipInfoLoader,
 ): Promise<boolean> {
+  const authorizationVersion = getAuthorizationVersion(userId, platform, roomId)
   const refreshKey = `${roomId}:${platform}:${userId}`
   const inFlight = membershipRefreshPool.get(refreshKey)
   if (inFlight) return inFlight
@@ -196,10 +232,14 @@ async function refreshMembershipEntry(
         ?.find((entry) => entry.userId === userId)
       // The user may have logged out or replaced the credential while the
       // provider request was in flight. Never restore a stale credential.
-      if (!current || current.cookie !== cookie) return false
+      if (!current || current.cookie !== cookie ||
+        getAuthorizationVersion(userId, platform, roomId) !== authorizationVersion) return false
 
       const userInfo = result.data
-      addCookie(roomId, platform, userId, cookie, userInfo.nickname, userInfo.vipType, true, {
+      // Refresh existing persistent metadata only; retained room contributions
+      // must not recreate a deleted authorization or replace a newer account.
+      const persist = platformAuthRepo.loadUser(userId).some((entry) => entry.platform === platform && entry.cookie === cookie)
+      addCookie(roomId, platform, userId, cookie, userInfo.nickname, userInfo.vipType, persist, {
         vipLabel: userInfo.vipLabel,
         vipLevel: userInfo.vipLevel,
       })

@@ -233,7 +233,14 @@ export class TypedServer<
     this.wss = new WebSocketServer({ noServer: true, maxPayload: MAX_WEBSOCKET_PAYLOAD_BYTES })
 
     httpServer.on('upgrade', (request, socket, head) => {
-      const pathname = new URL(request.url || '', `http://${request.headers.host}`).pathname
+      let pathname: string
+      try {
+        // Only the path is needed; an untrusted Host must not become a URL base.
+        pathname = new URL(request.url || '', 'http://localhost').pathname
+      } catch {
+        socket.destroy()
+        return
+      }
 
       if (pathname === '/ws') {
         this.wss.handleUpgrade(request, socket, head, (ws) => {
@@ -295,6 +302,11 @@ export class TypedServer<
 
   to(room: string): Broadcaster<ServerToClientEvents> {
     return new Broadcaster(this, room)
+  }
+
+  /** Explicit unicast; socket IDs are not public room names. */
+  getSocketById(id: string): TypedSocket<ClientToServerEvents, ServerToClientEvents, SocketData> | undefined {
+    return Array.from(this.sockets).find((socket) => socket.id === id)
   }
 
   /** @internal */

@@ -64,9 +64,10 @@ function withPlayMutex<T>(roomId: string, fn: () => Promise<T>): Promise<T> {
   const next = prev.then(fn, fn)
   playMutexes.set(roomId, next)
   // Cleanup entry when chain settles to avoid unbounded growth
-  next.finally(() => {
+  const cleanup = () => {
     if (playMutexes.get(roomId) === next) playMutexes.delete(roomId)
-  })
+  }
+  void next.then(cleanup, cleanup)
   return next
 }
 
@@ -440,7 +441,7 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
   // 通知大厅用户当前播放曲目变化
   broadcastRoomList(io)
 
-  const artistLabel = resolved.artist.filter(Boolean).join(' / ') || '未知歌手'
+  const artistLabel = (Array.isArray(resolved.artist) ? resolved.artist : []).filter(Boolean).join(' / ') || '未知歌手'
   const requestedQuality = formatAudioQuality(room.audioQuality)
   const actualQuality = formatResolvedAudioQuality(streamResolution)
   const qualityDowngraded = isQualityDowngraded(resolved.source, room.audioQuality, streamResolution)

@@ -6,6 +6,7 @@ import { checkSocketRateLimit } from '../middleware/socketRateLimiter.js'
 import * as voteService from '../services/voteService.js'
 import { executeVoteAction } from '../services/voteActionService.js'
 import { logger } from '../utils/logger.js'
+import { userRepo } from '../repositories/userRepository.js'
 import type { TypedServer, TypedSocket } from '../middleware/types.js'
 
 const ACTION_LABELS: Record<VoteAction, string> = {
@@ -48,6 +49,11 @@ export function registerVoteController(io: TypedServer, socket: TypedSocket) {
       const permAction = perm?.action ?? action
       const permSubject = perm?.subject ?? 'Player'
       if (ability.can(permAction as Actions, permSubject as Subjects)) {
+        if (action === 'remove-track' && ctx.room.temporaryAdminUserId === ctx.user.id &&
+          !ctx.room.allowTemporaryAdminTrackRemoval && !userRepo.isServerAdmin(ctx.user.id)) {
+          ctx.socket.emit(EVENTS.ROOM_ERROR, { code: ERROR_CODE.NO_PERMISSION, message: '房主未允许临时管理员删除歌曲' })
+          return
+        }
         const executed = await executeVoteAction(io, ctx.roomId, action, payload)
         if (!executed) return
         logger.debug(`有权限的用户“${ctx.user.nickname}”直接执行：${ACTION_LABELS[action]}`, {

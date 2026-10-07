@@ -18,6 +18,7 @@ export function registerPlaylistController(io: TypedServer, socket: TypedSocket)
       return
     }
 
+    let isCurrentRequest = () => socket.connected
     try {
       const mapping = roomRepo.getSocketMapping(socket.id)
       if (!mapping) {
@@ -31,10 +32,18 @@ export function registerPlaylistController(io: TypedServer, socket: TypedSocket)
         return
       }
 
+      const authorizationVersion = authService.getAuthorizationVersion(mapping.userId, platform, mapping.roomId)
+      isCurrentRequest = () =>
+        socket.connected &&
+        roomRepo.getSocketMapping(socket.id) === mapping &&
+        authService.getAuthorizationVersion(mapping.userId, platform, mapping.roomId) === authorizationVersion &&
+        authService.getUserCookie(mapping.userId, platform, mapping.roomId) === cookie
       const playlists = await AUTH_PROVIDERS[platform].getUserPlaylists(cookie)
+      if (!isCurrentRequest()) return
       socket.emit(EVENTS.PLAYLIST_MY_LIST, { platform, playlists })
     } catch (err) {
       logger.error('PLAYLIST_GET_MY error', err, { socketId: socket.id })
+      if (!isCurrentRequest()) return
       socket.emit(EVENTS.PLAYLIST_MY_LIST, { platform, playlists: [] })
     }
   })

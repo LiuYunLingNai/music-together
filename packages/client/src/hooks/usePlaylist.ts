@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { EVENTS, LIMITS, type MusicSource, type Playlist, type Track } from '@music-together/shared'
+import {
+  EVENTS,
+  LIMITS,
+  type MusicSource,
+  type MyPlatformAuth,
+  type Playlist,
+  type Track,
+} from '@music-together/shared'
 import { useSocketContext } from '@/providers/socket-context'
 import { useRoomStore } from '@/stores/roomStore'
 import { SERVER_URL } from '@/lib/config'
@@ -94,6 +101,7 @@ export function usePlaylist() {
   })
 
   // Paginated playlist tracks state
+  const [playlistsLoaded, setPlaylistsLoaded] = useState<Partial<Record<MusicSource, boolean>>>({})
   const [playlistTracks, setPlaylistTracks] = useState<Track[]>([])
   const [playlistTotal, setPlaylistTotal] = useState(0)
   const [hasMoreTracks, setHasMoreTracks] = useState(false)
@@ -107,13 +115,40 @@ export function usePlaylist() {
 
   useEffect(() => {
     const onMyList = (data: { platform: MusicSource; playlists: Playlist[] }) => {
+      setPlaylistsLoaded((prev) => ({ ...prev, [data.platform]: true }))
       setMyPlaylists((prev) => ({ ...prev, [data.platform]: data.playlists }))
       setPlaylistsLoading((prev) => ({ ...prev, [data.platform]: false }))
     }
+    const onMyStatus = (statuses: MyPlatformAuth[]) => {
+      const loggedIn = new Set(statuses.filter((status) => status.loggedIn).map((status) => status.platform))
+      setPlaylistsLoaded((prev) =>
+        Object.fromEntries(Object.entries(prev).filter(([source]) => loggedIn.has(source as MusicSource))),
+      )
+      setMyPlaylists(
+        (prev) =>
+          Object.fromEntries(
+            Object.entries(prev).map(([source, playlists]) => [
+              source,
+              loggedIn.has(source as MusicSource) ? playlists : [],
+            ]),
+          ) as typeof prev,
+      )
+      setPlaylistsLoading(
+        (prev) =>
+          Object.fromEntries(
+            Object.entries(prev).map(([source, loading]) => [
+              source,
+              loggedIn.has(source as MusicSource) ? loading : false,
+            ]),
+          ) as typeof prev,
+      )
+    }
 
     socket.on(EVENTS.PLAYLIST_MY_LIST, onMyList)
+    socket.on(EVENTS.AUTH_MY_STATUS, onMyStatus)
     return () => {
       socket.off(EVENTS.PLAYLIST_MY_LIST, onMyList)
+      socket.off(EVENTS.AUTH_MY_STATUS, onMyStatus)
     }
   }, [socket])
 
@@ -317,6 +352,7 @@ export function usePlaylist() {
   return {
     myPlaylists,
     playlistsLoading,
+    playlistsLoaded,
     playlistTracks,
     playlistTotal,
     hasMoreTracks,

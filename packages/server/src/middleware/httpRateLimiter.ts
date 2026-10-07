@@ -9,6 +9,7 @@ interface RateLimitOptions {
 }
 
 function requestKey(req: Request, suffix: string): string {
+  if (suffix === 'password-work') return `ip:${req.ip || req.socket.remoteAddress || 'unknown'}:${suffix}`
   const identity = req.identityUserId?.trim()
   if (identity) return `identity:${identity}:${suffix}`
   return `ip:${req.ip || req.socket.remoteAddress || 'unknown'}:${suffix}`
@@ -33,4 +34,12 @@ export const musicMetadataRateLimit = createHttpRateLimit({
   durationSeconds: 60,
   message: '音乐接口请求过于频繁，请稍后再试',
   suffix: 'music-metadata',
+})
+
+/** Password hashing admission must not be bypassed by minting another identity. */
+export const passwordWorkRateLimit = createHttpRateLimit({
+  points: 10,
+  durationSeconds: 60,
+  message: '密码操作过于频繁，请稍后再试',
+  suffix: 'password-work',
 })

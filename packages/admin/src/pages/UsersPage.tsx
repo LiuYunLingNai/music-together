@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Icon } from '@iconify/react'
 import {
   Badge,
@@ -37,6 +37,8 @@ export default function UsersPage() {
   const [authError, setAuthError] = useState<string | null>(null)
   const [revokeTarget, setRevokeTarget] = useState<AdminPlatformAuth | null>(null)
   const [revoking, setRevoking] = useState(false)
+  const authRequest = useRef(0)
+  const selectedAuthUser = useRef<string | null>(null)
 
   const reload = () => setReloadKey((key) => key + 1)
 
@@ -103,16 +105,23 @@ export default function UsersPage() {
   }
 
   const openAuths = (user: AdminUser) => {
+    selectedAuthUser.current = user.id
+    const request = ++authRequest.current
+    setRevokeTarget(null)
     setAuthTarget(user)
     setAuths(null)
     setAuthError(null)
     adminApi
       .getPlatformAuths(user.id)
-      .then((result) => setAuths(result.auths))
-      .catch((err: unknown) => setAuthError(err instanceof Error ? err.message : '加载失败'))
+      .then((result) => { if (request === authRequest.current) setAuths(result.auths) })
+      .catch((err: unknown) => {
+        if (request === authRequest.current) setAuthError(err instanceof Error ? err.message : '加载失败')
+      })
   }
 
   const closeAuths = () => {
+    selectedAuthUser.current = null
+    authRequest.current++
     setAuthTarget(null)
     setAuths(null)
     setAuthError(null)
@@ -120,13 +129,13 @@ export default function UsersPage() {
   }
 
   const handleRevoke = async () => {
-    if (!authTarget || !revokeTarget) return
+    if (!authTarget || !revokeTarget || authTarget.id !== selectedAuthUser.current) return
     setRevoking(true)
     try {
       await adminApi.revokePlatformAuth(authTarget.id, revokeTarget.platform)
       toast.show(`已解除 ${PLATFORM_LABELS[revokeTarget.platform]} 授权`, 'success')
       setRevokeTarget(null)
-      openAuths(authTarget)
+      if (selectedAuthUser.current === authTarget.id) openAuths(authTarget)
     } catch (err) {
       toast.show(err instanceof Error ? err.message : '解除失败', 'error')
     } finally {

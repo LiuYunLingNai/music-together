@@ -127,6 +127,8 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
       }
 
       const { room: updatedRoom, user, hostChanged, roleChanged } = result
+      const joinMapping = roomRepo.getSocketMapping(socket.id)
+      const isCurrentJoin = () => socket.connected && roomRepo.getSocketMapping(socket.id) === joinMapping
       const rejoin = issueRejoinTicket(roomId, user.id)
 
       socket.leave('lobby')
@@ -136,12 +138,12 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
       // Refresh it before resolving the permanent room stream so an SVIP
       // account does not get its first URL capped at the old VIP quality.
       await refreshRestoredMembershipDetails(io, socket, roomId, user.id)
-      if (!socket.connected) return
+      if (!isCurrentJoin()) return
 
       // Permanent rooms can retain a short-lived URL while empty. Refresh it
       // on demand before exposing room state, with service-level throttling.
       await playerService.refreshStreamUrlForJoin(roomId)
-      if (!socket.connected) return
+      if (!isCurrentJoin()) return
       socket.join(roomId)
 
       // Send history before ROOM_STATE. The lobby navigates as soon as it receives
@@ -443,7 +445,7 @@ function handleLeave(io: TypedServer, socket: TypedSocket, reason?: string, revo
     const newOwner = room.users.find((u) => u.role === 'owner')
     const ownerSocketId = newOwner ? roomRepo.getSocketIdForUser(roomId, newOwner.id) : null
     if (ownerSocketId) {
-      io.to(ownerSocketId).emit(EVENTS.ROOM_STATE, roomService.toPublicRoomStateForOwner(room))
+      io.getSocketById(ownerSocketId)?.emit(EVENTS.ROOM_STATE, roomService.toPublicRoomStateForOwner(room))
       io.to(roomId).except(ownerSocketId).emit(EVENTS.ROOM_STATE, roomService.toPublicRoomState(room))
     } else {
       io.to(roomId).emit(EVENTS.ROOM_STATE, roomService.toPublicRoomState(room))

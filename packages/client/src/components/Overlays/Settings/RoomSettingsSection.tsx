@@ -49,10 +49,16 @@ interface RoomSettingsSectionProps {
     roamingEnabled?: boolean
     roamingSource?: RoamingSource
     roamingMode?: NeteaseRoamingMode
-  }) => void
+  }) => Promise<boolean>
 }
 
 export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionProps) {
+  const submitSettings = async (settings: Parameters<typeof onUpdateSettings>[0], message: string) => {
+    const confirmed = await onUpdateSettings(settings)
+    if (confirmed) toast.success(message)
+    else toast.error('未收到设置确认，请检查连接和房间当前状态')
+    return confirmed
+  }
   const room = useRoomStore((s) => s.room)
   const currentUser = useRoomStore((s) => s.currentUser)
   const roomPassword = useRoomStore((s) => s.roomPassword)
@@ -112,8 +118,7 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
   const handlePasswordToggle = (checked: boolean) => {
     if (!checked) {
       updatePasswordDraft({ enabled: false, input: '' })
-      onUpdateSettings({ password: null })
-      toast.success('密码已移除')
+      void submitSettings({ password: null }, '密码已移除')
     } else {
       updatePasswordDraft({ enabled: true })
     }
@@ -124,9 +129,8 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
       toast.error('请输入密码')
       return
     }
-    onUpdateSettings({ password: passwordInput.trim() })
+    void submitSettings({ password: passwordInput.trim() }, '密码已设置')
     updatePasswordDraft({ input: '' })
-    toast.success('密码已设置')
   }
 
   const handleStartEditName = () => {
@@ -144,9 +148,8 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
       setEditingName(false)
       return
     }
-    onUpdateSettings({ name: trimmed })
+    void submitSettings({ name: trimmed }, '房间名已更新')
     setEditingName(false)
-    toast.success('房间名已更新')
   }
 
   const handleCancelEditName = () => {
@@ -232,8 +235,7 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
               onValueChange={(v) => {
                 const numeric = Number(v)
                 const quality = (Number.isNaN(numeric) ? v : numeric) as AudioQuality
-                onUpdateSettings({ audioQuality: quality })
-                toast.success(`音质已切换为 ${getAudioQualityLabel(quality, platformStatus)}`)
+                void submitSettings({ audioQuality: quality }, `音质已切换为 ${getAudioQualityLabel(quality, platformStatus)}`)
               }}
             >
               <SelectTrigger className="h-8 w-[145px] text-sm">
@@ -304,8 +306,7 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
               aria-label="隐藏房间"
               checked={room?.hidden ?? false}
               onCheckedChange={(hidden) => {
-                onUpdateSettings({ hidden })
-                toast.success(hidden ? '房间已从大厅隐藏' : '房间已在大厅公开')
+                void submitSettings({ hidden }, hidden ? '房间已从大厅隐藏' : '房间已在大厅公开')
               }}
             />
           </SettingRow>
@@ -314,8 +315,7 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
             <Switch
               checked={room?.permanent ?? false}
               onCheckedChange={(permanent) => {
-                onUpdateSettings({ permanent })
-                toast.success(permanent ? '已设为永久房间' : '已改为临时房间')
+                void submitSettings({ permanent }, permanent ? '已设为永久房间' : '已改为临时房间')
               }}
             />
           </SettingRow>
@@ -324,8 +324,7 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
             <Switch
               checked={room?.allowTemporaryAdminTrackRemoval ?? false}
               onCheckedChange={(allowTemporaryAdminTrackRemoval) => {
-                onUpdateSettings({ allowTemporaryAdminTrackRemoval })
-                toast.success(allowTemporaryAdminTrackRemoval ? '已允许临时管理员删除单曲' : '已限制临时管理员删除单曲')
+                void submitSettings({ allowTemporaryAdminTrackRemoval }, allowTemporaryAdminTrackRemoval ? '已允许临时管理员删除单曲' : '已限制临时管理员删除单曲')
               }}
             />
           </SettingRow>
@@ -334,8 +333,7 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
             <Switch
               checked={room?.allowTemporaryAdminQueueClear ?? false}
               onCheckedChange={(allowTemporaryAdminQueueClear) => {
-                onUpdateSettings({ allowTemporaryAdminQueueClear })
-                toast.success(allowTemporaryAdminQueueClear ? '已允许临时管理员清空歌单' : '已限制临时管理员清空歌单')
+                void submitSettings({ allowTemporaryAdminQueueClear }, allowTemporaryAdminQueueClear ? '已允许临时管理员清空歌单' : '已限制临时管理员清空歌单')
               }}
             />
           </SettingRow>
@@ -345,8 +343,7 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
               aria-label="播放后移除歌曲"
               checked={room?.removePlayedTracks ?? false}
               onCheckedChange={(removePlayedTracks) => {
-                onUpdateSettings({ removePlayedTracks })
-                toast.success(removePlayedTracks ? '已开启播放后自动移除' : '已关闭播放后自动移除')
+                void submitSettings({ removePlayedTracks }, removePlayedTracks ? '已开启播放后自动移除' : '已关闭播放后自动移除')
               }}
             />
           </SettingRow>

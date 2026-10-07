@@ -10,6 +10,7 @@ import * as z from 'zod/v4'
 import { roomRepo } from '../repositories/roomRepository.js'
 import type { PersistedUser } from '../repositories/userRepository.js'
 import bcrypt from 'bcryptjs'
+import { passwordWorkRateLimit } from '../middleware/httpRateLimiter.js'
 
 const router: RouterType = Router()
 
@@ -63,7 +64,7 @@ const recoverSchema = z.object({
   password: z.string().min(1).max(128),
 })
 
-router.post('/identity/recover', async (req: Request, res: Response) => {
+router.post('/identity/recover', passwordWorkRateLimit, async (req: Request, res: Response) => {
   const parsed = recoverSchema.safeParse(req.body)
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid input' })

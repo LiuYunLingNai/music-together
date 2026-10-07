@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Icon } from '@iconify/react'
 import { Badge, Button, Card, ConfirmDialog, Dialog, EmptyState, PageLoading } from '../components/ui'
 import { useToast } from '../components/toast'
@@ -20,6 +20,8 @@ export default function RoomsPage() {
   const [detailError, setDetailError] = useState<string | null>(null)
   const [kickTarget, setKickTarget] = useState<AdminRoomMember | null>(null)
   const [kicking, setKicking] = useState(false)
+  const detailRequest = useRef(0)
+  const selectedRoom = useRef<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -54,20 +56,27 @@ export default function RoomsPage() {
   }
 
   const loadDetail = (roomId: string) => {
+    const request = ++detailRequest.current
     setDetail(null)
     setDetailError(null)
     adminApi
       .getRoomDetail(roomId)
-      .then((result) => setDetail(result))
-      .catch((err: unknown) => setDetailError(err instanceof Error ? err.message : '加载失败'))
+      .then((result) => { if (request === detailRequest.current) setDetail(result) })
+      .catch((err: unknown) => {
+        if (request === detailRequest.current) setDetailError(err instanceof Error ? err.message : '加载失败')
+      })
   }
 
   const openDetail = (roomId: string) => {
+    selectedRoom.current = roomId
+    setKickTarget(null)
     setDetailRoomId(roomId)
     loadDetail(roomId)
   }
 
   const closeDetail = () => {
+    selectedRoom.current = null
+    detailRequest.current++
     setDetailRoomId(null)
     setDetail(null)
     setDetailError(null)
@@ -75,13 +84,13 @@ export default function RoomsPage() {
   }
 
   const handleKick = async () => {
-    if (!detail || !kickTarget) return
+    if (!detail || !kickTarget || detail.id !== selectedRoom.current) return
     setKicking(true)
     try {
       await adminApi.kickUser(detail.id, kickTarget.id)
       toast.show(`已将 ${kickTarget.nickname || kickTarget.id} 移出房间`, 'success')
       setKickTarget(null)
-      loadDetail(detail.id)
+      if (selectedRoom.current === detail.id) loadDetail(detail.id)
       setReloadKey((key) => key + 1)
     } catch (err) {
       toast.show(err instanceof Error ? err.message : '移出失败', 'error')

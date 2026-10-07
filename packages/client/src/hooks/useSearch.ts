@@ -68,6 +68,7 @@ export function useSearch(source: MusicSource, type: 'song' | 'album' | 'playlis
       const currentSearchId = ++searchIdRef.current
       lastKeywordRef.current = trimmed
 
+      setLoadingMore(false)
       setLoading(true)
       setHasSearched(true)
       fetchPage(source, trimmed, 1, controller.signal, type)

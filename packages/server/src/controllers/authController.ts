@@ -24,9 +24,20 @@ const VALID_PLATFORMS = new Set<MusicSource>(['netease', 'tencent', 'kugou', 'ku
 export function registerAuthController(io: TypedServer, socket: TypedSocket) {
   // 防止同一 QR 会话重复处理 803 成功状态
   let qrSuccessHandled = false
-  let activeQr: { key: string; platform: MusicSource } | null = null
+  let activeQr: { key: string; platform: MusicSource; authorization: ReturnType<typeof captureAuthorization> } | null = null
   let qrRequestVersion = 0
   let qrCheckInFlight = false
+
+  const captureAuthorization = (platform: MusicSource) => {
+    const mapping = getSocketMapping(socket.id)
+    const userId = mapping?.userId ?? socket.data.identityUserId
+    const version = authService.getAuthorizationVersion(userId, platform, mapping?.roomId)
+    return {
+      mapping,
+      current: () => socket.connected && getSocketMapping(socket.id) === mapping &&
+        authService.getAuthorizationVersion(userId, platform, mapping?.roomId) === version,
+    }
+  }
 
   // -------------------------------------------------------------------------
   // QR 扫码登录（所有平台统一处理）
@@ -36,6 +47,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
     if (!(await checkAuthRateLimit(socket))) return
     qrSuccessHandled = false
     activeQr = null
+    qrCheckInFlight = false
     const requestVersion = ++qrRequestVersion
     try {
       const platform = data?.platform as MusicSource
@@ -45,17 +57,18 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
       }
 
       const provider = AUTH_PROVIDERS[platform]
+      const authorization = captureAuthorization(platform)
       const result = await provider.generateQrCode()
 
       // A newer QR request superseded this asynchronous response.
-      if (requestVersion !== qrRequestVersion) return
+      if (requestVersion !== qrRequestVersion || !authorization.current()) return
 
       if (!result) {
         socket.emit(EVENTS.AUTH_QR_STATUS, { status: QR_STATUS.EXPIRED, message: '生成二维码失败，请重试' })
         return
       }
 
-      activeQr = { key: result.key, platform }
+      activeQr = { key: result.key, platform, authorization }
       socket.emit(EVENTS.AUTH_QR_GENERATED, { key: result.key, qrimg: result.qrimg })
     } catch (err) {
       logger.error('AUTH_REQUEST_QR error', err, { socketId: socket.id })
@@ -66,6 +79,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
 
   socket.on(EVENTS.AUTH_CHECK_QR, async (data) => {
     if (!(await checkAuthRateLimit(socket))) return
+    const requestVersion = qrRequestVersion
     try {
       if (!data?.key) {
         socket.emit(EVENTS.AUTH_QR_STATUS, { status: QR_STATUS.EXPIRED, message: '缺少二维码 key' })
@@ -84,11 +98,18 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
       }
       if (qrSuccessHandled) return
       if (qrCheckInFlight) return
+      const session = activeQr
+      if (!session.authorization.current()) {
+        activeQr = null
+        return
+      }
       qrCheckInFlight = true
 
       const provider = AUTH_PROVIDERS[platform]
       const result = await provider.checkQrStatus(data.key)
-      if (!activeQr || activeQr.key !== data.key) {
+      if (activeQr !== session || requestVersion !== qrRequestVersion) return
+      if (!session.authorization.current()) {
+        activeQr = null
         qrCheckInFlight = false
         return
       }
@@ -135,9 +156,16 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
           infoResult = await provider.getUserInfo(result.cookie)
         }
 
+        if (activeQr !== session || requestVersion !== qrRequestVersion) return
+        if (!session.authorization.current()) {
+          activeQr = null
+          qrCheckInFlight = false
+          return
+        }
+
         if (infoResult.ok) {
           const userInfo = infoResult.data
-          const mapping = getSocketMapping(socket.id)
+          const mapping = session.authorization.mapping
           if (mapping) {
             authService.addCookie(
               mapping.roomId,
@@ -185,6 +213,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
       qrCheckInFlight = false
     } catch (err) {
       logger.error('AUTH_CHECK_QR error', err, { socketId: socket.id })
+      if (requestVersion !== qrRequestVersion) return
       qrCheckInFlight = false
       if (data?.key && activeQr?.key !== data.key) return
       socket.emit(EVENTS.AUTH_QR_STATUS, {
@@ -219,7 +248,8 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
 
       const { cookie } = data
       const platform = data.platform as MusicSource
-      const mapping = getSocketMapping(socket.id)
+      const authorization = captureAuthorization(platform)
+      const mapping = authorization.mapping
       const roomId = mapping?.roomId ?? null
       const serverCookie = mapping && roomId ? authService.getUserCookie(mapping.userId, platform, roomId) : null
       const incomingTencentCredential = platform === 'tencent' ? tencentAuth.parseTencentCredential(cookie) : null
@@ -285,6 +315,8 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
         await new Promise((r) => setTimeout(r, 1500))
         infoResult = await provider.getUserInfo(cookie)
       }
+
+      if (!authorization.current()) return
 
       if (infoResult.ok) {
         const userInfo = infoResult.data
@@ -358,6 +390,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
       }
 
       const cookie = authService.getUserCookie(mapping.userId, 'kugou_concept', mapping.roomId)
+      const authorization = captureAuthorization('kugou_concept')
       if (!cookie) {
         socket.emit(EVENTS.AUTH_CLAIM_KUGOU_CONCEPT_VIP_RESULT, {
           success: false,
@@ -390,6 +423,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
           ? authService.getUserCookie(currentMapping.userId, 'kugou_concept', currentMapping.roomId)
           : null
         const canApplyRefresh =
+          authorization.current() &&
           currentMapping?.roomId === mapping.roomId &&
           currentMapping.userId === mapping.userId &&
           currentCookie === cookie
@@ -441,7 +475,12 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
 
   socket.on(EVENTS.AUTH_LOGOUT, (data) => {
     try {
-      if (!data?.platform) return
+      if (!data?.platform || !VALID_PLATFORMS.has(data.platform)) return
+      if (activeQr?.platform === data.platform) {
+        activeQr = null
+        qrRequestVersion++
+        qrCheckInFlight = false
+      }
       const mapping = getSocketMapping(socket.id)
       if (mapping) {
         authService.removeCookie(mapping.roomId, data.platform, mapping.userId)

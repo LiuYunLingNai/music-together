@@ -404,7 +404,7 @@ export function rasterizeLyricLineMask(options: {
 
   // 主行字号：基准 × 行缩放（上游 entry.scale）
   let fontSize = LYRIC_FONT_SIZE * scale
-  const subFontSize = fontSize * 0.52
+  let subFontSize = fontSize * 0.52
 
   // 测量：主行 + 附属小字的最宽者
   ctx.font = buildFont(fontSize, fontWeight, fontFamily)
@@ -428,8 +428,8 @@ export function rasterizeLyricLineMask(options: {
       fontSize *= shrinkFactor
       ctx.font = buildFont(fontSize, fontWeight, fontFamily)
       textWidth = Math.max(1, ctx.measureText(text).width)
-      const subShrunk = fontSize * 0.52
-      ctx.font = buildFont(subShrunk, fontWeight, fontFamily)
+      subFontSize = fontSize * 0.52
+      ctx.font = buildFont(subFontSize, fontWeight, fontFamily)
       subWidth = 0
       for (const sub of subLines) {
         subWidth = Math.max(subWidth, ctx.measureText(sub).width)

@@ -120,9 +120,11 @@ function createWebSocket(): TypedSocket {
     lastAttemptAt = performance.now()
 
     const wsUrl = SERVER_URL.replace(/^http/, 'ws') + '/ws'
-    ws = new WebSocket(wsUrl)
+    const connection = new WebSocket(wsUrl)
+    ws = connection
 
     ws.onopen = () => {
+      if (ws !== connection) return
       connected = true
       // 连接成功 → 退避计数归零（下一次断网仍从 2s 起步）
       failureCount = 0
@@ -138,6 +140,7 @@ function createWebSocket(): TypedSocket {
     }
 
     ws.onmessage = (event) => {
+      if (ws !== connection) return
       try {
         const msg = JSON.parse(event.data)
         if (msg && typeof msg.event === 'string') {
@@ -152,6 +155,7 @@ function createWebSocket(): TypedSocket {
     }
 
     ws.onclose = () => {
+      if (ws !== connection) return
       connected = false
       const disconnectHandlers = handlers.get('disconnect')
       if (disconnectHandlers) {
@@ -163,12 +167,13 @@ function createWebSocket(): TypedSocket {
         failureCount += 1
         reconnectTimer = setTimeout(() => {
           reconnectTimer = null
-          connect()
+          if (shouldReconnect) connect()
         }, reconnectDelayMs(failureCount))
       }
     }
 
     ws.onerror = (err) => {
+      if (ws !== connection) return
       console.error('WebSocket error', err)
       const errorHandlers = handlers.get('connect_error')
       if (errorHandlers) {

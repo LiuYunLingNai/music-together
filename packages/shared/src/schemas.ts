@@ -123,6 +123,11 @@ export const queueAddSchema = z.object({
   track: trackSchema,
 })
 
+// Empty payload resumes playback; native clients may omit it entirely.
+export const playerPlaySchema = z.object({
+  track: trackSchema.extend({ requestedBy: z.string().max(LIMITS.NICKNAME_MAX_LENGTH).optional() }).optional(),
+})
+
 export const queueInsertAfterCurrentSchema = queueAddSchema
 
 export const queueAddBatchSchema = z.object({

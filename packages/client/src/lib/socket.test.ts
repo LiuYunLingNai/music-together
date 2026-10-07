@@ -1,5 +1,54 @@
-import { describe, expect, it } from 'vitest'
-import { reconnectDelayMs } from './socket'
+import { describe, expect, it, vi } from 'vitest'
+import { disconnectSocket, getSocket, reconnectDelayMs } from './socket'
+
+it('ignores callbacks from a replaced connection and keeps the active connection usable', () => {
+  class FakeWebSocket {
+    static OPEN = 1
+    static CONNECTING = 0
+    static instances: FakeWebSocket[] = []
+    readyState = 0
+    onopen: (() => void) | null = null
+    onclose: (() => void) | null = null
+    onmessage: ((event: { data: string }) => void) | null = null
+    onerror: (() => void) | null = null
+    constructor() {
+      FakeWebSocket.instances.push(this)
+    }
+    close() {
+      this.readyState = 3
+    }
+    send() {}
+  }
+  vi.useFakeTimers()
+  vi.stubGlobal('WebSocket', FakeWebSocket)
+  try {
+    const socket = getSocket()
+    const disconnected = vi.fn()
+    const incoming = vi.fn()
+    socket.on('disconnect', disconnected)
+    socket.on('room:error', incoming)
+    socket.connect()
+    const old = FakeWebSocket.instances[0]
+    socket.disconnect()
+    socket.connect()
+    const active = FakeWebSocket.instances[1]
+    active.readyState = 1
+    active.onopen?.()
+    old.onclose?.()
+    old.onmessage?.({ data: JSON.stringify({ event: 'room:error', data: { code: 'OLD' } }) })
+    expect(socket.connected).toBe(true)
+    expect(disconnected).not.toHaveBeenCalled()
+    expect(incoming).not.toHaveBeenCalled()
+    active.onmessage?.({ data: JSON.stringify({ event: 'room:error', data: { code: 'CURRENT' } }) })
+    expect(incoming).toHaveBeenCalledOnce()
+    vi.advanceTimersByTime(60_000)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+  } finally {
+    disconnectSocket()
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  }
+})
 
 /**
  * 回归：重连必须**指数退避**，不得是热循环。

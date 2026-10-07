@@ -26,6 +26,11 @@ export default function BackgroundPage() {
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const patchQueue = useRef<Promise<void>>(Promise.resolve())
+  const patchVersion = useRef(0)
+  const pendingPatch = useRef<Partial<Omit<GlobalBackgroundSettings, 'backgroundUrl'>>>({})
+  const patchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const flushPendingPatch = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -39,21 +44,51 @@ export default function BackgroundPage() {
       })
     return () => {
       cancelled = true
+      if (patchTimer.current) {
+        clearTimeout(patchTimer.current)
+        flushPendingPatch.current?.()
+      }
     }
   }, [])
 
-  const patch = async (patchData: Partial<Omit<GlobalBackgroundSettings, 'backgroundUrl'>>) => {
+  const patch = (patchData: Partial<Omit<GlobalBackgroundSettings, 'backgroundUrl'>>) => {
     if (!settings) return
-    const previous = settings
-    setSettings({ ...settings, ...patchData })
-    try {
-      const updated = await adminApi.patchBackground(patchData)
-      setSettings(updated)
-      toast.show('背景设置已更新', 'success')
-    } catch (err) {
-      setSettings(previous)
-      toast.show(err instanceof Error ? err.message : '保存失败', 'error')
+    ++patchVersion.current
+    setSettings((current) => (current ? { ...current, ...patchData } : current))
+    pendingPatch.current = { ...pendingPatch.current, ...patchData }
+    if (patchTimer.current) clearTimeout(patchTimer.current)
+    const flush = () => {
+      patchTimer.current = null
+      flushPendingPatch.current = null
+      const version = patchVersion.current
+      const nextPatch = pendingPatch.current
+      pendingPatch.current = {}
+      // Preserve server ordering as well as optimistic UI ordering.
+      const request = patchQueue.current.then(() => adminApi.patchBackground(nextPatch))
+      patchQueue.current = request.then(
+        () => undefined,
+        () => undefined,
+      )
+      void (async () => {
+        try {
+          const updated = await request
+          if (version !== patchVersion.current) return
+          setSettings(updated)
+          toast.show('背景设置已更新', 'success')
+        } catch (err) {
+          if (version !== patchVersion.current) return
+          try {
+            const actual = await adminApi.getBackground()
+            if (version === patchVersion.current) setSettings(actual)
+          } catch {
+            // Keep the draft visible for an explicit retry; do not roll back newer fields.
+          }
+          toast.show(err instanceof Error ? err.message : '保存失败', 'error')
+        }
+      })()
     }
+    flushPendingPatch.current = flush
+    patchTimer.current = setTimeout(flush, 180)
   }
 
   const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -112,7 +147,11 @@ export default function BackgroundPage() {
   }
 
   if (error) {
-    return <Card title="全局背景"><p className="text-sm text-[#ff4d4f] dark:text-[#ff7875]">{error}</p></Card>
+    return (
+      <Card title="全局背景">
+        <p className="text-sm text-[#ff4d4f] dark:text-[#ff7875]">{error}</p>
+      </Card>
+    )
   }
   if (!settings) return <PageLoading />
 
@@ -161,13 +200,21 @@ export default function BackgroundPage() {
                 onChange={(event) => setImageUrl(event.target.value)}
                 placeholder="https://example.com/background.jpg"
               />
-              <Button variant="ghost" loading={actionLoading} disabled={!imageUrl.trim()} onClick={handleImageUrlSubmit} className="whitespace-nowrap">
+              <Button
+                variant="ghost"
+                loading={actionLoading}
+                disabled={!imageUrl.trim()}
+                onClick={handleImageUrlSubmit}
+                className="whitespace-nowrap"
+              >
                 应用
               </Button>
             </div>
           </Field>
 
-          <p className="text-xs text-zinc-400 dark:text-zinc-500">支持 PNG / JPEG / WebP，不超过 6MB；服务端会压缩为 2560×1440 以内的 WebP</p>
+          <p className="text-xs text-zinc-400 dark:text-zinc-500">
+            支持 PNG / JPEG / WebP，不超过 6MB；服务端会压缩为 2560×1440 以内的 WebP
+          </p>
         </div>
       </SectionCard>
 

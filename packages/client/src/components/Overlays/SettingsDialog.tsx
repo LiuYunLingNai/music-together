@@ -49,7 +49,7 @@ interface SettingsDialogProps {
     roamingEnabled?: boolean
     roamingSource?: import('@music-together/shared').RoamingSource
     roamingMode?: import('@music-together/shared').NeteaseRoamingMode
-  }) => void
+  }) => Promise<boolean>
   onSetUserRole?: (userId: string, role: 'admin' | 'member') => void
   initialTab?: SettingsTab
 }

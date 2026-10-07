@@ -409,11 +409,11 @@ function alignAuxiliarySource(
         decisions[cell] = 2
       }
 
-      const matchScore = textMatchScore(target.normalizedText, original[sourceIndex - 1].normalizedText)
-      if (matchScore === 0) continue
       const timeDistance = Math.abs(target.startTime - (original[sourceIndex - 1].startTime + offset))
       const tolerance = 6_000
       if (timeDistance > tolerance) continue
+      const matchScore = textMatchScore(target.normalizedText, original[sourceIndex - 1].normalizedText)
+      if (matchScore === 0) continue
       const alignedScore =
         scores[(targetIndex - 1) * width + sourceIndex - 1] + matchScore * 10 + 1 - timeDistance / tolerance
       if (alignedScore > scores[cell]) {

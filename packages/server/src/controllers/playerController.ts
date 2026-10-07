@@ -1,4 +1,4 @@
-import { EVENTS, ERROR_CODE, playerSeekSchema, playerSetModeSchema } from '@music-together/shared'
+import { EVENTS, ERROR_CODE, playerPlaySchema, playerSeekSchema, playerSetModeSchema } from '@music-together/shared'
 import type { TypedServer, TypedSocket } from '../middleware/types.js'
 import { createWithPermission, defineAbilityForRoomUser } from '../middleware/withControl.js'
 import { createWithRoom } from '../middleware/withRoom.js'
@@ -16,7 +16,12 @@ export function registerPlayerController(io: TypedServer, socket: TypedSocket) {
     EVENTS.PLAYER_PLAY,
     withPermission('play', 'Player', async (ctx, data) => {
       if (!(await checkSocketRateLimit(ctx.socket))) return
-      const track = data?.track ?? ctx.room.currentTrack ?? ctx.room.queue[0]
+      const parsed = playerPlaySchema.safeParse(data ?? {})
+      if (!parsed.success) {
+        ctx.socket.emit(EVENTS.ROOM_ERROR, { code: ERROR_CODE.INVALID_INPUT, message: '无效的播放请求' })
+        return
+      }
+      const track = parsed.data.track ?? ctx.room.currentTrack ?? ctx.room.queue[0]
       if (!track) return
 
       // Resume: same track already loaded and has stream URL → keep position

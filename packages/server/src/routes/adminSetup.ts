@@ -4,6 +4,7 @@ import * as z from 'zod/v4'
 import { issueIdentityCookie } from '../services/identityService.js'
 import { createInitialAdmin, isSetupNeeded } from '../services/adminSetupService.js'
 import { logger } from '../utils/logger.js'
+import { passwordWorkRateLimit } from '../middleware/httpRateLimiter.js'
 
 const setupSchema = z.object({
   accountId: z
@@ -14,7 +15,10 @@ const setupSchema = z.object({
     .regex(/^[a-z0-9_-]+$/, '账号 ID 只能包含小写字母、数字、下划线和连字符'),
   nickname: z.string().trim().min(1, '昵称不能为空').max(40),
   password: z.string().min(8, '密码至少需要 8 个字符').max(128),
-  avatarUrl: z.string().max(2 * 1024 * 1024).optional(),
+  avatarUrl: z
+    .string()
+    .max(2 * 1024 * 1024)
+    .optional(),
 })
 
 /**
@@ -28,53 +32,64 @@ export function createAdminSetupRoutes(): Router {
     res.json({ needed: isSetupNeeded() })
   })
 
-  router.post('/setup', async (req, res) => {
-    const parsed = setupSchema.safeParse(req.body)
-    if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid input' })
-      return
-    }
+  router.post(
+    '/setup',
+    (req, res, next) => {
+      if (!isSetupNeeded()) {
+        res.status(409).json({ error: '服务器已完成初始化' })
+        return
+      }
+      next()
+    },
+    passwordWorkRateLimit,
+    async (req, res) => {
+      const parsed = setupSchema.safeParse(req.body)
+      if (!parsed.success) {
+        res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid input' })
+        return
+      }
 
-    const passwordHash = await bcrypt.hash(parsed.data.password, 12)
-    const result = createInitialAdmin({
-      accountId: parsed.data.accountId,
-      nickname: parsed.data.nickname,
-      passwordHash,
-      avatarUrl: parsed.data.avatarUrl,
-    })
+      const passwordHash = await bcrypt.hash(parsed.data.password, 12)
+      const result = createInitialAdmin({
+        accountId: parsed.data.accountId,
+        nickname: parsed.data.nickname,
+        passwordHash,
+        avatarUrl: parsed.data.avatarUrl,
+      })
 
-    if (!result.success) {
-      const errors = {
-        already_initialized: { status: 409, error: '服务器已完成初始化' },
-        reserved_id: { status: 400, error: '该账号 ID 为系统保留名称' },
-        account_conflict: { status: 409, error: '该账号 ID 已被使用' },
-      } as const
-      const failure = errors[result.reason]
-      logger.warn('首个管理员初始化被拒绝', {
-        event: 'admin.setup_rejected',
-        reason: result.reason,
+      if (!result.success) {
+        const errors = {
+          already_initialized: { status: 409, error: '服务器已完成初始化' },
+          reserved_id: { status: 400, error: '该账号 ID 为系统保留名称' },
+          account_conflict: { status: 409, error: '该账号 ID 已被使用' },
+        } as const
+        const failure = errors[result.reason]
+        logger.warn('首个管理员初始化被拒绝', {
+          event: 'admin.setup_rejected',
+          reason: result.reason,
+          requestIp: req.ip,
+        })
+        res.status(failure.status).json({ error: failure.error })
+        return
+      }
+
+      const issued = issueIdentityCookie(req, res, result.user.id)
+      logger.info(`已完成服务器初始化，首个管理员账号为 ${result.user.id}`, {
+        event: 'admin.setup_completed',
+        accountId: result.user.id,
+        nickname: result.user.nickname,
         requestIp: req.ip,
       })
-      res.status(failure.status).json({ error: failure.error })
-      return
-    }
-
-    const issued = issueIdentityCookie(req, res, result.user.id)
-    logger.info(`已完成服务器初始化，首个管理员账号为 ${result.user.id}`, {
-      event: 'admin.setup_completed',
-      accountId: result.user.id,
-      nickname: result.user.nickname,
-      requestIp: req.ip,
-    })
-    res.json({
-      id: result.user.id,
-      nickname: result.user.nickname,
-      avatarUrl: result.user.avatarUrl,
-      hasPassword: true,
-      role: result.user.role,
-      expiresAt: issued.expiresAt,
-    })
-  })
+      res.json({
+        id: result.user.id,
+        nickname: result.user.nickname,
+        avatarUrl: result.user.avatarUrl,
+        hasPassword: true,
+        role: result.user.role,
+        expiresAt: issued.expiresAt,
+      })
+    },
+  )
 
   return router
 }

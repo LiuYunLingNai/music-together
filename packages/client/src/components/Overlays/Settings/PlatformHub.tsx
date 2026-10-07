@@ -156,6 +156,7 @@ export function PlatformHub() {
                 myStatus={getMyPlatformStatus(p, auth.myStatus)}
                 playlists={playlist.myPlaylists[p]}
                 loading={playlist.playlistsLoading[p]}
+                loaded={Boolean(playlist.playlistsLoaded[p])}
                 onFetchMyPlaylists={() => playlist.fetchMyPlaylists(p)}
                 onSelectPlaylist={handleSelectPlaylist}
               />
@@ -168,6 +169,7 @@ export function PlatformHub() {
                     myStatus={getMyPlatformStatus('kugou_concept', auth.myStatus)}
                     playlists={playlist.myPlaylists.kugou_concept}
                     loading={playlist.playlistsLoading.kugou_concept}
+                    loaded={Boolean(playlist.playlistsLoaded.kugou_concept)}
                     onFetchMyPlaylists={() => playlist.fetchMyPlaylists('kugou_concept')}
                     onSelectPlaylist={handleSelectPlaylist}
                     title="概念版歌单"

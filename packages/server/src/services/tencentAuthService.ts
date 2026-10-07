@@ -591,7 +591,6 @@ export async function generateQrCode(): Promise<{ key: string; qrimg: string } |
     if (!qrsig) {
       logger.error('QQ QR: qrsig not found in response headers', {
         setCookieCount: setCookies.length,
-        rawSetCookie: response.headers.get('set-cookie')?.slice(0, 200),
       })
       return null
     }
@@ -699,15 +698,10 @@ export async function checkQrStatus(qrsig: string): Promise<{
       .map(([k, v]) => `${k}=${v}`)
       .join('; ')
 
-    // 当登录成功（code=0）时输出原始响应方便调试
-    if (text.startsWith("ptuiCB('0'")) {
-      logger.debug('QQ 音乐扫码状态原始响应', { response: text.slice(0, 500) })
-    }
-
     // ptuiCB 格式不固定，可能 6~8 个参数，用宽松正则匹配
     const match = text.match(/ptuiCB\('(\d+)','([^']*)','([^']*)','([^']*)','([^']*)'(?:,'([^']*)')?/)
     if (!match) {
-      logger.warn('QQ QR: unexpected ptqrlogin response format', { text: text.slice(0, 300) })
+      logger.warn('QQ QR: unexpected ptqrlogin response format', { responseLength: text.length })
       return { status: 800, message: '检查状态失败（响应格式异常）' }
     }
 

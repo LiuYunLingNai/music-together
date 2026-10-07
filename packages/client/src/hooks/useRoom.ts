@@ -47,7 +47,34 @@ export function useRoom() {
       roamingSource?: import('@music-together/shared').RoamingSource
       roamingMode?: import('@music-together/shared').NeteaseRoamingMode
     }) => {
-      socket.emit(EVENTS.ROOM_SETTINGS, settings)
+      const roomId = useRoomStore.getState().room?.id
+      if (!socket.connected || !roomId) return Promise.resolve(false)
+      return new Promise<boolean>((resolve) => {
+        const finish = (confirmed: boolean) => {
+          clearTimeout(timer)
+          socket.off(EVENTS.ROOM_SETTINGS, onConfirmed)
+          socket.off(EVENTS.ROOM_ERROR, onRejected)
+          socket.off('disconnect', onRejected)
+          resolve(confirmed)
+        }
+        const onRejected = () => finish(false)
+        const onConfirmed = (
+          data: Parameters<import('@music-together/shared').ServerToClientEvents['room:settings']>[0],
+        ) => {
+          if (useRoomStore.getState().room?.id !== roomId) return finish(false)
+          if (
+            Object.entries(settings).every(
+              ([key, value]) => value === undefined || data[key as keyof typeof data] === value,
+            )
+          )
+            finish(true)
+        }
+        const timer = setTimeout(onRejected, 8_000)
+        socket.on(EVENTS.ROOM_SETTINGS, onConfirmed)
+        socket.on(EVENTS.ROOM_ERROR, onRejected)
+        socket.on('disconnect', onRejected)
+        socket.emit(EVENTS.ROOM_SETTINGS, settings)
+      })
     },
     [socket],
   )

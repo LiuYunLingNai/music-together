@@ -64,7 +64,7 @@ export function ManualCookieDialog({ open, onOpenChange, platform, onSubmit }: M
                 在左侧找到 <kbd className="bg-muted rounded px-1 py-0.5 text-xs">Cookies</kbd>，复制所有 Cookie
               </li>
             </ol>
-            <p className="mt-2 text-yellow-500">Cookie 仅存储在服务端内存，不会持久化保存。服务端重启后需重新登录。</p>
+            <p className="mt-2 text-yellow-500">Cookie 会用于房间内的音源授权，并可保存在此浏览器和服务端加密存储中。请仅在信任的设备和服务器上登录。</p>
           </div>
         </div>
 

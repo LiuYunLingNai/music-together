@@ -47,3 +47,39 @@ test('creates the first admin with role admin and blocks further setup', () => {
   const second = createInitialAdmin({ accountId: 'second-admin', nickname: 'Later', passwordHash: 'other' })
   assert.deepEqual(second, { success: false, reason: 'already_initialized' })
 })
+
+test('initialized setup rejects before hashing, and recovery limits cannot be bypassed by changing identity', async () => {
+  const express = (await import('express')).default
+  const bcrypt = (await import('bcryptjs')).default
+  const { createAdminSetupRoutes } = await import('../src/routes/adminSetup.js')
+  const authRoutes = (await import('../src/routes/auth.js')).default
+  const app = express()
+  app.use(express.json())
+  app.use((req, _res, next) => {
+    req.identityUserId = req.header('x-test-user')
+    next()
+  })
+  app.use('/admin', createAdminSetupRoutes())
+  app.use('/auth', authRoutes)
+  const server = app.listen(0, '127.0.0.1')
+  await new Promise<void>((resolve) => { if (server.listening) resolve(); else server.once('listening', resolve) })
+  const baseUrl = `http://127.0.0.1:${(server.address() as { port: number }).port}`
+  const originalHash = bcrypt.hash
+  let hashes = 0
+  bcrypt.hash = (() => { hashes++; throw new Error('unexpected password work') }) as typeof bcrypt.hash
+  try {
+    const response = await fetch(`${baseUrl}/admin/setup`, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ accountId: 'second-admin', nickname: 'X', password: 'valid-password' }) })
+    assert.equal(response.status, 409)
+    assert.equal(hashes, 0)
+    for (let index = 0; index < 11; index++) {
+      const recover = await fetch(`${baseUrl}/auth/identity/recover`, { method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-test-user': `rotating-identity-${index}` },
+        body: JSON.stringify({ accountId: 'missing-user', password: 'password' }) })
+      assert.equal(recover.status, index < 10 ? 401 : 429)
+    }
+  } finally {
+    bcrypt.hash = originalHash
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+  }
+})

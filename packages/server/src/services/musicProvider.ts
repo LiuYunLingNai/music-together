@@ -2786,7 +2786,7 @@ class MusicProvider {
     cookie?: string | null,
     type: 'playlist' | 'album' = 'playlist',
   ): Promise<{ ids: string[]; total: number }> {
-    const cacheKey = `${source}:${playlistId}`
+    const cacheKey = `${source}:${type}:${playlistId}`
 
     // Check reference index — verify registry still has all tracks
     const indexed = this.playlistIndex.get(cacheKey)
@@ -3196,9 +3196,9 @@ class MusicProvider {
     if (!tracks) {
       // Registry eviction between fetchFullPlaylist and hydrate (very rare).
       // Clear index and retry once.
-      this.playlistIndex.delete(`${source}:${playlistId}`)
+      this.playlistIndex.delete(`${source}:${type}:${playlistId}`)
       logger.warn(`Playlist page hydration failed, retrying: ${source}/${playlistId}`)
-      const retry = await this.fetchFullPlaylist(source, playlistId, playlistTotal, cookie)
+      const retry = await this.fetchFullPlaylist(source, playlistId, playlistTotal, cookie, type)
       if (retry.total === 0) return { tracks: [], total: 0, hasMore: false }
       const retryPageIds = retry.ids.slice(offset, offset + limit)
       tracks = this.hydrateFromRegistry(source, retryPageIds)

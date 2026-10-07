@@ -593,12 +593,14 @@ export function createAdminRoutes(io: TypedServer): Router {
 
     // Also remove from in-memory room cookie pool and notify user's sockets
     const platform = parsed.data
+    const affectedRooms = authService.revokeUserAuthorization(user.id, platform)
     for (const [roomId] of roomRepo.getAll()) {
-      const socketId = roomRepo.getSocketIdForUser(roomId, user.id)
-      if (socketId) {
-        authService.removeCookie(roomId, platform, user.id, false)
-        // Each socket auto-joins a room named after its own ID, so io.to(socketId) is unicast
-        io.to(socketId).emit(EVENTS.AUTH_MY_STATUS, authService.getUserAuthStatus(user.id, roomId))
+      for (const socket of io.getSocketsInRoom(roomId)) {
+        if (socket.data.identityUserId === user.id) {
+          socket.emit(EVENTS.AUTH_MY_STATUS, authService.getUserAuthStatus(user.id, roomId))
+        }
+      }
+      if (affectedRooms.includes(roomId)) {
         io.to(roomId).emit(EVENTS.AUTH_STATUS_UPDATE, authService.getAllPlatformStatus(roomId))
       }
     }

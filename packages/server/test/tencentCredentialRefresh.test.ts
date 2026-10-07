@@ -89,3 +89,24 @@ test('refreshes due credentials every 24 hours and updates active room copies', 
   assert.equal(platformAuthRepo.loadDueTencent(now - 1).length, 0)
   assert.equal(platformAuthRepo.loadDueTencent(now).length, 2)
 })
+
+test('scheduled refresh cannot overwrite a logout and new login reusing the same cookie', async () => {
+  const cookie = platformAuthRepo.loadUser('qq-refresh-success')[0]!.cookie
+  platformAuthRepo.markCredentialRefreshAttempt('qq-refresh-success', 'tencent', now - TENCENT_CREDENTIAL_REFRESH_INTERVAL_MS)
+  let release!: () => void
+  let started!: () => void
+  const held = new Promise<void>((resolve) => { release = resolve })
+  const began = new Promise<void>((resolve) => { started = resolve })
+  const pending = refreshDueTencentCredentials(now, async () => {
+    started()
+    await held
+    return credential(101, 'stale-scheduled-key')
+  })
+  await began
+  authService.removeCookie('refresh-room', 'tencent', 'qq-refresh-success')
+  authService.addCookie('refresh-room', 'tencent', 'qq-refresh-success', cookie, '重新登录', 1)
+  release()
+  assert.deepEqual(await pending, { checked: 1, refreshed: 0, failed: 0, skipped: 1 })
+  assert.equal(platformAuthRepo.loadUser('qq-refresh-success')[0]?.cookie, cookie)
+  assert.equal(platformAuthRepo.loadUser('qq-refresh-success')[0]?.nickname, '重新登录')
+})
