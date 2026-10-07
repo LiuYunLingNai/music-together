@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import type { UserPlaylist } from '@music-together/shared'
 import {
@@ -14,10 +14,22 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useAccountPlaylistStore } from '@/stores/accountPlaylistStore'
-import { addTracksToUserPlaylist, createUserPlaylist, fetchUserPlaylists } from '@/lib/playlistApi'
+import {
+  addTracksToUserPlaylist,
+  createUserPlaylist,
+  fetchUserPlaylists,
+  PlaylistIdentityChangedError,
+} from '@/lib/playlistApi'
 import { ListMusic, Loader2, Plus } from 'lucide-react'
 
 export function AddToPlaylistDialog() {
+  const pickerVersion = useAccountPlaylistStore((s) => s.pickerVersion)
+  return <PlaylistPicker key={pickerVersion} version={pickerVersion} />
+}
+
+function PlaylistPicker({ version }: { version: number }) {
+  const generation = useAccountPlaylistStore((s) => s.generation)
+  const isCurrent = () => useAccountPlaylistStore.getState().generation === generation
   const pickerTracks = useAccountPlaylistStore((s) => s.pickerTracks)
   const pickerLabel = useAccountPlaylistStore((s) => s.pickerLabel)
   const playlists = useAccountPlaylistStore((s) => s.playlists)
@@ -26,28 +38,54 @@ export function AddToPlaylistDialog() {
   const upsertPlaylist = useAccountPlaylistStore((s) => s.upsertPlaylist)
   const closePicker = useAccountPlaylistStore((s) => s.closePicker)
 
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(!loaded)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
+  const busy = useRef(false)
 
   const open = pickerTracks !== null
   const trackCount = pickerTracks?.length ?? 0
 
   useEffect(() => {
     if (!open || loaded) return
-    setLoading(true)
+    let active = true
     fetchUserPlaylists()
-      .then(setPlaylists)
-      .catch((error: unknown) => toast.error(error instanceof Error ? error.message : '歌单加载失败'))
-      .finally(() => setLoading(false))
-  }, [open, loaded, setPlaylists])
+      .then((data) => {
+        if (active && useAccountPlaylistStore.getState().generation === generation) {
+          setLoading(false)
+          setPlaylists(data)
+        }
+      })
+      .catch((error: unknown) => {
+        if (active && !(error instanceof PlaylistIdentityChangedError))
+          toast.error(error instanceof Error ? error.message : '歌单加载失败')
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [open, loaded, setPlaylists, generation])
 
   async function handleAdd(playlist: UserPlaylist) {
-    if (!pickerTracks || busyId) return
+    if (!pickerTracks || busy.current || loading) return
+    busy.current = true
     setBusyId(playlist.id)
     try {
+      await addToPlaylist(playlist)
+    } finally {
+      busy.current = false
+      setBusyId(null)
+    }
+  }
+
+  async function addToPlaylist(playlist: UserPlaylist) {
+    if (!pickerTracks) return
+    try {
       const { added, trackCount: total } = await addTracksToUserPlaylist(playlist.id, pickerTracks)
+      if (!isCurrent()) return
       const skipped = trackCount - added
       // 服务端 list 已缓存（loaded），不会再自动刷新——手动把最新曲目数与封面写回 store，
       // 否则列表和选择器会一直停留在创建时的「0 首」。
@@ -58,30 +96,33 @@ export function AddToPlaylistDialog() {
       })
       toast.success(
         skipped > 0
-          ? `已加入「${playlist.name}」${added} 首（${skipped} 首已存在）`
+          ? `已加入「${playlist.name}」${added} 首（${skipped} 首重复或超出容量）`
           : `已加入「${playlist.name}」${added} 首`,
       )
-      closePicker()
+      if (useAccountPlaylistStore.getState().pickerVersion === version) closePicker()
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : '加入歌单失败')
-    } finally {
-      setBusyId(null)
+      if (!(error instanceof PlaylistIdentityChangedError))
+        toast.error(error instanceof Error ? error.message : '加入歌单失败')
     }
   }
 
   async function handleCreate() {
     const name = newName.trim()
-    if (!name || creating) return
+    if (!name || !pickerTracks || busy.current || loading) return
+    busy.current = true
     setCreating(true)
     try {
       const playlist = await createUserPlaylist(name)
+      if (!isCurrent()) return
       upsertPlaylist(playlist)
       setNewName('')
-      await handleAdd(playlist)
+      if (useAccountPlaylistStore.getState().pickerVersion === version) await addToPlaylist(playlist)
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : '新建歌单失败')
+      if (!(error instanceof PlaylistIdentityChangedError))
+        toast.error(error instanceof Error ? error.message : '新建歌单失败')
     } finally {
       setCreating(false)
+      busy.current = false
     }
   }
 
@@ -114,7 +155,7 @@ export function AddToPlaylistDialog() {
               variant="outline"
               size="icon"
               className="shrink-0"
-              disabled={!newName.trim() || creating}
+              disabled={!newName.trim() || creating || busyId !== null || loading}
               onClick={() => void handleCreate()}
               aria-label="新建歌单并加入"
             >
@@ -135,7 +176,7 @@ export function AddToPlaylistDialog() {
                   <button
                     key={playlist.id}
                     type="button"
-                    disabled={busyId !== null}
+                    disabled={busyId !== null || creating || loading}
                     onClick={() => void handleAdd(playlist)}
                     className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left transition-colors hover:bg-accent disabled:opacity-60"
                   >

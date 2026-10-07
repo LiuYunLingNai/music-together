@@ -2,6 +2,7 @@ import { useAccountStore, type AccountProfile } from '@/stores/accountStore'
 import { useRoomStore } from '@/stores/roomStore'
 import { SERVER_URL } from './config'
 import { storage } from './storage'
+import { useAccountPlaylistStore } from '@/stores/accountPlaylistStore'
 
 function storeProfile(profile: AccountProfile): AccountProfile {
   useAccountStore.getState().setProfile(profile)
@@ -12,11 +13,16 @@ function storeProfile(profile: AccountProfile): AccountProfile {
 }
 
 async function requestProfile(path: string, init?: RequestInit): Promise<AccountProfile | null> {
+  const generation = useAccountPlaylistStore.getState().generation
   const response = await fetch(`${SERVER_URL}${path}`, {
     ...init,
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...init?.headers },
   })
+  const currentIdentity = () => {
+    if (generation !== useAccountPlaylistStore.getState().generation) throw new Error('账号已切换，请重新操作')
+  }
+  currentIdentity()
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { error?: string } | null
     throw new Error(body?.error ?? `Request failed: ${response.status}`)
@@ -26,7 +32,9 @@ async function requestProfile(path: string, init?: RequestInit): Promise<Account
     storage.clearUserId()
     return null
   }
-  return storeProfile((await response.json()) as AccountProfile)
+  const profile = (await response.json()) as AccountProfile
+  currentIdentity()
+  return storeProfile(profile)
 }
 
 export function fetchCurrentProfile(): Promise<AccountProfile | null> {

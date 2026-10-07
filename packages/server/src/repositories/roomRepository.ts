@@ -168,6 +168,7 @@ export class InMemoryRoomRepository implements RoomRepository {
     ON CONFLICT(id) DO UPDATE SET state_json = excluded.state_json, updated_at = excluded.updated_at
   `)
   private deletePermanentRoom = db.prepare('DELETE FROM permanent_rooms WHERE id = ?')
+  private deletePermanentMember = db.prepare('DELETE FROM permanent_room_members WHERE room_id = ? AND user_id = ?')
   private updateMigratedPermanentRoom = db.prepare(`
     UPDATE permanent_rooms
     SET state_json = @stateJson, updated_at = @updatedAt
@@ -298,6 +299,15 @@ export class InMemoryRoomRepository implements RoomRepository {
 
   set(roomId: string, room: RoomData): void {
     this.rooms.set(roomId, room)
+    this.persist(roomId)
+  }
+
+  removeMember(roomId: string, userId: string): void {
+    const room = this.rooms.get(roomId)
+    if (!room) return
+    room.members = room.members.filter((member) => member.id !== userId)
+    this.deletePermanentMember.run(roomId, userId)
+    this.persistedSnapshots.get(roomId)?.members.delete(userId)
     this.persist(roomId)
   }
 

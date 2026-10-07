@@ -11,7 +11,7 @@ import { initializeSocket } from './controllers/index.js'
 import { identityHttpMiddleware } from './middleware/identityHttp.js'
 import { attachSocketIdentity } from './middleware/socketIdentity.js'
 import type { SocketData } from './middleware/types.js'
-import authRoutes from './routes/auth.js'
+import { createAuthRoutes } from './routes/auth.js'
 import { createAdminRoutes } from './routes/admin.js'
 import { createAdminSetupRoutes } from './routes/adminSetup.js'
 import { createAccountRoutes } from './routes/account.js'
@@ -50,7 +50,7 @@ app.use('/uploads/avatars', express.static(path.join(path.dirname(databasePath),
 app.use('/uploads/backgrounds', express.static(path.join(path.dirname(databasePath), 'backgrounds'), { maxAge: '1h' }))
 
 // REST API routes
-app.use('/api/auth', authRoutes)
+app.use('/api/auth', createAuthRoutes(io))
 app.use('/api/auth', createAccountRoutes(io))
 // 首次初始化端点（公开）必须先于受保护的 /api/admin 路由挂载
 app.use('/api/admin', createAdminSetupRoutes())

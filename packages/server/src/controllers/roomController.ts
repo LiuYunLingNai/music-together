@@ -187,7 +187,10 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
 
       // Notify others (skip for rejoin — they already know the user is in the room)
       if (!validation.isRejoin) {
-        socket.to(roomId).emit(EVENTS.ROOM_USER_JOINED, user)
+        socket.to(roomId).emit(EVENTS.ROOM_USER_JOINED, {
+          ...user,
+          isPersistentMember: updatedRoom.members.some((member) => member.id === user.id),
+        })
         // System message for user joined (server-authoritative)
         const joinMsg = chatService.createSystemMessage(roomId, `${user.nickname} 加入了房间`)
         io.to(roomId).emit(EVENTS.CHAT_MESSAGE, joinMsg)

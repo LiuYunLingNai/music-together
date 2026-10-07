@@ -33,7 +33,7 @@ export interface ServerToClientEvents {
   [EVENTS.ROOM_REJOIN_TOKEN]: (data: { roomId: string; token: string; expiresAt: number }) => void
   [EVENTS.ROOM_ERROR]: (error: { code: string; message: string }) => void
   [EVENTS.ROOM_AUTO_FALLBACK]: (data: RoomAutoFallbackEvent) => void
-  [EVENTS.ROOM_USER_JOINED]: (user: User) => void
+  [EVENTS.ROOM_USER_JOINED]: (user: User & { isPersistentMember?: boolean }) => void
   [EVENTS.ROOM_USER_LEFT]: (user: User) => void
   [EVENTS.ROOM_SETTINGS]: (settings: {
     name: string

@@ -1,6 +1,8 @@
 import { SERVER_URL } from '@/lib/config'
 import { fetchCurrentProfile } from '@/lib/profileApi'
 import { storage } from '@/lib/storage'
+import { useAccountPlaylistStore } from '@/stores/accountPlaylistStore'
+import { useAccountStore } from '@/stores/accountStore'
 import type { AccountProfile } from '@/stores/accountStore'
 import type { TypedSocket } from '@/lib/socket'
 
@@ -36,6 +38,8 @@ function reconnectSocket(socket: TypedSocket): Promise<void> {
 }
 
 function clearIdentityBoundBrowserState(): void {
+  useAccountStore.getState().setProfile(null)
+  useAccountPlaylistStore.getState().reset()
   storage.setAuthCookies([])
   storage.clearRejoinToken()
 }
@@ -60,6 +64,8 @@ export async function updateAccountId(
     body: JSON.stringify({ accountId: accountId.trim().toLowerCase(), currentPassword }),
   })
   storage.setUserId(result.id)
+  useAccountStore.getState().setProfile(null)
+  useAccountPlaylistStore.getState().reset()
   storage.clearRejoinToken()
   const profile = await fetchCurrentProfile()
   if (!profile) throw new Error('账号资料恢复失败')

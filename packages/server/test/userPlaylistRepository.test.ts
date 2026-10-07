@@ -49,6 +49,20 @@ test('create/list/get are scoped by user_id (ownership isolation)', () => {
   assert.equal(listA[0]?.name, '我的收藏')
 })
 
+test('account ID changes preserve playlist IDs, order and ownership', () => {
+  userRepo.ensure('rename-playlist-before')
+  const created = userPlaylistRepo.create('rename-playlist-before', 'Keep')
+  assert.ok(created.success)
+  const id = created.playlist.id
+  userPlaylistRepo.addTracks('rename-playlist-before', id, [makeTrack({ id: 'rename-1' }), makeTrack({ id: 'rename-2' })])
+  assert.equal(userRepo.rename('rename-playlist-before', 'rename-playlist-after').success, true)
+  assert.equal(userPlaylistRepo.get('rename-playlist-before', id), null)
+  const detail = userPlaylistRepo.get('rename-playlist-after', id)
+  assert.equal(detail?.id, id)
+  assert.equal(detail?.name, 'Keep')
+  assert.deepEqual(detail?.tracks.map((track) => track.id), ['rename-1', 'rename-2'])
+})
+
 test('addTracks dedupes by track id and reports added count', () => {
   userRepo.ensure('dedupe-user')
   const created = userPlaylistRepo.create('dedupe-user', 'Dedupe')

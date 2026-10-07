@@ -21,7 +21,7 @@ interface RoomStore {
   setRoom: (room: RoomState | null) => void
   updateRoom: (partial: Partial<RoomState>) => void
   setRoomPassword: (password: string | null) => void
-  addUser: (user: User) => void
+  addUser: (user: User & { isPersistentMember?: boolean }) => void
   removeUser: (userId: string) => void
   updateUserProfile: (userId: string, profile: Pick<User, 'nickname' | 'avatarUrl'>) => void
   reset: () => void
@@ -47,7 +47,7 @@ export const useRoomStore = create<RoomStore>((set) => ({
 
   setRoomPassword: (password) => set({ roomPassword: password }),
 
-  addUser: (user) =>
+  addUser: ({ isPersistentMember, ...user }) =>
     set((state) => {
       if (!state.room) return {}
       const users = state.room.users.some((u) => u.id === user.id)
@@ -58,7 +58,9 @@ export const useRoomStore = create<RoomStore>((set) => ({
         ? state.room.members.map((member) =>
             member.id === user.id ? { ...member, ...user, isOnline: true, lastSeenAt: now } : member,
           )
-        : [...state.room.members, { ...user, isOnline: true, joinedAt: now, lastSeenAt: now }]
+        : isPersistentMember === false
+          ? state.room.members
+          : [...state.room.members, { ...user, isOnline: true, joinedAt: now, lastSeenAt: now }]
       const room = { ...state.room, users, members }
       const myId = storage.getUserId()
       if (user.id === myId) {

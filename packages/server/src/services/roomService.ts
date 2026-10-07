@@ -14,7 +14,7 @@ import { createSystemMessage } from './chatService.js'
 import { logger } from '../utils/logger.js'
 import type { TypedServer } from '../middleware/types.js'
 import { userRepo } from '../repositories/userRepository.js'
-import { toPublicRoomState } from '../utils/roomUtils.js'
+import { toPublicRoomState, toPublicRoomStateForOwner } from '../utils/roomUtils.js'
 
 // Re-export from their new homes so existing `roomService.xxx()` callers
 // in controllers don't need import changes.
@@ -109,6 +109,23 @@ function shouldPersistMember(room: RoomData, user: User): boolean {
 function upsertRoomMemberIfPersistable(room: RoomData, user: User, role: UserRole): void {
   if (!shouldPersistMember(room, user)) return
   upsertRoomMember(room, user, role)
+}
+
+/** Admit an online guest after setting an account password without requiring a rejoin. */
+export function refreshAccountMembership(userId: string, io: TypedServer): void {
+  for (const room of roomRepo.getAll().values()) {
+    const user = room.users.find((entry) => entry.id === userId)
+    if (!user || room.members.some((member) => member.id === userId) || !shouldPersistMember(room, user)) continue
+    upsertRoomMember(room, user, user.role)
+    roomRepo.persist(room.id)
+    for (const socket of io.getSocketsInRoom(room.id)) {
+      const mapping = roomRepo.getSocketMapping(socket.id)
+      socket.emit(
+        EVENTS.ROOM_STATE,
+        mapping?.userId === room.creatorId ? toPublicRoomStateForOwner(room) : toPublicRoomState(room),
+      )
+    }
+  }
 }
 
 /**
@@ -505,8 +522,7 @@ export function kickUserFromRoom(
 
   // 仅存在于离线名册：直接从成员列表移除并持久化
   if (!onlineUser && offlineMember) {
-    room.members = room.members.filter((item) => item.id !== userId)
-    roomRepo.persist(roomId)
+    roomRepo.removeMember(roomId, userId)
   }
 
   // 通知被移出用户的所有连接并回到大厅（旧客户端按普通错误提示处理）

@@ -81,6 +81,7 @@ const setPasswordHash = db.prepare('UPDATE users SET password_hash = ?, updated_
 const setRole = db.prepare('UPDATE users SET role = ?, updated_at = ? WHERE id = ?')
 const listUsers = db.prepare<[], UserRow>('SELECT * FROM users ORDER BY created_at DESC')
 const deleteUser = db.prepare('DELETE FROM users WHERE id = ?')
+const renamePlaylistOwner = db.prepare('UPDATE user_playlists SET user_id = ? WHERE user_id = ?')
 const insertRenamedUser = db.prepare(`
   INSERT INTO users (id, nickname, avatar_url, password_hash, role, created_at, updated_at, last_seen_at)
   VALUES (@id, @nickname, @avatarUrl, @passwordHash, @role, @createdAt, @now, @now)
@@ -160,6 +161,8 @@ const renameUser = db.transaction((oldUserId: string, newUserId: string): Rename
     })
   }
 
+  // Preserve playlist IDs and tracks before deleting the old user's cascading foreign keys.
+  renamePlaylistOwner.run(newUserId, oldUserId)
   deleteUser.run(oldUserId)
   return { success: true, user: toUser(selectUser.get(newUserId)!) }
 })

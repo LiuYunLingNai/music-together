@@ -82,6 +82,21 @@ test('keeps offline members in a permanent room roster after reload', () => {
   roomRepo.delete(room.id)
 })
 
+test('explicitly removed offline members stay removed after reload, including a restored repository', () => {
+  const { room } = roomService.createRoom('remove-owner-socket', 'Owner', 'Removal', null, 'remove-owner')
+  roomService.updateSettings(room.id, { permanent: true })
+  userRepo.ensure('remove-member')
+  userRepo.setPasswordHash('remove-member', 'hashed-placeholder')
+  roomService.joinRoom('remove-member-socket', room.id, 'Member', 'remove-member')
+  roomService.leaveRoom('remove-member-socket')
+  const restoredRepo = new InMemoryRoomRepository()
+  restoredRepo.removeMember(room.id, 'remove-member')
+  const restored = new InMemoryRoomRepository().get(room.id)
+  assert.equal(restored?.members.some((member) => member.id === 'remove-member'), false)
+  assert.ok(restored?.members.some((member) => member.id === 'remove-owner'))
+  roomRepo.delete(room.id)
+})
+
 test('restores the last identified device for an offline member after reload', () => {
   const client = { kind: 'windows' as const, label: 'Windows 客户端' }
   const { room } = roomService.createRoom('device-owner-socket', 'Owner', 'Device room', null, 'device-owner-id', client)

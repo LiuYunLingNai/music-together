@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import type { Track, UserPlaylist, UserPlaylistDetail } from '@music-together/shared'
+import { LIMITS, type Track, type UserPlaylist, type UserPlaylistDetail } from '@music-together/shared'
 import type { SettingsTab } from '../SettingsDialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -8,6 +8,7 @@ import { Separator } from '@/components/ui/separator'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useAccountStore } from '@/stores/accountStore'
 import { useAccountPlaylistStore } from '@/stores/accountPlaylistStore'
+import { useRoomStore } from '@/stores/roomStore'
 import { useQueue } from '@/hooks/useQueue'
 import {
   createUserPlaylist,
@@ -16,6 +17,7 @@ import {
   fetchUserPlaylists,
   removeTrackFromUserPlaylist,
   renameUserPlaylist,
+  PlaylistIdentityChangedError,
 } from '@/lib/playlistApi'
 import { ArrowLeft, Check, ListMusic, ListPlus, Loader2, Pencil, Plus, Trash2, X } from 'lucide-react'
 
@@ -24,7 +26,8 @@ interface MyPlaylistsSectionProps {
 }
 
 export function MyPlaylistsSection({ onNavigate }: MyPlaylistsSectionProps) {
-  const hasPassword = useAccountStore((state) => Boolean(state.profile?.hasPassword))
+  const profile = useAccountStore((state) => state.profile)
+  const hasPassword = Boolean(profile?.hasPassword)
 
   if (!hasPassword) {
     return (
@@ -45,17 +48,19 @@ export function MyPlaylistsSection({ onNavigate }: MyPlaylistsSectionProps) {
     )
   }
 
-  return <MyPlaylistsContent />
+  return <MyPlaylistsContent key={profile?.id} />
 }
 
 function MyPlaylistsContent() {
+  const generation = useAccountPlaylistStore((s) => s.generation)
+  const isCurrent = () => useAccountPlaylistStore.getState().generation === generation
   const playlists = useAccountPlaylistStore((s) => s.playlists)
   const loaded = useAccountPlaylistStore((s) => s.loaded)
   const setPlaylists = useAccountPlaylistStore((s) => s.setPlaylists)
   const upsertPlaylist = useAccountPlaylistStore((s) => s.upsertPlaylist)
   const removePlaylistFromStore = useAccountPlaylistStore((s) => s.removePlaylist)
 
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(!loaded)
   const [creatingName, setCreatingName] = useState('')
   const [creating, setCreating] = useState(false)
   const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -64,21 +69,37 @@ function MyPlaylistsContent() {
 
   useEffect(() => {
     if (loaded) return
-    setLoading(true)
+    let active = true
     fetchUserPlaylists()
-      .then(setPlaylists)
-      .catch((error: unknown) => toast.error(error instanceof Error ? error.message : '歌单加载失败'))
-      .finally(() => setLoading(false))
-  }, [loaded, setPlaylists])
+      .then((data) => {
+        if (active && useAccountPlaylistStore.getState().generation === generation) {
+          setLoading(false)
+          setPlaylists(data)
+        }
+      })
+      .catch((error: unknown) => {
+        if (active && !(error instanceof PlaylistIdentityChangedError))
+          toast.error(error instanceof Error ? error.message : '歌单加载失败')
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [loaded, setPlaylists, generation])
 
   async function handleCreate() {
     const name = creatingName.trim()
-    if (!name || creating) return
+    if (!name || creating || loading) return
     setCreating(true)
     try {
-      upsertPlaylist(await createUserPlaylist(name))
+      const playlist = await createUserPlaylist(name)
+      if (!isCurrent()) return
+      upsertPlaylist(playlist)
       setCreatingName('')
     } catch (error: unknown) {
+      if (error instanceof PlaylistIdentityChangedError) return
       toast.error(error instanceof Error ? error.message : '新建歌单失败')
     } finally {
       setCreating(false)
@@ -89,9 +110,12 @@ function MyPlaylistsContent() {
     const name = renameValue.trim()
     if (!name) return
     try {
-      upsertPlaylist(await renameUserPlaylist(id, name))
+      const playlist = await renameUserPlaylist(id, name)
+      if (!isCurrent()) return
+      upsertPlaylist(playlist)
       setRenamingId(null)
     } catch (error: unknown) {
+      if (error instanceof PlaylistIdentityChangedError) return
       toast.error(error instanceof Error ? error.message : '重命名失败')
     }
   }
@@ -100,14 +124,16 @@ function MyPlaylistsContent() {
     if (!window.confirm(`确定删除歌单「${playlist.name}」？此操作不可撤销。`)) return
     try {
       await deleteUserPlaylist(playlist.id)
+      if (!isCurrent()) return
       removePlaylistFromStore(playlist.id)
     } catch (error: unknown) {
+      if (error instanceof PlaylistIdentityChangedError) return
       toast.error(error instanceof Error ? error.message : '删除失败')
     }
   }
 
   if (openId) {
-    return <PlaylistDetailView playlistId={openId} onBack={() => setOpenId(null)} />
+    return <PlaylistDetailView key={openId} playlistId={openId} onBack={() => setOpenId(null)} />
   }
 
   return (
@@ -136,7 +162,7 @@ function MyPlaylistsContent() {
           variant="outline"
           size="icon"
           className="shrink-0"
-          disabled={!creatingName.trim() || creating}
+          disabled={!creatingName.trim() || creating || loading}
           onClick={() => void handleCreate()}
           aria-label="新建歌单"
         >
@@ -170,10 +196,22 @@ function MyPlaylistsContent() {
                       }
                     }}
                   />
-                  <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" onClick={() => void handleRename(playlist.id)} aria-label="保存">
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8 shrink-0"
+                    onClick={() => void handleRename(playlist.id)}
+                    aria-label="保存"
+                  >
                     <Check className="h-4 w-4" />
                   </Button>
-                  <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" onClick={() => setRenamingId(null)} aria-label="取消">
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8 shrink-0"
+                    onClick={() => setRenamingId(null)}
+                    aria-label="取消"
+                  >
                     <X className="h-4 w-4" />
                   </Button>
                 </>
@@ -186,7 +224,7 @@ function MyPlaylistsContent() {
                   >
                     <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded bg-muted">
                       {playlist.cover ? (
-                        <img src={playlist.cover} alt="" className="h-full w-full object-cover" />
+                        <img src={playlist.cover} alt="" loading="lazy" className="h-full w-full object-cover" />
                       ) : (
                         <ListMusic className="h-4 w-4 text-muted-foreground" />
                       )}
@@ -228,10 +266,13 @@ function MyPlaylistsContent() {
 }
 
 function PlaylistDetailView({ playlistId, onBack }: { playlistId: string; onBack: () => void }) {
+  const generation = useAccountPlaylistStore((s) => s.generation)
   const upsertPlaylist = useAccountPlaylistStore((s) => s.upsertPlaylist)
   const { addTrack, addBatchTracks } = useQueue()
   const [detail, setDetail] = useState<UserPlaylistDetail | null>(null)
   const [loading, setLoading] = useState(true)
+  const removing = useRef(new Set<string>())
+  const detailRef = useRef<UserPlaylistDetail | null>(null)
   const onBackRef = useRef(onBack)
   useEffect(() => {
     onBackRef.current = onBack
@@ -241,10 +282,13 @@ function PlaylistDetailView({ playlistId, onBack }: { playlistId: string; onBack
     let active = true
     fetchUserPlaylistDetail(playlistId)
       .then((data) => {
-        if (active) setDetail(data)
+        if (active && useAccountPlaylistStore.getState().generation === generation) {
+          detailRef.current = data
+          setDetail(data)
+        }
       })
       .catch((error: unknown) => {
-        if (!active) return
+        if (!active || error instanceof PlaylistIdentityChangedError) return
         toast.error(error instanceof Error ? error.message : '歌单加载失败')
         onBackRef.current()
       })
@@ -254,25 +298,40 @@ function PlaylistDetailView({ playlistId, onBack }: { playlistId: string; onBack
     return () => {
       active = false
     }
-  }, [playlistId])
+  }, [playlistId, generation])
 
   function handleAddAllToRoom() {
     if (!detail || detail.tracks.length === 0) return
-    addBatchTracks(detail.tracks, detail.name)
-    toast.success(`已将「${detail.name}」${detail.tracks.length} 首添加到房间`)
+    const room = useRoomStore.getState().room
+    if (!room) return
+    const available = Math.max(0, LIMITS.QUEUE_MAX_SIZE - room.queue.length)
+    if (!available) {
+      toast.error('播放队列已满')
+      return
+    }
+    const tracks = detail.tracks.slice(0, available)
+    addBatchTracks(tracks, detail.name)
+    toast.info(
+      `正在将「${detail.name}」${tracks.length} 首添加到房间${tracks.length < detail.tracks.length ? '，其余歌曲超出队列容量' : ''}`,
+    )
   }
 
   async function handleRemoveTrack(track: Track) {
-    if (!detail) return
+    if (!detail || removing.current.has(track.id)) return
+    removing.current.add(track.id)
     try {
       await removeTrackFromUserPlaylist(detail.id, track.id)
-      const tracks = detail.tracks.filter((item) => item.id !== track.id)
+      if (useAccountPlaylistStore.getState().generation !== generation) return
+      const current = detailRef.current
+      if (!current) return
+      const tracks = current.tracks.filter((item) => item.id !== track.id)
       const next: UserPlaylistDetail = {
-        ...detail,
+        ...current,
         tracks,
         trackCount: tracks.length,
         cover: tracks[0]?.thumbnailCover ?? tracks[0]?.cover ?? null,
       }
+      detailRef.current = next
       setDetail(next)
       upsertPlaylist({
         id: next.id,
@@ -283,7 +342,10 @@ function PlaylistDetailView({ playlistId, onBack }: { playlistId: string; onBack
         updatedAt: next.updatedAt,
       })
     } catch (error: unknown) {
+      if (error instanceof PlaylistIdentityChangedError) return
       toast.error(error instanceof Error ? error.message : '移除失败')
+    } finally {
+      removing.current.delete(track.id)
     }
   }
 
@@ -321,7 +383,12 @@ function PlaylistDetailView({ playlistId, onBack }: { playlistId: string; onBack
                 <span className="w-6 shrink-0 text-center text-xs tabular-nums text-muted-foreground">{index + 1}</span>
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded bg-muted">
                   {track.thumbnailCover || track.cover ? (
-                    <img src={track.thumbnailCover ?? track.cover} alt="" className="h-full w-full object-cover" />
+                    <img
+                      src={track.thumbnailCover ?? track.cover}
+                      alt=""
+                      loading="lazy"
+                      className="h-full w-full object-cover"
+                    />
                   ) : (
                     <ListMusic className="h-4 w-4 text-muted-foreground" />
                   )}
@@ -335,8 +402,14 @@ function PlaylistDetailView({ playlistId, onBack }: { playlistId: string; onBack
                   variant="ghost"
                   className="h-8 w-8 shrink-0"
                   onClick={() => {
+                    const room = useRoomStore.getState().room
+                    if (!room) return
+                    if (room.queue.length >= LIMITS.QUEUE_MAX_SIZE) {
+                      toast.error('播放队列已满')
+                      return
+                    }
                     addTrack(track)
-                    toast.success(`已添加「${track.title}」到队列`)
+                    toast.info(`正在添加「${track.title}」到队列`)
                   }}
                   aria-label={`将 ${track.title} 添加到队列`}
                 >

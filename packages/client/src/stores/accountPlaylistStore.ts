@@ -2,6 +2,10 @@ import { create } from 'zustand'
 import type { Track, UserPlaylist } from '@music-together/shared'
 
 interface AccountPlaylistState {
+  ownerId: string | null
+  generation: number
+  pickerVersion: number
+  bindAccount: (ownerId: string | null) => void
   /** 已缓存的本地歌单元数据列表。 */
   playlists: UserPlaylist[]
   /** 是否已成功拉取过一次列表。 */
@@ -21,6 +25,24 @@ interface AccountPlaylistState {
 }
 
 export const useAccountPlaylistStore = create<AccountPlaylistState>((set) => ({
+  ownerId: null,
+  generation: 0,
+  pickerVersion: 0,
+  bindAccount: (ownerId) =>
+    set((state) =>
+      state.ownerId === ownerId
+        ? {}
+        : {
+            ownerId,
+            generation: state.generation + 1,
+            playlists: [],
+            loaded: false,
+            loading: false,
+            pickerTracks: null,
+            pickerLabel: null,
+            pickerVersion: state.pickerVersion + 1,
+          },
+    ),
   playlists: [],
   loaded: false,
   loading: false,
@@ -34,7 +56,18 @@ export const useAccountPlaylistStore = create<AccountPlaylistState>((set) => ({
     }),
   removePlaylist: (id) => set((state) => ({ playlists: state.playlists.filter((item) => item.id !== id) })),
   setLoading: (loading) => set({ loading }),
-  openPicker: (tracks, label) => set({ pickerTracks: tracks, pickerLabel: label ?? null }),
-  closePicker: () => set({ pickerTracks: null, pickerLabel: null }),
-  reset: () => set({ playlists: [], loaded: false, loading: false, pickerTracks: null, pickerLabel: null }),
+  openPicker: (tracks, label) =>
+    set((state) => ({ pickerTracks: tracks, pickerLabel: label ?? null, pickerVersion: state.pickerVersion + 1 })),
+  closePicker: () =>
+    set((state) => ({ pickerTracks: null, pickerLabel: null, pickerVersion: state.pickerVersion + 1 })),
+  reset: () =>
+    set((state) => ({
+      generation: state.generation + 1,
+      playlists: [],
+      loaded: false,
+      loading: false,
+      pickerTracks: null,
+      pickerLabel: null,
+      pickerVersion: state.pickerVersion + 1,
+    })),
 }))

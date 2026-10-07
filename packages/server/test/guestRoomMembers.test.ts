@@ -70,3 +70,18 @@ test('a departing guest disappears entirely (online-only, never in the roster)',
   assert.equal(room.users.some((u) => u.id === 'leaver-guest'), false)
   assert.equal(room.members.some((m) => m.id === 'leaver-guest'), false)
 })
+
+test('setting a password admits an online guest without rejoining and broadcasts safely', () => {
+  const { room } = roomService.createRoom('upgrade-owner-sock', 'Owner', 'Upgrade', null, 'upgrade-owner')
+  roomService.updateSettings(room.id, { permanent: true })
+  roomService.joinRoom('upgrade-guest-sock', room.id, 'Guest', 'upgrade-guest')
+  makeAccount('upgrade-guest')
+  const states: unknown[] = []
+  const io = { getSocketsInRoom: () => [{ id: 'upgrade-guest-sock', emit: (_event: string, state: unknown) => states.push(state) }] }
+  roomService.refreshAccountMembership('upgrade-guest', io as Parameters<typeof roomService.refreshAccountMembership>[1])
+  assert.ok(room.members.some((member) => member.id === 'upgrade-guest'))
+  assert.equal(states.length, 1)
+  roomService.leaveRoom('upgrade-guest-sock')
+  assert.ok(room.members.some((member) => member.id === 'upgrade-guest' && !member.isOnline))
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM permanent_room_members WHERE room_id = ? AND user_id = ?').get(room.id, 'upgrade-guest')?.n, 1)
+})

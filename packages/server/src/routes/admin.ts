@@ -21,7 +21,7 @@ import {
   listBackups,
   refreshBackupScheduler,
 } from '../services/backupService.js'
-import { kickUserFromRoom } from '../services/roomService.js'
+import { kickUserFromRoom, refreshAccountMembership } from '../services/roomService.js'
 import { estimateCurrentTime } from '../services/syncService.js'
 import * as authService from '../services/authService.js'
 import { logger } from '../utils/logger.js'
@@ -363,6 +363,7 @@ export function createAdminRoutes(io: TypedServer): Router {
     }
 
     userRepo.setPasswordHash(user.id, await bcrypt.hash(parsed.data.password, 12))
+    refreshAccountMembership(user.id, io)
     logger.info(`服务器管理员重置了账号 ${user.id} 的密码`, {
       event: 'admin.user_password_reset',
       ...auditContext(req),

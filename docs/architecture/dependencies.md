@@ -53,7 +53,7 @@
 | express                           | ^4.22.2  | HTTP 框架                                                           |
 | ws                                | ^8.21.3  | 原生 WebSocket 服务端；`wss.ts` 提供类型化事件和房间广播兼容层      |
 | better-sqlite3                    | ^12.11.1 | 账号、永久房间、平台凭据和服务器设置持久化                          |
-| sharp                             | ^0.35.3  | 头像和全局背景图片处理                                              |
+| sharp                             | ^0.35.5  | 头像和全局背景图片处理                                              |
 | @meting/core                      | ^1.6.0   | 多音源音乐数据聚合                                                  |
 | Node.js `zlib` + `fetch`          | 内置     | `kugouLyricService` 获取、解密并解析酷狗 KRC，避免旧 request 依赖栈 |
 | nanoid                            | ^5.1.16  | 房间 ID 生成                                                        |
@@ -92,3 +92,7 @@
 | kill-port                   | ^2.0.1  | root   | 端口清理                |
 
 ---
+
+生产依赖审计保持 `pnpm audit --prod --audit-level high`。安全覆盖版本固定为 axios 1.20.0、proxy-addr 2.0.8、basic-ftp 6.2.1、ip-address 10.7.1、qs 6.16.0、fast-copy 4.1.0；锁文件包含 sharp 0.35.5 及对应 libvips 修复。basic-ftp 的上游 get-uri 调用仍使用兼容的 `Client/access/lastMod/list/downloadTo/close` API。
+
+经用户确认，仅定向豁免 `GHSA-86w9-cpqp-85rv`：node-forge 暂无修复版本，锁定的网易云 API 4.40.0 仅用它解析内置公钥并进行 RSA 加密（`util/crypto.js`），未调用公告涉及的 PKCS#1 v1.5 签名验证。不豁免整个包、不忽略其它未修复公告；升级网易云 API 或增加验签用途时重新检查该豁免，修复版本发布后移除。公告：https://github.com/advisories/GHSA-86w9-cpqp-85rv 。

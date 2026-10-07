@@ -52,7 +52,7 @@ test('initialized setup rejects before hashing, and recovery limits cannot be by
   const express = (await import('express')).default
   const bcrypt = (await import('bcryptjs')).default
   const { createAdminSetupRoutes } = await import('../src/routes/adminSetup.js')
-  const authRoutes = (await import('../src/routes/auth.js')).default
+  const { createAuthRoutes } = await import('../src/routes/auth.js')
   const app = express()
   app.use(express.json())
   app.use((req, _res, next) => {
@@ -60,7 +60,7 @@ test('initialized setup rejects before hashing, and recovery limits cannot be by
     next()
   })
   app.use('/admin', createAdminSetupRoutes())
-  app.use('/auth', authRoutes)
+  app.use('/auth', createAuthRoutes({ getSocketsInRoom: () => [] } as Parameters<typeof createAuthRoutes>[0]))
   const server = app.listen(0, '127.0.0.1')
   await new Promise<void>((resolve) => { if (server.listening) resolve(); else server.once('listening', resolve) })
   const baseUrl = `http://127.0.0.1:${(server.address() as { port: number }).port}`

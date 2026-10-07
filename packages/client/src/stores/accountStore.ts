@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { useAccountPlaylistStore } from './accountPlaylistStore'
 
 export interface AccountProfile {
   id: string
@@ -15,5 +16,8 @@ interface AccountState {
 
 export const useAccountStore = create<AccountState>((set) => ({
   profile: null,
-  setProfile: (profile) => set({ profile }),
+  setProfile: (profile) => {
+    useAccountPlaylistStore.getState().bindAccount(profile?.hasPassword ? profile.id : null)
+    set({ profile })
+  },
 }))

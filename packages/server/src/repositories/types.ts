@@ -59,6 +59,7 @@ export interface RoomRepository {
   get(roomId: string): RoomData | undefined
   set(roomId: string, room: RoomData): void
   persist(roomId: string): void
+  removeMember(roomId: string, userId: string): void
   delete(roomId: string): void
   getAll(): ReadonlyMap<string, RoomData>
   getAllIds(): string[]

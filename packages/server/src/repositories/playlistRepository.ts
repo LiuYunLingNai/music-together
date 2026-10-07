@@ -48,6 +48,9 @@ const deletePlaylist = db.prepare('DELETE FROM user_playlists WHERE id = ? AND u
 const selectTracks = db.prepare<[string], PlaylistTrackRow>(
   'SELECT track_json FROM user_playlist_tracks WHERE playlist_id = ? ORDER BY position ASC, rowid ASC',
 )
+const selectFirstTrack = db.prepare<[string], PlaylistTrackRow>(
+  'SELECT track_json FROM user_playlist_tracks WHERE playlist_id = ? ORDER BY position ASC, rowid ASC LIMIT 1',
+)
 const countTracks = db.prepare<[string], { count: number }>(
   'SELECT COUNT(*) AS count FROM user_playlist_tracks WHERE playlist_id = ?',
 )
@@ -65,7 +68,7 @@ const deleteTrack = db.prepare('DELETE FROM user_playlist_tracks WHERE playlist_
 /** Derive the playlist cover from an explicit value or the first track's artwork. */
 function resolveCover(row: PlaylistRow): string | null {
   if (row.cover) return row.cover
-  const first = selectTracks.all(row.id)[0]
+  const first = selectFirstTrack.get(row.id)
   const track = first ? parseTrack(first.track_json) : null
   return track?.thumbnailCover ?? track?.cover ?? null
 }

@@ -355,6 +355,10 @@ B站没有与房间 128K、320K 完全对应的普通 DASH 音轨，因此分别
 
 ### 2026-09 账户本地歌单与访客名册
 
+- 账号 ID 更改在原事务内迁移 `user_playlists.user_id`，再删除旧用户；歌单 ID 与曲目不变，不修改密钥、加密格式或旧表结构。浏览器歌单缓存绑定当前有密码账号，身份变化清空缓存并递增请求代次，旧歌单与资料响应不得写回新账号；选择器另用版本区分每次打开，旧操作不能关闭新选择器。
+- `ROOM_USER_JOINED` 增加可选 `isPersistentMember`，服务端按实际名册发送，Web 据此避免把在线访客写进名册；缺字段时保留旧服务端行为，原生客户端可忽略该字段。在线访客设置密码后同步入册并广播已有 `ROOM_STATE`，仅 owner 收到含密码版本。管理员显式移出离线成员时删除对应 SQLite 名册行；其它历史成员继续保留。
+- 歌单派生封面只查询首曲；曲目并发删除基于最新详情更新。加入房间先按当前队列容量裁剪，提示为正在添加，最终结果沿用服务端权威队列/消息；不增加 ACK 或更改 JSON 信封。
+
 - 新增账户级本地歌单：SQLite `user_playlists`（`id` / `user_id` / `name` / `cover` / 时间戳，`user_id` 外键级联删除）与 `user_playlist_tracks`（`(playlist_id, track_id)` 主键去重、`track_json` 存完整跨音源曲目、`position` 排序），两表均为 `CREATE TABLE IF NOT EXISTS` 幂等建表。歌单封面未显式设置时读取时派生自首曲 `thumbnailCover ?? cover`，不落库。
 - 歌单能力仅对已设置密码的账号开放（`/api/playlists*` 经 `requireAccount` 守卫，访客 401/403）；写入前经 `trackSchema` 校验并剥离 `streamUrl` / `requiresServerProxy` / `streamFormat` 等短时效字段，容量受 `USER_PLAYLIST_MAX` / `USER_PLAYLIST_TRACKS_MAX` / `USER_PLAYLIST_NAME_MAX` 限制。歌单 CRUD 走 REST，"加入房间"复用现有 `QUEUE_ADD_BATCH`（`{ tracks, playlistName }`），不新增 WS 事件，旧原生客户端不受影响。
 - 访客（无密码且非服务器管理员）不写入持久成员名册 `room.members`，仅存在于在线 `room.users`；房主与持久 admin 即使是访客也始终保留在名册，详见上文交互要点第 17 条。
