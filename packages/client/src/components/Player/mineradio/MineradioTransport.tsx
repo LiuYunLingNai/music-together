@@ -18,12 +18,13 @@ import {
   Repeat,
   Repeat1,
   Shuffle,
+  Settings2,
   SkipBack,
   SkipForward,
   Volume2,
   VolumeX,
 } from 'lucide-react'
-import { memo, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { AbilityContext } from '@/providers/ability-context'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { getProxiedCoverUrl } from '@/lib/cover'
@@ -195,7 +196,11 @@ function useOptimisticPlaying(isPlaying: boolean) {
   return { effectivePlaying, setIntent }
 }
 
-interface MineradioTransportProps {
+export interface MineradioTransportProps {
+  variant?: 'mineradio' | 'folia'
+  showProgress?: boolean
+  onSettings?: () => void
+  settingsButton?: ReactNode
   onPlay: () => void
   onPause: () => void
   onSeek: (time: number) => void
@@ -217,6 +222,10 @@ function formatTime(seconds: number): string {
 }
 
 export function MineradioTransport({
+  variant = 'mineradio',
+  showProgress = true,
+  onSettings,
+  settingsButton,
   onPlay,
   onPause,
   onSeek,
@@ -347,7 +356,7 @@ export function MineradioTransport({
   return (
     <div className="mt-mr-transport">
       {/* 进度条：跨越整行，位于三列之上（与上游的 #progress-bar 一致） */}
-      <MineradioProgress disabled={disabled} canSeek={canSeek} onSeek={onSeek} />
+      {showProgress && <MineradioProgress disabled={disabled} canSeek={canSeek} onSeek={onSeek} />}
 
       {/* 三列主体 */}
       <div className="mt-mr-controls">
@@ -370,7 +379,7 @@ export function MineradioTransport({
               </MarqueeText>
             </div>
           </div>
-          <MiniChatButton onOpenChat={onOpenChat} chatUnreadCount={chatUnreadCount} />
+          {variant === 'mineradio' && <MiniChatButton onOpenChat={onOpenChat} chatUnreadCount={chatUnreadCount} />}
         </div>
 
         {/* 中列：播放控制 */}
@@ -380,7 +389,7 @@ export function MineradioTransport({
               <Button
                 variant="ghost"
                 size="icon"
-                className="mt-mr-btn"
+                className="mt-mr-btn mt-mr-mode"
                 onClick={handlePlayModeToggle}
                 disabled={!canSetMode && !canVote}
                 aria-label={modeConfig.label}
@@ -396,7 +405,7 @@ export function MineradioTransport({
               <Button
                 variant="ghost"
                 size="icon"
-                className="mt-mr-btn"
+                className="mt-mr-btn mt-mr-skip"
                 onClick={() => handleSkip('prev')}
                 disabled={disabled || skipCooldown || (!ability.can('prev', 'Player') && !canVote)}
                 aria-label="上一首"
@@ -427,7 +436,7 @@ export function MineradioTransport({
               <Button
                 variant="ghost"
                 size="icon"
-                className="mt-mr-btn"
+                className="mt-mr-btn mt-mr-skip"
                 onClick={() => handleSkip('next')}
                 disabled={disabled || skipCooldown || (!ability.can('next', 'Player') && !canVote)}
                 aria-label="下一首"
@@ -441,6 +450,7 @@ export function MineradioTransport({
 
         {/* 右列：音量 + 队列 */}
         <div className="mt-mr-cluster mt-mr-cluster--modes">
+          {variant === 'folia' && <MiniChatButton onOpenChat={onOpenChat} chatUnreadCount={chatUnreadCount} />}
           <Tooltip delayDuration={300} open={popoverOpen ? false : undefined}>
             <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
               <TooltipTrigger asChild>
@@ -495,6 +505,18 @@ export function MineradioTransport({
             </TooltipTrigger>
             <TooltipContent>播放列表</TooltipContent>
           </Tooltip>
+          {settingsButton ??
+            (onSettings && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="mt-mr-btn"
+                onClick={onSettings}
+                aria-label="Folia 播放器设置"
+              >
+                <Settings2 className="size-4" />
+              </Button>
+            ))}
         </div>
       </div>
     </div>

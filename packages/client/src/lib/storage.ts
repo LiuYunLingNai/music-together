@@ -1,5 +1,7 @@
 import { NTP, type MusicSource } from '@music-together/shared'
 import { SYNC_PACKET_INTERVAL_MAX_SECONDS, SYNC_PACKET_INTERVAL_MIN_SECONDS } from '@/lib/constants'
+import { normalizeFoliaSettings, type FoliaSettings } from './foliaSettings'
+import { FOLIA_MODES } from './foliaModes'
 
 const PREFIX = 'mt-'
 const SETTINGS_SCHEMA_VERSION_KEY = 'settingsSchemaVersion'
@@ -109,10 +111,39 @@ migrateSettings()
 const LYRIC_ANCHORS = ['top', 'center', 'bottom'] as const
 const LYRIC_MASK_MODES = ['', 'full-mask', 'partial-mask'] as const
 
-/** Mineradio 舞台模式：classic 为默认，始终可无损回退。
- *  注意：没有 'cover' —— 曾自创的「封面视界」已于第九轮按用户决策删除；
- *  旧持久化值 'cover' 会因不在白名单内而安全回退到 'classic'。 */
-export const VISUAL_STAGES = ['classic', 'emily', 'tunnel', 'planet', 'vinyl', 'galaxy', 'topography'] as const
+/**
+ * 视觉舞台模式白名单（持久化层）。
+ *
+ * `classic` 为默认，始终可无损回退。注意：没有 'cover' —— 曾自创的
+ * 「封面视界」已于第九轮按用户决策删除；旧持久化值 'cover' 会因不在
+ * 白名单内而安全回退到 'classic'。
+ *
+ * 本列表包含**两个并列的舞台族**：
+ *
+ *   - mineradio（全屏 three.js 粒子舞台）：emily / tunnel / planet /
+ *     vinyl / galaxy / topography —— 见
+ *     `components/Player/mineradio/shared/VisualMode.ts` 的 `VISUAL_MODES`；
+ *   - folia（从 folia-major 移植的 DOM/CSS 歌词模式）：still / luminous /
+ *     partita / tilt / cappella —— 见
+ *     `components/Player/folia/registry.ts` 的 `FOLIA_MODES`。
+ *
+ * ★ 这份列表与两个注册表是**手工维护的两份清单**，由
+ *   `mineradio/shared/VisualMode.test.ts` 的「持久化白名单与注册表一致」
+ *   用例钉在一起（漏改一边会表现为"菜单里能选、刷新后被静默丢弃"）。
+ *   之所以不在这里 import 那两个注册表：本模块位于 `lib/`，被服务端共享
+ *   类型之外的**经典播放器路径**同步加载，引入 `components/` 会同时造成
+ *   分层倒置与把 three.js 拉进首屏包。
+ */
+export const VISUAL_STAGES = [
+  'classic',
+  'emily',
+  'tunnel',
+  'planet',
+  'vinyl',
+  'galaxy',
+  'topography',
+  ...FOLIA_MODES.map((mode) => mode.id),
+] as const
 export type VisualStageSetting = (typeof VISUAL_STAGES)[number]
 
 /**
@@ -185,6 +216,15 @@ export const SETTING_DEFAULTS = {
 } satisfies Record<string, unknown>
 
 export const storage = {
+  getFoliaSettings: () => {
+    const saved = safeGetJSON<unknown>('foliaSettings')
+    // Remember an existing Folia selection when upgrading from the lyric-only stage.
+    const fallback = normalizeFoliaSettings({ lyricMode: safeGet('visualStage') })
+    return normalizeFoliaSettings(saved && typeof saved === 'object' && !Array.isArray(saved)
+      ? { ...fallback, ...saved }
+      : fallback)
+  },
+  setFoliaSettings: (value: FoliaSettings) => safeSetJSON('foliaSettings', normalizeFoliaSettings(value)),
   /** Persistent user identity — synced from server identity bootstrap */
   getUserId: (): string => {
     return safeGet('userId') ?? ''

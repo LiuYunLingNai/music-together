@@ -8,6 +8,7 @@ import {
   usesParticlePreset,
 } from './VisualMode'
 import { VISUAL_STAGES } from '@/lib/storage'
+import { FOLIA_MODES } from '@/components/Player/folia/registry'
 
 describe('视觉模式注册表', () => {
   it('包含声波地形（对应 OpenMusic「声波地形」/ Mineradio sonic-topography）', () => {
@@ -53,14 +54,24 @@ describe('视觉模式注册表', () => {
   })
 
   /**
-   * 回归：`VISUAL_STAGES`（持久化白名单）与 `VISUAL_MODES`（菜单来源）
-   * 是两份手工维护的列表。任一新增模式时漏改另一边，就会表现为
-   * 「菜单里能选，但刷新后被静默丢弃」——这个测试把两者钉在一起。
+   * 回归：`VISUAL_STAGES`（持久化白名单）与两个舞台族的注册表
+   * （mineradio 的 `VISUAL_MODES`、folia 的 `FOLIA_MODES`）是手工维护的
+   * 多份列表。任一新增模式时漏改另一边，就会表现为「菜单里能选，但刷新后
+   * 被静默丢弃」——这个测试把三者钉在一起。
+   *
+   * ★ 自 folia 移植起，白名单不再只对应 `VISUAL_MODES`：它是**两族之并**。
+   *   因此这里比对的是并集，而不是单族。
    */
-  it('持久化白名单与模式注册表始终一致', () => {
+  it('持久化白名单与两个舞台族的注册表始终一致', () => {
     const stageIds = VISUAL_STAGES.filter((stage) => stage !== 'classic').sort()
-    const modeIds = VISUAL_MODES.map((mode) => mode.id).sort()
+    const modeIds = [...VISUAL_MODES.map((mode) => mode.id), ...FOLIA_MODES.map((mode) => mode.id)].sort()
     expect(stageIds).toEqual(modeIds)
+  })
+
+  it('两族注册表之间不得有重复 id（否则路由会取到错误的族）', () => {
+    const mineradioIds = VISUAL_MODES.map((mode) => mode.id)
+    const foliaIds = FOLIA_MODES.map((mode) => mode.id)
+    expect(mineradioIds.filter((id) => foliaIds.includes(id as never))).toEqual([])
   })
 
   it('每个模式都能被 isVisualStageId 识别（保证可持久化）', () => {

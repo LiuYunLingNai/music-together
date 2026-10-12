@@ -10,9 +10,10 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { Check, Sparkles } from 'lucide-react'
-import { VISUAL_MODES, type VisualModeId } from './shared/VisualMode'
+import { VISUAL_MODES } from './shared/VisualMode'
+import type { VisualStageId } from '../stages/registry'
 
-export type StageMode = 'classic' | VisualModeId
+export type StageMode = 'classic' | VisualStageId
 
 interface VisualModeMenuProps {
   mode: StageMode
@@ -24,6 +25,9 @@ interface VisualModeMenuProps {
  * 播放器 / 视觉模式菜单。
  *
  * 经典播放器始终作为第一项且无损可回退。
+ *
+ * 此菜单列出经典播放器与 Mineradio 注册表；Folia 由旁边的独立按钮进入，
+ * 其五种歌词样式在 Folia 设置里选择。
  */
 export function VisualModeMenu({ mode, onSelect, className }: VisualModeMenuProps) {
   const isClassic = mode === 'classic'
@@ -51,7 +55,7 @@ export function VisualModeMenu({ mode, onSelect, className }: VisualModeMenuProp
         <TooltipContent>播放器视觉模式</TooltipContent>
       </Tooltip>
 
-      <DropdownMenuContent align="end" className="w-52">
+      <DropdownMenuContent align="end" className="w-60">
         <DropdownMenuLabel>播放器</DropdownMenuLabel>
         <DropdownMenuItem onSelect={() => onSelect('classic')}>
           <span className="flex-1">经典播放器</span>
@@ -59,7 +63,7 @@ export function VisualModeMenu({ mode, onSelect, className }: VisualModeMenuProp
         </DropdownMenuItem>
 
         <DropdownMenuSeparator />
-        <DropdownMenuLabel>视觉模式</DropdownMenuLabel>
+        <DropdownMenuLabel>3D 视觉（重 GPU）</DropdownMenuLabel>
         {VISUAL_MODES.map((item) => {
           const active = mode === item.id
           return (

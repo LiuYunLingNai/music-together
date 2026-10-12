@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { FOLIA_DEFAULTS, normalizeFoliaSettings, type FoliaSettings } from '@/lib/foliaSettings'
 import {
   storage,
   SETTING_DEFAULTS,
@@ -35,7 +36,11 @@ type ResettableFields<K extends string, V> = {
 }
 
 /** 合并所有 resettable key 的字段为完整 SettingsStore 类型 */
-type SettingsStore = ResettableFields<'playbackTempoSyncEnabled', boolean> &
+type SettingsStore = {
+  foliaSettings: FoliaSettings
+  setFoliaSettings: (patch: Partial<FoliaSettings>) => void
+  resetFoliaSettings: () => void
+} & ResettableFields<'playbackTempoSyncEnabled', boolean> &
   ResettableFields<'playbackHardSeekSyncEnabled', boolean> &
   ResettableFields<'syncPacketIntervalSeconds', number> &
   ResettableFields<'ttmlEnabled', boolean> &
@@ -110,6 +115,20 @@ export const useSettingsStore = create<SettingsStore>((set) => {
   }
 
   return {
+    foliaSettings: storage.getFoliaSettings(),
+    setFoliaSettings: (patch) =>
+      set((state) => {
+        const foliaSettings = normalizeFoliaSettings({ ...state.foliaSettings, ...patch })
+        storage.setFoliaSettings(foliaSettings)
+        return { foliaSettings }
+      }),
+    resetFoliaSettings: () =>
+      set((state) => {
+        // Manual visibility is restored only by its dedicated stage button.
+        const foliaSettings = { ...FOLIA_DEFAULTS, manualHide: state.foliaSettings.manualHide }
+        storage.setFoliaSettings(foliaSettings)
+        return { foliaSettings }
+      }),
     ...resettable('playbackTempoSyncEnabled', storage.getPlaybackTempoSyncEnabled, storage.setPlaybackTempoSyncEnabled),
     ...resettable(
       'playbackHardSeekSyncEnabled',
@@ -172,10 +191,6 @@ export const useSettingsStore = create<SettingsStore>((set) => {
     ...resettable('lyricMotion', storage.getLyricMotion, storage.setLyricMotion),
     ...resettable('lyricDisplayMode3d', storage.getLyricDisplayMode3d, storage.setLyricDisplayMode3d),
     ...resettable('lyricCustomLineCount', storage.getLyricCustomLineCount, storage.setLyricCustomLineCount),
-    ...resettable(
-      'lyricTranslationMode3d',
-      storage.getLyricTranslationMode3d,
-      storage.setLyricTranslationMode3d,
-    ),
+    ...resettable('lyricTranslationMode3d', storage.getLyricTranslationMode3d, storage.setLyricTranslationMode3d),
   } as SettingsStore
 })

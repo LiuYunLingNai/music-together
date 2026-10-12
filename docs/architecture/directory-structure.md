@@ -69,17 +69,33 @@ src/
 │   │       └── QrLoginDialog.tsx           # 通用 QR 扫码登录弹窗（网易云 + 酷狗 + QQ 音乐）
 │   ├── Player/
 │   │   ├── constants.ts        #     共享动画常量（SPRING / LAYOUT_TRANSITION），NowPlaying 和 SongInfoBar 统一导入
-│   │   ├── AudioPlayer.tsx     #     播放器外壳：选择经典/Mineradio 舞台 + 模式菜单 + 播放回调透传
+│   │   ├── AudioPlayer.tsx     #     播放器外壳：按舞台族路由（经典/Mineradio/Folia）+ 模式菜单 + 播放回调透传
 │   │   ├── classic/
 │   │   │   └── ClassicPlayerStage.tsx   # 经典播放器布局（桌面左右分栏；移动双模式封面/歌词切换）
+│   │   ├── stages/
+│   │   │   └── registry.ts     #     舞台族路由（纯数据）：resolveStageFamily(id) → mineradio / folia / null
 │   │   ├── mineradio/
 │   │   │   ├── MineradioPlayerStage.tsx # 全屏 3D 舞台：封面采样粒子 + WebGL 歌词
-│   │   │   ├── VisualModeMenu.tsx       # 视觉模式菜单（经典播放器 + 6 个视觉模式）
+│   │   │   ├── VisualModeMenu.tsx       # 经典/Mineradio 菜单；Folia 由独立按钮进入
 │   │   │   ├── MineradioLyricStage.tsx  # AMLL 回退用的 DOM 歌词层
-│   │   │   ├── MineradioControlBar.tsx  # 底部悬浮玻璃控制台（组合专用 Transport）
+│   │   │   ├── MineradioControlBar.tsx  # Mineradio 底部悬浮玻璃控制台（Transport 行为与 Folia 共用）
 │   │   │   ├── lyrics/         #     WebGL 歌词：数据模型 / 栅格化 / 着色器 / 网格
 │   │   │   ├── particles/      #     粒子场、星河、统一轨道相机、3D 队列架 + 分叉着色器
 │   │   │   └── shared/         #     VisualMode / RenderPolicy / AudioAnalyser / 封面纹理
+│   │   ├── folia/              #     Folia 播放器：DOM/CSS 歌词、独立背景与胶囊控制栏
+│   │   │   ├── FoliaPlayerStage.tsx     # 宿主：歌词/时钟/主题适配 + 懒加载模式/背景 + 控制栏
+│   │   │   ├── FoliaEntryButton.tsx     # 独立入口；再次点击打开设置
+│   │   │   ├── FoliaSettingsPopover.tsx # 无遮罩紧凑浮层，样式/背景/播放器页签
+│   │   │   ├── FoliaControlBar.tsx      # 自动隐藏/展开/离底距离 + 共用 Transport 行为
+│   │   │   ├── backgrounds/            # 六类上游背景的按需加载宿主 + 快捷背景
+│   │   │   ├── upstream/               # 上游九个缺失模式、六类背景与运行时；仅视觉依赖
+│   │   │   ├── registry.ts              # 模式注册表（纯数据，不 import 组件）
+│   │   │   ├── renderers.ts             # 模式 → React.lazy 映射（仅宿主引用）
+│   │   │   ├── types.ts                 # Folia 的 Line/Word/Theme/各模式 tuning
+│   │   │   ├── definition.ts            # FoliaSharedProps 契约
+│   │   │   ├── lib/                     # 纯函数：字体栈 / 渲染提示 / 断句 / 分段 / pretext 垫片
+│   │   │   ├── stage/                   # 歌词适配、时钟、音频桥、模式参数、外壳与字幕
+│   │   │   └── modes/                   # still / luminous / partita / tilt / cappella（含头像与表情 PNG）
 │   │   ├── LyricDisplay.tsx    #     AMLL 歌词渲染、逐词效果、歌词校准和可配置底栏
 │   │   ├── NowPlaying.tsx      #     当前曲目展示（支持 compact 小封面横排模式 + layoutId 共享动画）
 │   │   ├── SongInfoBar.tsx     #     歌曲信息栏（标题/艺术家 + 音量/聊天按钮，竖屏模式自适应缩放）

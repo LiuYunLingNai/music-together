@@ -26,6 +26,10 @@
 |              | @pixi/filter-blur, filter-bulge-pinch, filter-color-matrix | —        | PixiJS 滤镜                             |
 | **视觉舞台** | three                                                      | ^0.186.0 | Mineradio 舞台的粒子/相机/着色器渲染    |
 |              | @react-three/fiber                                         | ^9.7.0   | three.js 的 React 渲染器（需 React 19） |
+| **Folia** | pixi.js | ^8.22.0 | 商籁、凝彩、绘光的按需加载运行时，与经典 Pixi v7 分离 |
+| | @chenglou/pretext | ^0.0.9 | 上游文字测量、断行及 rich-inline 布局 |
+| | @paper-design/shaders, shaders-react | ^0.0.80 | 隐现与漫游的原生 shader 背景 |
+| | twgl.js | ^7.0.0 | 上游 Sora WebGL 星尘背景 |
 | **弹窗**     | vaul                                                       | ^1.x     | 移动端 Drawer（底部抽屉，支持拖拽关闭） |
 | **虚拟列表** | @tanstack/react-virtual                                    | ^3.14.9  | 虚拟滚动（歌单详情大列表）              |
 | **工具**     | dayjs                                                      | ^1.11.21 | 日期格式化                              |

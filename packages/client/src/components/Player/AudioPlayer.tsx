@@ -5,7 +5,11 @@ import { useVisualStageSupport } from '@/hooks/useVisualStageSupport'
 import { ClassicPlayerStage } from './classic/ClassicPlayerStage'
 import { VisualModeMenu, type StageMode } from './mineradio/VisualModeMenu'
 import { detectDefaultQuality, type VisualQuality } from './mineradio/shared/RenderPolicy'
-import { isVisualStageId } from './mineradio/shared/VisualMode'
+import type { VisualModeId } from './mineradio/shared/VisualMode'
+import type { FoliaModeId } from './folia/registry'
+import { resolveStageFamily } from './stages/registry'
+import { FoliaEntryButton } from './folia/FoliaEntryButton'
+import { isFoliaModeId } from './folia/registry'
 
 /**
  * Mineradio 舞台按需加载。
@@ -15,6 +19,17 @@ import { isVisualStageId } from './mineradio/shared/VisualMode'
  */
 const MineradioPlayerStage = lazy(() =>
   import('./mineradio/MineradioPlayerStage').then((m) => ({ default: m.MineradioPlayerStage })),
+)
+
+/**
+ * Folia 舞台按需加载。
+ *
+ * 与 mineradio 同理：`motion/react` 与全部歌词布局/模式代码只在用户切到
+ * folia 模式时才请求。`folia/renderers.ts` 内部再对五个模式各自 lazy ——
+ * cappella 带约 3.5 MB 头像/表情 PNG，单独成块尤其重要。
+ */
+const FoliaPlayerStage = lazy(() =>
+  import('./folia/FoliaPlayerStage').then((m) => ({ default: m.FoliaPlayerStage })),
 )
 
 /**
@@ -97,6 +112,7 @@ export function AudioPlayer(props: AudioPlayerProps) {
   const { view, onToggleView } = props
 
   const setVisualStage = useSettingsStore((s) => s.setVisualStage)
+  const setFoliaSettings = useSettingsStore((s) => s.setFoliaSettings)
   const { disabled: visualDisabled, effectiveVisualStage } = useVisualStageSupport()
   const visualQuality = useSettingsStore((s) => s.visualQuality)
 
@@ -122,15 +138,27 @@ export function AudioPlayer(props: AudioPlayerProps) {
    *   三者来自同一个数，不会分叉。
    */
   const visualStage = effectiveVisualStage
-  const isMineradio = visualStage !== 'classic' && isVisualStageId(visualStage)
-  const stageMode: StageMode = isMineradio ? visualStage : 'classic'
+  /**
+   * 舞台族路由。
+   *
+   * `resolveStageFamily` 同时回答"是不是视觉舞台"和"属于哪一族"：
+   * mineradio（three.js 粒子）与 folia（DOM/CSS 歌词）是并列的两族，
+   * 各有自己的懒加载宿主。未知 id 返回 null → 走经典分支（安全回退）。
+   *
+   * ★ 这里**不再**用 `isVisualStageId`（只看 mineradio）—— 否则 folia 的
+   *   模式会被判成非视觉舞台，直接渲染经典播放器，表现为"选了没反应"。
+   */
+  const stageFamily = resolveStageFamily(visualStage)
+  const isVisualStage = stageFamily !== null
+  const stageMode: StageMode = isVisualStage ? (visualStage as StageMode) : 'classic'
 
   /**
    * 菜单选择适配器。
    *
-   * `VisualModeMenu` 的 `StageMode` 由 `VISUAL_MODES` 推导，而持久化层用
-   * `VISUAL_STAGES` 白名单校验。两者集合相同但类型来源不同，这里显式收窄，
-   * 避免任一侧新增模式时出现「能选但存不下」的静默失败。
+   * `VisualModeMenu` 的 `StageMode` 由两族注册表（`FOLIA_MODES` +
+   * `VISUAL_MODES`）推导，而持久化层用 `VISUAL_STAGES` 白名单校验。两者集合
+   * 相同但类型来源不同，这里显式收窄，避免任一侧新增模式时出现
+   * 「能选但存不下」的静默失败。
    */
   const handleSelectStage = useCallback(
     (next: StageMode) => {
@@ -142,6 +170,7 @@ export function AudioPlayer(props: AudioPlayerProps) {
       //   让"不可用"的语义在所有入口一致。
       if (visualDisabled) return
       setVisualStage(next)
+      if (isFoliaModeId(next)) setFoliaSettings({ lyricMode: next })
       // ★ 视觉舞台只在 `view === 'player'` 时渲染（整页播放列表是经典舞台
       //   独有的概念）。若用户当前停在经典舞台的整页歌单里再选视觉模式，
       //   而这里不把视图切回来，渲染的仍是经典舞台 —— 菜单里视觉模式显示
@@ -151,7 +180,7 @@ export function AudioPlayer(props: AudioPlayerProps) {
       //   player），避免为此新增一个 prop 或改动上层状态所有权。
       if (next !== 'classic' && view !== 'player') onToggleView()
     },
-    [setVisualStage, view, onToggleView, visualDisabled],
+    [setVisualStage, setFoliaSettings, view, onToggleView, visualDisabled],
   )
 
   const stageProps = {
@@ -182,20 +211,29 @@ export function AudioPlayer(props: AudioPlayerProps) {
             挡住经典舞台的按钮 —— 选前者只是少留一层无意义的 DOM 与一个
             绝对定位层。见 `lib/visualStageSupport.ts`。 */}
       {!visualDisabled && (
-        <div className="mt-mineradio-mode-menu absolute top-4 z-30">
+        <div className="mt-mineradio-mode-menu absolute top-4 z-30 flex items-center gap-1">
+          <FoliaEntryButton mode={stageMode} onSelect={handleSelectStage} />
           <VisualModeMenu mode={stageMode} onSelect={handleSelectStage} />
         </div>
       )}
 
-      {isMineradio && view === 'player' ? (
+      {isVisualStage && view === 'player' ? (
+        /* 视觉舞台只在播放器视图渲染：整页歌单是经典舞台独有的概念。
+           两族共用同一个错误边界与回退语义 —— 任何一族在挂载期抛错
+           （chunk 加载失败 / WebGL 上下文创建失败）都会把持久化舞台
+           回写为 classic，播放本身不受影响（播放所有权在舞台之外）。 */
         <StageErrorBoundary stageKey={visualStage} onUnavailable={handleUnavailable}>
-          <Suspense fallback={<MineradioFallback />}>
-            <MineradioPlayerStage
-              {...stageProps}
-              mode={visualStage}
-              quality={quality}
-              onUnavailable={handleUnavailable}
-            />
+          <Suspense fallback={<StageFallback />}>
+            {stageFamily === 'folia' ? (
+              <FoliaPlayerStage {...stageProps} mode={visualStage as FoliaModeId} />
+            ) : (
+              <MineradioPlayerStage
+                {...stageProps}
+                mode={visualStage as VisualModeId}
+                quality={quality}
+                onUnavailable={handleUnavailable}
+              />
+            )}
           </Suspense>
         </StageErrorBoundary>
       ) : (
@@ -206,6 +244,6 @@ export function AudioPlayer(props: AudioPlayerProps) {
 }
 
 /** 舞台加载中的占位：保持深色底，避免白闪 */
-function MineradioFallback() {
+function StageFallback() {
   return <div className="absolute inset-0 bg-[#05070b]" aria-hidden="true" />
 }

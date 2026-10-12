@@ -85,23 +85,54 @@ const { socket, isConnected } = useSocketContext()
 
 ## 组件组合模式
 
-`AudioPlayer` 是一个薄壳，只负责选择舞台、渲染模式菜单，并把既有播放回调透传给选中的舞台。经典舞台 `classic/ClassicPlayerStage` 组合 `NowPlaying` + `SongInfoBar` + `PlayerControls` + `LyricDisplay`；Mineradio 舞台 `mineradio/MineradioPlayerStage` 组合粒子场景 + 空间化歌词 + 底部玻璃控制台。`RoomPage` 组合所有功能区域和覆盖层弹窗。
+`AudioPlayer` 是一个薄壳，只负责选择舞台、渲染模式菜单，并把既有播放回调透传给选中的舞台。经典舞台 `classic/ClassicPlayerStage` 组合 `NowPlaying` + `SongInfoBar` + `PlayerControls` + `LyricDisplay`；Mineradio 舞台 `mineradio/MineradioPlayerStage` 组合粒子场景 + 空间化歌词 + 底部玻璃控制台；Folia 舞台 `folia/FoliaPlayerStage` 组合歌词适配层 + 逐帧时钟 + 从 folia-major 移植的 DOM/CSS 歌词模式。`RoomPage` 组合所有功能区域和覆盖层弹窗。
 
-### 播放器舞台切换（Mineradio）
+### 播放器舞台切换（经典 / Mineradio / Folia）
 
-播放器有两种并列体系，由 `settingsStore.visualStage` 决定，默认 `classic`：
+播放器有**三**种并列体系，由 `settingsStore.visualStage` 决定，默认 `classic`：
 
-| 舞台 | 组件 | 说明 |
-| ---- | ---- | ---- |
-| 经典播放器 | `classic/ClassicPlayerStage` | 改造前的完整原布局，行为不变，始终可无损回退 |
-| 视觉模式 | `mineradio/MineradioPlayerStage` | Emily / 滚筒 / 星球 / 唱片 / 星河 / 声波地形 |
+| 舞台族 | 组件 | 模式 | 渲染方式 |
+| ---- | ---- | ---- | ---- |
+| 经典播放器 | `classic/ClassicPlayerStage` | `classic` | 原布局，行为不变，始终可无损回退 |
+| Mineradio | `mineradio/MineradioPlayerStage` | Emily / 滚筒 / 星球 / 唱片 / 星河 / 声波地形 | 全屏 three.js 粒子 + WebGL 歌词 |
+| Folia | `folia/FoliaPlayerStage` | 静止 / 流光 / 云阶 / 倾诉 / 群唱 | DOM/CSS 歌词前景层 |
+
+族的归属由 `Player/stages/registry.ts` 的 `resolveStageFamily` 判定（**纯数据，不 import 任何舞台组件**），`AudioPlayer` 据此把 `visualStage` 路由到对应族的懒加载宿主。未知 id 返回 `null` 并回退经典播放器。
 
 关键约束：
 
 - **舞台切换只影响渲染子树。** 播放、暂停、切歌、跳转、权限、投票、房间同步和漂移校正全部位于 `usePlayer` / `useHowl` / `usePlayerSync`，舞台组件不参与，因此切换不会中断歌曲、重置进度或影响房间权威状态。
-- **按需加载。** `MineradioPlayerStage` 通过 `React.lazy` + 动态 `import()` 加载，`three` / `@react-three/fiber` 因此被打进异步 chunk。**不要在 `vite.config.ts` 的 `manualChunks` 里为 three 命名独立 chunk** —— 那会让 Rollup 把 three 提升为同步依赖，导致 `index.html` 直接 `modulepreload` 约 900 KB 的 three，经典播放器也要白白下载。
+- **按需加载。** 两个视觉族都通过 `React.lazy` + 动态 `import()` 加载：`three` / `@react-three/fiber` 只在切到 Mineradio 时请求，`motion/react` 与歌词布局代码只在切到 Folia 时请求，Folia 的十四个模式及背景各自 lazy（群唱带约 3.5 MB 头像/表情 PNG）。**不要在 `vite.config.ts` 的 `manualChunks` 里为 three 命名独立 chunk** —— 那会让 Rollup 把 three 提升为同步依赖，导致 `index.html` 直接 `modulepreload` 约 900 KB 的 three，经典播放器也要白白下载。
+- **两族注册表与持久化白名单必须对齐。** `lib/storage.ts` 的 `VISUAL_STAGES`、`mineradio/shared/VisualMode.ts` 的 `VISUAL_MODES`、`folia/registry.ts` 的 `FOLIA_MODES` 由纯数据 `lib/foliaModes.ts` 派生 Folia 类型和白名单，由 `folia/registry.test.ts` 与 `mineradio/shared/VisualMode.test.ts` 钉住一致；漏改一边会表现为"菜单能选、刷新后被静默丢弃"或"选了没反应"。
 - **单一 Canvas。** 同一时刻只存在一个 three Canvas；切回经典播放器即卸载场景并释放几何、材质与纹理。
-- **音频通过 SoundTouch 输出上的只读 tap 取样（masterGain 仅兜底）。** 见下节。
+- **音频通过 SoundTouch 输出上的只读 tap 取样（masterGain 仅兜底）。** 见下节。`folia/stage/foliaAudio.ts` 在 Folia 活跃时单点推进既有只读分析缓存，并映射为上游 0–255 的 MotionValue 频段；与 Mineradio 互斥挂载，避免多点驱动。
+
+### Folia 舞台（从 folia-major 移植的 DOM/CSS 歌词模式）
+
+Folia 通过独立 **Folia 按钮**进入，十四种歌词样式在播放器设置里选择。歌词、背景与悬浮控制栏分层组合；切入和切出均沿用现有播放、权限与服务端同步回调。原有 `still/luminous/partita/tilt/cappella` 持久化舞台值继续有效。
+
+```
+FoliaPlayerStage（folia/FoliaPlayerStage.tsx）
+├── 歌词适配层   stage/lyricAdapter.ts   AMLL LyricLine(ms) → Folia Line(s)
+├── 逐帧时钟     stage/foliaClock.ts     lyricPlayerBridge/store → MotionValue
+├── 主题          stage/lyricAdapter.ts   CSS 变量 → Folia Theme
+├── 模式         renderers.ts            十四个模式各自 React.lazy
+├── 背景         backgrounds/FoliaBackground  六类上游背景 + 柔焦/几何/纯色快捷项
+├── 控制栏       FoliaControlBar              独立胶囊样式、展开/自动隐藏/离底距离
+└── 设置         FoliaSettingsPopover          歌词、字幕、背景和控制栏
+```
+
+移植带来的两处**适配层**，是本目录最需要理解的部分：
+
+- **`stage/lyricAdapter.ts`** —— AMLL 的时间是**毫秒**、Folia 的是**秒**，换算只在这一处发生（差 1000 倍不会报错，但会让全部动画错位）。同时把 `word.word` → `word.text`、`translatedLyric` → `translation`，并按 `words[].word` 拼出 `fullText`（Folia 布局的关键输入），以及用 `isDuet` 映射出 `agentId` 供「群唱」的说话人分支使用。激活行按上游的渲染结束时窗 `renderEndTime` 查找；`stage/lyricPresentation.ts` 为长前奏和大于 3 秒的间隙生成上游间奏点行，不修改真实歌词时序。宿主始终传 `showText: true`，仅用 `showWaitingPlaceholder: false` 关闭等待提示，让模式保留余辉、预热、已唱行和场景效果。
+- **`stage/foliaClock.ts`** —— Folia 的模式全部按 `MotionValue<number>` 消费播放位置，而本项目**没有 MotionValue**。该 hook 优先读 `lyricPlayerBridge.getFrameTime()`（逐帧）、回退到 `usePlayerStore.currentTime`（10 Hz 节流），与 WebGL 歌词舞台完全同源；只在播放中持有 rAF 循环，卸载时取消并退订。歌词偏移在**时钟**上减去，而不是挪歌词行。
+
+`lib/lyricLrc.ts` 由 `LyricDisplay` 与 Folia 适配层**共用**：LRC 的解析与译文配对只有一份实现，避免两处漂移。
+
+`lib/foliaSettings.ts` 定义默认值和持久化校验；`settingsStore.foliaSettings` 合并局部修改并通过 `storage` 保存，首次升级记住原来的 Folia 歌词模式。恢复默认仅影响 Folia 设置。`FoliaControlBar` 复用 `MineradioTransport` 的权限、投票、去重和进度预览行为，通过可选 `variant/showProgress/settingsButton` 参数组合不同外观，避免两套播放实现漂移。
+
+背景完整包含 common/monet/nomand/latent/sora/url 六类，均按需加载原生实现；保留柔焦/几何/纯色快捷项。Pixi v8 用于商籁/凝彩/绘光，Sora 保留上游 twgl 星尘，隐现与漫游使用 Paper shaders；文字布局使用上游 pretext。暂停、隐藏页面、节能画质及系统减少动态效果通过宿主静态状态停止背景运动。控制栏保留聊天、队列、音量及设置入口，键盘焦点、弹出面板与投票阻止自动隐藏；字幕基线跟随离底距离。
+
 
 ### 视觉舞台的构图（参照 Mineradio / OpenMusic）
 

@@ -1422,3 +1422,152 @@ body[data-room-cover-tint='true'] {
     background: rgb(8 12 20 / 88%);
   }
 }
+
+/* ---------------------------------------------------------------- Folia 舞台
+   从 folia-major 移植的 DOM/CSS 歌词模式（still / luminous / partita /
+   tilt / cappella）。与 mineradio 一样，全部规则限定在 `.folia-*` 命名空间
+   内，经典播放器与 mineradio 的样式完全不受影响。
+
+   歌词仍为透明前景，独立背景铺在其下，Folia 胶囊控制栏位于最上层。
+   装饰环会横穿居中的歌词，由 `:has(.folia-root)` 隐藏。 */
+
+.folia-root {
+  /* 与 mineradio 的 `.mt-mineradio-root` 同构：满屏定位上下文 */
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  overflow: hidden;
+  --folia-subtitle-bottom: calc(min(var(--folia-bar-offset, 32px), max(16px, 100% - 220px)) + 176px);
+}
+
+/* Folia 的前景与背景分层；控制栏/字幕跟随可调离底距离。 */
+.folia-lyrics-layer { z-index: 1; }
+.folia-background { z-index: 0; }
+.folia-fluid__cover {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(40px);
+  transform: scale(1.5);
+  opacity: 0.8;
+  animation: folia-cover-reveal 1.5s ease-out both;
+}
+@keyframes folia-cover-reveal { from { opacity: 0; } to { opacity: 0.8; } }
+.folia-geometric__shape { position: absolute; animation: folia-shape-drift 40s linear infinite; }
+.folia-geometric__particle { position: absolute; border-radius: 50%; opacity: var(--folia-particle-opacity, 0.2); animation: folia-particle-drift 25s linear infinite; }
+@keyframes folia-shape-drift {
+  0% { transform: translate(-15px, 30px) rotate(0deg); }
+  50% { transform: translate(15px, -30px) rotate(180deg); }
+  100% { transform: translate(-15px, 30px) rotate(360deg); }
+}
+@keyframes folia-particle-drift {
+  0% { transform: translateY(0); opacity: 0; }
+  50% { opacity: var(--folia-particle-opacity, 0.2); }
+  100% { transform: translateY(-100px); opacity: 0; }
+}
+.folia-background[data-static] .folia-geometric__shape,
+.folia-background[data-static] .folia-geometric__particle { animation-play-state: paused; }
+.folia-background[data-static] .folia-fluid__cover { animation: none; }
+
+.folia-console {
+  position: absolute;
+  inset-inline: 0;
+  bottom: max(env(safe-area-inset-bottom, 0px), min(var(--folia-bar-offset, 32px), max(16px, 100% - 220px)));
+  z-index: 20;
+  display: flex;
+  justify-content: center;
+  padding-inline: max(12px, var(--mt-player-safe-left, 0px)) max(12px, var(--mt-player-safe-right, 0px));
+  pointer-events: none;
+}
+.folia-visibility-toggle { left: max(1rem, var(--mt-player-safe-left, 0px)); }
+.folia-console__inner {
+  width: min(100%, 400px);
+  padding: 12px 18px;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 32px;
+  background: rgb(0 0 0 / 22%);
+  backdrop-filter: blur(24px);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 20%);
+  pointer-events: auto;
+  transition: width 250ms ease-out, background 200ms ease-out, opacity 200ms ease-out;
+}
+.folia-console__inner:hover,
+.folia-console__inner:focus-within,
+.folia-console[data-expanded] .folia-console__inner {
+  width: min(100%, 640px);
+  background: rgb(0 0 0 / 38%);
+}
+.folia-console__inner:focus-visible { outline: 2px solid var(--ring); outline-offset: 4px; }
+.folia-console[data-hidden] .folia-console__inner { opacity: 0; pointer-events: none; }
+.folia-console .mt-mr-transport { gap: 8px; }
+.folia-console .mt-mr-controls { order: -1; grid-template-columns: auto minmax(0, 1fr); gap: 8px; }
+.folia-console .mt-mr-cluster--transport { grid-column: 1; grid-row: 1; }
+.folia-console .mt-mr-cluster--actions { grid-column: 2; grid-row: 1; text-align: center; }
+.folia-console .mt-mr-cluster--modes { grid-column: 1 / -1; grid-row: 2; justify-content: center; }
+.folia-console .mt-mr-cluster { height: auto; }
+.folia-console .mt-mr-cover { display: none; }
+.folia-console .mt-mr-cluster--actions .mt-mr-meta { display: flex; }
+.folia-console .mt-mr-play {
+  width: 44px;
+  height: 44px;
+  color: var(--background);
+  background: var(--foreground);
+  backdrop-filter: none;
+}
+.folia-console .mt-mr-play:hover { background: var(--primary); }
+.folia-console .mt-mr-btn { width: 44px; height: 44px; border-radius: 50%; }
+.folia-console .mt-mr-time { font-size: 10px; }
+.folia-console .mt-mr-skip,
+.folia-console .mt-mr-mode,
+.folia-console .mt-mr-artist { display: none; }
+.folia-console__inner:hover .mt-mr-skip,
+.folia-console__inner:focus-within .mt-mr-skip,
+.folia-console[data-expanded] .mt-mr-skip,
+.folia-console__inner:hover .mt-mr-mode,
+.folia-console__inner:focus-within .mt-mr-mode,
+.folia-console[data-expanded] .mt-mr-mode { display: inline-flex; }
+.folia-console__inner:hover .mt-mr-artist,
+.folia-console__inner:focus-within .mt-mr-artist,
+.folia-console[data-expanded] .mt-mr-artist { display: block; }
+.folia-vote { position: absolute; bottom: calc(100% + 12px); inset-inline: 12px; display: flex; justify-content: center; }
+@media (min-width: 640px) {
+  .folia-console .mt-mr-controls { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .folia-console .mt-mr-cluster--modes { grid-column: 3; grid-row: 1; }
+  .folia-console .mt-mr-btn { width: 36px; height: 44px; }
+  .folia-root { --folia-subtitle-bottom: calc(min(var(--folia-bar-offset, 32px), max(16px, 100% - 220px)) + 112px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .folia-console__inner { transition: none; backdrop-filter: none; background: rgb(0 0 0 / 85%); }
+  .folia-fluid__cover,
+  .folia-geometric__shape,
+  .folia-geometric__particle { animation: none; }
+}
+
+/* 歌词层默认不可交互：五个模式的歌词都是展示性的，交互（点击跳转）本轮
+   未接入 —— 与上游"视觉舞台下无点击跳转"的决策一致。控制栏在
+   `.folia-console__inner` 内自带 `pointer-events: auto`，不受此规则影响。 */
+.folia-still,
+.folia-luminous,
+.folia-partita,
+.folia-tilt,
+.folia-cappella {
+  pointer-events: none;
+}
+
+/* 装饰环（`.mt-player-stage::before`）会横穿居中的歌词文字。mineradio 舞台
+   已按同一理由隐藏它（见上方 `:has(.mt-mineradio-root)`），folia 的歌词同样
+   居中且文字更密，因此一并隐藏。经典播放器不受影响。 */
+.mt-player-stage:has(.folia-root)::before {
+  display: none;
+}
+
+/* 减少动态效果：folia 模式的入场 / 呼吸 / 逐字脉冲全部由 motion 驱动，
+   `motion` 自身会读取该偏好并跳过 transform 类动画。这里额外关掉 cappella
+   的循环关键帧（它们不受 motion 管辖，会持续消耗合成器）。 */
+@media (prefers-reduced-motion: reduce) {
+  .folia-cappella [style*='cappella-'] {
+    animation: none !important;
+  }
+}

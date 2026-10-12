@@ -48,7 +48,33 @@ describe('舞台外壳：故障回退与视图切换', () => {
   })
 
   it('视觉舞台的渲染条件含 view === player（该前提本身是对的，需保留）', () => {
-    expect(body).toMatch(/isMineradio && view === 'player'/)
+    // ★ 自 folia 移植起，判据由 `isMineradio` 改为 `isVisualStage`：
+    //   "是不是视觉舞台"现在要同时覆盖 mineradio 与 folia 两族
+    //   （见 `stages/registry.ts` 的 `resolveStageFamily`）。前提不变 ——
+    //   整页歌单（view === 'playlist'）是经典舞台独有的概念。
+    expect(body).toMatch(/isVisualStage && view === 'player'/)
+  })
+
+  /**
+   * 回归：两族舞台都必须被路由到，且各有自己的懒加载宿主。
+   *
+   * 真实风险：只加 folia 的注册项而忘了改路由，`resolveStageFamily` 认它、
+   * 白名单存得下、菜单也能选 —— 但渲染分支仍只认 mineradio，于是选中 folia
+   * 后画面是**经典播放器**，看起来像"选了没反应"。这类缺陷 typecheck 抓不到
+   * （两边都是合法类型），因此这里读源码钉住。
+   */
+  it('folia 与 mineradio 两族都被路由到各自的懒加载宿主', () => {
+    expect(body, 'folia 宿主未被懒加载').toMatch(/import\('\.\/folia\/FoliaPlayerStage'\)/)
+    expect(body, 'mineradio 宿主未被懒加载').toMatch(/import\('\.\/mineradio\/MineradioPlayerStage'\)/)
+    expect(body, '缺少 folia 分支').toMatch(/stageFamily === 'folia'/)
+    expect(body, '缺少 mineradio 回退分支').toMatch(/<MineradioPlayerStage/)
+  })
+
+  it('舞台族路由不得回退成只认 mineradio 的 isVisualStageId', () => {
+    // `isVisualStageId` 只看 `VISUAL_MODES`（mineradio）。若路由改回它，
+    // folia 模式会被判成非视觉舞台并直接渲染经典播放器。
+    expect(body).not.toMatch(/isVisualStageId/)
+    expect(body, '未使用统一路由').toMatch(/resolveStageFamily\(/)
   })
 })
 

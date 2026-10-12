@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && node scripts/build.mjs",
     "lint": "eslint .",
     "typecheck": "tsc -b --noEmit",
     "preview": "vite preview"
@@ -15,8 +15,11 @@
     "@applemusic-like-lyrics/lyric": "^1.0.2",
     "@applemusic-like-lyrics/react": "^0.5.2",
     "@casl/react": "^5.0.1",
+    "@chenglou/pretext": "^0.0.9",
     "@fontsource/plus-jakarta-sans": "^5.3.0",
     "@music-together/shared": "workspace:*",
+    "@paper-design/shaders": "^0.0.80",
+    "@paper-design/shaders-react": "^0.0.80",
     "@pixi/app": "^7.4.3",
     "@pixi/core": "^7.4.3",
     "@pixi/display": "^7.4.3",
@@ -36,6 +39,7 @@
     "lucide-react": "^0.563.0",
     "motion": "^12.34.0",
     "nanoid": "^5.1.16",
+    "pixi.js": "^8.22.0",
     "radix-ui": "^1.6.7",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
@@ -44,6 +48,7 @@
     "sonner": "^2.0.8",
     "tailwind-merge": "^3.6.0",
     "three": "^0.186.0",
+    "twgl.js": "^7.0.0",
     "vaul": "^1.1.2",
     "zustand": "^5.0.15"
   },

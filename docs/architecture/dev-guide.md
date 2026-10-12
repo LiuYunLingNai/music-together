@@ -85,3 +85,7 @@ npx shadcn@latest add <component-name>
 - Auth Cookie 自动重发：`useRoomState` 在收到 `ROOM_STATE` 时自动重发 localStorage 中的 cookie。另外，当从 HomePage 导航到 RoomPage 时（`ROOM_STATE` 已被 HomePage 提前消费），`useRoomState` 挂载时检测到 room 已存在会立即补发 cookie，确保任何入口都能恢复认证
 - Auth Cookie 服务端验证双路径：`authController` 收到 `AUTH_SET_COOKIE` 时先检查 `hasCookie()`——如果 cookie 已在内存池中（刷新页面场景），走 **fast path** 跳过 API 调用直接返回成功；否则走 **slow path** 调用 `getUserInfo()` → `ncmApi.login_status()`。slow path 对**任何失败原因**（`expired` 或 `error`）都自动重试 1 次（间隔 1.5 秒），因为网易云 `login_status` API 可能对有效 cookie 临时返回空 profile
 - `shared` 包修改后前后端会自动热重载（pnpm workspace 链接）
+
+## Windows 构建临时目录
+
+客户端构建由 scripts/build.mjs 调用 Vite API，加载 Vite 前把当前进程的 TEMP/TMP 指向 packages/client/.esbtmp。esbuild 对大于 1 MB 的输出块会使用临时文件，该入口避免 Windows 系统临时目录的删除权限问题；只影响构建进程，不修改系统环境变量。临时目录已在 .gitignore 忽略。

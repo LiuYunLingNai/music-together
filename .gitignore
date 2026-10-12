@@ -1,6 +1,14 @@
 node_modules
 dist
 *.tsbuildinfo
+
+# 构建临时目录（esbuild 的 TEMP 重定向）。
+# 背景：本机 %TEMP% 下删除 esbuild 临时文件会返回 "Access is denied"，
+# 导致 vite:esbuild-transpile 在 chunk 超过 1 MB 时构建失败
+# （esbuild 只在输入 >1MB 时才走临时文件路径）。把 TEMP 指到工作区内可绕过，
+# 见 README 的「构建」一节。里面是 node 编译缓存等可再生内容，不应进版本库。
+/.esbtmp/
+/packages/client/.esbtmp/
 .env
 .env.local
 *.log
