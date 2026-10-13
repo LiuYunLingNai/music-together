@@ -1,8 +1,8 @@
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
-import { readAudioBands } from '../shared/AudioAnalyser'
-import type { VisualModeId } from '../shared/VisualMode'
+import { readAudioBands } from '../../stages/AudioAnalyser'
+import type { VisualModeId } from '../../stages/VisualMode'
 import { getDotTexture } from './dotTexture'
 
 /** OpenMusic `GalaxyBackgroundStarRiver` 的背景星河粒子数。 */

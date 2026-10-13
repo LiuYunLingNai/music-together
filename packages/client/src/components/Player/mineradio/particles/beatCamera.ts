@@ -36,7 +36,7 @@
  */
 
 import { getAudioTapRevision } from '@/lib/audioTap'
-import { getSonicAudioFrame } from '../shared/SonicAudioMonitor'
+import { getSonicAudioFrame } from '../../stages/SonicAudioMonitor'
 
 // ---------------------------------------------------------------- 常量（上游 03-beat-dj-state.js:35-56）
 

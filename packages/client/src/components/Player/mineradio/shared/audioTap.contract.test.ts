@@ -70,10 +70,36 @@ describe('音频分析接线契约', () => {
     const src = stripComments(read('timeStretch.ts'))
     const catchIdx = src.indexOf('} catch (error) {')
     const fallback = src.slice(catchIdx, src.indexOf('return null', catchIdx))
-    expect(fallback).toMatch(/source\.connect\(context\.destination\)/)
+    // ★ 音量在图内（volumeGain）：fallback 的 source 接 gain 而不是直接
+    //   destination —— 静音丢节拍的修复要求两条路径（成功/失败）同语义。
+    expect(fallback).toMatch(/fallbackGain\s*=\s*context\.createGain\(\)/)
+    expect(fallback).toMatch(/source\.connect\(fallbackGain\)/)
+    expect(fallback).toMatch(/fallbackGain\.connect\(context\.destination\)/)
     expect(fallback).toMatch(/fallbackAnalyser\s*=\s*context\.createAnalyser\(\)/)
     expect(fallback).toMatch(/source\.connect\(fallbackAnalyser\)/)
     expect(fallback).toMatch(/publishStretchAnalyser\(fallbackAnalyser\)/)
+  })
+
+  it('用户音量 √v 拆分 + 静音地板（上游 Mineradio writeAudioOutputGain 同款）', () => {
+    const src = stripComments(read('timeStretch.ts'))
+    // 1. 成功图：soundtouch → volumeGain → destination，分析线在 gain 之前
+    //    （analyser 卡在元素 √v 与图内 √v 之间 —— 上游拓扑）
+    expect(src).toMatch(/stretchNode\.connect\(volumeGain\)/)
+    expect(src).toMatch(/volumeGain\.connect\(context\.destination\)/)
+    // 2. 音量分支走感知平方根 + 地板（跟随音量 + 静音不丢节拍）
+    expect(src).toMatch(/function splitVolumeGain/)
+    expect(src).toMatch(/Math\.sqrt\(volume\)/)
+    expect(src).toMatch(/AUDIO_SILENCE_GAIN = 0\.005/)
+    // 3. 元素 volume 属性被转发（Howler 的 howl.volume/fade 无需改）
+    expect(src).toMatch(/installVolumeRouting\(/)
+    expect(src).toMatch(/defineProperty\(audio,\s*'volume'/)
+    // 4. release 时还原原生属性；复用分支重新安装
+    expect(src).toMatch(/uninstallVolumeRouting\(/)
+    const reuseIdx = src.indexOf('return createController(existing)')
+    const beforeReuse = src.slice(Math.max(0, reuseIdx - 600), reuseIdx)
+    expect(beforeReuse).toMatch(/installVolumeRouting\(/)
+    // 5. 看门狗可查询静音地板（放行"播放中静音"的预期全零）
+    expect(src).toMatch(/export function isPlaybackVolumeAtFloor/)
   })
 
   it('分析节点在启用/旁路两条路径上都保持连接（否则切变速会丢频谱）', () => {
@@ -85,7 +111,7 @@ describe('音频分析接线契约', () => {
 
   it('AudioAnalyser 优先使用 audioTap 的节点，而不是 masterGain', () => {
     const src = stripComments(
-      readFileSync(join(CLIENT_SRC, 'components', 'Player', 'mineradio', 'shared', 'AudioAnalyser.ts'), 'utf8'),
+      readFileSync(join(CLIENT_SRC, 'components', 'Player', 'stages', 'AudioAnalyser.ts'), 'utf8'),
     )
     expect(src).toMatch(/getAudioTapAnalyser\s*\(/)
     // getAudioTapAnalyser 必须在 masterGain 之前被检查（优先使用）

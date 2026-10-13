@@ -20,8 +20,8 @@ import {
 } from './particles/stageSafeArea'
 import { extractCoverPalette } from './lyrics/coverPalette'
 import { clearCoverCache, loadCoverAssets, type CoverAssets } from './shared/CoverTextureLoader'
-import { detectHardwareProfile, detectPowerContext, getRenderPolicy, type VisualQuality } from './shared/RenderPolicy'
-import type { VisualModeId } from './shared/VisualMode'
+import { detectHardwareProfile, detectPowerContext, getRenderPolicy, type VisualQuality } from '../stages/RenderPolicy'
+import type { VisualModeId } from '../stages/VisualMode'
 
 interface MineradioPlayerStageProps {
   mode: VisualModeId

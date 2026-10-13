@@ -1,5 +1,6 @@
 import { Howler } from 'howler'
 import { getAudioTapAnalyser, getAudioTapRevision } from '@/lib/audioTap'
+import { isPlaybackVolumeAtFloor } from '@/lib/timeStretch'
 import { resetSonicAudioMonitor, stepSonicAudioMonitor, type SonicAudioFrame } from './SonicAudioMonitor'
 
 /**
@@ -191,6 +192,12 @@ function noteSpectrumFrame(data: Uint8Array, playing: boolean): void {
     watchdogWarned = false
     return
   }
+  // 用户静音（音量地板，timeStretch 的 √v 拆分）：频谱≈全零是**预期行为**
+  // （-80dB 低于字节精度），folia 侧有自己的呼吸兜底，不构成异常。
+  if (isPlaybackVolumeAtFloor()) {
+    watchdogSilentFrames = 0
+    return
+  }
   // 上下文挂起导致的静音：主动 resume，且不计入判死。
   if (analyser && tryResumeContext(analyser)) {
     watchdogSilentFrames = 0
@@ -326,8 +333,8 @@ export function ensureAudioAnalyser(): boolean {
     const node = ctx.createAnalyser()
     node.fftSize = 2048
     node.smoothingTimeConstant = 0.58
-    node.minDecibels = -82
-    node.maxDecibels = -8
+    // 不设 min/maxDecibels（上游同款，默认 -100/-30dB）：静音地板信号在此
+    // 映射下字节读数仍 ~70/255，节拍引擎静音时可继续打点。
 
     // 只读旁路：只从 masterGain 拉数据，不接回 destination。
     master.connect(node)
@@ -431,6 +438,23 @@ export function stepAudioFrame(deltaSeconds: number, currentTime = 0, playing = 
  */
 export function readAudioBands(): AudioBands {
   return cached ?? EMPTY_BANDS
+}
+
+/**
+ * 读取最近一帧的**原始 FFT 频谱**（**零参数，读缓存**）。
+ *
+ * 返回 `stepAudioFrame` 里 `getByteFrequencyData` 写入的那份 buffer 的快照
+ * 副本（0..255，bin 数 = analyser.frequencyBinCount，本项目 fftSize 2048 →
+ * 1024 bin）。未接线时返回 `null`，调用方按"无频谱"处理（如 monet 的
+ * band-profile 回退），不要自行触发分析。
+ *
+ * 返回副本而不是原 buffer：消费者（folia 的 MotionValue）会长期持有它，
+ * 共享可变 buffer 会让"上一帧引用"被下一帧覆写。
+ */
+export function readAudioSpectrum(): Uint8Array<ArrayBuffer> | null {
+  const data = frequencyData
+  if (wiredKind === 'none' || !data) return null
+  return data.slice()
 }
 
 /** 释放分析节点。舞台卸载时调用。 */

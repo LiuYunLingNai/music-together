@@ -4,11 +4,15 @@ import { FOLIA_MODES } from './foliaModes'
 import { normalizeFoliaBackgroundConfig } from './foliaBackgroundConfig'
 
 describe('完整 Folia 配置', () => {
-  it('六种上游背景都可以保存；保留已有的柔焦、几何和纯色', () => {
-    for (const id of ['common', 'latent', 'monet', 'nomand', 'sora', 'url', 'fluid', 'geometric', 'solid']) {
+  it('六种上游背景都可以保存；宿主自建的柔焦/几何回落到 common', () => {
+    for (const id of ['common', 'latent', 'monet', 'nomand', 'sora', 'url', 'solid']) {
       expect(FOLIA_BACKGROUNDS.some((item) => item.id === id)).toBe(true)
       expect(normalizeFoliaSettings({ background: id }).background).toBe(id)
     }
+    // 「专辑柔焦/几何浮游」是上游 common 背景的缩水重写，已删除；
+    // 旧存档回落到语义等价且功能更全的 common。
+    expect(normalizeFoliaSettings({ background: 'fluid' }).background).toBe('common')
+    expect(normalizeFoliaSettings({ background: 'geometric' }).background).toBe('common')
   })
   it('十四个动画的持久化模式完整且不与经典播放器混淆', () => {
     for (const mode of FOLIA_MODES) expect(normalizeFoliaSettings({ lyricMode: mode.id }).lyricMode).toBe(mode.id)

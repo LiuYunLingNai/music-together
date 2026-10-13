@@ -1,10 +1,10 @@
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
-import { readAudioBands } from '../shared/AudioAnalyser'
-import { getSonicAudioFrame } from '../shared/SonicAudioMonitor'
+import { readAudioBands } from '../../stages/AudioAnalyser'
+import { getSonicAudioFrame } from '../../stages/SonicAudioMonitor'
 import type { CoverPalette } from '../lyrics/coverPalette'
-import type { RenderPolicy } from '../shared/RenderPolicy'
+import type { RenderPolicy } from '../../stages/RenderPolicy'
 import { gestureRotationState, tickGestureRotation } from '../particles/gestureRotationState'
 import { orbitCameraState } from '../particles/orbitCameraState'
 import {

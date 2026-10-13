@@ -25,7 +25,7 @@ import { describe, expect, it } from 'vitest'
  * 这个测试不跑运行时，只做静态检查：读源码，断言「拆线」这个动作
  * 不再出现在看门狗路径里，且上下文挂起自愈存在。
  */
-const AUDIO_ANALYSER = readFileSync(join(__dirname, 'AudioAnalyser.ts'), 'utf8')
+const AUDIO_ANALYSER = readFileSync(join(__dirname, '..', '..', 'stages', 'AudioAnalyser.ts'), 'utf8')
 
 /** 去掉注释，避免把说明文字里的代码也算进去。 */
 function stripComments(source: string): string {

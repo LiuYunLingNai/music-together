@@ -30,8 +30,8 @@ import {
   type LyricTranslationMode,
 } from './lyricDisplayConfig'
 import { DEFAULT_PALETTE, type CoverPalette } from './coverPalette'
-import { readAudioBands } from '../shared/AudioAnalyser'
-import { detectHardwareProfile } from '../shared/RenderPolicy'
+import { readAudioBands } from '../../stages/AudioAnalyser'
+import { detectHardwareProfile } from '../../stages/RenderPolicy'
 import { coverPose, lyricWorldPos } from '../particles/gestureRotationState'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useSettingsStore } from '@/stores/settingsStore'

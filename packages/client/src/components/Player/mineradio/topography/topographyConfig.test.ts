@@ -195,7 +195,7 @@ describe('声波地形 · 踢鼓低频响应', () => {
 describe('声波地形 · 踢鼓包络（由 SonicAudioMonitor 统一驱动）', () => {
   it('地形消费引擎产出的 kickEnvelope，本地不再重复实现', async () => {
     // 静态钉住：引擎里有 stepKickEnvelope，topographyConfig 里没有
-    const { stepKickEnvelope: engineStep } = await import('../shared/SonicAudioMonitor')
+    const { stepKickEnvelope: engineStep } = await import('../../stages/SonicAudioMonitor')
     expect(typeof engineStep).toBe('function')
     const configSource = await import('./topographyConfig')
     expect('stepKickEnvelope' in configSource).toBe(false)

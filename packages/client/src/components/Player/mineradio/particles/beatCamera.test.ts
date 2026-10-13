@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { resetSonicAudioMonitor, stepSonicAudioMonitor } from '../shared/SonicAudioMonitor'
+import { resetSonicAudioMonitor, stepSonicAudioMonitor } from '../../stages/SonicAudioMonitor'
 import {
   consumePrimeCamPunch,
   primeBeatCameraAfterTrackStart,

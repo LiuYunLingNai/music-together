@@ -1,5 +1,5 @@
 import { VoteBanner } from '../../Vote/VoteBanner'
-import { MineradioTransport } from './MineradioTransport'
+import { Transport } from '../stages/Transport'
 import type { VoteAction, VoteState } from '@music-together/shared'
 
 interface MineradioControlBarProps {
@@ -19,7 +19,7 @@ interface MineradioControlBarProps {
 /**
  * 底部悬浮玻璃控制台。
  *
- * 内容使用自建的 `MineradioTransport`（三列 grid，参照 Mineradio 的
+ * 内容使用共享的 `stages/Transport`（三列 grid，参照 Mineradio 的
  * `#controls` 结构），而不是复用经典播放器的窄列组件 ——
  * 后者的 `zoom = clientWidth / 300` 缩放假设与横向胶囊不兼容。
  *
@@ -48,7 +48,7 @@ export function MineradioControlBar({
 
       <div className="mt-mineradio-console">
         <div className="mt-mineradio-console__inner">
-          <MineradioTransport
+          <Transport
             onPlay={onPlay}
             onPause={onPause}
             onSeek={onSeek}

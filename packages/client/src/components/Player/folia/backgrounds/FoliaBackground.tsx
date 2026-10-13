@@ -3,10 +3,6 @@ import type { MotionValue } from 'motion/react'
 import { useSettingsStore } from '@/stores/settingsStore'
 import type { Theme, AudioBands } from '../types'
 
-const FluidBackground = lazy(() => import('./FluidBackground').then((module) => ({ default: module.FluidBackground })))
-const GeometricBackground = lazy(() =>
-  import('./GeometricBackground').then((module) => ({ default: module.GeometricBackground })),
-)
 const SoraBackground = lazy(() => import('../upstream/components/visualizer/backgrounds/sora/SoraBackground'))
 const CommonFluid = lazy(() => import('../upstream/components/visualizer/backgrounds/common/FluidBackground'))
 const CommonGeometry = lazy(() => import('../upstream/components/visualizer/backgrounds/common/GeometricBackground'))
@@ -29,7 +25,6 @@ export function FoliaBackground({
   renderState: { paused: boolean; staticMode: boolean }
 }) {
   const settings = useSettingsStore((s) => s.foliaSettings)
-  const speed = useSettingsStore((s) => s.bgFlowSpeed)
   const paused = !settings.backgroundMotion || renderState.paused || renderState.staticMode
   const config = settings.backgroundConfig
   const common = config.common
@@ -90,9 +85,14 @@ export function FoliaBackground({
         {settings.background === 'url' && (
           <UrlBackground urlBackgroundList={config.url?.items} urlBackgroundSelectedId={config.url?.selectedId} />
         )}
-        {settings.background === 'fluid' && <FluidBackground theme={theme} coverUrl={coverUrl} />}
-        {settings.background === 'geometric' && <GeometricBackground theme={theme} speed={speed} />}
-        {settings.background === 'sora' && <SoraBackground theme={theme} isDaylight={false} paused={paused} />}
+        {settings.background === 'sora' && (
+          // 上游 entry 的包装语义：blank 时只渲染纯色帧，完全不挂 WebGL 星空。
+          <div className="absolute inset-0 z-0" style={{ backgroundColor: '#000000' }}>
+            {!config.sora?.tuning?.blank && (
+              <SoraBackground theme={theme} isDaylight={false} paused={paused} />
+            )}
+          </div>
+        )}
       </Suspense>
       <div className="absolute inset-0 bg-black" style={{ opacity: settings.backgroundDim }} />
     </div>

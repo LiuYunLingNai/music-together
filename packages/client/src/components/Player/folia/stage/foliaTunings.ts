@@ -2,7 +2,12 @@ import * as defaults from '../types'
 import type { FoliaModeId } from '../registry'
 import type { FoliaSettings } from '@/lib/foliaSettings'
 import type { FoliaSharedProps } from '../definition'
-import { FOLIA_MODE_CONTROLS, validateControl } from '@/lib/foliaTuningSchema'
+import {
+  FOLIA_MODE_CONTROLS,
+  getTuningPath,
+  setTuningPath,
+  validateControl,
+} from '@/lib/foliaTuningSchema'
 
 export const FOLIA_TUNING_DEFAULTS = {
   luminous: defaults.DEFAULT_CLASSIC_TUNING,
@@ -23,15 +28,16 @@ export const FOLIA_TUNING_DEFAULTS = {
 /** Saved patches cannot replace a tuning object or introduce invalid primitive types. */
 export function resolveFoliaTuning(mode: FoliaModeId, saved: FoliaSettings['tunings']): Record<string, unknown> {
   const base: Record<string, unknown> = mode === 'still' ? {} : { ...FOLIA_TUNING_DEFAULTS[mode] }
-  const result = { ...base }
+  // 嵌套对象（如 diorama 的 geometryVisibility）需要深一份拷贝，避免共享默认值引用。
+  const result = structuredClone(base)
   const patch = saved[mode]
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return result
-  for (const [key, fallback] of Object.entries(base)) {
-    const value = patch[key]
+  for (const control of FOLIA_MODE_CONTROLS[mode]) {
+    const fallback = getTuningPath(base, control.key)
+    const value = getTuningPath(patch, control.key)
     if (typeof value !== typeof fallback) continue
-    const control = FOLIA_MODE_CONTROLS[mode].find((item) => item.key === key)
-    const validated = control ? validateControl(control, value) : undefined
-    if (validated !== undefined) result[key] = validated
+    const validated = validateControl(control, value)
+    if (validated !== undefined) setTuningPath(result, control.key, validated)
   }
   return result
 }

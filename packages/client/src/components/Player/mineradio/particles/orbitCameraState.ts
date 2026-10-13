@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import type { VisualModeId } from '../shared/VisualMode'
+import type { VisualModeId } from '../../stages/VisualMode'
 import { resetGestureRotation } from './gestureRotationState'
 import { SHELF_CENTER, shelfFocusLookAtOffset, shelfFollowTier, shelfSideX } from './floatingSongCard'
 

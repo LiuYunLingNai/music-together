@@ -72,6 +72,11 @@ export function normalizeFoliaBackgroundConfig(value: unknown): VisualizerBackgr
   if (saved.latent) result.latent = { tuning: preset(DEFAULT_LATENT_BACKGROUND_TUNING, record(saved.latent).tuning) }
   if (saved.monet) result.monet = { tuning: preset(DEFAULT_MONET_BACKGROUND_TUNING, record(saved.monet).tuning) }
   if (saved.nomand) result.nomand = { tuning: preset(DEFAULT_NOMAND_BACKGROUND_TUNING, record(saved.nomand).tuning) }
+  // sora 只有一个 blank 开关（上游 entry：blank 时跳过 WebGL 星空，只渲染纯色帧）。
+  if (saved.sora) {
+    const soraTuning = record(record(saved.sora).tuning)
+    result.sora = { tuning: { blank: soraTuning.blank === true } }
+  }
   const image = record(saved.customImage)
   const imageUrl = normalizeUrlBackgroundUrl(image.url)
   if (imageUrl)

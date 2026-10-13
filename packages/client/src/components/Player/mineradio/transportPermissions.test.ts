@@ -4,7 +4,7 @@ import { defineAbilityFor } from '@music-together/shared'
 /**
  * 回归测试：控制栏的**权限与投票回退**行为。
  *
- * 这些断言对应三条用户实测反馈的 bug（详见 MineradioTransport 的注释）：
+ * 这些断言对应三条用户实测反馈的 bug（详见 stages/Transport 的注释）：
  *
  * 【Bug 1】房主点"播放模式"会触发投票
  *   错误写法：
@@ -71,7 +71,7 @@ describe('角色能力（权限回退的判定依据）', () => {
 })
 
 /**
- * 把 MineradioTransport 的决策逻辑抽出来做纯函数测试。
+ * 把 stages/Transport 的决策逻辑抽出来做纯函数测试。
  *
  * 这里复刻的是**修复后的**判定结构：先看直接权限，再回退到投票。
  * 若有人改回"两个分支都投票"，这些断言会失败。

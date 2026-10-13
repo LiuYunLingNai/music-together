@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { PAUSED_TARGET_FPS, resolveFrameloop } from './RenderPolicy'
+import { PAUSED_TARGET_FPS, resolveFrameloop } from '../../stages/RenderPolicy'
 
 /**
  * 回归：**暂停省钱**与**暂停不出黑屏**是同一个契约的两半，必须成对存在。

@@ -1,4 +1,4 @@
-import type { RenderPolicy } from '../shared/RenderPolicy'
+import type { RenderPolicy } from '../../stages/RenderPolicy'
 
 /**
  * 「声波地形」的规模与响应参数。
@@ -202,6 +202,6 @@ export function deriveKickFollowLowBands({
 
 /**
  * 踢鼓包络的上游常量（快攻 42/s、慢放 11.5/s）在本项目由
- * `shared/SonicAudioMonitor.ts` 的 `stepKickEnvelope` 统一实现 ——
+ * `stages/SonicAudioMonitor.ts` 的 `stepKickEnvelope` 统一实现 ——
  * 地形直接消费引擎产出的 `kickEnvelope`，不再在本地重复跑一遍。
  */

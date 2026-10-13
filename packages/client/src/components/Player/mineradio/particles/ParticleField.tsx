@@ -1,11 +1,11 @@
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
-import { readAudioBands } from '../shared/AudioAnalyser'
+import { readAudioBands } from '../../stages/AudioAnalyser'
 import { createAudioNormalizerState, stepAudioNormalize } from '../shared/audioNormalize'
 import type { CoverAssets } from '../shared/CoverTextureLoader'
-import type { RenderPolicy } from '../shared/RenderPolicy'
-import { PRESET_INDEX, getVisualMode, usesParticlePreset, type VisualModeId } from '../shared/VisualMode'
+import type { RenderPolicy } from '../../stages/RenderPolicy'
+import { PRESET_INDEX, getVisualMode, usesParticlePreset, type VisualModeId } from '../../stages/VisualMode'
 import { disposeDotTexture, getDotTexture } from './dotTexture'
 import {
   PARTICLE_ROTATION_EASE,

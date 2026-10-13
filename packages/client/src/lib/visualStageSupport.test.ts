@@ -23,7 +23,7 @@ const HOOK = readFileSync(join(HERE, '..', 'hooks', 'useVisualStageSupport.ts'),
 const SHELL = readFileSync(join(HERE, '..', 'components', 'Player', 'AudioPlayer.tsx'), 'utf8')
 const APPEARANCE = readFileSync(join(HERE, '..', 'components', 'Overlays', 'Settings', 'AppearanceSection.tsx'), 'utf8')
 const RENDER_POLICY = readFileSync(
-  join(HERE, '..', 'components', 'Player', 'mineradio', 'shared', 'RenderPolicy.ts'),
+  join(HERE, '..', 'components', 'Player', 'stages', 'RenderPolicy.ts'),
   'utf8',
 )
 

@@ -1,4 +1,4 @@
-import { getVisualMode, type VisualModeId } from './shared/VisualMode'
+import { getVisualMode, type VisualModeId } from '../stages/VisualMode'
 import { LyricDisplay } from '../LyricDisplay'
 
 interface MineradioLyricStageProps {

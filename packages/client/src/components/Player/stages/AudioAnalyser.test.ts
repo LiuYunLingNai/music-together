@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { SONIC_BAND_EDGES } from './AudioAnalyser'
+
+// ★ AudioAnalyser.ts 现在从 timeStretch 导入 isPlaybackVolumeAtFloor（静音地板
+//   看门狗门控），而 timeStretch 顶层 import SoundTouchNode 会引用 jsdom 没有
+//   的 AudioWorkletNode。stub 掉即可 —— 本文件只测频段常量。
+vi.mock('@/lib/timeStretch', () => ({ isPlaybackVolumeAtFloor: () => false }))
 
 /**
  * 回归保护：八频段定义必须与上游 Mineradio 一致。

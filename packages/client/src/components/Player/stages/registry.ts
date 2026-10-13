@@ -6,7 +6,7 @@
  * 本项目的播放器有三种形态：
  *
  *   1. `classic`  —— 经典播放器（始终可用，无损回退）；
- *   2. mineradio —— 全屏 three.js 粒子舞台（`mineradio/shared/VisualMode.ts`）；
+ *   2. mineradio —— 全屏 three.js 粒子舞台（`stages/VisualMode.ts`）；
  *   3. folia     —— 从 folia-major 移植的 DOM/CSS 歌词模式
  *                   （`folia/registry.ts`）。
  *
@@ -22,13 +22,16 @@
  *   真正的组件入口在各自的懒加载宿主里。
  */
 
-import { VISUAL_MODES, type VisualModeId } from '../mineradio/shared/VisualMode'
+import { VISUAL_MODES, type VisualModeId } from './VisualMode'
 import { isFoliaModeId, type FoliaModeId } from '../folia/registry'
 
 /** 舞台族。`classic` 不属于任何族 —— 它是回退项，不是可切换的"视觉"模式。 */
 export type StageFamily = 'mineradio' | 'folia'
 
 export type VisualStageId = VisualModeId | FoliaModeId
+
+/** 持久化/切换菜单用的完整舞台值：两族视觉模式 + classic 回退。 */
+export type StageMode = 'classic' | VisualStageId
 
 /**
  * 某个视觉舞台 id 属于哪个族。

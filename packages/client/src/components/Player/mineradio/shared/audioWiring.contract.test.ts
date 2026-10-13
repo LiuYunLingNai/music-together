@@ -57,7 +57,7 @@ describe('音频接线契约', () => {
   })
 
   it('readAudioBands 不再接受参数（消费者只能读缓存）', () => {
-    const source = stripComments(readFileSync(join(MINERADIO_DIR, 'shared', 'AudioAnalyser.ts'), 'utf8'))
+    const source = stripComments(readFileSync(join(MINERADIO_DIR, '..', 'stages', 'AudioAnalyser.ts'), 'utf8'))
     expect(source).toMatch(/export function readAudioBands\s*\(\s*\)/)
   })
 
@@ -69,7 +69,7 @@ describe('音频接线契约', () => {
    * 没有音频流过的静默线，切歌后新 tap 也无法接管，表现为"没有鼓点"。
    */
   it('ensureAudioAnalyser 在 tap 发布后必须从兜底升级（不得被接线状态短路）', () => {
-    const source = stripComments(readFileSync(join(MINERADIO_DIR, 'shared', 'AudioAnalyser.ts'), 'utf8'))
+    const source = stripComments(readFileSync(join(MINERADIO_DIR, '..', 'stages', 'AudioAnalyser.ts'), 'utf8'))
     // tap 读取必须发生在任何"已接线直接返回"之前：函数内不允许出现
     // 顶部短路（`if (wired) return true`）——接线状态只能记录来源，不能拦住 tap 检查。
     expect(source).not.toMatch(/if\s*\(\s*wired\s*\)\s*return\s+true/)
@@ -88,7 +88,7 @@ describe('音频接线契约', () => {
    * 见下一条用例）。**不变量不变**：disconnect 只能在 masterGain 分支内。
    */
   it('disposeAudioAnalyser 只拆自建的兜底节点，不碰共享 tap', () => {
-    const source = stripComments(readFileSync(join(MINERADIO_DIR, 'shared', 'AudioAnalyser.ts'), 'utf8'))
+    const source = stripComments(readFileSync(join(MINERADIO_DIR, '..', 'stages', 'AudioAnalyser.ts'), 'utf8'))
     // 截取 dispose 函数体
     const fnIdx = source.indexOf('export function disposeAudioAnalyser')
     expect(fnIdx).toBeGreaterThan(-1)
@@ -129,7 +129,7 @@ describe('音频接线契约', () => {
    * 只出现在兜底路径里。
    */
   it('failed 闩锁不得门控 tap 路径，且 dispose 必须能清掉它', () => {
-    const source = stripComments(readFileSync(join(MINERADIO_DIR, 'shared', 'AudioAnalyser.ts'), 'utf8'))
+    const source = stripComments(readFileSync(join(MINERADIO_DIR, '..', 'stages', 'AudioAnalyser.ts'), 'utf8'))
 
     // ---- dispose：不得提前返回，且必须复位 failed ----
     const disposeIdx = source.indexOf('export function disposeAudioAnalyser')
@@ -162,7 +162,7 @@ describe('音频接线契约', () => {
   })
 
   it('真实音频源切换按 tap 发布代次重置，舞台重挂载不误重置', () => {
-    const source = stripComments(readFileSync(join(MINERADIO_DIR, 'shared', 'AudioAnalyser.ts'), 'utf8'))
+    const source = stripComments(readFileSync(join(MINERADIO_DIR, '..', 'stages', 'AudioAnalyser.ts'), 'utf8'))
     const ensureIdx = source.indexOf('export function ensureAudioAnalyser')
     const ensureBody = source.slice(ensureIdx, source.indexOf('\n}\n', ensureIdx))
     expect(ensureBody).toMatch(/getAudioTapRevision\s*\(/)

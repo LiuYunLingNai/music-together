@@ -5,7 +5,7 @@ import { useFrame, useThree } from '@react-three/fiber'
 import type { Track } from '@music-together/shared'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
-import { readAudioBands } from '../shared/AudioAnalyser'
+import { readAudioBands } from '../../stages/AudioAnalyser'
 import {
   applyFloatingSongCardPose,
   clearFloatingSongCardCoverCache,

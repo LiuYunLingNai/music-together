@@ -836,11 +836,28 @@ export interface CappellaEmojiImage {
   url: string;
 }
 
+/** 导入时暂存的原始文件（Blob 存 IndexedDB，消费时转 objectURL 变成 CappellaEmojiImage）。 */
+export interface StoredCappellaEmojiImage {
+  id: string;
+  name: string;
+  mimeType: string;
+  blob: Blob;
+}
+
 
 export interface CappellaAvatarImage {
   id: string;
   name: string;
   url: string;
+}
+
+
+/** 导入时暂存的原始文件（Blob 存 IndexedDB，消费时转 objectURL 变成 CappellaAvatarImage）。 */
+export interface StoredCappellaAvatarImage {
+  id: string;
+  name: string;
+  mimeType: string;
+  blob: Blob;
 }
 
 
@@ -855,6 +872,14 @@ export interface MonetPortraitImage {
   id: string;
   name: string;
   url: string;
+}
+
+/** IndexedDB 里的 monet 自定义封面（Blob 形态；消费时才转 objectURL）。 */
+export interface StoredMonetPortraitImage {
+  id: string;
+  name: string;
+  mimeType: string;
+  blob: Blob;
 }
 
 

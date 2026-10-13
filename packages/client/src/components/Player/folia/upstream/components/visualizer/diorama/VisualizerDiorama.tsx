@@ -468,11 +468,9 @@ function advanceDirector(previous: DioramaDirectorState, gatedSeed: string | num
         // blend arms is the failure this is here to make visible: it means something reset the
         // lyric read-head under the outgoing song, and the camera is about to fly a round trip to
         // nowhere before the real change even happens.
-        console.log(
-            `[Diorama] camera flight #${context.transitionEpoch}:`
-            + ` ${isNewSong ? 'new song' : 'loop restart'}, seed ${String(gatedSeed ?? 'none')},`
-            + ` leaving line ${outgoingGlobal}`,
-        );
+        // 宿主移植：上游的这条 console.log 是给上游 automix 排障的可观测性日志；
+        // 本项目没有 automix，正常使用中它只会在每次切歌时向用户控制台输出噪音，
+        // 因此去掉（上游注释保留，语义不变 —— 只是本环境没有要"看得见"的故障）。
         transition = { epoch: context.transitionEpoch, outgoingIndex: outgoingGlobal };
     }
     if (effectiveLineIndex >= 0) {

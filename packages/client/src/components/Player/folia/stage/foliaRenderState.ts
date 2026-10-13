@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useReducedMotion } from 'motion/react'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
-import { detectHardwareProfile } from '../../mineradio/shared/RenderPolicy'
+import { detectHardwareProfile } from '../../stages/RenderPolicy'
 
 export function useFoliaRenderState() {
   const playing = usePlayerStore((s) => s.isPlaying)
