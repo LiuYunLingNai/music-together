@@ -1,6 +1,6 @@
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from '@/components/ui/drawer'
+import { Drawer, DrawerContent } from '@/components/ui/drawer'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { usePlayerStore } from '@/stores/playerStore'
@@ -14,7 +14,7 @@ import { useAddToPlaylist } from '@/hooks/useAddToPlaylist'
 import { useCallback, useContext, useEffect, useRef, useState, type MouseEvent } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { AbilityContext } from '@/providers/ability-context'
-import { ArrowUpToLine, ChevronDown, ChevronUp, ListPlus, ListX, Music, Play, RefreshCw, Trash2, User, X } from 'lucide-react'
+import { ArrowUpToLine, ChevronDown, ChevronUp, ListEnd, ListPlus, ListX, Music, Play, RefreshCw, Trash2, User, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { MarqueeText } from '@/components/ui/marquee-text'
 import { BilibiliMetadataDialog } from './BilibiliMetadataDialog'
@@ -43,6 +43,12 @@ interface QueueDrawerProps {
       | { clearMetadata: true },
   ) => void
   onClearQueue: () => void
+  /**
+   * 外壳形态。`drawer`（默认）是常规抽屉；`island` 是 folia 舞台的
+   * 播放栏浮岛 —— 与 folia 胶囊控制栏同语言的暗玻璃卡片，从控制栏
+   * 上方浮出（上游 WallToolsQueueIsland 的形态语义），功能完全一致。
+   */
+  variant?: 'drawer' | 'island'
 }
 
 export function QueueDrawer({
@@ -52,6 +58,7 @@ export function QueueDrawer({
   onReorderQueue,
   onUpdateBilibiliMetadata,
   onClearQueue,
+  variant = 'drawer',
 }: QueueDrawerProps) {
   const queue = useRoomStore((s) => s.room?.queue ?? EMPTY_QUEUE)
   const roomId = useRoomStore((s) => s.room?.id)
@@ -83,6 +90,8 @@ export function QueueDrawer({
   const [metadataTrack, setMetadataTrack] = useState<Track | null>(null)
 
   const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
+  const scrollElementRef = useRef<HTMLDivElement | null>(null)
+  scrollElementRef.current = scrollElement
   // TanStack Virtual manages mutable measurements internally and cannot be compiler-memoized.
   // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
@@ -99,6 +108,60 @@ export function QueueDrawer({
     },
     [],
   )
+
+  // ---- Smart 滚动（上游 WallToolsQueueIsland 的滚动语义）----
+  // 打开时把当前歌滚到列表正中；之后切歌时平滑跟随。用户手动滚动时暂停
+  // 跟随，几秒后恢复 —— 永远不跟用户抢滚动条。
+  const currentIndex = currentTrack ? queue.findIndex((t) => t.id === currentTrack.id) : -1
+  const centeredForOpenRef = useRef(false)
+  const followTrackIdRef = useRef<string | null>(currentTrack?.id ?? null)
+  const userScrollUntilRef = useRef(0)
+
+  // 打开那一帧重置居中标记（关闭期间换的歌也会在下一次打开时居中）。
+  useEffect(() => {
+    if (open) centeredForOpenRef.current = false
+  }, [open])
+
+  useEffect(() => {
+    if (!open || currentIndex < 0) return
+    const scrollElement = scrollElementRef.current
+    if (!scrollElement) return
+
+    const centerCurrentTrack = (behavior: ScrollBehavior) => {
+      const viewport = scrollElement.clientHeight
+      const target = currentIndex * 64 - (viewport - 56) / 2
+      scrollElement.scrollTo({ top: Math.max(0, target), behavior })
+    }
+
+    // 打开后的首次定位：等虚拟列表量完一帧再滚（否则 getTotalSize 还是旧值）。
+    if (!centeredForOpenRef.current) {
+      centeredForOpenRef.current = true
+      const frame = requestAnimationFrame(() => centerCurrentTrack('auto'))
+      return () => cancelAnimationFrame(frame)
+    }
+
+    // 切歌跟随：手动滚动宽限期内不抢；同一首歌不重复滚。
+    const trackId = currentTrack?.id ?? null
+    if (trackId === followTrackIdRef.current) return
+    followTrackIdRef.current = trackId
+    if (Date.now() < userScrollUntilRef.current) return
+    centerCurrentTrack('smooth')
+  }, [open, currentIndex, currentTrack?.id, scrollElementRef])
+  // 用户手动滚动 → 暂停切歌跟随 4 秒（程序滚动不触发，scrollend 前 wheel/touch 才算）。
+  useEffect(() => {
+    if (!open) return
+    const scrollElement = scrollElementRef.current
+    if (!scrollElement) return
+    const markUserScroll = (event: Event) => {
+      if (event.isTrusted) userScrollUntilRef.current = Date.now() + 4000
+    }
+    scrollElement.addEventListener('wheel', markUserScroll, { passive: true })
+    scrollElement.addEventListener('touchmove', markUserScroll, { passive: true })
+    return () => {
+      scrollElement.removeEventListener('wheel', markUserScroll)
+      scrollElement.removeEventListener('touchmove', markUserScroll)
+    }
+  }, [open, scrollElementRef])
 
   const handleClear = useCallback(() => {
     if (!confirmClear) {
@@ -131,6 +194,16 @@ export function QueueDrawer({
     if (index >= queue.length - 1) return
     const ids = queue.map((t) => t.id)
     ;[ids[index], ids[index + 1]] = [ids[index + 1], ids[index]]
+    onReorderQueue(ids)
+  }
+
+  // 移到末尾（上游 WallToolsQueueRow 的 moveToEnd 语义）；已是最后一首时是空操作。
+  const handleMoveToEnd = (track: Track) => {
+    const ids = queue.map((t) => t.id)
+    const from = ids.indexOf(track.id)
+    if (from < 0 || from === ids.length - 1) return
+    ids.splice(from, 1)
+    ids.push(track.id)
     onReorderQueue(ids)
   }
 
@@ -196,76 +269,75 @@ export function QueueDrawer({
     toast.success(`已置顶「${track.title}」`)
   }
 
-  return (
-    <Drawer open={open} onOpenChange={onOpenChange} direction={isMobile ? 'bottom' : 'right'}>
-      <DrawerContent className={cn('flex flex-col p-0', isMobile && 'h-[70vh]')}>
-        <DrawerHeader className="shrink-0 border-b px-4 py-3">
-          <div className="flex items-center justify-between">
-            <DrawerTitle className="flex items-center gap-2 text-base">
-              <Music className="h-4 w-4" />
-              播放列表 ({queue.length})
-            </DrawerTitle>
-            <div className="flex items-center gap-1">
-              {canAddToPlaylist && queue.length > 0 && (
-                <Tooltip delayDuration={300}>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      onClick={() => addToPlaylist(queue, '房间队列')}
-                      aria-label="将播放列表存入我的歌单"
-                    >
-                      <ListPlus className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>存入我的歌单</TooltipContent>
-                </Tooltip>
-              )}
-              {canClearQueue && queue.length > 0 && (
-                <Tooltip delayDuration={300}>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className={cn('h-7 w-7', confirmClear && 'text-destructive hover:text-destructive')}
-                      onClick={handleClear}
-                      aria-label="清空播放列表"
-                    >
-                      <ListX className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{confirmClear ? '再次点击确认清空' : '清空播放列表'}</TooltipContent>
-                </Tooltip>
-              )}
-              {!isMobile && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={() => onOpenChange(false)}
-                  aria-label="关闭播放列表"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
-          </div>
-        </DrawerHeader>
+  // ---- 外壳 ----
+  // island：folia 播放栏上方的浮出卡片（暗玻璃，与 folia-console 同语言）；
+  // drawer：常规抽屉。头部/列表/行动作完全共用，仅容器与定位不同。
+  const header = (
+    <div className="flex shrink-0 items-center justify-between border-b border-white/8 px-4 py-2.5">
+      <div className="flex items-center gap-2 text-sm font-medium text-white/90">
+        <Music className="h-4 w-4" />
+        播放列表 ({queue.length})
+      </div>
+      <div className="flex items-center gap-1">
+        {canAddToPlaylist && queue.length > 0 && (
+          <Tooltip delayDuration={300}>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-white/70 hover:bg-white/10 hover:text-white"
+                onClick={() => addToPlaylist(queue, '房间队列')}
+                aria-label="将播放列表存入我的歌单"
+              >
+                <ListPlus className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>存入我的歌单</TooltipContent>
+          </Tooltip>
+        )}
+        {canClearQueue && queue.length > 0 && (
+          <Tooltip delayDuration={300}>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn('h-7 w-7 text-white/70 hover:bg-white/10 hover:text-white', confirmClear && 'text-destructive hover:text-destructive')}
+                onClick={handleClear}
+                aria-label="清空播放列表"
+              >
+                <ListX className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{confirmClear ? '再次点击确认清空' : '清空播放列表'}</TooltipContent>
+          </Tooltip>
+        )}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 text-white/70 hover:bg-white/10 hover:text-white"
+          onClick={() => onOpenChange(false)}
+          aria-label="关闭播放列表"
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  )
 
-        <div ref={setScrollElement} className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-2">
-          {queue.length === 0 ? (
-            <div className="flex h-40 items-center justify-center text-muted-foreground">播放列表为空</div>
-          ) : (
-            <div className="w-full" style={{ height: `${virtualizer.getTotalSize()}px`, position: 'relative' }}>
-              {virtualizer.getVirtualItems().map((virtualRow) => {
-                const i = virtualRow.index
-                const track = queue[i]
-                if (!track) return null
-                return (
-                  <div
-                    key={track.id}
-                    style={{
+  const list = (
+    <div ref={setScrollElement} className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-2">
+      {queue.length === 0 ? (
+        <div className="flex h-40 items-center justify-center text-muted-foreground">播放列表为空</div>
+      ) : (
+        <div className="w-full" style={{ height: `${virtualizer.getTotalSize()}px`, position: 'relative' }}>
+          {virtualizer.getVirtualItems().map((virtualRow) => {
+            const i = virtualRow.index
+            const track = queue[i]
+            if (!track) return null
+            return (
+              <div
+                key={track.id}
+                style={{
                       position: 'absolute',
                       top: 0,
                       left: 0,
@@ -428,6 +500,22 @@ export function QueueDrawer({
                               </TooltipTrigger>
                               <TooltipContent side="bottom">置顶到当前播放下方</TooltipContent>
                             </Tooltip>
+
+                            <Tooltip delayDuration={400}>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 min-h-9 min-w-9 sm:min-h-0 sm:min-w-0"
+                                  disabled={i === queue.length - 1}
+                                  onClick={() => handleMoveToEnd(track)}
+                                  aria-label={`移到末尾 ${track.title}`}
+                                >
+                                  <ListEnd className="h-3 w-3" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent side="bottom">移到末尾</TooltipContent>
+                            </Tooltip>
                           </>
                         )}
 
@@ -469,9 +557,49 @@ export function QueueDrawer({
                   </div>
                 )
               })}
-            </div>
-          )}
-        </div>
+          </div>
+        )}
+    </div>
+  )
+
+  if (variant === 'island') {
+    return (
+      <div className="folia-queue-island" data-open={open || undefined} aria-hidden={!open}>
+        {open && (
+          <div className="folia-queue-island__card" role="dialog" aria-label="播放列表">
+            {header}
+            {list}
+          </div>
+        )}
+        <BilibiliMetadataDialog
+          track={metadataTrack}
+          roomId={roomId}
+          onOpenChange={(isOpen) => !isOpen && setMetadataTrack(null)}
+          onSelect={(metadata, metadataSource) => {
+            if (!metadataTrack) return
+            onUpdateBilibiliMetadata(metadataTrack.id, {
+              metadataSource,
+              lyricId: metadata.lyricId,
+              picId: metadata.picId,
+              cover: metadata.cover || metadataTrack.cover,
+            })
+            setMetadataTrack(null)
+          }}
+          onSkip={() => {
+            if (!metadataTrack) return
+            onUpdateBilibiliMetadata(metadataTrack.id, { clearMetadata: true })
+            setMetadataTrack(null)
+          }}
+        />
+      </div>
+    )
+  }
+
+  return (
+    <Drawer open={open} onOpenChange={onOpenChange} direction={isMobile ? 'bottom' : 'right'}>
+      <DrawerContent className={cn('flex flex-col p-0', isMobile && 'h-[70vh]')}>
+        {header}
+        {list}
       </DrawerContent>
       <BilibiliMetadataDialog
         track={metadataTrack}

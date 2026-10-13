@@ -1443,33 +1443,6 @@ body[data-room-cover-tint='true'] {
 /* Folia 的前景与背景分层；控制栏/字幕跟随可调离底距离。 */
 .folia-lyrics-layer { z-index: 1; }
 .folia-background { z-index: 0; }
-.folia-fluid__cover {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  filter: blur(40px);
-  transform: scale(1.5);
-  opacity: 0.8;
-  animation: folia-cover-reveal 1.5s ease-out both;
-}
-@keyframes folia-cover-reveal { from { opacity: 0; } to { opacity: 0.8; } }
-.folia-geometric__shape { position: absolute; animation: folia-shape-drift 40s linear infinite; }
-.folia-geometric__particle { position: absolute; border-radius: 50%; opacity: var(--folia-particle-opacity, 0.2); animation: folia-particle-drift 25s linear infinite; }
-@keyframes folia-shape-drift {
-  0% { transform: translate(-15px, 30px) rotate(0deg); }
-  50% { transform: translate(15px, -30px) rotate(180deg); }
-  100% { transform: translate(-15px, 30px) rotate(360deg); }
-}
-@keyframes folia-particle-drift {
-  0% { transform: translateY(0); opacity: 0; }
-  50% { opacity: var(--folia-particle-opacity, 0.2); }
-  100% { transform: translateY(-100px); opacity: 0; }
-}
-.folia-background[data-static] .folia-geometric__shape,
-.folia-background[data-static] .folia-geometric__particle { animation-play-state: paused; }
-.folia-background[data-static] .folia-fluid__cover { animation: none; }
 
 .folia-console {
   position: absolute;
@@ -1531,7 +1504,58 @@ body[data-room-cover-tint='true'] {
 .folia-console__inner:hover .mt-mr-artist,
 .folia-console__inner:focus-within .mt-mr-artist,
 .folia-console[data-expanded] .mt-mr-artist { display: block; }
-.folia-vote { position: absolute; bottom: calc(100% + 12px); inset-inline: 12px; display: flex; justify-content: center; }
+.folia-vote {
+  position: absolute;
+  bottom: calc(100% + 12px);
+  inset-inline: 12px;
+  display: flex;
+  justify-content: center;
+  /* 横幅在 .folia-console（pointer-events: none）内；不恢复 auto 的话
+     赞成/反对按钮看得见却点不动（folia 下投票异常的根因）。 */
+  pointer-events: auto;
+}
+
+/* Folia 队列浮岛：folia 舞台激活时替代抽屉的播放列表外壳。
+   与 folia-console__inner 同语言（暗玻璃、白 8% 描边），但**锚定在右下角**
+   —— 播放栏右端上方，不侵占居中的歌词展示区（移动端宽度不足时回退为
+   居中，与播放栏对齐）。打开/关闭走透明度 + 位移过渡（上游
+   WallToolsQueueIsland 的浮现语义）。内部行渲染与抽屉完全共用。 */
+.folia-queue-island {
+  position: absolute;
+  inset-inline: 0;
+  bottom: max(env(safe-area-inset-bottom, 0px), min(var(--folia-bar-offset, 32px), max(16px, 100% - 220px)));
+  z-index: 25; /* 控制栏(20)之上，和声叠层(30)之下 */
+  display: flex;
+  justify-content: flex-end; /* 右下角锚定：控制栏右端上方 */
+  padding-right: max(12px, var(--mt-player-safe-right, 0px));
+  pointer-events: none;
+}
+@media (max-width: 639px) {
+  .folia-queue-island { justify-content: center; }
+}
+.folia-queue-island__card {
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 380px);
+  max-height: min(60vh, 480px);
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 24px;
+  background: rgb(0 0 0 / 38%);
+  backdrop-filter: blur(24px);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 25%);
+  overflow: hidden;
+  pointer-events: auto;
+  transform-origin: bottom right;
+  animation: folia-island-in 200ms ease-out;
+}
+@keyframes folia-island-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (max-width: 639px) {
+  .folia-queue-island__card { transform-origin: bottom center; }
+}
+.folia-queue-island__card .mt-mr-progress { display: none; }
 @media (min-width: 640px) {
   .folia-console .mt-mr-controls { grid-template-columns: auto minmax(0, 1fr) auto; }
   .folia-console .mt-mr-cluster--modes { grid-column: 3; grid-row: 1; }
@@ -1540,9 +1564,6 @@ body[data-room-cover-tint='true'] {
 }
 @media (prefers-reduced-motion: reduce) {
   .folia-console__inner { transition: none; backdrop-filter: none; background: rgb(0 0 0 / 85%); }
-  .folia-fluid__cover,
-  .folia-geometric__shape,
-  .folia-geometric__particle { animation: none; }
 }
 
 /* 歌词层默认不可交互：五个模式的歌词都是展示性的，交互（点击跳转）本轮

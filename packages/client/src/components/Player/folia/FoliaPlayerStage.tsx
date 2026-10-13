@@ -1,4 +1,4 @@
-import { Suspense, useMemo, type CSSProperties } from 'react'
+import { Suspense, lazy, useMemo, type CSSProperties } from 'react'
 import { MotionConfig } from 'motion/react'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -15,6 +15,15 @@ import { FoliaBackground } from './backgrounds/FoliaBackground'
 import { useFoliaAudio } from './stage/foliaAudio'
 import { useFoliaRenderState } from './stage/foliaRenderState'
 import { getFoliaTuningProps } from './stage/foliaTunings'
+import { useCappellaCustomImages } from './stage/cappellaAssets'
+import { useMonetPortraitImage } from './stage/monetPortraitAssets'
+import FoliaHarmonyOverlay from './stage/FoliaHarmonyOverlay'
+
+// 播放列表浮岛：folia 舞台的队列外壳。惰性加载 —— 只在第一次打开时拉代码，
+// 且不进主 chunk（与模式的懒加载同红线）。
+const FoliaQueueIsland = lazy(() =>
+  import('./FoliaQueueIsland').then((m) => ({ default: m.FoliaQueueIsland })),
+)
 
 interface FoliaPlayerStageProps {
   mode: FoliaModeId
@@ -30,6 +39,9 @@ interface FoliaPlayerStageProps {
   activeVote: VoteState | null
   onCastVote: (approve: boolean) => void
   onStartVote: (action: VoteAction, payload?: Record<string, unknown>) => void
+  /** 播放列表浮层开关（folia 舞台用浮岛形态渲染，外壳在 folia-root 内）。 */
+  queueOpen?: boolean
+  onQueueOpenChange?: (open: boolean) => void
 }
 
 /**
@@ -63,6 +75,8 @@ export function FoliaPlayerStage({
   activeVote,
   onCastVote,
   onStartVote,
+  queueOpen,
+  onQueueOpenChange,
 }: FoliaPlayerStageProps) {
   const currentTrack = usePlayerStore((s) => s.currentTrack)
   const lyricOffsetPreview = usePlayerStore((s) => s.lyricOffsetPreview)
@@ -72,6 +86,8 @@ export function FoliaPlayerStage({
   const settings = useSettingsStore((s) => s.foliaSettings)
   const renderState = useFoliaRenderState()
   const audio = useFoliaAudio(renderState.paused || renderState.staticMode)
+  const cappellaAssets = useCappellaCustomImages()
+  const monetPortrait = useMonetPortraitImage()
 
   const sourceLines = useFoliaLines()
   const lines = useMemo(
@@ -142,6 +158,9 @@ export function FoliaPlayerStage({
     // 同一首歌每次进入都得到同一份布局 / 同一批头像：种子优先用曲目身份，
     // 缺失时回退到标题（与 cappella 上游的 `seed ?? titleText` 一致）。
     seed: currentTrack?.lyricId ?? songTitle ?? 'folia',
+    cappellaCustomEmojiImages: cappellaAssets.emojiImages,
+    cappellaCustomAvatarImages: cappellaAssets.avatarImages,
+    monetPortraitImage: monetPortrait.monetPortraitImage,
     lyricsFontScale,
     subtitleFontScale,
     subtitleContentMode: settings.showTranslation
@@ -168,6 +187,16 @@ export function FoliaPlayerStage({
             <ModeRenderer {...modeProps} />
           </Suspense>
         </div>
+        {/* 顶部和声叠层（上游 VisualizerRenderer 挂在模式渲染之外的同层语义）：
+        数据来自 lyricAdapter 折叠的 isBG 背景唱词，不改变任何模式的歌词布局。 */}
+        <FoliaHarmonyOverlay
+          currentTime={currentTime}
+          lines={lines}
+          showText
+          theme={theme}
+          subtitleContentMode={modeProps.subtitleContentMode}
+          subtitleFontScale={subtitleFontScale}
+        />
       </MotionConfig>
 
       {/* 独立 Folia 胶囊外壳；权限、投票、去重与 Seek 预览仍共用 Transport。 */}
@@ -184,6 +213,14 @@ export function FoliaPlayerStage({
         onCastVote={onCastVote}
         onStartVote={onStartVote}
       />
+
+      {/* 播放列表浮岛：folia 舞台把抽屉替换为播放栏上方的暗玻璃卡片。
+          打开时才挂载（lazy + 条件渲染），代码与 DOM 都按需出现。 */}
+      {(queueOpen && onQueueOpenChange) && (
+        <Suspense fallback={null}>
+          <FoliaQueueIsland open={queueOpen} onOpenChange={onQueueOpenChange} />
+        </Suspense>
+      )}
     </div>
   )
 }

@@ -3,14 +3,14 @@ import type { VoteState } from '@music-together/shared'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { VoteBanner } from '../../Vote/VoteBanner'
-import { MineradioTransport, type MineradioTransportProps } from '../mineradio/MineradioTransport'
+import { Transport, type TransportProps } from '../stages/Transport'
 import { FoliaSettingsPopover } from './FoliaSettingsPopover'
 import { Button } from '@/components/ui/button'
 import { Eye, EyeOff, Settings2 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 type FoliaControlBarProps = Omit<
-  MineradioTransportProps,
+  TransportProps,
   'variant' | 'showProgress' | 'onSettings' | 'settingsButton'
 > & {
   activeVote: VoteState | null
@@ -100,7 +100,7 @@ export function FoliaControlBar({ activeVote, onCastVote, ...transport }: FoliaC
         )}
         {!settings.manualHide && (
           <div className="folia-console__inner" tabIndex={0} role="group" aria-label="Folia 播放控制">
-            <MineradioTransport
+            <Transport
               {...transport}
               variant="folia"
               showProgress={settings.showProgress}

@@ -10,7 +10,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { FoliaControlBar } from './FoliaControlBar'
-import { FoliaEntryButton } from './FoliaEntryButton'
+import { StageSwitcher } from '../stages/StageSwitcher'
 
 let root: Root
 let container: HTMLDivElement
@@ -139,13 +139,24 @@ describe('Folia 播放栏行为', () => {
     click('恢复播放栏')
     expect(container.querySelector('[aria-label="Folia 播放控制"]')).not.toBeNull()
   })
-  it('单个 Folia 按钮直接进入上次保存的歌词样式', () => {
+  it('舞台切换器：未激活 Folia 段直接进入上次保存的歌词样式', () => {
     useSettingsStore.getState().setFoliaSettings({ lyricMode: 'cappella' })
     const onSelect = vi.fn()
-    act(() => root.render(createElement(FoliaEntryButton, { mode: 'classic', onSelect })))
-    click('进入 Folia 播放器')
+    act(() => root.render(createElement(StageSwitcher, { mode: 'classic', onSelect })))
+    click('切换到Folia 歌词')
     expect(onSelect).toHaveBeenCalledWith('cappella')
-    expect(container.querySelectorAll('button')).toHaveLength(1)
+  })
+  it('舞台切换器：已激活段展开模式列表，未激活段点击切换', () => {
+    useSettingsStore.getState().setVisualStage('galaxy')
+    const onSelect = vi.fn()
+    act(() => root.render(createElement(StageSwitcher, { mode: 'galaxy', onSelect })))
+    // 已激活 3D：点击展开模式列表而不是切换（浮层经 portal 挂在 body 上）。
+    click('切换到3D 视觉（当前）')
+    expect(onSelect).not.toHaveBeenCalled()
+    expect(document.body.textContent).toContain('声波地形')
+    // 未激活的经典段：直接切换。
+    act(() => click('切换到经典播放器'))
+    expect(onSelect).toHaveBeenLastCalledWith('classic')
   })
   it('房主直接播放、切歌与切模式，使用现有房间权限', () => {
     const props = mount('owner')

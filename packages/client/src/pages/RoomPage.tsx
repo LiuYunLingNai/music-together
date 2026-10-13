@@ -34,6 +34,8 @@ import { AbilityProvider } from '@/providers/AbilityProvider'
 import { AbilityContext } from '@/providers/ability-context'
 import { useClockSync } from '@/hooks/useClockSync'
 import { storage } from '@/lib/storage'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { resolveStageFamily } from '@/components/Player/stages/registry'
 import { usePlayerStore } from '@/stores/playerStore'
 
 /** Invisible component that runs NTP clock-sync only while in a room. */
@@ -249,6 +251,10 @@ export default function RoomPage() {
   const { leaveRoom, updateSettings, setUserRole } = useRoom()
   const { play, pause, seek, requestSeek, next, prev } = usePlayer()
   const { addTrack, insertAfterCurrent, removeTrack, reorderTracks, updateBilibiliMetadata, clearQueue } = useQueue()
+  // folia 舞台激活时播放列表走浮岛（浮岛本体在 FoliaPlayerStage 内渲染，
+  // 这里的 QueueDrawer 只作为 island 占位避免双份 DOM；其余舞台用抽屉）。
+  const storedStage = useSettingsStore((s) => s.visualStage)
+  const isFoliaStage = resolveStageFamily(storedStage) === 'folia'
 
   const room = useRoomStore((s) => s.room)
   const chatOpen = useChatStore((s) => s.isChatOpen)
@@ -601,6 +607,8 @@ export default function RoomPage() {
                     onPrev={prev}
                     onOpenChat={toggleChat}
                     onOpenQueue={() => setQueueOpen(true)}
+                    queueOpen={queueOpen}
+                    onQueueOpenChange={setQueueOpen}
                     chatUnreadCount={chatUnreadCount}
                     view={playerView}
                     onToggleView={() => setPlayerView((view) => (view === 'player' ? 'playlist' : 'player'))}
@@ -720,14 +728,18 @@ export default function RoomPage() {
             onAddToQueue={addTrack}
             onInsertAfterCurrent={insertAfterCurrent}
           />
-          <QueueDrawer
-            open={queueOpen}
-            onOpenChange={setQueueOpen}
-            onRemoveFromQueue={removeTrack}
-            onReorderQueue={reorderTracks}
-            onUpdateBilibiliMetadata={updateBilibiliMetadata}
-            onClearQueue={clearQueue}
-          />
+          {/* folia 舞台：浮岛由 FoliaPlayerStage 在 folia-root 内渲染（需要它的
+              定位变量与坐标系），这里不再渲染抽屉，避免双份 DOM。 */}
+          {!isFoliaStage && (
+            <QueueDrawer
+              open={queueOpen}
+              onOpenChange={setQueueOpen}
+              onRemoveFromQueue={removeTrack}
+              onReorderQueue={reorderTracks}
+              onUpdateBilibiliMetadata={updateBilibiliMetadata}
+              onClearQueue={clearQueue}
+            />
+          )}
           <SettingsDialog
             open={settingsOpen}
             onOpenChange={(open) => {

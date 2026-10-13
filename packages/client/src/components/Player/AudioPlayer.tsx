@@ -3,12 +3,12 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import type { VoteAction, VoteState } from '@music-together/shared'
 import { useVisualStageSupport } from '@/hooks/useVisualStageSupport'
 import { ClassicPlayerStage } from './classic/ClassicPlayerStage'
-import { VisualModeMenu, type StageMode } from './mineradio/VisualModeMenu'
-import { detectDefaultQuality, type VisualQuality } from './mineradio/shared/RenderPolicy'
-import type { VisualModeId } from './mineradio/shared/VisualMode'
+import { StageSwitcher } from './stages/StageSwitcher'
+import type { StageMode } from './stages/registry'
+import { detectDefaultQuality, type VisualQuality } from './stages/RenderPolicy'
+import type { VisualModeId } from './stages/VisualMode'
 import type { FoliaModeId } from './folia/registry'
 import { resolveStageFamily } from './stages/registry'
-import { FoliaEntryButton } from './folia/FoliaEntryButton'
 import { isFoliaModeId } from './folia/registry'
 
 /**
@@ -93,6 +93,9 @@ interface AudioPlayerProps {
   activeVote: VoteState | null
   onCastVote: (approve: boolean) => void
   onStartVote: (action: VoteAction, payload?: Record<string, unknown>) => void
+  /** 播放列表浮层的开关状态（folia 舞台把抽屉替换为播放栏浮岛时渲染它）。 */
+  queueOpen?: boolean
+  onQueueOpenChange?: (open: boolean) => void
 }
 
 /**
@@ -133,7 +136,7 @@ export function AudioPlayer(props: AudioPlayerProps) {
    *
    *   为什么用 hook 的返回值而不是再读一次 store：这个组件在 `visualStage`
    *   被上层回写的**同一个提交**里重渲染时，store 值已是 'classic'，但
-   *   `VisualModeMenu` 的高亮若依赖 store 会在回写的 effect 之前闪一帧
+   *   `StageSwitcher` 的高亮若依赖 store 会在回写的 effect 之前闪一帧
    *   "已选 Emily"。用 hook 的推导值可让菜单高亮、渲染分支、`stageKey`
    *   三者来自同一个数，不会分叉。
    */
@@ -155,7 +158,7 @@ export function AudioPlayer(props: AudioPlayerProps) {
   /**
    * 菜单选择适配器。
    *
-   * `VisualModeMenu` 的 `StageMode` 由两族注册表（`FOLIA_MODES` +
+   * `StageSwitcher` 的 `StageMode` 由两族注册表（`FOLIA_MODES` +
    * `VISUAL_MODES`）推导，而持久化层用 `VISUAL_STAGES` 白名单校验。两者集合
    * 相同但类型来源不同，这里显式收窄，避免任一侧新增模式时出现
    * 「能选但存不下」的静默失败。
@@ -200,9 +203,8 @@ export function AudioPlayer(props: AudioPlayerProps) {
 
   return (
     <div className="relative h-full">
-      {/* 舞台切换菜单。
-          经典舞台自带的歌单切换按钮位于右上角，这里把菜单放在它的左侧，
-          避免两个按钮重叠，同时保留相同的安全边距处理。
+      {/* 舞台切换器：三段胶囊（经典 | 3D | Folia），点已激活段展开该族模式列表。
+          位于经典舞台歌单按钮的左侧，避免两个按钮重叠，保留相同的安全边距处理。
 
           ★ 移动端（触摸设备）**整个容器不渲染**。
             这里是把条件写在容器外、连空壳一起省掉，而不是在容器内藏按钮：
@@ -211,9 +213,8 @@ export function AudioPlayer(props: AudioPlayerProps) {
             挡住经典舞台的按钮 —— 选前者只是少留一层无意义的 DOM 与一个
             绝对定位层。见 `lib/visualStageSupport.ts`。 */}
       {!visualDisabled && (
-        <div className="mt-mineradio-mode-menu absolute top-4 z-30 flex items-center gap-1">
-          <FoliaEntryButton mode={stageMode} onSelect={handleSelectStage} />
-          <VisualModeMenu mode={stageMode} onSelect={handleSelectStage} />
+        <div className="mt-mineradio-mode-menu absolute top-4 z-30 flex items-center">
+          <StageSwitcher mode={stageMode} onSelect={handleSelectStage} />
         </div>
       )}
 
@@ -225,7 +226,12 @@ export function AudioPlayer(props: AudioPlayerProps) {
         <StageErrorBoundary stageKey={visualStage} onUnavailable={handleUnavailable}>
           <Suspense fallback={<StageFallback />}>
             {stageFamily === 'folia' ? (
-              <FoliaPlayerStage {...stageProps} mode={visualStage as FoliaModeId} />
+              <FoliaPlayerStage
+                {...stageProps}
+                mode={visualStage as FoliaModeId}
+                queueOpen={props.queueOpen}
+                onQueueOpenChange={props.onQueueOpenChange}
+              />
             ) : (
               <MineradioPlayerStage
                 {...stageProps}

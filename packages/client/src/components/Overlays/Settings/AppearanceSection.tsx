@@ -8,13 +8,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { VISUAL_MODES } from '@/components/Player/mineradio/shared/VisualMode'
+import { VISUAL_MODES } from '@/components/Player/stages/VisualMode'
 import { isFoliaModeId } from '@/components/Player/folia/registry'
 import { FoliaSettingsPopover } from '@/components/Player/folia/FoliaSettingsPopover'
 import { Button } from '@/components/ui/button'
 import { useState } from 'react'
 import { Settings2 } from 'lucide-react'
-import { VISUAL_QUALITIES, VISUAL_QUALITY_LABELS } from '@/components/Player/mineradio/shared/RenderPolicy'
+import { VISUAL_QUALITIES, VISUAL_QUALITY_LABELS } from '@/components/Player/stages/RenderPolicy'
 import {
   LYRIC_DISPLAY_LABELS,
   LYRIC_DISPLAY_MODES,
