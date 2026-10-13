@@ -3,7 +3,7 @@ import { FOLIA_MODES, getFoliaMode, isFoliaModeId } from './registry'
 import { FOLIA_MODE_RENDERERS } from './renderers'
 import { resolveStageFamily } from '../stages/registry'
 import { VISUAL_STAGES } from '@/lib/storage'
-import { VISUAL_MODES } from '../mineradio/shared/VisualMode'
+import { VISUAL_MODES } from '../stages/VisualMode'
 
 /**
  * Folia 舞台注册表 —— 结构回归。

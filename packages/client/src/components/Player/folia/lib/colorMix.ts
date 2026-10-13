@@ -48,7 +48,9 @@ const readColor = (normalizedColor: string): ParsedColor => {
 
     const rgbMatch = normalizedColor.match(/^rgba?\(([^)]+)\)$/);
     if (rgbMatch) {
-        const [r, g, b] = rgbMatch[1].split(',').slice(0, 3).map(part => Number.parseFloat(part.trim()));
+        // CSS Color 4 允许空格分隔（rgb(116 184 165)）；宿主主题适配层输出的正是
+        // 这种格式。统一按 [/\s,]+ 切分，逗号与空格两种写法都能解析。
+        const [r, g, b] = rgbMatch[1].split(/[/\s,]+/).slice(0, 3).map(part => Number.parseFloat(part.trim()));
         if ([r, g, b].every(isFiniteChannel)) {
             return { r, g, b };
         }

@@ -122,13 +122,13 @@ const LYRIC_MASK_MODES = ['', 'full-mask', 'partial-mask'] as const
  *
  *   - mineradio（全屏 three.js 粒子舞台）：emily / tunnel / planet /
  *     vinyl / galaxy / topography —— 见
- *     `components/Player/mineradio/shared/VisualMode.ts` 的 `VISUAL_MODES`；
+ *     `components/Player/stages/VisualMode.ts` 的 `VISUAL_MODES`；
  *   - folia（从 folia-major 移植的 DOM/CSS 歌词模式）：still / luminous /
  *     partita / tilt / cappella —— 见
  *     `components/Player/folia/registry.ts` 的 `FOLIA_MODES`。
  *
  * ★ 这份列表与两个注册表是**手工维护的两份清单**，由
- *   `mineradio/shared/VisualMode.test.ts` 的「持久化白名单与注册表一致」
+ *   `stages/VisualMode.test.ts` 的「持久化白名单与注册表一致」
  *   用例钉在一起（漏改一边会表现为"菜单里能选、刷新后被静默丢弃"）。
  *   之所以不在这里 import 那两个注册表：本模块位于 `lib/`，被服务端共享
  *   类型之外的**经典播放器路径**同步加载，引入 `components/` 会同时造成

@@ -1,5 +1,5 @@
 import { FOLIA_MODES, isFoliaModeId, type FoliaModeId } from './foliaModes'
-import { FOLIA_MODE_CONTROLS, validateControl } from './foliaTuningSchema'
+import { FOLIA_MODE_CONTROLS, getTuningPath, setTuningPath, validateControl } from './foliaTuningSchema'
 import { normalizeFoliaBackgroundConfig } from './foliaBackgroundConfig'
 import type { VisualizerBackgroundConfig } from '@/components/Player/folia/upstream/components/visualizer/backgrounds/definition'
 
@@ -9,11 +9,19 @@ export const FOLIA_BACKGROUNDS = [
   { id: 'monet', label: '莫奈 Monet' },
   { id: 'nomand', label: '漫游 Nomand' },
   { id: 'url', label: '嵌入网页' },
-  { id: 'fluid', label: '专辑柔焦' },
-  { id: 'geometric', label: '几何浮游' },
   { id: 'sora', label: 'Sora 星尘' },
   { id: 'solid', label: '纯色' },
 ] as const
+
+/**
+ * 历史背景 id → 现选项回落。宿主自建的「专辑柔焦/几何浮游」是上游
+ * common 背景（封面柔焦 + 几何浮游）的缩水重写，已删除：两者语义都由
+ * `common` 完整覆盖（带音频响应与图标形状的上游原版）。
+ */
+const FOLIA_BACKGROUND_FALLBACKS: Record<string, (typeof FOLIA_BACKGROUNDS)[number]['id']> = {
+  fluid: 'common',
+  geometric: 'common',
+}
 
 export interface FoliaSettings {
   lyricMode: FoliaModeId
@@ -36,7 +44,10 @@ export interface FoliaSettings {
 export const FOLIA_DEFAULTS: Readonly<FoliaSettings> = {
   lyricMode: 'luminous',
   background: 'latent',
-  backgroundDim: 0.35,
+  // 上游没有全局黑遮罩 —— 背景亮度由各背景自身的 opacity（common 0.75 等）决定。
+  // 宿主的 `backgroundDim` 是给用户留的额外压暗手段，默认只取轻微 0.15，
+  // 接近上游观感；已保存过设置的用户不受影响（normalize 会沿用其保存值）。
+  backgroundDim: 0.15,
   backgroundMotion: true,
   showProgress: true,
   alwaysExpand: false,
@@ -65,8 +76,8 @@ export function normalizeFoliaSettings(value: unknown): FoliaSettings {
       if (!patch || typeof patch !== 'object' || Array.isArray(patch)) continue
       const clean: Record<string, unknown> = {}
       for (const control of FOLIA_MODE_CONTROLS[mode.id]) {
-        const validated = validateControl(control, (patch as Record<string, unknown>)[control.key])
-        if (validated !== undefined) clean[control.key] = validated
+        const validated = validateControl(control, getTuningPath(patch as Record<string, unknown>, control.key))
+        if (validated !== undefined) setTuningPath(clean, control.key, validated)
       }
       result.tunings[mode.id] = clean
     }
@@ -74,8 +85,13 @@ export function normalizeFoliaSettings(value: unknown): FoliaSettings {
   if (typeof saved.lyricMode === 'string' && isFoliaModeId(saved.lyricMode)) {
     result.lyricMode = saved.lyricMode as FoliaSettings['lyricMode']
   }
-  if (FOLIA_BACKGROUNDS.some(({ id }) => id === saved.background)) {
-    result.background = saved.background as FoliaSettings['background']
+  if (typeof saved.background === 'string') {
+    const fallback = FOLIA_BACKGROUND_FALLBACKS[saved.background]
+    if (fallback) {
+      result.background = fallback
+    } else if (FOLIA_BACKGROUNDS.some(({ id }) => id === saved.background)) {
+      result.background = saved.background as FoliaSettings['background']
+    }
   }
   const booleanKeys = [
     'backgroundMotion',

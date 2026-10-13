@@ -275,6 +275,16 @@ export function FoliaBackgroundSettings() {
           <p className="text-xs text-muted-foreground">网页以隔离的背景层显示；部分网站禁止嵌入。</p>
         </>
       )}
+      {settings.background === 'sora' && (
+        <div className={row}>
+          <span>纯色模式</span>
+          <Switch
+            aria-label="Sora 纯色模式"
+            checked={!!config.sora?.tuning?.blank}
+            onCheckedChange={(blank) => save({ sora: { tuning: { blank } } })}
+          />
+        </div>
+      )}
     </div>
   )
 }

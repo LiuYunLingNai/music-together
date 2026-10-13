@@ -32,10 +32,10 @@ describe('Folia 设置保存与升级', () => {
   it('修改与恢复 Folia 不改变音量、播放时间、舞台选择或其他设置', () => {
     const previous = useSettingsStore.getState()
     const player = usePlayerStore.getState()
-    previous.setFoliaSettings({ background: 'geometric', barOffset: 80, autoHide: true })
+    previous.setFoliaSettings({ background: 'latent', barOffset: 80, autoHide: true })
     previous.setFoliaSettings({ showProgress: false })
     expect(storage.getFoliaSettings()).toMatchObject({
-      background: 'geometric',
+      background: 'latent',
       barOffset: 80,
       autoHide: true,
       showProgress: false,
@@ -56,5 +56,45 @@ describe('Folia 设置保存与升级', () => {
     expect(storage.getFoliaSettings()).toEqual(FOLIA_DEFAULTS)
     expect(() => useSettingsStore.getState().setFoliaSettings({ background: 'solid' })).not.toThrow()
     expect(useSettingsStore.getState().foliaSettings.background).toBe('solid')
+  })
+})
+
+describe('folia tuning 嵌套路径与上游 clamp', () => {
+  it('diorama 的 geometryVisibility 嵌套对象能保存并合并回默认值', () => {
+    const saved = normalizeFoliaSettings({
+      tunings: {
+        diorama: {
+          'geometryVisibility.mode': 'corridor',
+          'geometryVisibility.strands': false,
+          particleScale: 9,
+        },
+      },
+    })
+    expect(saved.tunings.diorama?.geometryVisibility).toMatchObject({
+      mode: 'corridor',
+      strands: false,
+    })
+    // 越界值被 clamp（上游 DIORAMA_PARTICLE_SCALE 0.65-1.6）
+    expect(saved.tunings.diorama?.particleScale).toBe(1.6)
+  })
+
+  it('resolveFoliaTuning 合并嵌套对象时不共享默认值引用', async () => {
+    const { resolveFoliaTuning } = await import('@/components/Player/folia/stage/foliaTunings')
+    const a = resolveFoliaTuning('diorama', {})
+    const b = resolveFoliaTuning('diorama', {})
+    expect(a.geometryVisibility).not.toBe(b.geometryVisibility)
+    const patched = resolveFoliaTuning('diorama', { diorama: { 'geometryVisibility.mode': 'corridor' } })
+    expect((patched.geometryVisibility as { mode: string }).mode).toBe('corridor')
+    // 未提供的子字段回落默认
+    expect((patched.geometryVisibility as { enabled: boolean }).enabled).toBe(true)
+  })
+
+  it('diorama 三个镜头类滑条的 clamp 与上游 settingsPanels 一致', () => {
+    const saved = normalizeFoliaSettings({
+      tunings: { diorama: { cameraSpeed: 9, motionAmount: -1, audioReactivity: 5 } },
+    })
+    expect(saved.tunings.diorama?.cameraSpeed).toBe(1.85)
+    expect(saved.tunings.diorama?.motionAmount).toBe(0.4)
+    expect(saved.tunings.diorama?.audioReactivity).toBe(1.5)
   })
 })

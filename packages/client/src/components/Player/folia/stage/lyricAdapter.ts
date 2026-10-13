@@ -34,6 +34,19 @@ import { attachFoliaInterludes } from './lyricPresentation'
 /** 毫秒 → 秒。AMLL 的时间是整数毫秒。 */
 const toSeconds = (ms: number): number => (Number.isFinite(ms) ? ms / 1000 : 0)
 
+/** 把一行 folia `Line` 折叠成和声叠层的 `LyricBackgroundVocal`（上游 `lineToBackgroundVocal`）。 */
+function lineToBackgroundVocal(line: Line): NonNullable<Line['backgroundVocal']> {
+  return {
+    text: line.fullText,
+    startTime: line.startTime,
+    endTime: line.endTime,
+    words: line.words,
+    agentId: line.agentId,
+    translation: line.translation,
+    romanization: line.romanization,
+  }
+}
+
 /**
  * 把 AMLL 的一行转成 folia 的 `Line`。
  *
@@ -61,11 +74,12 @@ export function toFoliaLine(line: AMLLLyricLine, index: number): Line {
     fullText,
     translation: line.translatedLyric?.trim() || undefined,
     romanization: line.romanLyric?.trim() || undefined,
-    // ★ 本项目没有 TTML `<agent>`（AMLL 只给 `isDuet`）。cappella 用 agentId
-    //   区分"两个说话人"，因此把 `isDuet` 映射成两值标识，让它的对唱分支
-    //   能生效。非对唱曲目两边都是同一个值 → cappella 的 resolver 因
+    // ★ 本项目没有 TTML `<agent>`（AMLL 只给 `isDuet`/`isBG`）。cappella 用
+    //   agentId 区分"两个说话人"，因此把 `isDuet` 映射成两值标识；`isBG` 行
+    //   映射为 'bg'，供 foldFoliaBackgroundVocals 折叠进主行的和声唱词。
+    //   非对唱曲目两边都是同一个值 → cappella 的 resolver 因
     //   "agent 少于 2 个"返回 null，回落到它自己的左右序列（与上游一致）。
-    agentId: line.isDuet ? 'duet' : 'main',
+    agentId: line.isBG ? 'bg' : line.isDuet ? 'duet' : 'main',
     renderHints: buildLineRenderHints({ startTime, endTime, words }),
   }
 }
@@ -92,7 +106,63 @@ export function useFoliaLines(): Line[] {
     [ttmlLines, lyric, tlyric],
   )
 
-  return useMemo(() => attachFoliaInterludes(source.map(toFoliaLine)), [source])
+  return useMemo(() => attachFoliaInterludes(foldFoliaBackgroundVocals(source.map(toFoliaLine))), [source])
+}
+
+/**
+ * 把 AMLL `isBG` 行折叠为紧邻前一个主行的 `backgroundVocal`，供顶部和声叠层
+ * （`FoliaHarmonyOverlay`）消费 —— 上游 TTML 解析器的同语义：每条主行携带
+ * 自己的背景唱词，主时间轴不含背景行。
+ *
+ * ★ 折叠规则：先按 AMLL `optimizeLyricLines` 折叠连续 isBG（只保留每段第一个，
+ *   其余降级为普通行），再把幸存的背景行归属**时间上最近的前一个主行**；
+ *   找不到主行（曲目以背景行开头）时保留为普通行，不丢内容。行首的
+ *   interlude 不参与归属。
+ */
+export function foldFoliaBackgroundVocals(lines: Line[]): Line[] {
+  // 连续 isBG 折叠（AMLL optimizeLyricLines 同语义，mineradio 的
+  // foldConsecutiveBackgroundLines 同一规则）。
+  const isBackground: boolean[] = []
+  let consecutiveBgCount = 0
+  for (const line of lines) {
+    if (line.agentId === 'bg') {
+      consecutiveBgCount += 1
+      isBackground.push(consecutiveBgCount <= 1)
+    } else {
+      consecutiveBgCount = 0
+      isBackground.push(false)
+    }
+  }
+
+  const result: Line[] = []
+  let mainIndex = -1
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]
+    const isInterlude = line.id?.startsWith('folia-interlude-') ?? false
+    if (line.agentId === 'bg') {
+      if (!isBackground[index]) {
+        result.push(line)
+        continue
+      }
+      if (mainIndex >= 0) {
+        const mainLine = result[mainIndex]
+        const vocal = lineToBackgroundVocal(line)
+        if (!vocal) {
+          result.push(line)
+          continue
+        }
+        const vocals = mainLine.backgroundVocals ?? (mainLine.backgroundVocal ? [mainLine.backgroundVocal] : [])
+        const next = [...vocals, vocal]
+        result[mainIndex] = { ...mainLine, backgroundVocal: next[0], backgroundVocals: next }
+      } else {
+        result.push(line)
+      }
+      continue
+    }
+    result.push(line)
+    if (!isInterlude) mainIndex = result.length - 1
+  }
+  return result
 }
 
 /**
@@ -145,8 +215,10 @@ export function useFoliaTheme(): Theme {
       primaryColor: foreground,
       accentColor: accent,
       // `--theme-secondary-rgb` 存的是 `R G B` 三元组（见 index.css），
-      // 不能直接当颜色用，必须包进 rgb()。
-      secondaryColor: `rgb(${secondaryRgb})`,
+      // 不能直接当颜色用，必须包进 rgb()。逗号分隔 —— folia 的 colorMix
+      // 解析器（及上游主题约定）按 rgb(r, g, b) 读；空格分隔会走 fallback
+      // 变白色（群唱左侧气泡看不清正是这个）。
+      secondaryColor: `rgb(${secondaryRgb.split(/\s+/).join(', ')})`,
       fontStyle: 'sans',
       animationIntensity: 'normal',
     }),
