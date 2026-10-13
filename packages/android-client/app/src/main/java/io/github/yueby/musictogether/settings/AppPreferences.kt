@@ -8,7 +8,6 @@ import io.github.yueby.musictogether.model.PlayerDisplaySettings
 import io.github.yueby.musictogether.model.ShareCardBackgroundSource
 import io.github.yueby.musictogether.model.ShareCardSettings
 import io.github.yueby.musictogether.model.ThemeMode
-import io.github.yueby.musictogether.model.UiStyle
 import io.github.yueby.musictogether.model.UpdateDownloadSource
 import io.github.yueby.musictogether.network.ServerCatalog
 import io.github.yueby.musictogether.network.normalizeMusicDownloadDirectory
@@ -118,14 +117,6 @@ internal class AppPreferences(context: Context) {
         preferences.edit().putBoolean(HAPTIC_FEEDBACK_ENABLED_KEY, enabled).apply()
     }
 
-    fun uiStyle(): UiStyle = UiStyle.fromPreferenceValue(
-        preferences.getString(UI_STYLE_KEY, null),
-    )
-
-    fun setUiStyle(style: UiStyle) {
-        preferences.edit().putString(UI_STYLE_KEY, style.preferenceValue).apply()
-    }
-
     fun themeMode(): ThemeMode = ThemeMode.fromPreferenceValue(
         preferences.getString(THEME_MODE_KEY, null),
     )
@@ -140,7 +131,7 @@ internal class AppPreferences(context: Context) {
         preferences.edit().putBoolean(PURE_BLACK_BACKGROUND_KEY, enabled).apply()
     }
 
-    fun dynamicColor(): Boolean = preferences.getBoolean(DYNAMIC_COLOR_KEY, true)
+    fun dynamicColor(): Boolean = preferences.getBoolean(DYNAMIC_COLOR_KEY, false)
 
     fun setDynamicColor(enabled: Boolean) {
         preferences.edit().putBoolean(DYNAMIC_COLOR_KEY, enabled).apply()
@@ -298,7 +289,6 @@ internal class AppPreferences(context: Context) {
         const val PLAYBACK_HARD_SEEK_SYNC_KEY = "playback_hard_seek_sync_enabled"
         const val ALLOW_AUDIO_MIXING_KEY = "allow_audio_mixing"
         const val HAPTIC_FEEDBACK_ENABLED_KEY = "haptic_feedback_enabled"
-        const val UI_STYLE_KEY = "ui_style"
         const val THEME_MODE_KEY = "theme_mode"
         const val PURE_BLACK_BACKGROUND_KEY = "pure_black_background"
         const val DYNAMIC_COLOR_KEY = "dynamic_color"

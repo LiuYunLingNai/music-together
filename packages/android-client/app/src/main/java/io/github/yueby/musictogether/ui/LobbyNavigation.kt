@@ -1,7 +1,5 @@
 package io.github.yueby.musictogether.ui
 
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -9,11 +7,6 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -21,10 +14,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.yueby.musictogether.model.BottomBarStyle
-import io.github.yueby.musictogether.model.UiStyle
 import io.github.yueby.musictogether.ui.designsystem.LocalBottomBarStyle
 import io.github.yueby.musictogether.ui.designsystem.LocalGlassBottomBarEnabled
-import io.github.yueby.musictogether.ui.designsystem.LocalUiStyle
 import io.github.yueby.musictogether.ui.designsystem.liquid.IosLiquidGlassNavigationBar
 import top.yukonga.miuix.kmp.basic.NavigationBar as MiuixNavigationBar
 import top.yukonga.miuix.kmp.basic.NavigationBarItem as MiuixNavigationBarItem
@@ -92,61 +83,39 @@ internal fun LobbyBottomNavigation(
             add(LobbyTab.Settings)
         }
     }
-    when (LocalUiStyle.current) {
-        UiStyle.Material3 -> NavigationBar(
-            modifier = modifier.border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
-            ),
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.84f),
-            tonalElevation = 0.dp,
-            windowInsets = WindowInsets(0),
+    when (LocalBottomBarStyle.current) {
+        BottomBarStyle.Standard -> MiuixNavigationBar(
+            modifier = modifier.fillMaxWidth(),
+            defaultWindowInsetsPadding = false,
         ) {
             tabs.forEach { tab ->
                 val onHapticTabSelected = rememberHapticClick { onTabSelected(tab) }
-                NavigationBarItem(
+                MiuixNavigationBarItem(
+                    modifier = Modifier.weight(1f),
                     selected = tab == selectedTab,
                     onClick = onHapticTabSelected,
-                    icon = { Icon(tab.icon, contentDescription = tab.label) },
-                    label = { Text(tab.label) },
+                    icon = tab.icon,
+                    label = tab.label,
                 )
             }
         }
 
-        UiStyle.Miuix -> when (LocalBottomBarStyle.current) {
-            BottomBarStyle.Standard -> MiuixNavigationBar(
-                modifier = modifier.fillMaxWidth(),
-                defaultWindowInsetsPadding = false,
-            ) {
-                tabs.forEach { tab ->
-                    val onHapticTabSelected = rememberHapticClick { onTabSelected(tab) }
-                    MiuixNavigationBarItem(
-                        modifier = Modifier.weight(1f),
-                        selected = tab == selectedTab,
-                        onClick = onHapticTabSelected,
-                        icon = tab.icon,
-                        label = tab.label,
-                    )
-                }
+        BottomBarStyle.Floating -> {
+            val hapticTabCallbacks = tabs.map { tab ->
+                rememberHapticClick { onTabSelected(tab) }
             }
-
-            BottomBarStyle.Floating -> {
-                val hapticTabCallbacks = tabs.map { tab ->
-                    rememberHapticClick { onTabSelected(tab) }
-                }
-                val navigationItems = remember(tabs) {
-                    tabs.map { tab -> MiuixNavigationItem(label = tab.label, icon = tab.icon) }
-                }
-                IosLiquidGlassNavigationBar(
-                    modifier = modifier,
-                    items = navigationItems,
-                    selectedIndex = tabs.indexOf(selectedTab).coerceAtLeast(0),
-                    onItemClick = { index -> hapticTabCallbacks.getOrNull(index)?.invoke() },
-                    backdrop = blurBackdrop,
-                    isBlurActive = LocalGlassBottomBarEnabled.current && blurBackdrop != null,
-                    compact = compact,
-                )
+            val navigationItems = remember(tabs) {
+                tabs.map { tab -> MiuixNavigationItem(label = tab.label, icon = tab.icon) }
             }
+            IosLiquidGlassNavigationBar(
+                modifier = modifier,
+                items = navigationItems,
+                selectedIndex = tabs.indexOf(selectedTab).coerceAtLeast(0),
+                onItemClick = { index -> hapticTabCallbacks.getOrNull(index)?.invoke() },
+                backdrop = blurBackdrop,
+                isBlurActive = LocalGlassBottomBarEnabled.current && blurBackdrop != null,
+                compact = compact,
+            )
         }
     }
 }

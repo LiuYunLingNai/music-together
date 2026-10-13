@@ -6,12 +6,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -20,10 +18,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.VerticalAlignTop
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -51,11 +47,9 @@ import io.github.yueby.musictogether.MusicTogetherViewModel
 import io.github.yueby.musictogether.model.AppState
 import io.github.yueby.musictogether.model.Playlist
 import io.github.yueby.musictogether.model.Track
-import io.github.yueby.musictogether.model.UiStyle
 import io.github.yueby.musictogether.model.queueIdentity
 import io.github.yueby.musictogether.ui.designsystem.AppButton
 import io.github.yueby.musictogether.ui.designsystem.LocalAppWindowSheet
-import io.github.yueby.musictogether.ui.designsystem.LocalUiStyle
 import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
 import top.yukonga.miuix.kmp.basic.IconButton as MiuixIconButton
 
@@ -123,14 +117,8 @@ internal fun PlaylistDetailPane(state: AppState, playlist: Playlist, viewModel: 
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (!LocalAppWindowSheet.current) {
-                if (LocalUiStyle.current == UiStyle.Miuix) {
-                    MiuixIconButton(onClick = viewModel::closePlaylist) {
-                        MiuixIcon(Icons.AutoMirrored.Filled.ArrowBack, "返回歌单列表")
-                    }
-                } else {
-                    IconButton(onClick = viewModel::closePlaylist) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回歌单列表")
-                    }
+                MiuixIconButton(onClick = viewModel::closePlaylist) {
+                    MiuixIcon(Icons.AutoMirrored.Filled.ArrowBack, "返回歌单列表")
                 }
             }
             Column(Modifier.weight(1f)) {
@@ -154,24 +142,11 @@ internal fun PlaylistDetailPane(state: AppState, playlist: Playlist, viewModel: 
                 addableCount > 0 -> "添加 $addableCount 首"
                 else -> "已添加"
             }
-            if (LocalUiStyle.current == UiStyle.Miuix) {
-                AppButton(
-                    text = addAllLabel,
-                    onClick = { viewModel.addPlaylistTracksToQueue(playlist) },
-                    enabled = addAllEnabled,
-                )
-            } else FilledTonalButton(
+            AppButton(
+                text = addAllLabel,
                 onClick = { viewModel.addPlaylistTracksToQueue(playlist) },
                 enabled = addAllEnabled,
-            ) {
-                if (hub.playlistAddingAll) {
-                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                } else {
-                    Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null, Modifier.size(18.dp))
-                }
-                Spacer(Modifier.width(4.dp))
-                Text(addAllLabel)
-            }
+            )
         }
         HorizontalDivider()
         when {

@@ -4,17 +4,6 @@ import androidx.compose.runtime.Immutable
 
 const val DEFAULT_MUSIC_DOWNLOAD_DIRECTORY = "/storage/emulated/0/Download/music-together"
 
-enum class UiStyle(val preferenceValue: String) {
-    Material3("material3"),
-    Miuix("miuix");
-
-    companion object {
-        fun fromPreferenceValue(value: String?): UiStyle =
-            entries.firstOrNull { style -> style.preferenceValue == value }
-                ?: Material3
-    }
-}
-
 enum class ThemeMode(val preferenceValue: String) {
     System("system"),
     Light("light"),
@@ -67,8 +56,8 @@ data class ShareCardSettings(
     )
 }
 
-fun UiStyle.usesFloatingBottomBar(bottomBarStyle: BottomBarStyle): Boolean =
-    this == UiStyle.Miuix && bottomBarStyle == BottomBarStyle.Floating
+fun usesFloatingBottomBar(bottomBarStyle: BottomBarStyle): Boolean =
+    bottomBarStyle == BottomBarStyle.Floating
 
 @Immutable
 data class PlayerDisplaySettings(
@@ -522,10 +511,9 @@ data class AppState(
     val playbackHardSeekSyncEnabled: Boolean = false,
     val allowAudioMixing: Boolean = false,
     val hapticFeedbackEnabled: Boolean = true,
-    val uiStyle: UiStyle = UiStyle.Material3,
     val themeMode: ThemeMode = ThemeMode.System,
     val pureBlackBackground: Boolean = false,
-    val dynamicColor: Boolean = true,
+    val dynamicColor: Boolean = false,
     val appBlurEnabled: Boolean = true,
     val bottomBarStyle: BottomBarStyle = BottomBarStyle.Floating,
     val glassBottomBar: Boolean = true,

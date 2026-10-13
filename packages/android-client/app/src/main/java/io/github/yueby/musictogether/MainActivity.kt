@@ -42,7 +42,6 @@ class MainActivity : ComponentActivity() {
                 setIntent(Intent())
             }
             MusicTogetherTheme(
-                uiStyle = state.value.uiStyle,
                 themeMode = state.value.themeMode,
                 pureBlackBackground = state.value.pureBlackBackground,
                 dynamicColor = state.value.dynamicColor,

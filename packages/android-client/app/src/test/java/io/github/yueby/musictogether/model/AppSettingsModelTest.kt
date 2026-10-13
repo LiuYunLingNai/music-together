@@ -3,20 +3,7 @@ package io.github.yueby.musictogether.model
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-class UiStyleTest {
-    @Test
-    fun preferenceValue_roundTripsEveryStyle() {
-        UiStyle.entries.forEach { style ->
-            assertEquals(style, UiStyle.fromPreferenceValue(style.preferenceValue))
-        }
-    }
-
-    @Test
-    fun missingOrUnknownPreference_fallsBackToMaterial3() {
-        assertEquals(UiStyle.Material3, UiStyle.fromPreferenceValue(null))
-        assertEquals(UiStyle.Material3, UiStyle.fromPreferenceValue("unknown"))
-    }
-
+class AppSettingsModelTest {
     @Test
     fun themeMode_roundTripsAndFallsBackToSystem() {
         ThemeMode.entries.forEach { mode ->
@@ -34,11 +21,9 @@ class UiStyleTest {
     }
 
     @Test
-    fun floatingBottomBar_isMiuixOnly() {
-        assertEquals(false, UiStyle.Material3.usesFloatingBottomBar(BottomBarStyle.Floating))
-        assertEquals(false, UiStyle.Material3.usesFloatingBottomBar(BottomBarStyle.Standard))
-        assertEquals(false, UiStyle.Miuix.usesFloatingBottomBar(BottomBarStyle.Standard))
-        assertEquals(true, UiStyle.Miuix.usesFloatingBottomBar(BottomBarStyle.Floating))
+    fun floatingBottomBar_isUsedForFloatingBottomBarOnly() {
+        assertEquals(true, usesFloatingBottomBar(BottomBarStyle.Floating))
+        assertEquals(false, usesFloatingBottomBar(BottomBarStyle.Standard))
     }
 
     @Test

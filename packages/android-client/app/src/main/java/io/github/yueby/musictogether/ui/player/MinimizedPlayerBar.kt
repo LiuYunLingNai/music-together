@@ -21,10 +21,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -39,9 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.yueby.musictogether.MusicTogetherViewModel
 import io.github.yueby.musictogether.model.Track
-import io.github.yueby.musictogether.model.UiStyle
 import io.github.yueby.musictogether.player.PlayerUiState
-import io.github.yueby.musictogether.ui.designsystem.LocalUiStyle
 import io.github.yueby.musictogether.ui.designsystem.appGlassSurface
 import io.github.yueby.musictogether.ui.designsystem.liquid.lens
 import io.github.yueby.musictogether.ui.designsystem.liquid.vibrancy
@@ -67,15 +61,10 @@ internal fun MinimizedPlayerBar(
     blurBackdrop: LayerBackdrop? = null,
     compact: Boolean = false,
 ) {
-    val isMiuix = LocalUiStyle.current == UiStyle.Miuix
-    val contentColor = if (isMiuix) MiuixTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface
-    val secondaryColor = if (isMiuix) {
-        MiuixTheme.colorScheme.onSurfaceVariantSummary
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
+    val contentColor = MiuixTheme.colorScheme.onSurface
+    val secondaryColor = MiuixTheme.colorScheme.onSurfaceVariantSummary
     val enabled = track != null
-    if (compact && isMiuix) {
+    if (compact) {
         CompactMiuixPlayerBar(
             track = track,
             playing = player.playing,
@@ -146,25 +135,21 @@ internal fun MinimizedPlayerBar(
     }
 
     val shape = CircleShape
-    val solidContainerColor = if (isMiuix) {
-        MiuixTheme.colorScheme.surfaceContainer.copy(alpha = 0.96f)
-    } else {
-        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.98f)
-    }
+    val solidContainerColor = MiuixTheme.colorScheme.surfaceContainer.copy(alpha = 0.96f)
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = if (isMiuix) 24.dp else 12.dp)
+            .padding(horizontal = 24.dp)
             .height(64.dp)
-            .appGlassSurface(if (isMiuix) blurBackdrop else null, shape)
+            .appGlassSurface(blurBackdrop, shape)
             .then(
-                if (isMiuix && blurBackdrop != null) {
+                if (blurBackdrop != null) {
                     Modifier
                 } else {
                     Modifier.background(solidContainerColor, shape)
                 },
             )
-            .border(0.75.dp, contentColor.copy(alpha = if (isMiuix) 0.12f else 0.08f), shape)
+            .border(0.75.dp, contentColor.copy(alpha = 0.12f), shape)
             .graphicsLayer { alpha = 0.88f + containerProgress.value * 0.12f },
     ) {
         Row(
@@ -209,46 +194,27 @@ internal fun MinimizedPlayerBar(
                     contentAlignment = Alignment.CenterStart,
                 ) {
                     Column {
-                        if (isMiuix) {
-                            MiuixText(
-                                text = track?.title ?: "暂无歌曲",
-                                color = contentColor,
-                                fontSize = 14.sp,
-                                lineHeight = 17.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            MiuixText(
-                                text = track?.artist?.joinToString(" / ") ?: "点击打开播放器",
-                                color = secondaryColor,
-                                fontSize = 11.sp,
-                                lineHeight = 14.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        } else {
-                            Text(
-                                text = track?.title ?: "暂无歌曲",
-                                color = contentColor,
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                text = track?.artist?.joinToString(" / ") ?: "点击打开播放器",
-                                color = secondaryColor,
-                                style = MaterialTheme.typography.bodySmall,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
+                        MiuixText(
+                            text = track?.title ?: "暂无歌曲",
+                            color = contentColor,
+                            fontSize = 14.sp,
+                            lineHeight = 17.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        MiuixText(
+                            text = track?.artist?.joinToString(" / ") ?: "点击打开播放器",
+                            color = secondaryColor,
+                            fontSize = 11.sp,
+                            lineHeight = 14.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                 }
             }
             MiniPlayerIconButton(
-                isMiuix = isMiuix,
                 onClick = viewModel::togglePlayback,
                 enabled = enabled,
                 icon = if (player.playing) Icons.Default.Pause else Icons.Default.PlayArrow,
@@ -260,7 +226,6 @@ internal fun MinimizedPlayerBar(
                 },
             )
             MiniPlayerIconButton(
-                isMiuix = isMiuix,
                 onClick = onOpenQueue,
                 icon = Icons.AutoMirrored.Filled.QueueMusic,
                 contentDescription = "打开播放列表",
@@ -336,7 +301,6 @@ private fun CompactMiuixPlayerBar(
             }
             Spacer(Modifier.weight(1f).clickable(onClick = onExpand))
             MiniPlayerIconButton(
-                isMiuix = true,
                 onClick = onTogglePlayback,
                 enabled = enabled,
                 icon = if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
@@ -345,7 +309,6 @@ private fun CompactMiuixPlayerBar(
                 modifier = Modifier.size(40.dp),
             )
             MiniPlayerIconButton(
-                isMiuix = true,
                 onClick = onOpenQueue,
                 icon = Icons.AutoMirrored.Filled.QueueMusic,
                 contentDescription = "打开播放列表",
@@ -358,7 +321,6 @@ private fun CompactMiuixPlayerBar(
 
 @Composable
 private fun MiniPlayerIconButton(
-    isMiuix: Boolean,
     onClick: () -> Unit,
     icon: ImageVector,
     contentDescription: String,
@@ -366,19 +328,13 @@ private fun MiniPlayerIconButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
-    if (isMiuix) {
-        MiuixIconButton(
-            onClick = onClick,
-            enabled = enabled,
-            modifier = modifier.size(44.dp),
-            minWidth = 44.dp,
-            minHeight = 44.dp,
-        ) {
-            MiuixIcon(icon, contentDescription = contentDescription, tint = tint)
-        }
-    } else {
-        IconButton(onClick = onClick, enabled = enabled, modifier = modifier.size(44.dp)) {
-            Icon(icon, contentDescription = contentDescription, tint = tint)
-        }
+    MiuixIconButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.size(44.dp),
+        minWidth = 44.dp,
+        minHeight = 44.dp,
+    ) {
+        MiuixIcon(icon, contentDescription = contentDescription, tint = tint)
     }
 }

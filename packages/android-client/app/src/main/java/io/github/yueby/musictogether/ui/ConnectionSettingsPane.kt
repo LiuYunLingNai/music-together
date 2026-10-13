@@ -13,13 +13,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,10 +26,8 @@ import io.github.yueby.musictogether.logging.AppLogger
 import io.github.yueby.musictogether.model.AppState
 import io.github.yueby.musictogether.model.ConnectionStatus
 import io.github.yueby.musictogether.model.ServerConnection
-import io.github.yueby.musictogether.model.UiStyle
 import io.github.yueby.musictogether.ui.designsystem.AppButton
 import io.github.yueby.musictogether.ui.designsystem.AppTextField
-import io.github.yueby.musictogether.ui.designsystem.LocalUiStyle
 import top.yukonga.miuix.kmp.basic.Card as MiuixCard
 import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
 import top.yukonga.miuix.kmp.basic.IconButton as MiuixIconButton
@@ -122,14 +113,7 @@ private fun ConnectionEditor(state: AppState, viewModel: MusicTogetherViewModel)
             )
         }
     }
-    when (LocalUiStyle.current) {
-        UiStyle.Material3 -> Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-            content = { fields() },
-        )
-        UiStyle.Miuix -> MiuixCard(modifier = Modifier.fillMaxWidth(), content = { fields() })
-    }
+    MiuixCard(modifier = Modifier.fillMaxWidth(), content = { fields() })
 }
 
 @Composable
@@ -152,32 +136,17 @@ private fun ServerConnectionItem(
             ConnectionRemoveButton(removeEnabled, onRemove)
         }
     }
-    when (LocalUiStyle.current) {
-        UiStyle.Material3 -> Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-            content = { body() },
-        )
-        UiStyle.Miuix -> MiuixCard(modifier = Modifier.fillMaxWidth(), content = { body() })
-    }
+    MiuixCard(modifier = Modifier.fillMaxWidth(), content = { body() })
 }
 
 @Composable
 private fun ConnectionStatusIcon(status: ConnectionStatus) {
-    when (LocalUiStyle.current) {
-        UiStyle.Material3 -> Icon(
-            Icons.Default.Dns,
-            contentDescription = null,
-            tint = if (status == ConnectionStatus.Connected) MaterialTheme.colorScheme.primary
-            else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        UiStyle.Miuix -> MiuixIcon(
-            Icons.Default.Dns,
-            contentDescription = null,
-            tint = if (status == ConnectionStatus.Connected) MiuixTheme.colorScheme.primary
-            else MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        )
-    }
+    MiuixIcon(
+        Icons.Default.Dns,
+        contentDescription = null,
+        tint = if (status == ConnectionStatus.Connected) MiuixTheme.colorScheme.primary
+        else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+    )
 }
 
 @Composable
@@ -188,57 +157,30 @@ private fun ConnectionStatusText(server: ServerConnection, selected: Boolean, mo
         ConnectionStatus.Disconnected -> server.error ?: "未连接"
     }
     Column(modifier) {
-        when (LocalUiStyle.current) {
-            UiStyle.Material3 -> {
-                Text(
-                    server.url,
-                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    summary,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            UiStyle.Miuix -> {
-                MiuixText(
-                    server.url,
-                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                MiuixText(
-                    summary,
-                    style = MiuixTheme.textStyles.footnote1,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
+        MiuixText(
+            server.url,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        MiuixText(
+            summary,
+            style = MiuixTheme.textStyles.footnote1,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
 @Composable
 private fun ConnectionSelectButton(onClick: () -> Unit) {
-    when (LocalUiStyle.current) {
-        UiStyle.Material3 -> TextButton(onClick = onClick) { Text("切换") }
-        UiStyle.Miuix -> MiuixTextButton(text = "切换", onClick = onClick)
-    }
+    MiuixTextButton(text = "切换", onClick = onClick)
 }
 
 @Composable
 private fun ConnectionRemoveButton(enabled: Boolean, onClick: () -> Unit) {
-    when (LocalUiStyle.current) {
-        UiStyle.Material3 -> IconButton(onClick = onClick, enabled = enabled) {
-            Icon(Icons.Default.Delete, contentDescription = "移除服务器")
-        }
-        UiStyle.Miuix -> MiuixIconButton(onClick = onClick, enabled = enabled) {
-            MiuixIcon(Icons.Default.Delete, contentDescription = "移除服务器")
-        }
+    MiuixIconButton(onClick = onClick, enabled = enabled) {
+        MiuixIcon(Icons.Default.Delete, contentDescription = "移除服务器")
     }
 }

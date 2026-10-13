@@ -32,7 +32,7 @@ Android 客户端包含以下主要能力：
 | 语言 | Kotlin 2.4.10，Java Virtual Machine (JVM) 17 |
 | 构建 | Gradle 9.5.0，Android Gradle Plugin 9.3.1 |
 | Android | `minSdk 26`，`targetSdk 36`，`compileSdk 37` |
-| 用户界面 | Jetpack Compose，Material 3，MIUIX 0.9.3 |
+| 用户界面 | Jetpack Compose，MIUIX 0.9.3 |
 | 网络 | OkHttp 4.12，HTTP API，原生 WebSocket |
 | 播放 | Media3 ExoPlayer，MediaSessionService |
 | 图片与取色 | Coil 3，AndroidX Palette |
@@ -107,7 +107,7 @@ io/github/yueby/musictogether/
 | `updates/` | 应用更新检查、下载校验和安装流程 |
 | `lyrics/` | 歌词解析和 Apple Music-like Lyrics (AMLL) 数据处理 |
 | `ui/` | 大厅、房间、设置、账号和平台界面 |
-| `ui/designsystem/` | Material 3 / MIUIX 主题桥接、风格感知的公共组件和运行时风格选择器 |
+| `ui/designsystem/` | MIUIX 主题桥接和公共组件 |
 | `ui/player/` | 播放器布局与歌词绘制 |
 | `notifications/` | 聊天通知 |
 | `logging/` | Debug 日志记录与导出 |
@@ -143,7 +143,7 @@ UI 操作
 
 `MusicTogetherViewModel` 持有 `StateFlow<AppState>`，并作为 Compose 使用的统一操作门面。账号、队列待确认状态、应用更新、本地设置和多服务器发现分别由独立协调组件管理；这些组件通过显式状态变换回调更新 `AppState`，不直接持有第二份应用状态。
 
-`AppState` 包含服务器、房间、账号、搜索、平台推荐、当前歌曲下载、歌词、平台中心、界面风格、主题模式、底栏与播放器显示设置、同步设置、服务端音频代理策略和应用更新状态。界面和播放器偏好由 `AppPreferences` 持久化，切换时只替换 Compose 表现层，不重建 ViewModel、网络连接或播放会话。平台推荐、完整歌单加载、下载选项和文件下载分别使用可取消任务；切换歌单或歌曲、离开房间及释放 ViewModel 时取消对应旧任务。旧服务端没有代理策略事件时，酷狗默认强制代理。
+`AppState` 包含服务器、房间、账号、搜索、平台推荐、当前歌曲下载、歌词、平台中心、主题模式、底栏与播放器显示设置、同步设置、服务端音频代理策略和应用更新状态。界面和播放器偏好由 `AppPreferences` 持久化，切换时只替换 Compose 表现层，不重建 ViewModel、网络连接或播放会话。平台推荐、完整歌单加载、下载选项和文件下载分别使用可取消任务；切换歌单或歌曲、离开房间及释放 ViewModel 时取消对应旧任务。旧服务端没有代理策略事件时，酷狗默认强制代理。
 
 已下载歌曲由统一离线索引关联曲目元数据和可播放 URI：应用私有下载与 Android 公共 Download 目录中的系统保存文件都会写入该索引，旧版公共下载会在启动时迁移。下载请求沿用当前播放目标和平台请求头策略，B 站及需要代理的酷狗资源下载服务器可播放版本。房间播放曲目时先查询离线索引，命中后仍按房间的同步时间、计划操作和漂移校正播放本地文件；未命中时继续使用网络资源。主页的本地音乐页只在未加入房间时启动本地播放，避免与房间同步播放意图冲突。
 
@@ -153,11 +153,11 @@ UI 操作
 
 `MusicTogetherApp.kt` 根据房间状态显示 `LobbyScreen` 或 `RoomScreen`。`RoomScreen.kt` 负责房间整体布局和面板切换，具体内容分布在以下文件：
 
-`MainActivity.kt` 在 Compose 根节点读取持久化的 `UiStyle`、主题模式、MIUIX 纯黑背景和显示偏好，并通过 `MusicTogetherTheme` 同时提供 Material 3 与 MIUIX 色彩上下文。主题支持跟随系统、浅色与深色；Android 12 及以上可选系统动态色。纯黑背景是 MIUIX 深色模式的独立偏好，不改变 Material 3 外观。MIUIX 主题同时向仍在复用的 Material 控件映射可读的背景、内容、轮廓与强调色，避免迁移期间出现低对比度文字或弹层割裂。风格感知组件只依赖 `LocalUiStyle` 和统一状态：Material 3 模式保留原有组件，MIUIX 模式使用对应的原生 MIUIX 容器与导航。业务页面不得因为风格切换复制网络、播放器或状态逻辑；新增双风格组件应优先放入 `ui/designsystem/`，再由页面组合使用。
+`MainActivity.kt` 在 Compose 根节点读取持久化的主题模式、MIUIX 纯黑背景和显示偏好，并通过 `MusicTogetherTheme` 提供 MIUIX 色彩上下文。主题支持跟随系统、浅色与深色；Android 12 及以上可选系统动态色，默认关闭。纯黑背景是 MIUIX 深色模式的独立偏好。MIUIX 主题同时向仍在复用的 Material 控件映射可读的背景、内容、轮廓与强调色，避免出现低对比度文字或弹层割裂。界面固定使用 MIUIX，业务页面不复制网络、播放器或状态逻辑；新增公共组件应优先放入 `ui/designsystem/`，再由页面组合使用。
 
-设置首页只承担分类导航，账号、服务器连接、外观与个性化、播放器、播放与同步、存储与更新、管理员入口分别进入二级页面；进入任意二级页后隐藏底部导航，返回设置首页时恢复。页面之间使用即时切换，系统返回只负责返回栈语义；在连续动效达到可发布质量前，不提供实验性页面过渡或对应设置项。Material 3 固定使用标准导航栏，不展示 MIUIX 专属的底栏样式和玻璃效果选项；MIUIX 可在标准底栏与 iOS 风格液态悬浮胶囊之间切换。`BottomDock` 统一拥有系统导航栏 Insets、导航胶囊、迷你播放器附件和页面底部占位，禁止页面使用固定偏移分别定位这些元素。iOS 悬浮导航直接沿用 MIUIX `v0.9.3` 官方示例的 Apache-2.0 实现：外层为 64 dp 胶囊，并保留阻尼拖动、橡皮筋位移、双 Backdrop、折射、色散、设备倾斜高光、RTL 与无障碍语义。有迷你播放器时，播放器与导航胶囊位于同一高度、等分可用宽度，播放器切换为仅保留圆形封面和必要操作的紧凑形态，导航选中透镜限制为不超过标签槽宽的圆形；两侧共用相同的背景采样、模糊、折射、混色和外层胶囊半径。没有迷你播放器时导航胶囊占完整 Dock 宽度。主页内容延伸至悬浮 Dock 后方并用滚动内容 Padding 保证末项可达，禁止用不透明底部占位制造黑色条带。实时光学效果不可用或用户关闭玻璃效果时，仍使用官方实色 iOS 胶囊路径，不切换到 Material 组件，也不自行发明另一套降级外观。
+设置首页只承担分类导航，账号、服务器连接、外观与个性化、播放器、播放与同步、存储与更新、管理员入口分别进入二级页面；进入任意二级页后隐藏底部导航，返回设置首页时恢复。页面之间使用即时切换，系统返回只负责返回栈语义；在连续动效达到可发布质量前，不提供实验性页面过渡或对应设置项。底栏可在标准底栏与 iOS 风格液态悬浮胶囊之间切换。`BottomDock` 统一拥有系统导航栏 Insets、导航胶囊、迷你播放器附件和页面底部占位，禁止页面使用固定偏移分别定位这些元素。iOS 悬浮导航直接沿用 MIUIX `v0.9.3` 官方示例的 Apache-2.0 实现：外层为 64 dp 胶囊，并保留阻尼拖动、橡皮筋位移、双 Backdrop、折射、色散、设备倾斜高光、RTL 与无障碍语义。有迷你播放器时，播放器与导航胶囊位于同一高度、等分可用宽度，播放器切换为仅保留圆形封面和必要操作的紧凑形态，导航选中透镜限制为不超过标签槽宽的圆形；两侧共用相同的背景采样、模糊、折射、混色和外层胶囊半径。没有迷你播放器时导航胶囊占完整 Dock 宽度。主页内容延伸至悬浮 Dock 后方并用滚动内容 Padding 保证末项可达，禁止用不透明底部占位制造黑色条带。实时光学效果不可用或用户关闭玻璃效果时，仍使用官方实色 iOS 胶囊路径，不切换到 Material 组件，也不自行发明另一套降级外观。
 
-MIUIX 设置二级页使用 MIUIX `Scaffold` 与 `SmallTopAppBar` 消费状态栏和横向安全区，列表只消费 Scaffold 返回的内容 Padding；页面 Scaffold、顶栏、系统栏衔接区和底部 Dock 后方必须读取同一个解析后页面背景，纯黑开关关闭时不得由 `surface` 默认值重新引入局部纯黑。自定义卡片内容必须保留不受圆角裁剪的内边距，不得用页面级圆角裁剪正文。播放器可见控件经 `PlayerControlPrimitives` 分派按钮、滑块、表面和菜单，歌词排版层保持 AMLL 风格中立。MIUIX 弹出偏好依赖 Activity 提供的 Navigation Event 环境，Compose、Activity、Lifecycle、Navigation Event 与 Material 3 必须作为同一兼容矩阵升级，禁止单独提升其中一个库。播放器“房间与音质”“音源账号与歌单”等复用弹层统一经风格感知的 `AppModalBottomSheet`：Material 3 使用 Material Sheet，MIUIX 使用窗口级 `WindowBottomSheet`。窗口 Sheet 内的下拉选择必须使用 `WindowDropdownPreference`，不得使用依赖主窗口 `MiuixPopupHost` 的 `OverlayDropdownPreference`；弹层存在内部详情时，返回键、手势、遮罩点击和左上角导航均先弹出内部页面，只有根页面可以关闭弹层。仪器测试应分别覆盖 MIUIX Overlay/Window 下拉弹窗和 Material 3 暴露式下拉框的实际展开路径。
+MIUIX 设置二级页使用 MIUIX `Scaffold` 与 `SmallTopAppBar` 消费状态栏和横向安全区，列表只消费 Scaffold 返回的内容 Padding；页面 Scaffold、顶栏、系统栏衔接区和底部 Dock 后方必须读取同一个解析后页面背景，纯黑开关关闭时不得由 `surface` 默认值重新引入局部纯黑。自定义卡片内容必须保留不受圆角裁剪的内边距，不得用页面级圆角裁剪正文。播放器可见控件经 `PlayerControlPrimitives` 分派按钮、滑块、表面和菜单，歌词排版层保持 AMLL 风格中立。MIUIX 弹出偏好依赖 Activity 提供的 Navigation Event 环境，Compose、Activity、Lifecycle、Navigation Event 与 Material 3 必须作为同一兼容矩阵升级，禁止单独提升其中一个库。播放器“房间与音质”“音源账号与歌单”等复用弹层统一经 `AppModalBottomSheet`，使用窗口级 `WindowBottomSheet`。窗口 Sheet 内的下拉选择必须使用 `WindowDropdownPreference`，不得使用依赖主窗口 `MiuixPopupHost` 的 `OverlayDropdownPreference`；弹层存在内部详情时，返回键、手势、遮罩点击和左上角导航均先弹出内部页面，只有根页面可以关闭弹层。仪器测试应覆盖 MIUIX Overlay/Window 下拉弹窗的实际展开路径。
 
 | 文件 | 内容 |
 | --- | --- |
@@ -342,7 +342,7 @@ AMLL 纯算法按职责分布：
 - 网络 Cookie
 - 歌词偏移
 - 播放同步间隔、自动变速和大偏差硬 Seek 设置
-- 界面风格、主题、动态色、应用模糊、底栏样式与玻璃效果
+- 主题、动态色、应用模糊、底栏样式与玻璃效果
 - 歌词显示、动画和播放器动态背景设置
 - 更新下载源
 - 音乐默认下载目录

@@ -24,7 +24,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import io.github.yueby.musictogether.ui.designsystem.AppModalBottomSheet
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -41,8 +40,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.yueby.musictogether.MusicTogetherViewModel
 import io.github.yueby.musictogether.model.AppState
-import io.github.yueby.musictogether.model.UiStyle
-import io.github.yueby.musictogether.ui.designsystem.LocalUiStyle
 import io.github.yueby.musictogether.ui.player.PlayerPane
 import kotlinx.coroutines.delay
 import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
@@ -93,7 +90,6 @@ fun RoomScreen(
     var activeOverlay by remember { mutableStateOf<RoomOverlay?>(null) }
     var landscapeChromeVisible by remember(room.id) { mutableStateOf(true) }
     var roomMenuExpanded by remember(room.id) { mutableStateOf(false) }
-    val overlaySheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
     val handleBack = {
         when (resolveRoomBackAction(activeOverlay != null, roomMenuExpanded)) {
@@ -221,22 +217,19 @@ fun RoomScreen(
                 }
                 AppModalBottomSheet(
                     onDismissRequest = navigateUpFromOverlay,
-                    sheetState = overlaySheetState,
                     title = if (overlay == RoomOverlay.Accounts) {
                         appState.platformHub.selectedPlaylist?.name ?: overlay.title
                     } else {
                         overlay.title
                     },
-                    startAction = if (LocalUiStyle.current == UiStyle.Miuix) {
-                        {
-                            MiuixIconButton(onClick = navigateUpFromOverlay) {
-                                MiuixIcon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "返回播放器",
-                                )
-                            }
+                    startAction = {
+                        MiuixIconButton(onClick = navigateUpFromOverlay) {
+                            MiuixIcon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "返回播放器",
+                            )
                         }
-                    } else null,
+                    },
                 ) {
                     Box(
                         Modifier

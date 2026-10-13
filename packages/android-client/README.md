@@ -2,7 +2,7 @@
 
 这是 Music Together 的原生 Android 客户端，使用 Kotlin、Jetpack Compose、OkHttp WebSocket 和 Media3 ExoPlayer 实现，不是 WebView 套壳。
 
-界面支持 Material 3 与 MIUIX 两套原生 Compose 视觉体系。设置页按账号、外观、播放器、播放同步、存储与更新等二级页面组织；Material 3 固定使用标准导航，MIUIX 模式可切换标准或实时模糊悬浮底栏。播放器允许独立调整翻译、音译、歌词字号与字重、焦点位置、弹簧/缩放/模糊效果及动态背景强度。
+界面固定使用 MIUIX 原生 Compose 视觉体系。设置页按账号、外观、播放器、播放同步、存储与更新等二级页面组织；底栏可切换标准或实时模糊悬浮胶囊。播放器允许独立调整翻译、音译、歌词字号与字重、焦点位置、弹簧/缩放/模糊效果及动态背景强度。
 
 ## 已支持
 

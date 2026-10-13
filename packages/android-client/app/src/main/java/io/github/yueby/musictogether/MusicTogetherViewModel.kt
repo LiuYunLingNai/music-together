@@ -37,7 +37,6 @@ import io.github.yueby.musictogether.model.ShareCardSettings
 import io.github.yueby.musictogether.model.ServerConnection
 import io.github.yueby.musictogether.model.Track
 import io.github.yueby.musictogether.model.ThemeMode
-import io.github.yueby.musictogether.model.UiStyle
 import io.github.yueby.musictogether.model.UiNotice
 import io.github.yueby.musictogether.model.UpdateDownloadSource
 import io.github.yueby.musictogether.model.queueIdentity
@@ -172,7 +171,6 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             playbackHardSeekSyncEnabled = playbackSyncSettings.hardSeekEnabled,
             allowAudioMixing = appPreferences.allowAudioMixing(),
             hapticFeedbackEnabled = appPreferences.hapticFeedbackEnabled(),
-            uiStyle = appPreferences.uiStyle(),
             themeMode = appPreferences.themeMode(),
             pureBlackBackground = appPreferences.pureBlackBackground(),
             dynamicColor = appPreferences.dynamicColor(),
@@ -397,12 +395,6 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     fun updateHapticFeedbackEnabled(enabled: Boolean) {
         appPreferences.setHapticFeedbackEnabled(enabled)
         _state.value = _state.value.copy(hapticFeedbackEnabled = enabled)
-    }
-
-    fun updateUiStyle(style: UiStyle) {
-        if (style == _state.value.uiStyle) return
-        appPreferences.setUiStyle(style)
-        _state.value = _state.value.copy(uiStyle = style)
     }
 
     fun updateThemeMode(mode: ThemeMode) {

@@ -23,10 +23,8 @@ import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Animation
@@ -46,19 +44,6 @@ import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material.icons.filled.QrCode
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.Slider
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -79,10 +64,7 @@ import io.github.yueby.musictogether.model.PlayerDisplaySettings
 import io.github.yueby.musictogether.model.ShareCardBackgroundSource
 import io.github.yueby.musictogether.model.ShareCardSettings
 import io.github.yueby.musictogether.model.ThemeMode
-import io.github.yueby.musictogether.model.UiStyle
-import io.github.yueby.musictogether.ui.designsystem.LocalUiStyle
 import io.github.yueby.musictogether.ui.designsystem.LocalAppPageBackground
-import io.github.yueby.musictogether.ui.designsystem.UiStyleSelector
 import io.github.yueby.musictogether.ui.designsystem.AppButton
 import io.github.yueby.musictogether.ui.designsystem.AppTextField
 import top.yukonga.miuix.kmp.basic.Card as MiuixCard
@@ -227,54 +209,33 @@ private fun SettingsHome(
             add(SettingsCategory(SettingsDestination.Admin, "服务器管理", "账号、房间与代理策略", Icons.Default.AdminPanelSettings))
         }
     }
-    when (LocalUiStyle.current) {
-        UiStyle.Material3 -> LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item {
-                SettingsHero(
-                    title = state.accountProfile?.nickname ?: "Music Together",
-                    summary = "按类别管理应用与播放器设置",
-                )
-            }
-            categories.forEach { category ->
-                item(key = category.destination.name) {
-                    val onHapticOpen = rememberHapticClick { onOpen(category.destination) }
-                    SettingsCategoryCard(category, onClick = onHapticOpen)
-                }
-            }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        item {
+            SettingsHero(
+                title = state.accountProfile?.nickname ?: "Music Together",
+                summary = "按类别管理应用与播放器设置",
+            )
         }
-
-        UiStyle.Miuix -> LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            item {
-                SettingsHero(
-                    title = state.accountProfile?.nickname ?: "Music Together",
-                    summary = "按类别管理应用与播放器设置",
-                )
-            }
-            item {
-                MiuixSettingsGroup {
-                    categories.forEach { category ->
-                        val onHapticOpen = rememberHapticClick { onOpen(category.destination) }
-                        ArrowPreference(
-                            title = category.title,
-                            summary = category.summary,
-                            startAction = {
-                                MiuixIcon(
-                                    imageVector = category.icon,
-                                    contentDescription = null,
-                                    tint = MiuixTheme.colorScheme.primary,
-                                )
-                            },
-                            onClick = onHapticOpen,
-                        )
-                    }
+        item {
+            MiuixSettingsGroup {
+                categories.forEach { category ->
+                    val onHapticOpen = rememberHapticClick { onOpen(category.destination) }
+                    ArrowPreference(
+                        title = category.title,
+                        summary = category.summary,
+                        startAction = {
+                            MiuixIcon(
+                                imageVector = category.icon,
+                                contentDescription = null,
+                                tint = MiuixTheme.colorScheme.primary,
+                            )
+                        },
+                        onClick = onHapticOpen,
+                    )
                 }
             }
         }
@@ -283,45 +244,25 @@ private fun SettingsHome(
 
 @Composable
 private fun SettingsHero(title: String, summary: String) {
-    when (LocalUiStyle.current) {
-        UiStyle.Material3 -> Column(Modifier.padding(horizontal = 8.dp, vertical = 12.dp)) {
-            Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            Text(summary, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        UiStyle.Miuix -> Column(Modifier.padding(horizontal = 8.dp, vertical = 18.dp)) {
-            MiuixText(title, style = MiuixTheme.textStyles.title1, fontWeight = FontWeight.Bold)
-            MiuixText(summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-        }
+    Column(Modifier.padding(horizontal = 8.dp, vertical = 18.dp)) {
+        MiuixText(title, style = MiuixTheme.textStyles.title1, fontWeight = FontWeight.Bold)
+        MiuixText(summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
     }
 }
 
 @Composable
 private fun SettingsCategoryCard(category: SettingsCategory, onClick: () -> Unit) {
-    when (LocalUiStyle.current) {
-        UiStyle.Material3 -> Card(
+    MiuixCard(
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        ArrowPreference(
+            title = category.title,
+            summary = category.summary,
+            startAction = {
+                MiuixIcon(category.icon, null, tint = MiuixTheme.colorScheme.primary)
+            },
             onClick = onClick,
-            shape = RoundedCornerShape(22.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-        ) {
-            ListItem(
-                headlineContent = { Text(category.title, fontWeight = FontWeight.SemiBold) },
-                supportingContent = { Text(category.summary) },
-                leadingContent = { Icon(category.icon, null, tint = MaterialTheme.colorScheme.primary) },
-                trailingContent = { Icon(Icons.AutoMirrored.Filled.ArrowForward, null) },
-            )
-        }
-        UiStyle.Miuix -> MiuixCard(
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            ArrowPreference(
-                title = category.title,
-                summary = category.summary,
-                startAction = {
-                    MiuixIcon(category.icon, null, tint = MiuixTheme.colorScheme.primary)
-                },
-                onClick = onClick,
-            )
-        }
+        )
     }
 }
 
@@ -331,119 +272,40 @@ private fun SettingsPage(
     onBack: () -> Unit,
     content: @Composable () -> Unit,
 ) {
-    when (LocalUiStyle.current) {
-        UiStyle.Material3 -> Column(Modifier.fillMaxSize()) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                }
-                Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            Column(Modifier.weight(1f)) { content() }
-        }
-
-        UiStyle.Miuix -> MiuixScaffold(
-            modifier = Modifier.fillMaxSize(),
-            containerColor = LocalAppPageBackground.current,
-            topBar = {
-                MiuixSmallTopAppBar(
-                    title = title,
-                    color = LocalAppPageBackground.current,
-                    navigationIcon = {
-                        MiuixIconButton(onClick = onBack) {
-                            MiuixIcon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                        }
-                    },
-                )
-            },
-            contentWindowInsets = WindowInsets.systemBars
-                .add(WindowInsets.displayCutout)
-                .only(WindowInsetsSides.Horizontal),
-        ) { innerPadding ->
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .consumeWindowInsets(innerPadding),
-            ) { content() }
-        }
+    MiuixScaffold(
+        modifier = Modifier.fillMaxSize(),
+        containerColor = LocalAppPageBackground.current,
+        topBar = {
+            MiuixSmallTopAppBar(
+                title = title,
+                color = LocalAppPageBackground.current,
+                navigationIcon = {
+                    MiuixIconButton(onClick = onBack) {
+                        MiuixIcon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
+            )
+        },
+        contentWindowInsets = WindowInsets.systemBars
+            .add(WindowInsets.displayCutout)
+            .only(WindowInsetsSides.Horizontal),
+    ) { innerPadding ->
+        Box(
+            Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .consumeWindowInsets(innerPadding),
+        ) { content() }
     }
 }
 
 @Composable
 private fun AppearanceSettingsPage(state: AppState, viewModel: MusicTogetherViewModel) {
-    if (LocalUiStyle.current == UiStyle.Miuix) {
-        MiuixAppearanceSettingsPage(state, viewModel)
-        return
-    }
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        item {
-            UiStyleSelector(state.uiStyle, viewModel::updateUiStyle)
-        }
-        item {
-            ChoiceSetting(
-                title = "主题模式",
-                summary = "普通深色保留层次，纯黑仅在 AMOLED 模式启用",
-                icon = Icons.Default.ColorLens,
-                entries = ThemeMode.entries,
-                selected = state.themeMode,
-                label = ThemeMode::label,
-                onSelected = viewModel::updateThemeMode,
-            )
-        }
-        item {
-            SettingsSwitch(
-                title = "系统动态色",
-                summary = "使用壁纸主色生成界面色板",
-                icon = Icons.Default.Palette,
-                checked = state.dynamicColor,
-                onCheckedChange = viewModel::updateDynamicColor,
-            )
-        }
-        item { ShareCardSettingsSection(state.shareCardSettings, viewModel) }
-        if (state.uiStyle == UiStyle.Miuix) {
-            item {
-                ChoiceSetting(
-                    title = "主页底栏",
-                    summary = "标准底栏或类 iOS 悬浮胶囊",
-                    icon = Icons.Default.Tune,
-                    entries = BottomBarStyle.entries,
-                    selected = state.bottomBarStyle,
-                    label = BottomBarStyle::label,
-                    onSelected = viewModel::updateBottomBarStyle,
-                )
-            }
-            if (state.bottomBarStyle == BottomBarStyle.Floating) {
-                item {
-                    SettingsSwitch(
-                        title = "液态玻璃",
-                        summary = "支持时启用官方实时折射；不支持时保持官方实色 iOS 胶囊",
-                        icon = Icons.Default.BlurOn,
-                        checked = state.glassBottomBar,
-                        onCheckedChange = viewModel::updateGlassBottomBar,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun MiuixAppearanceSettingsPage(state: AppState, viewModel: MusicTogetherViewModel) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        item { UiStyleSelector(state.uiStyle, viewModel::updateUiStyle) }
         item { SettingsSectionTitle("主题") }
         item {
             MiuixSettingsGroup {
@@ -480,103 +342,37 @@ private fun ShareCardSettingsSection(settings: ShareCardSettings, viewModel: Mus
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri?.let(viewModel::setShareCardLocalImage)
     }
-    when (LocalUiStyle.current) {
-        UiStyle.Material3 -> Card(
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-        ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Icon(Icons.Default.Palette, null, tint = MaterialTheme.colorScheme.primary)
-                    Column {
-                        Text("分享卡片", fontWeight = FontWeight.SemiBold)
-                        Text("自定义分享图片的背景和信息内容", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-                ChoiceSetting(
-                    title = "背景来源",
-                    summary = "渐变、当前歌曲封面、本地图片或网络图片",
-                    icon = Icons.Default.Palette,
-                    entries = ShareCardBackgroundSource.entries,
-                    selected = settings.backgroundSource,
-                    label = { it.label },
-                    wrapInCard = false,
-                    onSelected = { source -> viewModel.updateShareCardSettings { it.copy(backgroundSource = source) } },
-                )
-                if (settings.backgroundSource == ShareCardBackgroundSource.LocalImage) {
-                    Text(
-                        settings.localImagePath?.let { "已选择本地图片" } ?: "尚未选择本地图片",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    AppButton("选择本地图片", { picker.launch("image/*") }, modifier = Modifier.fillMaxWidth(), primary = false)
-                    AppButton(
-                        "恢复歌曲封面",
-                        { viewModel.updateShareCardSettings { it.copy(backgroundSource = ShareCardBackgroundSource.TrackCover) } },
-                        modifier = Modifier.fillMaxWidth(),
-                        primary = false,
-                    )
-                }
-                if (settings.backgroundSource == ShareCardBackgroundSource.Url) {
-                    AppTextField(
-                        value = settings.backgroundUrl,
-                        onValueChange = { viewModel.updateShareCardSettings { current -> current.copy(backgroundUrl = it) } },
-                        label = "背景图片 URL",
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                SettingsSlider("背景模糊", "${settings.backgroundBlur}", Icons.Default.BlurOn, settings.backgroundBlur.toFloat(), 0f..8f, 7, false) {
-                    viewModel.updateShareCardSettings { current -> current.copy(backgroundBlur = it.toInt()) }
-                }
-                SettingsSlider("背景暗化", "${(settings.backgroundDim * 100).toInt()}%", Icons.Default.ColorLens, settings.backgroundDim, 0f..0.8f, 7, false) {
-                    viewModel.updateShareCardSettings { current -> current.copy(backgroundDim = it) }
-                }
-                SettingsSwitch("显示歌曲封面", "在分享卡片左侧保留歌曲封面", Icons.Default.Palette, settings.showCover) {
-                    viewModel.updateShareCardSettings { current -> current.copy(showCover = it) }
-                }
-                SettingsSwitch("显示二维码", "保留扫码加入房间的二维码区域", Icons.Default.QrCode, settings.showQrCode) {
-                    viewModel.updateShareCardSettings { current -> current.copy(showQrCode = it) }
-                }
-                SettingsSwitch("显示房间链接", "在卡片底部显示可复制的网页链接", Icons.Default.Link, settings.showLink) {
-                    viewModel.updateShareCardSettings { current -> current.copy(showLink = it) }
-                }
-            }
+    MiuixSettingsGroup {
+        SettingsSectionTitle("分享卡片")
+        ChoiceSetting("背景来源", "渐变、歌曲封面、本地图片或网络图片", Icons.Default.Palette, ShareCardBackgroundSource.entries, settings.backgroundSource, { it.label }, false) {
+            viewModel.updateShareCardSettings { current -> current.copy(backgroundSource = it) }
         }
-        UiStyle.Miuix -> MiuixSettingsGroup {
-            SettingsSectionTitle("分享卡片")
-            ChoiceSetting("背景来源", "渐变、歌曲封面、本地图片或网络图片", Icons.Default.Palette, ShareCardBackgroundSource.entries, settings.backgroundSource, { it.label }, false) {
-                viewModel.updateShareCardSettings { current -> current.copy(backgroundSource = it) }
-            }
-            if (settings.backgroundSource == ShareCardBackgroundSource.LocalImage) {
-                AppButton("选择本地图片", { picker.launch("image/*") }, modifier = Modifier.fillMaxWidth(), primary = false)
-                AppButton(
-                    "恢复歌曲封面",
-                    { viewModel.updateShareCardSettings { it.copy(backgroundSource = ShareCardBackgroundSource.TrackCover) } },
-                    modifier = Modifier.fillMaxWidth(),
-                    primary = false,
-                )
-            }
-            if (settings.backgroundSource == ShareCardBackgroundSource.Url) {
-                AppTextField(settings.backgroundUrl, { value -> viewModel.updateShareCardSettings { it.copy(backgroundUrl = value) } }, "背景图片 URL", Modifier.fillMaxWidth())
-            }
-            SettingsSlider("背景模糊", settings.backgroundBlur.toString(), Icons.Default.BlurOn, settings.backgroundBlur.toFloat(), 0f..8f, 7, false) { value ->
-                viewModel.updateShareCardSettings { it.copy(backgroundBlur = value.toInt()) }
-            }
-            SettingsSlider("背景暗化", "${(settings.backgroundDim * 100).toInt()}%", Icons.Default.ColorLens, settings.backgroundDim, 0f..0.8f, 7, false) { value ->
-                viewModel.updateShareCardSettings { it.copy(backgroundDim = value) }
-            }
-            SettingsSwitch("显示歌曲封面", "在分享卡片左侧保留歌曲封面", Icons.Default.Palette, settings.showCover, false) { value -> viewModel.updateShareCardSettings { it.copy(showCover = value) } }
-            SettingsSwitch("显示二维码", "保留扫码加入房间的二维码区域", Icons.Default.QrCode, settings.showQrCode, false) { value -> viewModel.updateShareCardSettings { it.copy(showQrCode = value) } }
-            SettingsSwitch("显示房间链接", "在卡片底部显示可复制的网页链接", Icons.Default.Link, settings.showLink, false) { value -> viewModel.updateShareCardSettings { it.copy(showLink = value) } }
+        if (settings.backgroundSource == ShareCardBackgroundSource.LocalImage) {
+            AppButton("选择本地图片", { picker.launch("image/*") }, modifier = Modifier.fillMaxWidth(), primary = false)
+            AppButton(
+                "恢复歌曲封面",
+                { viewModel.updateShareCardSettings { it.copy(backgroundSource = ShareCardBackgroundSource.TrackCover) } },
+                modifier = Modifier.fillMaxWidth(),
+                primary = false,
+            )
         }
+        if (settings.backgroundSource == ShareCardBackgroundSource.Url) {
+            AppTextField(settings.backgroundUrl, { value -> viewModel.updateShareCardSettings { it.copy(backgroundUrl = value) } }, "背景图片 URL", Modifier.fillMaxWidth())
+        }
+        SettingsSlider("背景模糊", settings.backgroundBlur.toString(), Icons.Default.BlurOn, settings.backgroundBlur.toFloat(), 0f..8f, 7, false) { value ->
+            viewModel.updateShareCardSettings { it.copy(backgroundBlur = value.toInt()) }
+        }
+        SettingsSlider("背景暗化", "${(settings.backgroundDim * 100).toInt()}%", Icons.Default.ColorLens, settings.backgroundDim, 0f..0.8f, 7, false) { value ->
+            viewModel.updateShareCardSettings { it.copy(backgroundDim = value) }
+        }
+        SettingsSwitch("显示歌曲封面", "在分享卡片左侧保留歌曲封面", Icons.Default.Palette, settings.showCover, false) { value -> viewModel.updateShareCardSettings { it.copy(showCover = value) } }
+        SettingsSwitch("显示二维码", "保留扫码加入房间的二维码区域", Icons.Default.QrCode, settings.showQrCode, false) { value -> viewModel.updateShareCardSettings { it.copy(showQrCode = value) } }
+        SettingsSwitch("显示房间链接", "在卡片底部显示可复制的网页链接", Icons.Default.Link, settings.showLink, false) { value -> viewModel.updateShareCardSettings { it.copy(showLink = value) } }
     }
 }
 
 @Composable
 private fun PlayerSettingsPage(settings: PlayerDisplaySettings, viewModel: MusicTogetherViewModel) {
-    if (LocalUiStyle.current == UiStyle.Miuix) {
-        MiuixPlayerSettingsPage(settings, viewModel)
-        return
-    }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
@@ -621,69 +417,18 @@ private fun PlayerSettingsPage(settings: PlayerDisplaySettings, viewModel: Music
 }
 
 @Composable
-private fun MiuixPlayerSettingsPage(settings: PlayerDisplaySettings, viewModel: MusicTogetherViewModel) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        item { SettingsSectionTitle("辅助歌词") }
-        item {
-            MiuixSettingsGroup {
-                SettingsSwitch("显示翻译", "显示主歌词下方的翻译", Icons.Default.Translate, settings.showTranslation, false) { value -> viewModel.updatePlayerDisplaySettings { it.copy(showTranslation = value) } }
-                SettingsSwitch("显示音译", "显示罗马音或逐词音译", Icons.Default.Translate, settings.showRomanization, false) { value -> viewModel.updatePlayerDisplaySettings { it.copy(showRomanization = value) } }
-            }
-        }
-        item { SettingsSectionTitle("排版") }
-        item {
-            MiuixSettingsGroup {
-                SettingsSlider("歌词大小", "${(settings.lyricFontScale * 100).toInt()}%", Icons.Default.GraphicEq, settings.lyricFontScale, 0.8f..1.3f, 9, false) { value -> viewModel.updatePlayerDisplaySettings { it.copy(lyricFontScale = value) } }
-                SettingsSlider("歌词字重", settings.lyricFontWeight.toString(), Icons.Default.GraphicEq, settings.lyricFontWeight.toFloat(), 400f..800f, 3, false) { value -> viewModel.updatePlayerDisplaySettings { it.copy(lyricFontWeight = value.toInt()) } }
-                SettingsSlider("当前行位置", "${(settings.lyricAlignPosition * 100).toInt()}%", Icons.Default.Tune, settings.lyricAlignPosition, 0.05f..0.45f, 7, false) { value -> viewModel.updatePlayerDisplaySettings { it.copy(lyricAlignPosition = value) } }
-            }
-        }
-        item { SettingsSectionTitle("动画与背景") }
-        item {
-            MiuixSettingsGroup {
-                SettingsSwitch("弹簧动画", "使用 AMLL 风格的物理行切换", Icons.Default.Animation, settings.lyricSpringAnimation, false) { value -> viewModel.updatePlayerDisplaySettings { it.copy(lyricSpringAnimation = value) } }
-                SettingsSwitch("当前行缩放", "突出当前播放的歌词行", Icons.Default.Animation, settings.lyricScaleEffect, false) { value -> viewModel.updatePlayerDisplaySettings { it.copy(lyricScaleEffect = value) } }
-                SettingsSwitch("非当前行模糊", "更接近 AMLL，可能增加渲染负担", Icons.Default.BlurOn, settings.lyricBlurEffect, false) { value -> viewModel.updatePlayerDisplaySettings { it.copy(lyricBlurEffect = value) } }
-                SettingsSwitch("流体封面背景", "保持移动端全帧率的缓慢流体运动", Icons.Default.Animation, settings.backgroundMotion, false) { value -> viewModel.updatePlayerDisplaySettings { it.copy(backgroundMotion = value) } }
-                if (settings.backgroundMotion) {
-                    SettingsSlider("背景运动强度", "${(settings.backgroundMotionStrength * 100).toInt()}%", Icons.Default.Animation, settings.backgroundMotionStrength, 0.5f..1.5f, 9, false) { value -> viewModel.updatePlayerDisplaySettings { it.copy(backgroundMotionStrength = value) } }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun PlaybackSettingsPage(state: AppState, viewModel: MusicTogetherViewModel) {
-    if (LocalUiStyle.current == UiStyle.Miuix) {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-        ) {
-            item {
-                MiuixSettingsGroup {
-                    SettingsSwitch("平滑变速同步", "小漂移使用保持音高的限幅变速", Icons.Default.SettingsEthernet, state.playbackTempoSyncEnabled, false, viewModel::updatePlaybackTempoSync)
-                    SettingsSwitch("大漂移硬跳转", "连续确认明显漂移后执行 Seek", Icons.Default.SettingsEthernet, state.playbackHardSeekSyncEnabled, false, viewModel::updatePlaybackHardSeekSync)
-                    SettingsSlider("同步包间隔", "${state.syncPacketIntervalSeconds} 秒", Icons.Default.SettingsEthernet, state.syncPacketIntervalSeconds.toFloat(), 1f..60f, 58, false) { viewModel.updateSyncPacketInterval(it.toInt()) }
-                }
-            }
-        }
-        return
-    }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item { SettingsSwitch("平滑变速同步", "小漂移使用保持音高的限幅变速", Icons.Default.SettingsEthernet, state.playbackTempoSyncEnabled, onCheckedChange = viewModel::updatePlaybackTempoSync) }
-        item { SettingsSwitch("大漂移硬跳转", "连续确认明显漂移后执行 Seek", Icons.Default.SettingsEthernet, state.playbackHardSeekSyncEnabled, onCheckedChange = viewModel::updatePlaybackHardSeekSync) }
-        item { SettingsSlider("同步包间隔", "${state.syncPacketIntervalSeconds} 秒", Icons.Default.SettingsEthernet, state.syncPacketIntervalSeconds.toFloat(), 1f..60f, 58) {
-            viewModel.updateSyncPacketInterval(it.toInt())
-        } }
+        item {
+            MiuixSettingsGroup {
+                SettingsSwitch("平滑变速同步", "小漂移使用保持音高的限幅变速", Icons.Default.SettingsEthernet, state.playbackTempoSyncEnabled, false, viewModel::updatePlaybackTempoSync)
+                SettingsSwitch("大漂移硬跳转", "连续确认明显漂移后执行 Seek", Icons.Default.SettingsEthernet, state.playbackHardSeekSyncEnabled, false, viewModel::updatePlaybackHardSeekSync)
+                SettingsSlider("同步包间隔", "${state.syncPacketIntervalSeconds} 秒", Icons.Default.SettingsEthernet, state.syncPacketIntervalSeconds.toFloat(), 1f..60f, 58, false) { viewModel.updateSyncPacketInterval(it.toInt()) }
+            }
+        }
     }
 }
 
@@ -691,66 +436,36 @@ private fun PlaybackSettingsPage(state: AppState, viewModel: MusicTogetherViewMo
 private fun GeneralSettingsPage(state: AppState, viewModel: MusicTogetherViewModel) {
     val onAudioMixingChanged = rememberHapticValueChange(viewModel::updateAllowAudioMixing)
     val onHapticFeedbackChanged = rememberHapticValueChange(viewModel::updateHapticFeedbackEnabled)
-    if (LocalUiStyle.current == UiStyle.Miuix) {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-        ) {
-            item {
-                MiuixSettingsGroup {
-                    SettingsSwitch(
-                        "允许与其他应用同时播放",
-                        "开启后不再请求音频焦点，不主动暂停或压低其他媒体音量",
-                        Icons.Default.PlayCircle,
-                        state.allowAudioMixing,
-                        false,
-                        onAudioMixingChanged,
-                    )
-                    SettingsSwitch(
-                        "触感反馈",
-                        "点击按钮、导航项和可操作卡片时提供轻微震动",
-                        Icons.Default.Vibration,
-                        state.hapticFeedbackEnabled,
-                        false,
-                        onHapticFeedbackChanged,
-                    )
-                }
-            }
-        }
-        return
-    }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            SettingsSwitch(
-                "允许与其他应用同时播放",
-                "开启后不再请求音频焦点，不主动暂停或压低其他媒体音量",
-                Icons.Default.PlayCircle,
-                state.allowAudioMixing,
-                onCheckedChange = onAudioMixingChanged,
-            )
-        }
-        item {
-            SettingsSwitch(
-                "触感反馈",
-                "点击按钮、导航项和可操作卡片时提供轻微震动",
-                Icons.Default.Vibration,
-                state.hapticFeedbackEnabled,
-                onCheckedChange = onHapticFeedbackChanged,
-            )
+            MiuixSettingsGroup {
+                SettingsSwitch(
+                    "允许与其他应用同时播放",
+                    "开启后不再请求音频焦点，不主动暂停或压低其他媒体音量",
+                    Icons.Default.PlayCircle,
+                    state.allowAudioMixing,
+                    false,
+                    onAudioMixingChanged,
+                )
+                SettingsSwitch(
+                    "触感反馈",
+                    "点击按钮、导航项和可操作卡片时提供轻微震动",
+                    Icons.Default.Vibration,
+                    state.hapticFeedbackEnabled,
+                    false,
+                    onHapticFeedbackChanged,
+                )
+            }
         }
     }
 }
 
 @Composable
 private fun SettingsSectionTitle(text: String) {
-    when (LocalUiStyle.current) {
-        UiStyle.Material3 -> Text(text, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp))
-        UiStyle.Miuix -> MiuixText(text, style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp))
-    }
+    MiuixText(text, style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp))
 }
 
 @Composable
@@ -762,28 +477,16 @@ private fun SettingsSwitch(
     wrapInCard: Boolean = true,
     onCheckedChange: (Boolean) -> Unit,
 ) {
-    when (LocalUiStyle.current) {
-        UiStyle.Material3 -> Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
-            ListItem(
-                headlineContent = { Text(title, fontWeight = FontWeight.SemiBold) },
-                supportingContent = { Text(summary) },
-                leadingContent = { Icon(icon, null, tint = MaterialTheme.colorScheme.primary) },
-                trailingContent = { Switch(checked, onCheckedChange) },
-            )
-        }
-        UiStyle.Miuix -> {
-            val preference: @Composable () -> Unit = {
-                SwitchPreference(
-                title = title,
-                summary = summary,
-                startAction = { MiuixIcon(icon, null, tint = MiuixTheme.colorScheme.onBackground) },
-                checked = checked,
-                onCheckedChange = onCheckedChange,
-                )
-            }
-            if (wrapInCard) MiuixCard(modifier = Modifier.fillMaxWidth()) { preference() } else preference()
-        }
+    val preference: @Composable () -> Unit = {
+        SwitchPreference(
+            title = title,
+            summary = summary,
+            startAction = { MiuixIcon(icon, null, tint = MiuixTheme.colorScheme.onBackground) },
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+        )
     }
+    if (wrapInCard) MiuixCard(modifier = Modifier.fillMaxWidth()) { preference() } else preference()
 }
 
 @Composable
@@ -797,39 +500,17 @@ private fun <T> ChoiceSetting(
     wrapInCard: Boolean = true,
     onSelected: (T) -> Unit,
 ) {
-    when (LocalUiStyle.current) {
-        UiStyle.Material3 -> Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
-                    Column { Text(title, fontWeight = FontWeight.SemiBold); Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                }
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                    entries.forEachIndexed { index, entry ->
-                        SegmentedButton(
-                            selected = entry == selected,
-                            onClick = { onSelected(entry) },
-                            shape = SegmentedButtonDefaults.itemShape(index, entries.size),
-                            label = { Text(label(entry)) },
-                        )
-                    }
-                }
-            }
-        }
-        UiStyle.Miuix -> {
-            val preference: @Composable () -> Unit = {
-                OverlayDropdownPreference(
-                title = title,
-                summary = summary,
-                items = entries.map(label),
-                startAction = { MiuixIcon(icon, null, tint = MiuixTheme.colorScheme.onBackground) },
-                selectedIndex = entries.indexOf(selected).coerceAtLeast(0),
-                onSelectedIndexChange = { index -> entries.getOrNull(index)?.let(onSelected) },
-                )
-            }
-            if (wrapInCard) MiuixCard(modifier = Modifier.fillMaxWidth()) { preference() } else preference()
-        }
+    val preference: @Composable () -> Unit = {
+        OverlayDropdownPreference(
+            title = title,
+            summary = summary,
+            items = entries.map(label),
+            startAction = { MiuixIcon(icon, null, tint = MiuixTheme.colorScheme.onBackground) },
+            selectedIndex = entries.indexOf(selected).coerceAtLeast(0),
+            onSelectedIndexChange = { index -> entries.getOrNull(index)?.let(onSelected) },
+        )
     }
+    if (wrapInCard) MiuixCard(modifier = Modifier.fillMaxWidth()) { preference() } else preference()
 }
 
 @Composable
@@ -843,37 +524,23 @@ private fun SettingsSlider(
     wrapInCard: Boolean = true,
     onValueChange: (Float) -> Unit,
 ) {
-    when (LocalUiStyle.current) {
-        UiStyle.Material3 -> Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
-            Column(Modifier.padding(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
-                    Text(title, Modifier.padding(start = 10.dp).weight(1f), fontWeight = FontWeight.SemiBold)
-                    Text(valueLabel, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Slider(value = value, onValueChange = onValueChange, valueRange = range, steps = steps)
+    val sliderContent: @Composable () -> Unit = {
+        Column(Modifier.padding(vertical = 4.dp)) {
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                MiuixIcon(icon, null, tint = MiuixTheme.colorScheme.onBackground)
+                MiuixText(title, Modifier.padding(start = 10.dp).weight(1f), fontWeight = FontWeight.SemiBold)
+                MiuixText(valueLabel, color = MiuixTheme.colorScheme.onSurfaceVariantActions)
             }
-        }
-        UiStyle.Miuix -> {
-            val sliderContent: @Composable () -> Unit = {
-            Column(Modifier.padding(vertical = 4.dp)) {
-                Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    MiuixIcon(icon, null, tint = MiuixTheme.colorScheme.onBackground)
-                    MiuixText(title, Modifier.padding(start = 10.dp).weight(1f), fontWeight = FontWeight.SemiBold)
-                    MiuixText(valueLabel, color = MiuixTheme.colorScheme.onSurfaceVariantActions)
-                }
-                MiuixSlider(
-                    value = value,
-                    onValueChange = onValueChange,
-                    valueRange = range,
-                    steps = steps,
-                    modifier = Modifier.padding(horizontal = 12.dp),
-                )
-            }
-            }
-            if (wrapInCard) MiuixCard(modifier = Modifier.fillMaxWidth()) { sliderContent() } else sliderContent()
+            MiuixSlider(
+                value = value,
+                onValueChange = onValueChange,
+                valueRange = range,
+                steps = steps,
+                modifier = Modifier.padding(horizontal = 12.dp),
+            )
         }
     }
+    if (wrapInCard) MiuixCard(modifier = Modifier.fillMaxWidth()) { sliderContent() } else sliderContent()
 }
 
 @Composable

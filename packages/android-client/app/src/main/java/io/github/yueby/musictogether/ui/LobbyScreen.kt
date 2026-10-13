@@ -2,7 +2,6 @@ package io.github.yueby.musictogether.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,8 +34,6 @@ import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -67,13 +64,11 @@ import io.github.yueby.musictogether.model.AppState
 import io.github.yueby.musictogether.model.ConnectionStatus
 import io.github.yueby.musictogether.model.RoomListItem
 import io.github.yueby.musictogether.model.Track
-import io.github.yueby.musictogether.model.UiStyle
 import io.github.yueby.musictogether.model.usesFloatingBottomBar
 import io.github.yueby.musictogether.ui.designsystem.LocalAppBlurEnabled
 import io.github.yueby.musictogether.ui.designsystem.LocalBottomBarStyle
 import io.github.yueby.musictogether.ui.designsystem.LocalGlassBottomBarEnabled
 import io.github.yueby.musictogether.ui.designsystem.LocalAppPageBackground
-import io.github.yueby.musictogether.ui.designsystem.LocalUiStyle
 import io.github.yueby.musictogether.ui.designsystem.rememberAppBlurBackdrop
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import top.yukonga.miuix.kmp.blur.layerBackdrop
@@ -113,11 +108,10 @@ fun LobbyScreen(
     val connectedServerCount = state.servers.count { it.status == ConnectionStatus.Connected }
     val roomCount = state.servers.sumOf { it.rooms.size }
     val layoutDirection = LocalLayoutDirection.current
-    val floatingBar = LocalUiStyle.current.usesFloatingBottomBar(LocalBottomBarStyle.current)
+    val floatingBar = usesFloatingBottomBar(LocalBottomBarStyle.current)
     val navigationBarInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val blurBackdrop = rememberAppBlurBackdrop(
-        enabled = LocalUiStyle.current == UiStyle.Miuix &&
-            floatingBar &&
+        enabled = floatingBar &&
             LocalAppBlurEnabled.current &&
             LocalGlassBottomBarEnabled.current,
     )
@@ -275,7 +269,7 @@ fun LobbyScreen(
                 .fillMaxSize()
                 .padding(bottom = dockHeight)
                 .padding(
-                    top = if (visibleTab == LobbyTab.Settings && LocalUiStyle.current == UiStyle.Miuix) {
+                    top = if (visibleTab == LobbyTab.Settings) {
                         0.dp
                     } else {
                         contentPadding.calculateTopPadding()
@@ -407,33 +401,20 @@ private fun LobbyHeading(
     summary: String,
     compact: Boolean = false,
 ) {
-    if (LocalUiStyle.current == UiStyle.Miuix) {
-        MiuixText(
-            text = title,
-            style = if (compact) MiuixTheme.textStyles.title2 else MiuixTheme.textStyles.title1,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        MiuixText(
-            text = summary,
-            style = if (compact) MiuixTheme.textStyles.footnote1 else MiuixTheme.textStyles.body2,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    } else {
-        Text(
-            text = title,
-            style = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.displaySmall,
-            fontWeight = FontWeight.Bold,
-        )
-        Text(
-            text = summary,
-            style = if (compact) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
+    MiuixText(
+        text = title,
+        style = if (compact) MiuixTheme.textStyles.title2 else MiuixTheme.textStyles.title1,
+        fontWeight = FontWeight.Bold,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+    MiuixText(
+        text = summary,
+        style = if (compact) MiuixTheme.textStyles.footnote1 else MiuixTheme.textStyles.body2,
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 @Composable
@@ -443,11 +424,7 @@ private fun LobbyIconButton(
     content: @Composable () -> Unit,
 ) {
     val onHapticClick = rememberHapticClick(onClick)
-    if (LocalUiStyle.current == UiStyle.Miuix) {
-        MiuixIconButton(onClick = onHapticClick, enabled = enabled, content = content)
-    } else {
-        IconButton(onClick = onHapticClick, enabled = enabled, content = content)
-    }
+    MiuixIconButton(onClick = onHapticClick, enabled = enabled, content = content)
 }
 
 @Composable
@@ -456,20 +433,12 @@ private fun LobbyIcon(
     contentDescription: String?,
     modifier: Modifier = Modifier,
 ) {
-    if (LocalUiStyle.current == UiStyle.Miuix) {
-        MiuixIcon(
-            imageVector = imageVector,
-            contentDescription = contentDescription,
-            modifier = modifier,
-            tint = MiuixTheme.colorScheme.onSurface,
-        )
-    } else {
-        Icon(
-            imageVector = imageVector,
-            contentDescription = contentDescription,
-            modifier = modifier,
-        )
-    }
+    MiuixIcon(
+        imageVector = imageVector,
+        contentDescription = contentDescription,
+        modifier = modifier,
+        tint = MiuixTheme.colorScheme.onSurface,
+    )
 }
 
 @Composable
@@ -478,31 +447,17 @@ private fun LobbySectionTitle(title: String, icon: ImageVector) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        if (LocalUiStyle.current == UiStyle.Miuix) {
-            MiuixIcon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier.size(26.dp),
-                tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
-            )
-            MiuixText(
-                text = title,
-                style = MiuixTheme.textStyles.title2,
-                fontWeight = FontWeight.Bold,
-            )
-        } else {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier.size(26.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-            )
-        }
+        MiuixIcon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(26.dp),
+            tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
+        )
+        MiuixText(
+            text = title,
+            style = MiuixTheme.textStyles.title2,
+            fontWeight = FontWeight.Bold,
+        )
     }
 }
 
@@ -515,27 +470,11 @@ private fun LobbyActionCard(
     modifier: Modifier = Modifier,
 ) {
     val onHapticClick = rememberHapticClick(onClick)
-    if (LocalUiStyle.current == UiStyle.Miuix) {
-        MiuixCard(
-            modifier = modifier.height(112.dp),
-            onClick = onHapticClick,
-        ) {
-            LobbyActionCardContent(icon, title, subtitle, miuix = true)
-        }
-    } else {
-        val shape = RoundedCornerShape(16.dp)
-        Card(
-            onClick = onHapticClick,
-            modifier = modifier
-                .height(112.dp)
-                .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.48f), shape),
-            shape = shape,
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.78f),
-            ),
-        ) {
-            LobbyActionCardContent(icon, title, subtitle, miuix = false)
-        }
+    MiuixCard(
+        modifier = modifier.height(112.dp),
+        onClick = onHapticClick,
+    ) {
+        LobbyActionCardContent(icon, title, subtitle)
     }
 }
 
@@ -544,45 +483,26 @@ private fun LobbyActionCardContent(
     icon: ImageVector,
     title: String,
     subtitle: String,
-    miuix: Boolean,
 ) {
     Column(
         modifier = Modifier.padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (miuix) {
-            MiuixIcon(icon, null, Modifier.size(24.dp), tint = MiuixTheme.colorScheme.primary)
-            MiuixText(
-                title,
-                style = MiuixTheme.textStyles.title4,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            MiuixText(
-                subtitle,
-                style = MiuixTheme.textStyles.footnote2,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        } else {
-            Icon(icon, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
-            Text(
-                title,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+        MiuixIcon(icon, null, Modifier.size(24.dp), tint = MiuixTheme.colorScheme.primary)
+        MiuixText(
+            title,
+            style = MiuixTheme.textStyles.title4,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        MiuixText(
+            subtitle,
+            style = MiuixTheme.textStyles.footnote2,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -609,86 +529,39 @@ private fun TrackResumeCard(track: Track, onClick: (() -> Unit)?) {
                     modifier = Modifier
                         .size(68.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(
-                            if (LocalUiStyle.current == UiStyle.Miuix) {
-                                MiuixTheme.colorScheme.primaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.primaryContainer
-                            },
-                        ),
+                        .background(MiuixTheme.colorScheme.primaryContainer),
                     contentAlignment = Alignment.Center,
                 ) {
                     LobbyIcon(Icons.Default.MusicNote, contentDescription = null)
                 }
             }
             Column(Modifier.weight(1f)) {
-                if (LocalUiStyle.current == UiStyle.Miuix) {
-                    MiuixText(
-                        track.title,
-                        style = MiuixTheme.textStyles.title3,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    MiuixText(
-                        track.artist.joinToString(" / "),
-                        style = MiuixTheme.textStyles.body2,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                } else {
-                    Text(
-                        track.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        track.artist.joinToString(" / "),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-            if (LocalUiStyle.current == UiStyle.Miuix) {
-                MiuixIcon(
-                    Icons.AutoMirrored.Filled.ArrowForward,
-                    "打开播放器",
-                    tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
+                MiuixText(
+                    track.title,
+                    style = MiuixTheme.textStyles.title3,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
-            } else {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowForward,
-                    "打开播放器",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                MiuixText(
+                    track.artist.joinToString(" / "),
+                    style = MiuixTheme.textStyles.body2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
+            MiuixIcon(
+                Icons.AutoMirrored.Filled.ArrowForward,
+                "打开播放器",
+                tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
+            )
         }
     }
-    if (LocalUiStyle.current == UiStyle.Miuix) {
-        MiuixCard(
-            modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
-            onClick = if (onClick != null) onHapticClick else null,
-        ) { content() }
-    } else {
-        val shape = RoundedCornerShape(16.dp)
-        Card(
-            onClick = onHapticClick,
-            enabled = onClick != null,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 10.dp)
-                .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.48f), shape),
-            shape = shape,
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.78f),
-            ),
-        ) { content() }
-    }
+    MiuixCard(
+        modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+        onClick = if (onClick != null) onHapticClick else null,
+    ) { content() }
 }
 
 @Composable
@@ -706,21 +579,12 @@ internal fun LobbyTabHeader(
         LobbyIconButton(onClick = onBack) {
             LobbyIcon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回首页")
         }
-        if (LocalUiStyle.current == UiStyle.Miuix) {
-            MiuixText(
-                title,
-                modifier = Modifier.weight(1f),
-                style = MiuixTheme.textStyles.title2,
-                fontWeight = FontWeight.Bold,
-            )
-        } else {
-            Text(
-                title,
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-            )
-        }
+        MiuixText(
+            title,
+            modifier = Modifier.weight(1f),
+            style = MiuixTheme.textStyles.title2,
+            fontWeight = FontWeight.Bold,
+        )
         onAction?.let { action ->
             LobbyIconButton(onClick = action) {
                 LobbyIcon(Icons.Default.Settings, contentDescription = "服务器设置")
@@ -962,23 +826,9 @@ private fun RoomCard(room: RoomListItem, onClick: () -> Unit) {
             }
         }
     }
-    if (LocalUiStyle.current == UiStyle.Miuix) {
-        MiuixCard(
-            modifier = Modifier.fillMaxWidth(),
-            insideMargin = PaddingValues(0.dp),
-            onClick = onHapticClick,
-        ) { content() }
-    } else {
-        val shape = RoundedCornerShape(12.dp)
-        Card(
-            onClick = onHapticClick,
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.38f), shape),
-            shape = shape,
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.74f),
-            ),
-        ) { content() }
-    }
+    MiuixCard(
+        modifier = Modifier.fillMaxWidth(),
+        insideMargin = PaddingValues(0.dp),
+        onClick = onHapticClick,
+    ) { content() }
 }

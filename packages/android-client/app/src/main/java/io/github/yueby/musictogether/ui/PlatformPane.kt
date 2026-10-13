@@ -1,7 +1,6 @@
 package io.github.yueby.musictogether.ui
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,14 +16,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -47,10 +40,8 @@ import io.github.yueby.musictogether.MusicTogetherViewModel
 import io.github.yueby.musictogether.model.AppState
 import io.github.yueby.musictogether.model.MyPlatformAuth
 import io.github.yueby.musictogether.model.Playlist
-import io.github.yueby.musictogether.model.UiStyle
 import io.github.yueby.musictogether.ui.designsystem.AppDialog
 import io.github.yueby.musictogether.ui.designsystem.LocalAppWindowSheet
-import io.github.yueby.musictogether.ui.designsystem.LocalUiStyle
 import top.yukonga.miuix.kmp.basic.Card as MiuixCard
 import top.yukonga.miuix.kmp.basic.SmallTitle as MiuixSmallTitle
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
@@ -104,51 +95,22 @@ private fun PlatformAccountList(state: AppState, viewModel: MusicTogetherViewMod
 
     val horizontalPadding = if (LocalAppWindowSheet.current) 0.dp else 12.dp
     Column(Modifier.fillMaxSize().padding(horizontal = horizontalPadding)) {
-        if (LocalUiStyle.current == UiStyle.Miuix) {
-            if (!LocalAppWindowSheet.current) {
-                MiuixSmallTitle(text = "平台账号与歌单")
-            }
-            MiuixText(
-                "登录后可浏览个人歌单，并为房间提供 VIP 播放能力。",
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                style = MiuixTheme.textStyles.footnote1,
+        if (!LocalAppWindowSheet.current) {
+            MiuixSmallTitle(text = "平台账号与歌单")
+        }
+        MiuixText(
+            "登录后可浏览个人歌单，并为房间提供 VIP 播放能力。",
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            style = MiuixTheme.textStyles.footnote1,
+        )
+        MiuixCard(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+            WindowDropdownPreference(
+                title = "音乐平台",
+                items = platformOptions.map { it.second },
+                selectedIndex = platformOptions.indexOfFirst { it.first == platform }.coerceAtLeast(0),
+                onSelectedIndexChange = { index -> platformOptions.getOrNull(index)?.let { platform = it.first } },
             )
-            MiuixCard(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                WindowDropdownPreference(
-                    title = "音乐平台",
-                    items = platformOptions.map { it.second },
-                    selectedIndex = platformOptions.indexOfFirst { it.first == platform }.coerceAtLeast(0),
-                    onSelectedIndexChange = { index -> platformOptions.getOrNull(index)?.let { platform = it.first } },
-                )
-            }
-        } else {
-            Text(
-                "平台账号 & 歌单",
-                modifier = Modifier.padding(start = 8.dp, top = 12.dp),
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                "登录后可浏览个人歌单，平台账号也会为房间提供 VIP 播放能力。",
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                platformOptions.forEach { (value, label) ->
-                    AssistChip(
-                        onClick = { platform = value },
-                        label = { Text(label) },
-                        leadingIcon = if (platform == value) {
-                            { Icon(Icons.Default.LibraryMusic, null, Modifier.size(16.dp)) }
-                        } else null,
-                    )
-                }
-            }
         }
 
         LazyColumn(
