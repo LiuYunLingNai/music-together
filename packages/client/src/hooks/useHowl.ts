@@ -324,7 +324,11 @@ export function useHowl(onTrackEnd: () => void) {
             const outgoing = outgoingHowlRef.current
             if (outgoing && outgoing !== howl) {
               outgoingHowlRef.current = null
-              outgoing.fade(outgoing.volume(), 0, TRACK_CROSSFADE_MS)
+              // outgoing 音量为 0 时 fade(0→0) 会让 Howler 的 fade tween 永久
+              // 空转（同下方 unmute 处的注释）；直接 dispose 前不必渐弱。
+              if (outgoing.volume() > 0) {
+                outgoing.fade(outgoing.volume(), 0, TRACK_CROSSFADE_MS)
+              }
               if (outgoingCleanupTimerRef.current) clearTimeout(outgoingCleanupTimerRef.current)
               outgoingCleanupTimerRef.current = setTimeout(() => {
                 outgoingCleanupTimerRef.current = null
@@ -335,7 +339,16 @@ export function useHowl(onTrackEnd: () => void) {
             unmuteTimerRef.current = setTimeout(() => {
               if (howlRef.current !== howl) return
               const latestVolume = usePlayerStore.getState().volume
-              howl.fade(0, latestVolume, SCHEDULED_START_FADE_MS, soundId)
+              // ★ from === to 的 fade 必须短路：Howler 的 _startFadeInterval 在
+              //   diff=0 时 steps=0 → 永不满足 clearInterval 条件 → **永久
+              //   interval**，每 ~20ms 把 volume 写回 0，吞掉之后一切音量设置
+              //   （实测：设置 0.8 后 100ms 内被写回）。latestVolume=0（静音用户）
+              //   精确命中这个边界。直接定位到终值即可，无需 tween。
+              if (latestVolume > 0) {
+                howl.fade(0, latestVolume, SCHEDULED_START_FADE_MS, soundId)
+              } else {
+                howl.volume(0, soundId)
+              }
               syncReadyRef.current = true
             }, 20)
           }

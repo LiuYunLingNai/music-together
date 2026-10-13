@@ -45,6 +45,18 @@ interface StretchGraph {
    *   **不会改变声音**（不接回 destination 的另一路），也不碰 SoundTouch。
    */
   analyser: AnalyserNode | null
+  /**
+   * 用户音量的图内一半（`installVolumeRouting` 的 √v 分支）。
+   *
+   * ★ 拓扑（上游 Mineradio 同款，见 installVolumeRouting 顶部说明）：
+   *     source(el.volume=√v) → soundtouch → volumeGain(√v) → destination
+   *                        └→ analyser（旁路，幅度 ∝ √v）
+   * analyser 在两半之间 —— **节拍反馈跟随音量**（√v 感知曲线），静音时
+   * 两半都写地板值，信号继续流过分析线，节拍不丢。
+   *
+   * 占位/失败图（无 source）为 null，保持原生 el.volume 语义。
+   */
+  volumeGain: GainNode | null
 }
 
 export interface TimeStretchController {
@@ -58,6 +70,36 @@ const graphByAudio = new WeakMap<HTMLMediaElement, StretchGraph>()
 const registrationByContext = new WeakMap<BaseAudioContext, Promise<void>>()
 let nextAudioUsesCors = false
 let obtainAudioPatched = false
+
+/**
+ * 已装"volume → gain 转发"的元素 → 其 gain。
+ *
+ * HTML5 元素是池化复用的：同元素换歌重 attach 时会再次走到建图代码，
+ * 必须避免对同一个元素重复 defineProperty（二次包装会让还原逻辑失效）。
+ * releaseTimeStretch 撤回 tap 时按此表还原原生 volume 属性。
+ */
+const descriptorRestoreRef = new WeakMap<HTMLMediaElement, GainNode>()
+
+/** 摘除元素上的 volume 转发，恢复原生属性（元素回池前调用）。 */
+function uninstallVolumeRouting(audio: HTMLMediaElement): void {
+  if (!descriptorRestoreRef.has(audio)) return
+  descriptorRestoreRef.delete(audio)
+  try {
+    delete (audio as unknown as Record<string, unknown>).volume
+  } catch {
+    /* defineProperty 的 own property 用 delete 移除；极老引擎忽略 */
+  }
+}
+
+/**
+ * 当前会话是否处于静音地板（用户音量 ≤ 0.001）。
+ *
+ * AudioAnalyser 的"播放中频谱全零"看门狗据此放行静音：地板下频谱≈全零是
+ * **预期行为**（低于字节精度），不是死 tap。true 表示"最后写入的
+ * 音量分支是地板值"；未建图（原生元素）时读不到转发值，恒 false ——
+ * 看门狗维持原判据，不会因静音漏报真异常。
+ */
+let volumeAtFloor = false
 
 /**
  * 占位"禁用图"（节拍丢失加固，见 attachTimeStretch 内注释）：
@@ -83,6 +125,7 @@ function createDisabledGraph(context: AudioContext, audio: HTMLMediaElement): St
     lastBlockCount: 0,
     lastUnderrunCount: 0,
     analyser: null,
+    volumeGain: null,
   }
 }
 
@@ -161,6 +204,15 @@ export function releaseTimeStretch(howl: Howl): (() => void) | null {
   if (graph?.analyser && getAudioTapAnalyser() === graph.analyser) {
     publishStretchAnalyser(null)
   }
+  // 撤回 volume 转发，把原生 volume 属性还给元素（回池复用后可能走
+  // 不建图的直通路径，需要原生语义）。把当前分支值反解回用户音量再写回，
+  // 避免音量在换歌瞬间跳变（地板值反解为 0，即真静音）。
+  if (descriptorRestoreRef.has(audio)) {
+    const gain = descriptorRestoreRef.get(audio)!
+    const branch = gain.gain.value
+    uninstallVolumeRouting(audio)
+    audio.volume = branch <= AUDIO_SILENCE_GAIN * 1.001 ? 0 : Math.min(1, branch * branch)
+  }
   if (graph?.initializing) {
     graph.cancelled = true
     // Howler 会在紧接着的 unload() 中才把元素放回池。返回一个收尾函数，
@@ -169,6 +221,75 @@ export function releaseTimeStretch(howl: Howl): (() => void) | null {
     return () => retireAudioElement(audio)
   }
   return null
+}
+
+/**
+ * 音量路由：把用户音量 v 拆成**元素 √v × 图内 gain √v**（上游 Mineradio
+ * `08-audio-graph-controls.js` 的 `writeAudioOutputGain` 同款），并施加
+ * 静音地板（上游 `AUDIO_SILENCE_GAIN`）。
+ *
+ * 拓扑：`source(el.volume=√v) → soundtouch → analyser(旁路) + volumeGain(√v) → destination`。
+ * analyser 卡在两半之间，看到的信号幅度 ∝ √v（感知曲线）——
+ * **节拍反馈跟随音量**（上游语义：低音量下视觉随之温柔），且 √v 在低音量端
+ * 比线性保更大的检测余量。总响度 = √v·√v = v，听感不变。
+ *
+ * 静音地板：音量 ≤ 0.001（上游 `audioSilentFloor` 判据）时两半都写
+ * `AUDIO_SILENCE_GAIN`（见常量处的取值论证）而不是 0 —— 元素 volume=0
+ * 会让 MediaElementSource 物理静音进图（本轮"静音丢节拍"的根因），
+ * 地板让信号继续流过 analyser，节拍引擎在静音时仍有东西可测。
+ *
+ * Howler 在 HTML5 模式下把音量直接写到 `el.volume`（`howl.volume()`、
+ * `howl.fade()` 的每帧 tween 都是），所以还是劫持元素自身的 volume 属性：
+ * `el.volume = v` → 元素写 √v'（带地板）、gain 写 √v'；读回返回 v。
+ * 只有成功建图（有 volumeGain）才装；失败图同样安装（分析线语义一致），
+ * 元素回池前由 `uninstallVolumeRouting` 还原。
+ */
+
+/** 静音地板（上游 Mineradio `AUDIO_SILENCE_GAIN` 的有效化修订）。
+ *
+ * 上游写 0.0001（-80dB）——但 -80dB 经 getByteFrequencyData 映射（默认
+ * -100/-30dB 区间）后字节读数 ≈ 1~3，再经 smoothing 实测衰减到全零：
+ * **上游的字面值在其自身分析链上读不出节拍**。这里取 0.005（-46dB）：
+ * 仍然完全听不见（歌正播放时被完全掩蔽；歌内静音段泄漏低于安静房间本底），
+ * 但字节读数 ~25/255，节拍引擎在静音时有真实信号可打点 —— 达成上游
+ * "静音节拍反馈仍在"的设计意图，而不只是字面值。
+ */
+export const AUDIO_SILENCE_GAIN = 0.005
+/** 上游 `audioSilentFloor` 的静音判据。 */
+const VOLUME_FLOOR_THRESHOLD = 0.001
+
+/** 上游 `writeAudioOutputGain` 的分支值：图内音量走感知平方根。 */
+function splitVolumeGain(volume: number): number {
+  if (volume <= VOLUME_FLOOR_THRESHOLD) return AUDIO_SILENCE_GAIN
+  return Math.sqrt(volume)
+}
+
+function installVolumeRouting(audio: HTMLMediaElement, gain: GainNode): void {
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'volume')
+  if (!descriptor) return
+  Object.defineProperty(audio, 'volume', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      // 读回"用户音量"：从 gain 反解 v = (√v)²。地板值反解为 0（静音）。
+      const branch = gain.gain.value
+      return branch <= AUDIO_SILENCE_GAIN * 1.001 ? 0 : Math.min(1, branch * branch)
+    },
+    set(next: number) {
+      const clamped = Math.max(0, Math.min(1, next))
+      const branch = splitVolumeGain(clamped)
+      gain.gain.value = branch
+      volumeAtFloor = clamped <= VOLUME_FLOOR_THRESHOLD
+      // 元素写同一分支值（上游同样同时写两处）。写地板而非 0：
+      // 元素 volume=0 会让进图的信号物理静音，分析线跟着全零。
+      descriptor.set!.call(audio, branch)
+    },
+  })
+}
+
+/** 看门狗查询：当前用户音量是否处于静音地板（频谱全零属预期）。 */
+export function isPlaybackVolumeAtFloor(): boolean {
+  return volumeAtFloor
 }
 
 function registerProcessor(context: AudioContext): Promise<void> {
@@ -187,7 +308,16 @@ function disableGraph(graph: StretchGraph, failed = false): void {
   graph.node.playbackRate.setValueAtTime(1, graph.context.currentTime)
   graph.node.disconnect()
   graph.source.disconnect()
-  graph.source.connect(graph.context.destination)
+  // ★ bypass 时音量节点仍在链上：source → volumeGain → destination。
+  //   元素 volume 属性已被转发到 gain（installVolumeRouting），不能把
+  //   元素直接接回 destination 而绕过它 —— 否则"元素 volume=1 全幅直出"
+  //   会让用户音量失控（变成最大音量）。
+  if (graph.volumeGain) {
+    graph.source.connect(graph.volumeGain)
+    graph.volumeGain.connect(graph.context.destination)
+  } else {
+    graph.source.connect(graph.context.destination)
+  }
   // 旁路时 worklet 被摘掉，分析节点要改从音源直接取，否则视觉会静音
   if (graph.analyser) graph.source.connect(graph.analyser)
   graph.audio.playbackRate = 1
@@ -241,6 +371,14 @@ export async function attachTimeStretch(howl: Howl): Promise<TimeStretchControll
     if (existing.analyser && getAudioTapAnalyser() !== existing.analyser) {
       publishStretchAnalyser(existing.analyser)
     }
+    // ★ 复用分支必须重新装 volume 转发：releaseTimeStretch 在换歌时已把
+    //   原生 volume 属性还给元素（uninstallVolumeRouting），若不接回，
+    //   Howler 写 el.volume=0 会让进图信号物理静音 —— 静音丢节拍从这里复发。
+    if (existing.volumeGain && !descriptorRestoreRef.has(audio)) {
+      existing.volumeGain.gain.value = splitVolumeGain(audio.volume)
+      installVolumeRouting(audio, existing.volumeGain)
+      descriptorRestoreRef.set(audio, existing.volumeGain)
+    }
     return createController(existing)
   }
 
@@ -279,21 +417,34 @@ export async function attachTimeStretch(howl: Howl): Promise<TimeStretchControll
     stretchNode.pitch.value = 1
     source.connect(stretchNode)
 
+    // 用户音量 √v 拆分（见 installVolumeRouting 顶部说明）：元素与 gain 各拿
+    // 一半，analyser 卡在中间看 √v 幅度。必须在发布 tap 之前装好转发，避免
+    // Howler 先写 el.volume=0 而此刻 gain 仍是默认 1 的窗口。
+    const volumeGain = context.createGain()
+    volumeGain.gain.value = splitVolumeGain(audio.volume)
+    installVolumeRouting(audio, volumeGain)
+    descriptorRestoreRef.set(audio, volumeGain)
+
     // 只读分析旁路：worklet 输出 → AnalyserNode（不接回 destination）。
     // 视觉层从这里取频谱 —— 这是唯一一条真正有音频流过的路径。
+    //
+    // ★ 不设 minDecibels/maxDecibels（上游 Mineradio 建图处同样只设 fftSize +
+    //   smoothing）：Web Audio 默认 -100/-30dB 下，静音地板信号的字节读数
+    //   仍有 ~25/255 —— 节拍引擎在静音时有足够分辨率继续打点（上游同款
+    //   语义）。此前项目里自设的 -82/-8 收窄把地板信号压到字节读数 2~7，
+    //   近似量化归零 —— 表现为"音量 0 就又没节拍"。
     let analyser: AnalyserNode | null = null
     try {
       analyser = context.createAnalyser()
       analyser.fftSize = 2048
       analyser.smoothingTimeConstant = 0.58
-      analyser.minDecibels = -82
-      analyser.maxDecibels = -8
       stretchNode.connect(analyser)
     } catch {
       analyser = null
     }
 
-    stretchNode.connect(context.destination)
+    stretchNode.connect(volumeGain)
+    volumeGain.connect(context.destination)
 
     const graph: StretchGraph = {
       audio,
@@ -308,6 +459,7 @@ export async function attachTimeStretch(howl: Howl): Promise<TimeStretchControll
       lastBlockCount: 0,
       lastUnderrunCount: 0,
       analyser,
+      volumeGain,
     }
     if (analyser) publishStretchAnalyser(analyser)
     graphByAudio.set(audio, graph)
@@ -354,14 +506,19 @@ export async function attachTimeStretch(howl: Howl): Promise<TimeStretchControll
       } catch {
         /* 节点可能尚未连接 */
       }
-      source.connect(context.destination)
+      // 失败图同语义：√v 拆分 + 地板，静音时节拍输入仍工作。
+      const fallbackGain = context.createGain()
+      fallbackGain.gain.value = splitVolumeGain(audio.volume)
+      installVolumeRouting(audio, fallbackGain)
+      descriptorRestoreRef.set(audio, fallbackGain)
+      source.connect(fallbackGain)
+      fallbackGain.connect(context.destination)
       let fallbackAnalyser: AnalyserNode | null = null
       try {
         fallbackAnalyser = context.createAnalyser()
         fallbackAnalyser.fftSize = 2048
         fallbackAnalyser.smoothingTimeConstant = 0.58
-        fallbackAnalyser.minDecibels = -82
-        fallbackAnalyser.maxDecibels = -8
+        // 不设 min/maxDecibels（与成功图一致，静音地板可读）
         source.connect(fallbackAnalyser)
         publishStretchAnalyser(fallbackAnalyser)
       } catch {
@@ -369,6 +526,7 @@ export async function attachTimeStretch(howl: Howl): Promise<TimeStretchControll
       }
       pendingGraph.source = source
       pendingGraph.analyser = fallbackAnalyser
+      pendingGraph.volumeGain = fallbackGain
       pendingGraph.initializing = false
       pendingGraph.failed = true
     } else {
