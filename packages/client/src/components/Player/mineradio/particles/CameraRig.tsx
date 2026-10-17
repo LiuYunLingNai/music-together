@@ -6,6 +6,7 @@ import { lyricPlayerBridge } from '@/lib/lyricPlayerBridge'
 import type { VisualModeId } from '../../stages/VisualMode'
 import { consumePrimeCamPunch, stepBeatCameraFrame } from './beatCamera'
 import { applyParticleSpinDrag, lyricWorldPos } from './gestureRotationState'
+import { isPointerOverUi } from './pointerUiHit'
 import { isPointerOverShelfCard } from './shelfHitRegistry'
 import { stageProjectionShiftX, stepStageSafeArea } from './stageSafeArea'
 import {
@@ -28,20 +29,6 @@ import {
 
 /** 拖动超过该像素数视为 drag（上游 `CLICK_THRESHOLD`）。 */
 const CLICK_THRESHOLD = 6
-
-/**
- * UI 命中检测（上游 `isPointerOverUi`）。
- *
- * 上游用一个 `UI_HIT_SELECTOR` 列出所有 HUD 容器，再 `closest()`。
- * 本项目里画布是唯一的全屏层，HUD 都是它的兄弟节点，因此这里用
- * 「命中点是否落在画布自身」来判断：落在画布上才是舞台交互。
- */
-function isPointerOverUi(event: { clientX: number; clientY: number }): boolean {
-  if (typeof document === 'undefined') return false
-  const el = document.elementFromPoint(event.clientX, event.clientY)
-  if (!el) return false
-  return !el.closest('.mt-mineradio-canvas-layer')
-}
 
 interface CameraRigProps {
   mode: VisualModeId
@@ -112,7 +99,9 @@ export function CameraRig({ mode, enabled = true, onCanvasClick }: CameraRigProp
     }
     const onPointerMove = (event: PointerEvent) => {
       // 歌单架热区需要持续读取指针位置（悬停判定不依赖射线命中）。
-      state.pointerSlot = { x: event.clientX, y: event.clientY }
+      // `movedAt` 盖的是**本次真实事件**的时刻 —— 歌单架的 650ms 空闲判定
+      // 靠它分辨"指针真的停了"与"只是又过了一帧"（见 `pointerSlot` 注释）。
+      state.pointerSlot = { x: event.clientX, y: event.clientY, movedAt: performance.now() }
       if (!state.rotating) return
 
       const drag = dragRef.current
@@ -346,6 +335,21 @@ export function CameraRig({ mode, enabled = true, onCanvasClick }: CameraRigProp
     //   ≈0.038/0.029，进 出都是慢速推拉。没有这层时指针在命中边界抖动，
     //   跟拍以全速来回甩 —— 用户报告的"触发相机位移又莫名回正、抽搐"。
     const shelfFocusType = focus.type === 'shelf'
+    // ★ 节拍 punch 缓动加速（上游 03-focus-cinema-camera.js:88-91）：
+    //   if (beatCam.punch > 0.01) {
+    //     focusEase  = max(focusEase,  0.12 + punch * 0.12)
+    //     radiusEase = max(radiusEase, 0.09 + punch * 0.12)
+    //   }
+    //   punch 期间相机**追得更快**，这是"跟拍有劲"的一半来源。
+    //   位置必须在 shelf 限速**之前** —— 上游让 shelfCameraSpeed 去缩放
+    //   已被 punch 抬高的 ease（:103-104），顺序反了跟拍就不受限速约束。
+    //   注意用的是 `kick.punch`（= 上游 `beatCam.punch`），不是下方 FOV 用的
+    //   `cameraPunch`：上游 `camPunch` 与 `beatCam.punch` 是两个独立量
+    //   （01-orbit-free-camera.js:30 vs 03-focus-cinema-camera.js:137）。
+    if (kick.punch > 0.01) {
+      positionEase = Math.max(positionEase, 0.12 + kick.punch * 0.12)
+      radiusEase = Math.max(radiusEase, 0.09 + kick.punch * 0.12)
+    }
     if (shelfFocusType) {
       // 进入中（active）或退出中（type 未清但 active 已关）都要限速
       const speed = SHELF_CAMERA_SPEED
@@ -430,7 +434,12 @@ export function CameraRig({ mode, enabled = true, onCanvasClick }: CameraRigProp
     //   本组件末尾本来就有一次重建，因此这里在其后追加。
     const perspective = camera as THREE.PerspectiveCamera
     const globalPunch = tickCameraPunch()
-    const cameraPunch = Math.max(globalPunch * 0.55, (kick.punch * 0.54 + kick.radiusKick * 0.16) * shake)
+    // 上游 03-focus-cinema-camera.js:137：
+    //   cameraPunch = max(camPunch*0.55, beatCam.punch*0.54 + radiusKick*0.16) * cameraShake
+    // ★ `cameraShake` 乘在**整个 max 之外**。此前本项目只把 shake 乘进第二个
+    //   参数，于是 globalPunch 那一支（预设切换/手势/歌单架触发的 camPunch）
+    //   完全不受 shake 调制 —— 画面抖动关掉时它照样全幅冲 FOV。
+    const cameraPunch = Math.max(globalPunch * 0.55, kick.punch * 0.54 + kick.radiusKick * 0.16) * shake
     const targetFov = 45 - cameraPunch * 2.35
     perspective.fov += (targetFov - perspective.fov) * (targetFov < perspective.fov ? 0.24 : 0.12)
     perspective.updateProjectionMatrix()

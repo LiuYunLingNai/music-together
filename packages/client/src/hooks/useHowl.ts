@@ -18,6 +18,7 @@ import { setHowlPosition } from '@/lib/howlPosition'
 import { registerActivePlaybackStop } from '@/lib/audioPlaybackLifecycle'
 import { lyricPlayerBridge } from '@/lib/lyricPlayerBridge'
 import { getScheduledPlaybackPosition } from '@/lib/playbackSync'
+import { hideLoading, showLoading } from '@/components/Player/mineradio/particles/loadingState'
 
 /** Max wait (ms) for Howler `unlock` event before giving up and skipping */
 const PLAY_ERROR_TIMEOUT_MS = 3000
@@ -194,6 +195,10 @@ export function useHowl(onTrackEnd: () => void) {
     preparedTrackRef.current = null
     soundIdRef.current = undefined
     stopTimeUpdate()
+    // 上游 `12-playback-switch-core.js:20`：`if (!isPlaying) hideLoading()`。
+    // 停播后不可能再有内容到达，雾环必须撤掉 —— 否则停止播放时画面会
+    // 永远留着一层雾。
+    hideLoading()
   }, [cancelScheduledPlayback, disposeHowl, stopTimeUpdate])
 
   const schedulePlayback = useCallback(
@@ -265,6 +270,15 @@ export function useHowl(onTrackEnd: () => void) {
 
       if (!track.streamUrl) return
 
+      // ★ 上游 `06-lyrics/03-podcast-playlist-loaders.js:39,71` 的
+      //   `showLoading()` … `finally { hideLoading() }` 形态：开始取内容时
+      //   点亮加载态雾环，取到就撤。上游用在播单列表加载；本项目的等价物
+      //   是音频缓冲区间（Howl 的 onload/onplay 之前）。
+      //
+      //   放在 `streamUrl` 空值返回**之后**：没有流地址时根本不会开始加载，
+      //   点亮雾环会永远停在那里（`hideLoading` 只由 onload/onplay 触发）。
+      showLoading()
+
       const currentVolume = usePlayerStore.getState().volume
       const roomId = useRoomStore.getState().room?.id ?? ''
       const playbackUrl =
@@ -291,6 +305,10 @@ export function useHowl(onTrackEnd: () => void) {
             clearTimeout(loadTimerRef.current)
             loadTimerRef.current = null
           }
+          // 上游 `05-playback/14-player-controls.js` 的 5 处 `hideLoading()`
+          // —— 音频可取即撤掉加载态雾环。上游的分支是"用户控制动作后"，
+          // 本项目的对应物是"缓冲区间结束"（见 loadingState.ts 的驱动源说明）。
+          hideLoading()
           const d = howl.duration()
           if (!deferCommit && Number.isFinite(d) && d > 0) {
             usePlayerStore.getState().setDuration(d)
@@ -304,6 +322,10 @@ export function useHowl(onTrackEnd: () => void) {
         onplay: (soundId) => {
           if (howlRef.current !== howl) return
 
+          // 上游 `14-player-controls.js:384` —— 播放态确立即撤加载态。
+          // 与 onload 那一处重复是**有意的**：onload 之后仍要 seek/对齐/
+          // 等 unlock，这段里雾环该继续显示；真正开播了才撤。
+          hideLoading()
           const scheduledStart = scheduledStartRef.current
           if (scheduledStart?.howl === howl) {
             const alignedTime = getScheduledPlaybackPosition(
@@ -392,6 +414,10 @@ export function useHowl(onTrackEnd: () => void) {
             clearTimeout(loadTimerRef.current)
             loadTimerRef.current = null
           }
+          // 上游 `13-playback-start-audio.js:1516,1541` 的 catch 里也有
+          // `hideLoading()` —— 加载失败同样要撤掉加载态，否则雾环会一直飘。
+          // （重试分支不撤：那次 `howl.load()` 仍有机会成功。）
+          hideLoading()
           console.error('Howl load error (after retry):', msg)
           toast.error(`「${trackTitleRef.current}」加载失败，已跳到下一首`)
           onTrackEnd()
@@ -421,6 +447,9 @@ export function useHowl(onTrackEnd: () => void) {
         if (howlRef.current !== howl || syncReadyRef.current) return
         loadTimerRef.current = null
         console.warn('Audio load timed out, skipping track')
+        // 上游 `12-playback-switch-core.js:20` 的 `if (!isPlaying) hideLoading()`
+        // —— 切歌/停播时撤掉加载态。超时放弃同理。
+        hideLoading()
         disposeHowl(howl)
         if (howlRef.current === howl) howlRef.current = null
         toast.error(`「${trackTitleRef.current}」加载超时，已跳到下一首`)

@@ -65,51 +65,134 @@ function safeColor(value: string | undefined, fallback: string): THREE.Color {
  *   glow = sonicNumber(fx, 'sonicGroundGlow', DEFAULT_GROUND_GLOW=68, 0, 100)
  *   uGlowIntensity = clamp(0.55 + glow*0.014 + bloomStrength*0.22, 0.45, 2.2)
  *
- * 出厂 bloomStrength=0.62（`04-fx-defaults.js:16`）→ 约 1.64。
- * 与封面色板无关 —— 此前本项目在有色板时写死 0.2，地形比上游暗得多。
+ * ★★ `sonicNumber` 的第三个参数是**兜底值**，只在 `fx` 里没有该键时生效。
+ *    而 `fx` 出厂就带 `sonicGroundGlow: 20`（`00-state/04-fx-defaults.js:110`），
+ *    所以上游实际跑的是 **20**，不是预设文件里那个 68。
+ *
+ *      glow=20 → clamp(0.55 + 0.28 + 0.1364) = 0.9664   ← 上游真实值
+ *      glow=68 → clamp(0.55 + 0.952 + 0.1364) = 1.6384  ← 错取 fallback
+ *
+ *    此前本项目取了 68，再乘 `TOPOGRAPHY_GLOW_TRIM 0.78` = 1.278，
+ *    **比上游亮 32%**。这正是 `ALIGNMENT-topography.md` §B15 为逐频段 EQ
+ *    正确警告过的同一个坑（"preset 文件内那个是未被采用的 fallback"），
+ *    辉光上重犯了一遍。
  */
-const UPSTREAM_GROUND_GLOW = 68
+const UPSTREAM_GROUND_GLOW = 20
 const UPSTREAM_BLOOM_STRENGTH = 0.62
 const TOPOGRAPHY_GLOW_INTENSITY = Math.max(
   0.45,
   Math.min(2.2, 0.55 + UPSTREAM_GROUND_GLOW * 0.014 + UPSTREAM_BLOOM_STRENGTH * 0.22),
 )
 
+/** 上游 `DEFAULT_GROUND_BASE_COLOR`（`sonic-topography-preset.js:26`）。 */
+const GROUND_BASE_COLOR = '#05070c'
+/** 上游 `DEFAULT_GROUND_COOL_COLOR`（同文件 :27），`palette.secondary` 的兜底。 */
+const GROUND_COOL_COLOR = '#0066ff'
+/** 上游 `DEFAULT_GROUND_ACCENT_COLOR`（同文件 :29），`palette.highlight` 的兜底。 */
+const GROUND_ACCENT_COLOR = '#33e6ff'
+/** 上游 `fx.visualTintColor` 出厂值（`04-fx-defaults.js:58`），`palette.primary` 的兜底。 */
+const VISUAL_TINT_COLOR = '#9db8cf'
+
 /**
- * 解析当前应当使用的主题。
+ * 上游 `sonicPaletteHex(value, fallback)` → `lyricPaletteColorToHex(…, 0.42)`
+ * → `lyricThreeColor(…, minLum = 0.42)`（`07-lyrics-palette-text-utils.js:565-576`）。
  *
- * 有封面调色板时按封面主色推导：底色压到阴影色的 20%（保住地形的暗部
- * 对比），冷/暖两极分别取 primary / secondary，涟漪取 highlight。
- * 这与上游 `resolveTopographyTheme` 的映射一致。
+ * 亮度地板：`lum = 0.299r + 0.587g + 0.114b`，低于 0.42 时三通道**各加**
+ * `floor - lum`（不是乘法缩放），再钳到 1。暗封面因此被抬亮而不是变灰。
+ */
+function groundPaletteColor(value: string | undefined, fallback: string): THREE.Color {
+  const c = safeColor(value, fallback)
+  const lum = c.r * 0.299 + c.g * 0.587 + c.b * 0.114
+  if (lum < 0.42) {
+    const lift = 0.42 - lum
+    c.r = Math.min(1, c.r + lift)
+    c.g = Math.min(1, c.g + lift)
+    c.b = Math.min(1, c.b + lift)
+  }
+  return c
+}
+
+/**
+ * 解析当前应当使用的主题 —— 上游 `sonicCoverGroundTheme`（:160-177）
+ * 与 `syncTheme` 的边缘派生（:744-748）逐行同构。
+ *
+ * ```
+ * primary   = sonicPaletteHex(palette.primary,   fx.visualTintColor '#9db8cf')
+ * secondary = sonicPaletteHex(palette.secondary, '#0066ff')
+ * highlight = sonicPaletteHex(palette.highlight, '#33e6ff')
+ *
+ * base1    = primary.lerp('#05070c', 0.84)      ← 底色**跟随封面主色**
+ * base2    = base1.lerp(highlight, 0.14)
+ * coolCore = primary.lerp('#ffffff', 0.08)
+ * warmCore = secondary.lerp('#ffb15a', 0.18)    ← 暖极带橙色倾向
+ * ripple   = highlight.lerp('#ffffff', 0.10)
+ *
+ * coolEdge = coolCore.lerp(base1, 0.34)         ← 边缘**趋向暗底**
+ * warmEdge = warmCore.lerp(base1, 0.26)
+ * fogColor = base1
+ * ```
+ *
+ * ★★ 此前本项目这一段是**重写**而不是移植，两处方向性错误：
+ *
+ *   1. `base1` 被钉成固定近黑 `Color(0.01,0.02,0.04)*0.2`，完全忽略
+ *      `primary` —— 底色与雾色不再跟随封面。
+ *   2. `coolEdge`/`warmEdge` 朝 `highlight` 插值（趋亮），而上游朝 `base1`
+ *      插值（趋暗）。着色器里
+ *      `targetGlow = mix(zoneCore, zoneEdge, fract(rnd*11.0))`
+ *      （`topographyShader.ts:259`）因此从"核→暗"反转成"核→亮"，
+ *      整块地形的渐变方向是反的。
+ *
+ *   另外 `warmCore` 丢了 `#ffb15a` 的 0.18 橙色混入，暖极偏冷。
  */
 export function resolveTopographyTheme(palette: CoverPalette | null, accent: string | null): TopographyThemeColors {
   const theme = cloneTheme(NOCTURNAL)
 
   if (palette) {
-    const primary = safeColor(palette.primary, '#e8f4ff')
-    const secondary = safeColor(palette.secondary, '#9db8cf')
-    const highlight = safeColor(palette.highlight, '#ffffff')
-    // shadow 是 rgba 字符串，无法直接解析；用基色的 20% 作为暗部等价物
-    const shadow = new THREE.Color(0.01, 0.02, 0.04)
+    const primary = groundPaletteColor(palette.primary, VISUAL_TINT_COLOR)
+    const secondary = groundPaletteColor(palette.secondary, GROUND_COOL_COLOR)
+    const highlight = groundPaletteColor(palette.highlight, GROUND_ACCENT_COLOR)
 
-    theme.uBaseColor1.copy(shadow).multiplyScalar(0.2)
-    theme.uFogColor.copy(theme.uBaseColor1)
-    theme.uBaseColor2.copy(shadow).lerp(primary, 0.22)
-    theme.uCoolCore.copy(primary)
-    theme.uCoolEdge.copy(primary).lerp(highlight, 0.35)
-    theme.uWarmCore.copy(secondary)
-    theme.uWarmEdge.copy(secondary).lerp(highlight, 0.28)
-    theme.uRippleColor.copy(highlight)
+    const base1 = primary.clone().lerp(new THREE.Color(GROUND_BASE_COLOR), 0.84)
+    const base2 = base1.clone().lerp(highlight, 0.14)
+    const coolCore = primary.clone().lerp(new THREE.Color('#ffffff'), 0.08)
+    const warmCore = secondary.clone().lerp(new THREE.Color('#ffb15a'), 0.18)
+    const ripple = highlight.clone().lerp(new THREE.Color('#ffffff'), 0.1)
+
+    theme.uBaseColor1.copy(base1)
+    theme.uBaseColor2.copy(base2)
+    theme.uFogColor.copy(base1)
+    theme.uCoolCore.copy(coolCore)
+    // 边缘派生（上游 syncTheme:745,747）：朝 base1 收，不是朝 highlight 开
+    theme.uCoolEdge.copy(coolCore).lerp(base1, 0.34)
+    theme.uWarmCore.copy(warmCore)
+    theme.uWarmEdge.copy(warmCore).lerp(base1, 0.26)
+    theme.uRippleColor.copy(ripple)
     theme.uGlowIntensity = TOPOGRAPHY_GLOW_INTENSITY
     return theme
   }
 
-  if (accent && /^#[0-9a-fA-F]{6}$/.test(accent)) {
-    const color = new THREE.Color(accent)
-    theme.uRippleColor.copy(color)
-    theme.uCoolCore.copy(color)
-    theme.uCoolEdge.copy(color).lerp(new THREE.Color('#ffffff'), 0.35)
-  }
+  // 无封面调色板：上游走 `sonicCoverGroundTheme` 的兜底链（palette 全空
+  // ⇒ primary=visualTintColor、secondary='#0066ff'、highlight='#33e6ff'），
+  // 而不是原封不动的 Nocturnal。accent 若有效则顶替 primary 的位置。
+  const primary = groundPaletteColor(
+    accent && /^#[0-9a-fA-F]{6}$/.test(accent) ? accent : undefined,
+    VISUAL_TINT_COLOR,
+  )
+  const secondary = groundPaletteColor(undefined, GROUND_COOL_COLOR)
+  const highlight = groundPaletteColor(undefined, GROUND_ACCENT_COLOR)
+
+  const base1 = primary.clone().lerp(new THREE.Color(GROUND_BASE_COLOR), 0.84)
+  theme.uBaseColor1.copy(base1)
+  theme.uBaseColor2.copy(base1.clone().lerp(highlight, 0.14))
+  theme.uFogColor.copy(base1)
+  const coolCore = primary.clone().lerp(new THREE.Color('#ffffff'), 0.08)
+  const warmCore = secondary.clone().lerp(new THREE.Color('#ffb15a'), 0.18)
+  theme.uCoolCore.copy(coolCore)
+  theme.uCoolEdge.copy(coolCore).lerp(base1, 0.34)
+  theme.uWarmCore.copy(warmCore)
+  theme.uWarmEdge.copy(warmCore).lerp(base1, 0.26)
+  theme.uRippleColor.copy(highlight.clone().lerp(new THREE.Color('#ffffff'), 0.1))
+  theme.uGlowIntensity = TOPOGRAPHY_GLOW_INTENSITY
 
   return theme
 }

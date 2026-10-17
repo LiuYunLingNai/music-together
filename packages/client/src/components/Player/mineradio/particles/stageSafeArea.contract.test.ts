@@ -122,7 +122,7 @@ describe('侧栏退让 · 接线契约', () => {
  * 该开关、相机恒定看向封面，单独套用位移会让歌词离开封面轴心，封面旋转时
  * 明显错位、构图也失去轴心。现改为：
  *   · 歌词恒定居中在封面正上方（不加任何横向避让位移）
- *   · 歌单架右移 0.54 world 让开
+ *   · 歌单架位置回到上游出厂 −0.34（静止态不可见，见 `shelfSummonState`）
  *   · 跟拍注视点跟随歌单架位置（同一常量来源）
  */
 const LYRICS = readFileSync(join(HERE, '..', 'lyrics', 'LyricStage.tsx'), 'utf8')
@@ -139,10 +139,8 @@ describe('歌词居中 · 歌单架让位契约', () => {
     expect(branch![0], '未直接采用封面位置').toMatch(/group\.position\.set\(\s*coverPose\.position\.x/)
   })
 
-  it('★ 歌单架不得回到上游出厂偏移（常驻可见时会压住封面）', () => {
-    expect(CARD, '歌单架回到了上游坐标，会再次压住封面').not.toMatch(/SHELF_CENTER = \{ x: -0\.34,/)
-    // 当前取值：上游侧栏基准位 + 0 偏移（消掉上游的负偏移，卡片与封面贴着不压住）
-    expect(CARD, 'SHELF_CENTER.x 不是当前选定值').toMatch(/SHELF_CENTER = \{ x: 0,/)
+  it('★ 歌单架回到上游出厂偏移 −0.34（召唤包络移植后静止态不可见，不再压封面）', () => {
+    expect(CARD, '歌单架未回到上游坐标').toMatch(/SHELF_CENTER = \{ x: -0\.34,/)
   })
 
   it('★ 跟拍注视点必须与歌单架位置同源，且偏移**分档**（不得硬编码 2.32 / 2.86）', () => {

@@ -1,8 +1,8 @@
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
-import { readAudioBands } from '../../stages/AudioAnalyser'
 import type { VisualModeId } from '../../stages/VisualMode'
+import { readNormalizedAudio } from '../shared/audioNormalize'
 import { getDotTexture } from './dotTexture'
 
 /** OpenMusic `GalaxyBackgroundStarRiver` 的背景星河粒子数。 */
@@ -131,7 +131,15 @@ export function StarRiver({ enabled = true, mode }: StarRiverProps) {
   useEffect(() => () => material.dispose(), [material])
 
   useFrame((state, delta) => {
-    const bands = readAudioBands()
+    // ★ 读**归一化后**的音频，与主粒子层同源 —— 上游 `backgroundStarRiverUniforms`
+    //   直接复用主层的 uniform 对象引用（`00-pointer-cover-particles.js:1075-1086`），
+    //   所以星河从来不吃原始 RMS。
+    //
+    //   此前这里是 `readAudioBands()`（原始频段），两个后果：
+    //     · 缺动态峰值归一化 ⇒ 安静曲目背景几乎静止、响亮曲目过冲；
+    //     · `uBeat` 实际喂的是 `kickEnvelope` 而非上游的 `beatPulse`，
+    //       包络形状与衰减都不同。
+    const norm = readNormalizedAudio()
     const target = enabled && mode !== 'galaxy' ? 0.34 : 0
     const ease = target > alphaRef.current ? 0.085 : 0.16
     alphaRef.current += (target - alphaRef.current) * Math.min(1, ease * Math.max(1, delta * 60))
@@ -139,10 +147,10 @@ export function StarRiver({ enabled = true, mode }: StarRiverProps) {
     const u = uniforms
     /* eslint-disable react-hooks/immutability -- Three.js uniforms are mutable frame handles by design. */
     u.uTime.value = state.clock.elapsedTime
-    u.uBass.value = bands.bass
-    u.uTreble.value = bands.treble
-    u.uBeat.value = bands.beat
-    u.uEnergy.value = bands.energy
+    u.uBass.value = norm.bass
+    u.uTreble.value = norm.treble
+    u.uBeat.value = norm.beat
+    u.uEnergy.value = norm.energy
     u.uPixel.value = state.gl.getPixelRatio()
     u.uAlpha.value = alphaRef.current
     // uParticleDim：地形模式挂载时星河压暗（上游 11-main-loop.js:588

@@ -9,16 +9,34 @@ import { readAudioBands } from '../../stages/AudioAnalyser'
 import {
   applyFloatingSongCardPose,
   clearFloatingSongCardCoverCache,
+  createCardPulse,
   createFloatingSongCardMesh,
   disposeFloatingSongCardMesh,
   drawFloatingSongCard,
   isPortraitShelfViewport,
+  pulseCard,
   shelfPointerParallax,
+  stepCardPulse,
   stepShelfPointerParallax,
+  type CardPulse,
   type FloatingSongCardMesh,
 } from './floatingSongCard'
 import { clearShelfFocus, orbitCameraState, setShelfCameraFocus } from './orbitCameraState'
 import { registerShelfHitTester } from './shelfHitRegistry'
+import {
+  createShelfSummonState,
+  markShelfPlaybackSwitchGuard,
+  publishShelfLyricAvoid,
+  shelfCardReveal,
+  shelfFocusEntryUnlocked,
+  shelfPlaybackSwitchGuardActive,
+  SHELF_LOOK_OPACITY,
+  shouldAvoidStageLyricsForShelf,
+  tickShelfHoverCueValue,
+  tickShelfVisibility,
+  updateShelfHoverCue,
+  type ShelfSummonState,
+} from './shelfSummonState'
 import { SHELF_MAX_RENDER, computeShelfWindow } from './shelfWindow'
 
 /*
@@ -173,6 +191,50 @@ export function FloatingSongShelf({ accent, onOpenQueue, motionEnabled }: Floati
   const drawKeysRef = useRef<string[]>([])
   const hoversRef = useRef<number[]>([])
   /**
+   * 每槽位的撞击脉冲（上游 `card.fxPulse`，`01-manager-core.js:261` 建卡时置 0）。
+   *
+   * 上游在四个点触发 `pulseCard`：打开歌单卡 1.05（:550）、滚轮换到新中心
+   * 0.55（:685）、卡片 action 1.0/0.70（:875）、二级内容框 1.0（:895）。
+   * 本项目对应的是"滚轮逐格换歌"这一条（0.55）—— 其余三个上游动作
+   * （右键菜单 / 歌单二级面板）本项目没有对应物。
+   */
+  const pulsesRef = useRef<CardPulse[]>([])
+  /**
+   * 每槽位的选中抬升量（上游 `card.floatMix`，:261 建卡时置 0）。
+   *
+   * ★ 与 `hoversRef` **不是一回事**，尽管两者的目标值都是"指针是否在这张卡上"：
+   *
+   *   hoversRef    eased 0.14 每帧，直接作为**偏移量**参与姿态
+   *                （这是本项目此前的自创用法，上游没有）
+   *   pulsesRef    双速趋近（升 0.20 / 降 0.13，上游 :443-448），
+   *                作为 `lift` 参与姿态，且**只对 selected 卡**生效
+   *
+   *   上游的 `lift` 由 `card.selected` 决定，而 `selected` 来自
+   *   `updateShelfCardHoverSelection` → `setSelected(idx)`
+   *   （`05-card-interactions.js:22-63`）—— 是**布尔命中**而非连续量。
+   */
+  const floatMixRef = useRef<number[]>([])
+  /**
+   * 待触发的撞击脉冲（队列**绝对序号** + 量）。
+   *
+   * 滚轮回调发生在帧之间，那时槽位还没重新绑定到新窗口；因此只记录请求，
+   * 由渲染循环在 `computeShelfWindow` 之后按绝对序号找到槽位再触发。
+   * `null` = 无待触发。
+   */
+  const pendingPulseRef = useRef<{ index: number; amount: number } | null>(null)
+  /**
+   * 卡片组的 three `Group`（上游 `shelfGroup`）。
+   *
+   * 上游在 `01-manager-core.js:779-795` 对它做三件逐帧的事：
+   *   · `group.renderOrder` = 300 / 30（有抬升或选中时压到歌词之上）
+   *   · `group.position` = 0（stage 档才飘动）
+   *   · `group.rotation` 跟随封面盘（`bindToCover`）或指针视差
+   *
+   * 本项目只移植第一项：后两项在本项目要么恒等（position 归零）、
+   * 要么会与手势旋转（`gestureRotationState`）双重叠加，故不移植。
+   */
+  const groupRef = useRef<THREE.Group | null>(null)
+  /**
    * 槽位「封面刚就绪、需要重绘」标记。
    *
    * 与 `drawKeysRef` 平行、按槽位索引。封面加载是异步的，完成时该槽位可能
@@ -186,13 +248,41 @@ export function FloatingSongShelf({ accent, onOpenQueue, motionEnabled }: Floati
   const [cardCount, setCardCount] = useState(0)
 
   /**
-   * 悬停状态（对照上游 `shelfHoverCue`）。
+   * 跟拍进出计时器（上游 `setFocusZone` 的 `pendingTimer` / `exitTimer`，
+   * `03-focus-cinema-camera.js:232-261`）。
    *
-   * - `zoneActive` 指针在热区内
-   * - `enteredAt`  进入热区的时刻，用于 260ms 停留判定
-   * - `exitAt`     离开热区的时刻；退出跟拍要等 120ms（上游 `exitTimer`）
+   * ★ 与 `summonRef`（`shelfHoverCue`）**不是**同一份状态的重复，
+   *   两者盯的区域不同，因此判定条件也不同：
+   *
+   *     summonRef.zoneActive  悬停**召唤**区 = 热区 ∪ 预览使用区
+   *                          （上游 `canShowShelfHoverCueAt`：卡片还没浮现，
+   *                           不可能"贴在卡上"，所以只能按屏幕区域判）
+   *     hoverCue.zoneActive   跟拍**保持**区 = 卡片射线命中 ∪
+   *                          (已跟拍 ∧ 热区 ∪ 预览使用区)
+   *                          （上游 `isSideShelfFocusHit`：进入要"贴在卡上"，
+   *                           保持要"还在这一侧"）
+   *
+   *   上游用**同一个** `shelfHoverCue` 承载两者，是因为它的召唤与跟拍都
+   *   只依赖屏幕区域；本项目多出的"卡片射线命中"这一条（用于跟拍进入）
+   *   在上游不存在，因此这里分成两份计时器。
+   *
+   *   - `zoneActive` 指针在跟拍区内
+   *   - `enteredAt`  进入的时刻，用于 260ms 停留判定
+   *   - `exitAt`     离开的时刻；退出跟拍要等 120ms（上游 `exitTimer`）
    */
   const hoverCueRef = useRef({ zoneActive: false, enteredAt: 0, exitAt: 0 })
+
+  /**
+   * 悬停召唤包络（上游 `shelfHoverCue` + `shelfVisibility` + `shelfOpenAnimAt`）。
+   *
+   * `fx.shelfPresence` 出厂 `'auto'`（00-state/04-fx-defaults.js:154）——
+   * 歌单架**默认隐藏**，指针移到右缘热区停留 260ms 才淡入浮现。
+   * 详见 `./shelfSummonState` 的模块注释。
+   *
+   * 存 `useRef` 而不是 `useState`：这三个量每帧都在变，走 React 状态会把
+   * 整个组件（含 11 张卡的 `<primitive>`）每帧重渲。
+   */
+  const summonRef = useRef<ShelfSummonState>(createShelfSummonState())
 
   /**
    * 歌单架内容 = **整条队列**（上游 `currentItems()` →
@@ -246,6 +336,8 @@ export function FloatingSongShelf({ accent, onOpenQueue, motionEnabled }: Floati
       cardsRef.current.push(card)
       drawKeysRef.current.push('')
       hoversRef.current.push(0)
+      pulsesRef.current.push(createCardPulse())
+      floatMixRef.current.push(0)
       coverDirtyRef.current.push(false)
     }
     while (cardsRef.current.length > renderCount) {
@@ -253,6 +345,8 @@ export function FloatingSongShelf({ accent, onOpenQueue, motionEnabled }: Floati
       if (card) disposeFloatingSongCardMesh(card)
       drawKeysRef.current.pop()
       hoversRef.current.pop()
+      pulsesRef.current.pop()
+      floatMixRef.current.pop()
       coverDirtyRef.current.pop()
     }
     setCardCount(cardsRef.current.length)
@@ -274,6 +368,16 @@ export function FloatingSongShelf({ accent, onOpenQueue, motionEnabled }: Floati
     if (currentIdx < 0) return
     centerTargetRef.current = Math.min(currentIdx, Math.max(0, items.length - 1))
     centerSmoothRef.current = centerTargetRef.current
+    // 上游 `suppressShelfPreviewForPlaybackSwitch`（00-layout-hover.js:230-245）：
+    // 切歌 = 歌单架中心硬跳（上游 rebuild 直接 `centerSmooth = centerTarget`），
+    // 若不压住召唤，这张跳变的脸会被看见 —— 而且指针可能恰好在热区里，
+    // 于是整列在旧内容上淡入、再跳到新内容。压住 1120ms。
+    markShelfPlaybackSwitchGuard(summonRef.current, performance.now())
+    // 上游 `suppressShelfPreviewForPlaybackSwitch`（:270）末尾的
+    // `setFocusZone(null, true)` —— 切歌时跟拍也一并收回。
+    // 本项目此前只压了悬停量：浮现整列被压掉，但相机仍停在跟拍位，
+    // 于是"歌单架没了、镜头还侧着"，要等下一次悬停才推回来。
+    clearShelfFocus()
   }, [currentIdx, items.length])
 
   useEffect(
@@ -293,8 +397,19 @@ export function FloatingSongShelf({ accent, onOpenQueue, motionEnabled }: Floati
       // 而显示空白。
       drawKeysRef.current = []
       hoversRef.current = []
+      pulsesRef.current = []
+      floatMixRef.current = []
       coverDirtyRef.current = []
       clearFloatingSongCardCoverCache()
+      // 上游 `clearShelfPreviewOnPointerExit`（00-layout-hover.js:210-228）末尾
+      // 的 `shelfVisibility = 0`：卸载时整列收回，下次挂载从隐藏态开始
+      // —— 否则 StrictMode 重放 / 切模式再进来会直接是浮现态。
+      summonRef.current.visibility = 0
+      summonRef.current.value = 0
+      summonRef.current.target = 0
+      summonRef.current.zoneActive = false
+      summonRef.current.switchGuardUntil = 0
+      publishShelfLyricAvoid(false, 0)
     },
     [gl],
   )
@@ -413,10 +528,22 @@ export function FloatingSongShelf({ accent, onOpenQueue, motionEnabled }: Floati
       //   Math.min(allItems.length - 1, centerTarget + direction))`，
       //   `01-manager-core.js:679`）。滚到两端即停，不会滚出列表 ——
       //   这是"越界滚动导致显示空白"的另一半修复。
+      const prevTarget = Math.round(centerTargetRef.current)
       centerTargetRef.current = Math.max(
         0,
         Math.min(items.length - 1, centerTargetRef.current + (event.deltaY > 0 ? 1 : -1)),
       )
+      // 上游 `step()` 末尾（`01-manager-core.js:685`）：
+      //   `pulseCard(cards.find(c => c.index === nextTarget), 0.55)`
+      // 即**新中心**那张卡弹一下。这是滚轮换歌唯一的手感反馈 —— 缺了它
+      // 滚轮逐格移动时视觉上完全静音。
+      //
+      // 脉冲存在槽位上（`pulsesRef`），而槽位与队列序号的绑定每帧才刷新；
+      // 这里记下"下一次 pulse"，由渲染循环在窗口重绑定后按绝对序号找到
+      // 对应槽位再触发 —— 否则此刻的槽位还是上一帧的内容。
+      if (Math.round(centerTargetRef.current) !== prevTarget) {
+        pendingPulseRef.current = { index: Math.round(centerTargetRef.current), amount: 0.55 }
+      }
     }
     canvas.addEventListener('pointerdown', stopCardEvent, true)
     canvas.addEventListener('click', onClick, true)
@@ -438,11 +565,46 @@ export function FloatingSongShelf({ accent, onOpenQueue, motionEnabled }: Floati
       hoveredRef.current = -1
       hoverCueRef.current.zoneActive = false
       hoverCueRef.current.exitAt = 0
+      // 上游 `allItems.length === 0` → targetVis 恒 0（:761），
+      // 整列收回。这里同步压掉悬停量，避免下次有内容时直接以上次的目标浮现。
+      summonRef.current.target = 0
+      summonRef.current.zoneActive = false
+      summonRef.current.enteredAt = 0
+      publishShelfLyricAvoid(false, 0)
       return
     }
 
     const hoverCue = hoverCueRef.current
     const now = performance.now()
+    // ★ `getDelta()` 是"距**上次调用**"的时间差，不是"距上一帧"。
+    //   本函数有三处需要 dt（悬停缓动 / 可见度缓动 / 卡片呼吸时间基准），
+    //   若各自调用，第二、三次拿到的都是亚毫秒值 —— 缓动会因此几乎不动。
+    //   因此整帧只取一次，三处共用。
+    const dt = state.clock.getDelta()
+    // 上游 `placeCard` 读的是 `uniforms.uTime.value` —— 一个**单调递增的
+    // 秒计时**，与帧间隔无关（呼吸/breathPulse 的相位都基于它）。
+    // `state.clock.elapsedTime` 正是这个量；`motionEnabled` 为假时冻结在 0
+    // （上游的 reduced-motion 语义）。
+    const time = motionEnabled ? state.clock.elapsedTime : 0
+
+    // ---- 整体可见度（上游 01-manager-core.js:767-771）----
+    //
+    // ★ 必须排在悬停判定**之前**：`cardHit` 靠 `raycastCardAt`，而后者只取
+    //   `mesh.visible` 的卡片。若先判悬停再置可见性，歌单架刚开始淡出的
+    //   那一帧里卡片仍是 visible，`cardHit` 会读到陈旧状态 →
+    //   本该收回的跟拍又触发一次，表现为"淡出边缘相机抽搐一下"。
+    //
+    // 上游的门控是
+    //   `group.visible = appRevealed && (mode !== 'side' || shelfVisibility > 0) && allItems.length > 0`
+    // 本项目没有 `appRevealed`（无开场动画），因此等价于
+    //   `hasItems && shelfVisibility > 0`。
+    const summon = summonRef.current
+    const summonGuard = shelfPlaybackSwitchGuardActive(summon, now)
+    const { visible: shelfVisible } = tickShelfVisibility(summon, dt, items.length > 0 && !summonGuard)
+    // 上游 `shouldAvoidStageLyricsForShelf` 驱动歌词的 `layoutScale *= 0.72`
+    // （14-stage-lyrics-rendering.js:2117）。发布给兄弟组件 `LyricStage`。
+    // 卸载/无内容时发布 false，让歌词回到完整尺寸。
+    publishShelfLyricAvoid(shouldAvoidStageLyricsForShelf(summon), summon.visibility)
 
     // ---- 悬停判定（对照上游 tickShelfHoverCue + isSideShelfFocusHit）----
     //
@@ -463,27 +625,62 @@ export function FloatingSongShelf({ accent, onOpenQueue, motionEnabled }: Floati
     //   保持是"还在这个区域里"。
     const slot = orbitCameraState.pointerSlot
     const pointerOverUi = slot != null && isPointerOverUi(slot.x, slot.y)
-    // ★ 拖拽（转物体）期间**不得**进入歌单架跟拍。
+    // ---- 悬停召唤（上游 tickShelfHoverCue / updateShelfHoverCueFromPointer）----
     //
-    //   用户实测："旋转封面时鼠标误触到歌曲架判定，会进入歌曲架的相机"。
-    //   拖拽转物体是"按住并大幅划动"的手势，指针很容易扫过右侧热区；
-    //   而热区宽达视口 18%（保持区更达 56%），260ms 的停留门槛在**慢速
-    //   划动**下会被满足 → 相机突然被拉去跟拍，把正在进行的旋转打断。
+    // ★ 这里的 `rotating` 守卫**不再是**"因未移植而产生的补偿"。
     //
-    //   上游没有这个显式守卫，是因为它的歌单架默认**自动隐藏**
-    //   （`fx.shelfPresence` 出厂 `'auto'`），跟拍入口 `isSideShelfFocusHit`
-    //   要求 `shelfVisibility > 0.34` —— 平时根本不满足，误触概率极低。
-    //   而本项目**未移植悬停召唤包络**（登记于 §5.1），歌单架**常驻可见**，
-    //   那个隐含门槛不存在，同样的手势就会误触。因此这里补一条显式守卫，
-    //   属于"因未移植项而产生的必要补偿"，登记为 §2 D11。
+    //   上游没有显式守卫，靠的是 `fx.shelfPresence` 出厂 `'auto'`：
+    //   跟拍入口 `isSideShelfFocusHit`（05-card-interactions.js:13-21）要求
+    //   `shelfVisibility > 0.34`，未浮现时恒不满足。召唤包络移植后这个
+    //   隐含门槛已恢复（`shelfFocusEntryUnlocked`）。
     //
-    //   实现上只改 `inZone` 的取值，状态机自然处理：拖拽中 `inZone=false`
-    //   → 退出既有跟拍（120ms 延迟）；松手后若指针仍在区内，260ms 停留
-    //   重新计时后正常进入跟拍 —— 不影响"拖完顺手去点卡片"。
+    //   但**保留**这一条仍有必要，且理由与上游同源：上游
+    //   `canShowShelfHoverCueAt`（00-layout-hover.js:127）把
+    //   `shelfPinnedOpen` / `isPointerOverUi` 都列为否决项，本项目对应的
+    //   是"指针正在被拖拽手势占用"。拖拽转物体是按住大幅划动，指针会扫过
+    //   右缘热区，260ms 停留门槛在慢速划动下会被满足。因此拖拽期间不推进
+    //   悬停量 —— 松手后若指针仍在区内，260ms 重新计时，不影响"拖完顺手
+    //   去点卡片"。
     const rotating = orbitCameraState.rotating
+    updateShelfHoverCue(
+      summonRef.current,
+      {
+        x: slot?.x ?? -1,
+        y: slot?.y ?? -1,
+        overUi: pointerOverUi,
+        inZone: slot != null && !pointerOverUi && (isInShelfHotZone(slot.x, slot.y) || isInShelfPreviewUseZone(slot.x, slot.y)),
+        rotating,
+        // 真实 pointermove 的时刻（CameraRig 盖戳）。指针离开画布时 slot 为
+        // null → 传 null，空闲计时继续累积（见 shelfSummonState 的说明）。
+        movedAt: slot?.movedAt ?? null,
+      },
+      now,
+    )
+    tickShelfHoverCueValue(summonRef.current, dt, now)
+
+    // 上游 `isSideShelfFocusHit` 的进入分支仍用卡片命中（"贴在卡上"），
+    // 保持分支用两个屏幕几何区（见下）。差别在 `shelfFocusEntryUnlocked`：
+    // 未浮现时整列不可见，自然不会触发。
+    //
+    // ★★ 方案一（用户决策）：歌单架浮现**自动带起相机跟拍**。
+    //
+    //   这是上游解掉"歌词长行与卡片列重叠"的真正机制，而不是靠歌词让位：
+    //   上游 `00-layout-hover.js:232` 里 `setShelfPinnedOpen(true)` 与
+    //   `setFocusZone('shelf-side')` 是**同一个函数里的两行** —— 歌单架一出现，
+    //   相机就侧到 `radius 4.20 / lookAt.x 2.32`，歌词随构图滑出画面。
+    //   （上游的触发是画布右键，本项目是悬停浮现；机制同源。）
+    //
+    //   本项目此前只做了前半句（浮现卡片）、没做后半句（推相机），于是
+    //   长歌词行在右缘与整列卡片正面相撞：实测卡片列左缘在 71.9%，
+    //   而满基宽歌词行右缘 88.6%、被 `lyricRowFitRatio` 夹到视口安全边
+    //   95.5% —— 侵入达 23.6%。
+    //
+    //   与进入判定**解耦**：进入仍要"贴在卡上 + 停留 260ms"（上游
+    //   `setFocusZone` 的 pendingTimer 语义），但**只要整列已浮现**且指针
+    //   仍在右侧宽区，跟拍就一直保持 —— 否则卡片在视觉上伸出窄热区之外
+    //   （热区最宽 360px，预览使用区可达 820px），镜头会反复推拉。
     const cardHit = slot != null && !pointerOverUi && !rotating && raycastCardAt(slot.x, slot.y, 18) >= 0
     const shelfFocused = orbitCameraState.focus.active && orbitCameraState.focus.type === 'shelf'
-    // 保持区 = 热区 ∪ 预览使用区（上游 isSideShelfFocusHit 的宽分支）
     const inShelfHoldZone =
       slot != null &&
       !pointerOverUi &&
@@ -553,12 +750,22 @@ export function FloatingSongShelf({ accent, onOpenQueue, motionEnabled }: Floati
     // 跟拍：进入要在区域内**连续**停留超过 260ms（上游 `setFocusZone` 的
     // `pendingTimer`）；一旦激活就锁在固定跟拍目标上；离开后**再等 120ms**
     // 才退出（上游 `exitTimer`，03-focus-cinema-camera.js:245-249）。
-    const shouldFocus = hoverCue.zoneActive && now - hoverCue.enteredAt > 260
+    // 上游 `isSideShelfFocusHit`（05-card-interactions.js:13-21）的进入门槛
+    // `shelfVisibility > 0.34` —— 歌单架必须先浮现到一定程度才允许跟拍。
+    // 本项目此前因为常驻可见而把这条门控整个去掉了。
+    //
+    // ★ 方案一：`shelfVisible` 也单独作为一条保持源（见上方长注释）——
+    //   浮现即跟拍，不再要求指针还压在具体某张卡上。
+    const focusUnlocked = shelfFocusEntryUnlocked(summonRef.current)
+    const shouldFocus =
+      ((hoverCue.zoneActive && now - hoverCue.enteredAt > 260) || (shelfVisible && inShelfHoldZone)) &&
+      focusUnlocked
     // 未在区域内时，退出跟拍还要再等 120ms（上游 exitTimer）
     const shouldExit =
       !shouldFocus &&
       shelfFocused &&
       !hoverCue.zoneActive &&
+      !shelfVisible &&
       hoverCue.exitAt > 0 &&
       now - hoverCue.exitAt > SHELF_EXIT_DELAY_MS
     if (shouldFocus && !shelfFocused) {
@@ -574,6 +781,26 @@ export function FloatingSongShelf({ accent, onOpenQueue, motionEnabled }: Floati
 
     gl.domElement.style.cursor = inZone ? 'pointer' : ''
 
+    // ---- 组级 renderOrder（上游 01-manager-core.js:779）----
+    //
+    //   group.renderOrder = (contentOpen || pinnedOpen || liftedCardActive) ? 300 : 30
+    //
+    // 上游在 side 档还有个 `passiveAlwaysGroup`（`shelfAlwaysVisible()` 且未
+    // 固定未开详情）的变体，用 30/300 两档 + 更细的层内步长（`* 1.1` 而非
+    // `* 10`）。本项目 `shelfAlwaysVisible()` / `pinnedOpen` / 详情面板
+    // 三个概念都不存在，因此只剩 `liftedCardActive` 这一项真实分支：
+    //   有卡正在抬升（`floatMix > 0.025`，上游 :780 的门槛）
+    //     ⇒ 整组压到 300，让抬起的卡盖过歌词
+    //   否则 30（歌词的 `RENDER_ORDER_OFFSET = 258` 平移到 300.6~301.4，
+    //          所以未抬升时卡片在歌词之下 —— 与上游同序）
+    if (groupRef.current) {
+      const lifted = floatMixRef.current.some((mix) => mix > 0.025)
+      groupRef.current.renderOrder = lifted ? 300 : 30
+    }
+
+    // ---- 整体可见度（上游 01-manager-core.js:767-771）----
+    //
+    // `shelfVisibility` 与 `group.visible`：未浮现时整列不渲染。
     const player = usePlayerStore.getState()
     const progress = player.duration > 0 ? Math.max(0, Math.min(1, player.currentTime / player.duration)) : 0
     const bands = readAudioBands()
@@ -589,6 +816,13 @@ export function FloatingSongShelf({ accent, onOpenQueue, motionEnabled }: Floati
     const { start: windowStart, end: windowEnd } = computeShelfWindow(center, items.length)
 
     cardsRef.current.forEach((card, slotIndex) => {
+      // 上游 `group.visible` 门控：整列未浮现时**不渲染**（不是 opacity 0）。
+      // 差别在于 raycast —— `raycastCardAt` 只取 `mesh.visible` 的卡片，
+      // 若只是把 opacity 置 0，指针仍会命中看不见的卡片并触发跟拍/点击。
+      if (!shelfVisible) {
+        card.mesh.visible = false
+        return
+      }
       const index = windowStart + slotIndex
       if (slotIndex >= SHELF_MAX_RENDER || index > windowEnd) {
         card.mesh.visible = false
@@ -602,19 +836,66 @@ export function FloatingSongShelf({ accent, onOpenQueue, motionEnabled }: Floati
       // mesh 在窗口内换了队列序号 —— 命中判定要跟着走
       card.mesh.userData.cardIndex = slotIndex
       const isCenter = Math.abs(index - center) < 0.5
+      // ---- 撞击脉冲（上游 `card.fxPulse`，:425/559-562）----
+      //
+      // 每槽位一个脉冲槽。先推进衰减，再处理本帧待触发的那一次
+      // （上游 gsap 的更新时机同样是帧首）。
+      const pulse = pulsesRef.current[slotIndex]
+      stepCardPulse(pulse, now)
+      const pendingPulse = pendingPulseRef.current
+      if (pendingPulse && pendingPulse.index === index) {
+        pulseCard(pulse, pendingPulse.amount, now)
+        pendingPulseRef.current = null
+      }
+      // ---- 选中抬升（上游 `card.floatMix` 双速趋近，:443-448）----
+      //
+      // 上游的目标是**布尔**：`card.selected && shelfPointerSelectionForegroundActive()
+      // && !detailOpenSide`。本项目没有"指针隐藏"态（上游靠它区分
+      // 键鼠/手柄），因此等价于 `hoveredRef.current === index`。
+      const liftTarget = hoveredRef.current === index ? 1 : 0
+      const currentMix = floatMixRef.current[slotIndex]
+      const liftRate = liftTarget > currentMix ? 0.2 : 0.13
+      let nextMix = currentMix + (liftTarget - currentMix) * liftRate
+      // 上游 :447：`if (!liftTarget && card.floatMix < 0.004) card.floatMix = 0`
+      // —— 归零要**干净**，否则永远有一个 ~1e-4 的残值卡在公式里。
+      if (!liftTarget && nextMix < 0.004) nextMix = 0
+      floatMixRef.current[slotIndex] = nextMix
+      // ---- 指针悬停（本项目此前的自创量，保留以兼容绘制键）----
+      //
+      // ★ 它**不再**参与姿态：上游 placeCard 的 side 分支里没有任何
+      //   "指针 hover 直接当偏移"的项。抬升走上面的 `lift`（双速、
+      //   只对 selected 卡），命中反馈走纹理高亮（`drawFloatingSongCard`
+      //   的 `hovered` 参数）。
       const targetHover = hoveredRef.current === index ? 1 : 0
       hoversRef.current[slotIndex] += (targetHover - hoversRef.current[slotIndex]) * 0.14
+      // ---- 揭示（上游 `reveal`，:453-455）----
+      //
+      // `absD` = |index - center|，与 placeCard 里 `delta`/`absD` 同源
+      // （上游 :416-417）。必须先算出来 —— `shelfCardReveal` 的 stagger
+      // 就乘在它上面。
+      const absD = Math.abs(index - center)
+      const reveal = shelfCardReveal(summon, now, absD)
       // 传**绝对队列序号** index 与 center —— 上游 placeCard 用的就是
       // `allItems` 上的绝对序号（`delta = card.index - centerSmooth`）。
-      const distance = applyFloatingSongCardPose(
-        card.mesh,
-        motionEnabled ? state.clock.elapsedTime : 0,
-        index,
-        center,
-        hoversRef.current[slotIndex],
-      )
+      const distance = applyFloatingSongCardPose(card.mesh, time, index, center, {
+        visibility: summon.visibility,
+        lift: nextMix,
+        reveal,
+        pulse: pulse.value,
+        parX: shelfPointerParallax.x,
+        parY: shelfPointerParallax.y,
+      })
       if (!card.mesh.visible) return
-      card.mesh.renderOrder = (isCenter ? 300 : 30) + Math.round((6 - Math.min(distance, 6)) * 4)
+      // 上游 :449（`passiveAlways` 分支）/:421（通用分支）：
+      //   passiveAlways → 30 + layer*1.1 + round(lift*96)
+      //   通用          → 60 + layer*10  + round(lift*70)
+      // 本项目没有 `passiveAlways`（见 `groupRef` 处的说明），因此走通用分支；
+      // 基数 30/300 与 `* 4` 步长是本项目为让开歌词的 `RENDER_ORDER_OFFSET`
+      // （258，见 `LyricStage`）而整体上移的结果 —— **上游的 60/30 会在
+      // 歌词之下**，本项目把中心卡抬到 300 是为了让正在播放的那张压住歌词。
+      // `round(lift * 70)` 则原样保留：抬升中的卡必须排在同层卡之上。
+      card.mesh.renderOrder =
+        (isCenter ? 300 : 30) + Math.round((6 - Math.min(distance, 6)) * 4) + Math.round(nextMix * 70)
       const isCurrent = index === currentIdx
       const itemProgress = isCurrent ? progress : 0
       const drawKey = [
@@ -649,7 +930,7 @@ export function FloatingSongShelf({ accent, onOpenQueue, motionEnabled }: Floati
             centered: isCenter,
           },
           color,
-          motionEnabled ? state.clock.elapsedTime : 0,
+          time,
           hoveredRef.current === index,
           // ★ 封面异步完成时**只标脏**，由下一帧用**当前**的 item/color/hover
           //   重绘 —— 而不是把本次的绘制闭包回放一遍。
@@ -669,13 +950,32 @@ export function FloatingSongShelf({ accent, onOpenQueue, motionEnabled }: Floati
         card.texture.needsUpdate = true
       }
       const material = card.mesh.material as THREE.MeshBasicMaterial
-      material.opacity += ((isCenter ? 0.96 : Math.max(0.22, 1 - distance * 0.3)) - material.opacity) * 0.12
+      // 上游 01-manager-core.js:495 的距离衰减：
+      //   `absD < 0.5 ? 1.0 : Math.max(0.22, 1.0 - absD * 0.30)`
+      const distanceOpacity = isCenter ? 1 : Math.max(0.22, 1 - distance * 0.3)
+      // 上游 01-manager-core.js:504（完整形态）：
+      //   min(1, opacity × shelfVisibility × reveal × (1 − paneEase×0.24)
+      //          + pulse×0.10×reveal + breathPulse×0.035) × shelfLook.opacity
+      //
+      // 本项目：
+      //   · `paneEase` ≡ 0（无歌单页切换）⇒ `(1 - paneEase*0.24)` = 1
+      //   · `pulse` = 本槽位 `fxPulse`（上游 :425）
+      //   · `breathPulse` = `hoverBreath * (0.5 + 0.5*sin(nowT*1.22 + idx*0.74))`
+      //     （上游 :452），其中 `hoverBreath = shelfVisibility`（:441）
+      //     —— 之前整个没进不透明度，现在补上。
+      const breathPulse = summon.visibility * (0.5 + 0.5 * Math.sin(time * 1.22 + index * 0.74))
+      const opacityTarget =
+        Math.min(
+          1,
+          distanceOpacity * summon.visibility * reveal + pulse.value * 0.1 * reveal + breathPulse * 0.035,
+        ) * SHELF_LOOK_OPACITY
+      material.opacity += (opacityTarget - material.opacity) * 0.12
     })
   })
   /* eslint-enable react-hooks/immutability */
 
   return (
-    <group>
+    <group ref={groupRef}>
       {/*
         key 必须是**槽位序号**，不能是 trackKey。
         卡片 mesh 是固定池 + 逐帧重绑定（上游 syncRenderedWindow 的

@@ -47,6 +47,30 @@ export interface NormalizerState {
   beatPulse: number
 }
 
+/**
+ * 最近一帧的归一化结果（模块级单例）。
+ *
+ * ★ 为什么需要它：上游把**同一批 uniform 对象**同时挂给主粒子层与背景星河
+ *   （`00-pointer-cover-particles.js:1075-1086` 的 `backgroundStarRiverUniforms`
+ *   直接复用 `uniforms.uBass` / `uTreble` / `uBeat` / `uEnergy` 的引用），
+ *   因此星河吃到的是**归一化后**的值，与前景完全同源。
+ *
+ *   本项目的 React 组件各自持有自己的 uniform 对象，无法共享引用，于是改用
+ *   "谁驱动谁发布"：`ParticleField`（唯一跑 normalizer 的地方）每帧写入这里，
+ *   `StarRiver` 每帧读取。两者恒为同层挂载（地形模式会把它们一起替换掉），
+ *   所以不存在读到陈旧值的窗口。
+ *
+ *   此前 `StarRiver` 直接读 `readAudioBands()` 的**原始 RMS**，后果是：
+ *     · 安静曲目下背景星河近乎静止而前景活跃（峰值归一化缺失）；
+ *     · `uBeat` 变成 `kickEnvelope` 而不是 `beatPulse`，包络语义不同。
+ */
+const published: NormalizedAudio = { bass: 0, mid: 0, treble: 0, energy: 0, beat: 0 }
+
+/** 读取最近一帧的归一化结果（供背景星河等同源消费者使用）。 */
+export function readNormalizedAudio(): NormalizedAudio {
+  return published
+}
+
 export function createAudioNormalizerState(): NormalizerState {
   return {
     bassPeak: 0.12,
@@ -186,6 +210,13 @@ export function stepAudioNormalize(
       beat *= 0.72
     }
   }
+
+  // 发布给同源消费者（背景星河）—— 等价上游的 uniform 对象共享。
+  published.bass = bass
+  published.mid = mid
+  published.treble = treble
+  published.energy = audioEnergy
+  published.beat = beat
 
   return { bass, mid, treble, energy: audioEnergy, beat }
 }

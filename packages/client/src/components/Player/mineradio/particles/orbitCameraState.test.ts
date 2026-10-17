@@ -116,28 +116,65 @@ describe('轨道相机状态机', () => {
     expect(orbitCameraState.userRadius).toBeCloseTo(MIN_RADIUS, 6)
   })
 
-  it('跟拍激活时解除基准锁，并采用齐平档（phi 0 / lookAt.y 0）', () => {
+  it('跟拍激活时解除基准锁，并采用上游俯拍档（phi −0.12 / lookAt.y −0.10）', () => {
     setShelfCameraFocus(true)
     expect(orbitCameraState.centerLocked).toBe(false)
     expect(orbitCameraState.focus.active).toBe(true)
     expect(orbitCameraState.focus.type).toBe('shelf')
     expect(orbitCameraState.focus.theta).toBeCloseTo(0.42, 6)
-    // ★ 齐平档（用户观感决策）：上游 OpenMusic 的桌面档是 phi −0.12 /
-    //   lookAt.y −0.10（俯拍），实测会让整列卡片下沉（列中心 ndcY −0.130，
-    //   上下间隙差 0.261）。归零后列中心 0.000、上下差 0.000（完全对称）。
-    expect(orbitCameraState.focus.phi).toBeCloseTo(0, 6)
-    expect(orbitCameraState.focus.lookAt.y).toBeCloseTo(0, 6)
+    // ★ 恢复上游值（用户 2026-10-17 决策）：桌面档 phi −0.12 /
+    //   lookAt.y −0.10（俯拍），见 `03-focus-cinema-camera.js:193-195`。
+    //
+    //   此前（2026-09-21）曾按"齐平以保持上下间隙对称"把它们归零，实测
+    //     上卡 ndcY +1.723、下卡 ndcY −1.983 → 列中心 −0.130
+    //     上间隙 −0.723、下间隙 −0.983 → 上下差 0.261
+    //   但歌单架现已移植上游的悬停召唤包络（`./shelfSummonState`），
+    //   静止态整列不可见 —— "整列常驻时需要上下对称"的前提已不成立，
+    //   因此改为忠实复刻上游的俯拍档。
+    expect(orbitCameraState.focus.phi).toBeCloseTo(-0.12, 6)
+    expect(orbitCameraState.focus.lookAt.y).toBeCloseTo(-0.1, 6)
     expect(orbitCameraState.focus.radius).toBeCloseTo(4.2, 6)
   })
 
-  it('★ 跟拍注视点 x 必须跟随歌单架位置（第三十三轮：歌单架右移后同步）', () => {
+  /**
+   * 上游 `03-focus-cinema-camera.js:196`：`camPunch = Math.max(camPunch, 0.82)`。
+   *
+   * 这是"歌单架打开时镜头有明确的推近感"的来源 —— 单靠 ease 滑到跟拍位
+   * 只是"慢慢飘过去"，没有冲击。本项目此前跟拍完全没有这一项。
+   *
+   * ★ 取 `max` 语义：beat 脉冲已经把 camPunch 抬高时，跟拍不得**压低**它。
+   */
+  it('跟拍开启会抬高 camPunch 到 0.82（上游 shelf-side 分支）', () => {
+    resetCameraPunch()
+    expect(tickCameraPunch()).toBe(0)
+    setShelfCameraFocus(true)
+    expect(tickCameraPunch()).toBeCloseTo(0.82 * 0.86, 6)
+    // 取 max：已有更高冲击时不回落（先抬到 0.9，再开跟拍仍是 0.9）
+    boostCameraPunch(0.9)
+    setShelfCameraFocus(true)
+    expect(tickCameraPunch()).toBeCloseTo(0.9 * 0.86, 6)
+  })
+
+  it('退出跟拍不加 camPunch（上游退出分支没有 camPunch）', () => {
+    resetCameraPunch()
+    setShelfCameraFocus(true)
+    tickCameraPunch()
+    resetCameraPunch()
+    setShelfCameraFocus(false)
+    // 退出只解除 active；若此处也 boost，每次指针移出右缘都会再推一次镜头
+    expect(tickCameraPunch()).toBe(0)
+  })
+
+  it('跟拍注视点 x 必须跟随歌单架位置（同源推导）', () => {
     // 卡片列中心世界 x = shelfSideX() + SHELF_CENTER.x；偏移按**档位**取
     // （第三十四轮 §5.4 C5：上游 lookAt.x 只有两档，而 sideX 有三档）。
     const expectedX = shelfSideX() + SHELF_CENTER.x - shelfFocusLookAtOffset()
     setShelfCameraFocus(true)
     expect(orbitCameraState.focus.lookAt.x).toBeCloseTo(expectedX, 6)
-    // 且必须**不是**上游旧值（否则说明跟随逻辑失效）
-    expect(orbitCameraState.focus.lookAt.x).not.toBeCloseTo(2.32, 3)
+    // 宽屏下 `SHELF_CENTER.x` 回到上游出厂 −0.34 后，这个推导值**就是**
+    // 上游的 2.32（3.18 − 0.34 − 0.52 = 2.32）—— 不再断言"不得等于 2.32"，
+    // 那个断言只在歌单架被右移到 0 时才成立（第三十三轮的代偿态）。
+    expect(orbitCameraState.focus.lookAt.x).toBeCloseTo(2.32, 6)
     // 纵/横都与卡片列中心保持**该档位**的偏移关系
     expect(shelfSideX() + SHELF_CENTER.x - orbitCameraState.focus.lookAt.x).toBeCloseTo(shelfFocusLookAtOffset(), 6)
   })
@@ -178,27 +215,35 @@ describe('轨道相机状态机', () => {
     setShelfCameraFocus(true)
     expect(orbitCameraState.focus.type).toBe('shelf')
     expect(orbitCameraState.focus.theta).toBeCloseTo(0.42, 6)
-    // 齐平档：phi 与 lookAt.y 一律归零（上下间隙对称）
-    expect(orbitCameraState.focus.phi).toBeCloseTo(0, 6)
-    expect(orbitCameraState.focus.lookAt.y).toBeCloseTo(0, 6)
+    // 上游俯拍档：phi 与 lookAt.y 随桌面档取 −0.12 / −0.10
+    expect(orbitCameraState.focus.phi).toBeCloseTo(-0.12, 6)
+    expect(orbitCameraState.focus.lookAt.y).toBeCloseTo(-0.1, 6)
     // 拉近幅度减半（主相机 8.4 → 5.2，而非 4.2）
     expect(orbitCameraState.focus.radius).toBeCloseTo(5.2, 6)
-    // 其余模式不受影响
+    // 其余模式不受影响（仍为桌面档的 −0.12）
     setOrbitMode('emily')
     setShelfCameraFocus(true)
-    expect(orbitCameraState.focus.phi).toBeCloseTo(0, 6)
+    expect(orbitCameraState.focus.phi).toBeCloseTo(-0.12, 6)
     expect(orbitCameraState.focus.radius).toBeCloseTo(4.2, 6)
   })
 
   /**
-   * 齐平档的几何契约：跟拍姿态下整列卡片必须在垂直方向**对称**。
+   * 跟拍档的投影契约：跟拍姿态下整列卡片在垂直方向的落位。
    *
-   * 这是用户反馈的"歌单架上下不对称"的可回归化表达 —— 把投影公式
-   * （与 CameraRig 一致：position = lookAt + radius*(cosφ·sinθ, sinφ, cosφ·cosθ)）
-   * 内联在这里，钉住"上下间隙相等"这一性质本身，而不是钉死某组数值。
+   * 这里把投影公式（与 CameraRig 一致：position = lookAt +
+   * radius*(cosφ·sinθ, sinφ, cosφ·cosθ)）内联，钉住**上游俯拍档本身的
+   * 数值结果** —— 即"忠实复刻后列落在哪里"。
+   *
+   * ★ 曾经的用例断言"上下间隙对称（|列中心| < 0.005）"，那是 2026-09-21
+   *   **齐平档**（phi 0 / lookAt.y 0）的自洽性质。用户 2026-10-17 决策恢复
+   *   上游俯拍档后该前提已撤销：俯拍下
+   *     桌面档   列中心 +0.0204、上下差 1.2989
+   *     地形档   列中心 +0.0141、上下差 1.0830（半径 5.2）
+ *     竖屏档   列中心 −0.0716、上下差 0.9247
+   *   这正是上游的观感（卡片列略偏离画面中线、下方留白更多），
+   *   因此改为钉数值而不是钉对称性。
    */
-  it('齐平档下歌单架列的上下间隙对称（列中心落在画面中线）', () => {
-    const aspect = 16 / 9
+  it('上游俯拍档下歌单架列的垂直落位（桌面 +0.0204）', () => {
     const fov = 45
     const project = (
       look: { x: number; y: number; z: number },
@@ -229,20 +274,119 @@ describe('轨道相机状态机', () => {
       const d = { x: 0 - cam.x, y: y - cam.y, z: 0.86 - cam.z }
       const zc = d.x * fw.x + d.y * fw.y + d.z * fw.z
       const yc = d.x * u.x + d.y * u.y + d.z * u.z
-      void aspect
       return yc / zc / Math.tan((fov * Math.PI) / 180 / 2)
     }
 
-    for (const mode of ['emily', 'topography'] as const) {
-      setOrbitMode(mode)
-      setShelfCameraFocus(true)
+    // 桌面档（node 环境无 window ⇒ 横屏档）：列中心 +0.0204、上下差 1.2989。
+    // 注意地形档半径是 5.2（拉近减半），投影落位不同，见下一个用例。
+    setOrbitMode('emily')
+    setShelfCameraFocus(true)
+    {
       const { theta, phi, radius, lookAt } = orbitCameraState.focus
       // 卡片 y = -delta * stepY（横屏 stepY = 0.68），取 ±2 档
       const top = project(lookAt, theta, phi, radius, 2 * 0.68)
       const bottom = project(lookAt, theta, phi, radius, -2 * 0.68)
-      // 上下间隙相等 ⇔ 列中心落在 0
-      expect(Math.abs((top + bottom) / 2)).toBeLessThan(0.005)
+      expect((top + bottom) / 2).toBeCloseTo(0.0204, 3)
+      // 俯拍档下方留白更多：上下间隙差 ≈1.30（上游观感）
+      expect(top - bottom).toBeCloseTo(-1.2989, 3)
     }
+  })
+
+  /**
+   * 地形档：半径取 5.2（第二十二轮"拉近幅度减半"），与粒子档同一原则但
+   * 投影落位不同 —— 列中心 +0.0141、上下差 1.0830。
+   */
+  it('地形档跟拍下歌单架列的垂直落位（列中心 +0.0141 / 上下差 1.0830）', () => {
+    setOrbitMode('topography')
+    setShelfCameraFocus(true)
+    const { theta, phi, radius, lookAt } = orbitCameraState.focus
+    const fov = 45
+    const project = (
+      look: { x: number; y: number; z: number },
+      th: number,
+      ph: number,
+      r: number,
+      y: number,
+    ) => {
+      const cy = Math.cos(ph)
+      const sy = Math.sin(ph)
+      const cam = {
+        x: look.x + r * cy * Math.sin(th),
+        y: look.y + r * sy,
+        z: look.z + r * cy * Math.cos(th),
+      }
+      const f = { x: look.x - cam.x, y: look.y - cam.y, z: look.z - cam.z }
+      const fn = Math.hypot(f.x, f.y, f.z)
+      const fw = { x: f.x / fn, y: f.y / fn, z: f.z / fn }
+      const s = { x: fw.z, y: 0, z: -fw.x }
+      const sn = Math.hypot(s.x, s.y, s.z) || 1
+      const sw = { x: s.x / sn, y: 0, z: s.z / sn }
+      const u = {
+        x: sw.y * fw.z - sw.z * fw.y,
+        y: sw.z * fw.x - sw.x * fw.z,
+        z: sw.x * fw.y - sw.y * fw.x,
+      }
+      const d = { x: 0 - cam.x, y: y - cam.y, z: 0.86 - cam.z }
+      const zc = d.x * fw.x + d.y * fw.y + d.z * fw.z
+      const yc = d.x * u.x + d.y * u.y + d.z * u.z
+      return yc / zc / Math.tan((fov * Math.PI) / 180 / 2)
+    }
+    const top = project(lookAt, theta, phi, radius, 2 * 0.68)
+    const bottom = project(lookAt, theta, phi, radius, -2 * 0.68)
+    expect((top + bottom) / 2).toBeCloseTo(0.0141, 3)
+    expect(top - bottom).toBeCloseTo(-1.083, 3)
+  })
+
+  /**
+   * 竖屏档的投影落位（上游 `shelfProfile.portrait` 分支：theta 0.24 /
+   * phi −0.06 / radius 5.28 / lookAt.y −0.18）。
+   *
+   * 与桌面档的差别来自档位本身，不是实现分叉 —— 桌面档的用例在 node 环境
+   * （无 window）下恒走横屏档，因此竖屏档必须单独喂 viewport 验证。
+   */
+  it('竖屏俯拍档下歌单架列的垂直落位（列中心 −0.0716 / 上下差 0.9247）', () => {
+    const tier = shelfFollowTier({ width: 390, height: 844 })
+    expect(tier.phi).toBeCloseTo(-0.06, 6)
+    expect(tier.lookAtY).toBeCloseTo(-0.18, 6)
+
+    const fov = 45
+    const project = (
+      look: { x: number; y: number; z: number },
+      theta: number,
+      phi: number,
+      radius: number,
+      y: number,
+    ) => {
+      const cy = Math.cos(phi)
+      const sy = Math.sin(phi)
+      const cam = {
+        x: look.x + radius * cy * Math.sin(theta),
+        y: look.y + radius * sy,
+        z: look.z + radius * cy * Math.cos(theta),
+      }
+      const f = { x: look.x - cam.x, y: look.y - cam.y, z: look.z - cam.z }
+      const fn = Math.hypot(f.x, f.y, f.z)
+      const fw = { x: f.x / fn, y: f.y / fn, z: f.z / fn }
+      const s = { x: fw.z, y: 0, z: -fw.x }
+      const sn = Math.hypot(s.x, s.y, s.z) || 1
+      const sw = { x: s.x / sn, y: 0, z: s.z / sn }
+      const u = {
+        x: sw.y * fw.z - sw.z * fw.y,
+        y: sw.z * fw.x - sw.x * fw.z,
+        z: sw.x * fw.y - sw.y * fw.x,
+      }
+      const d = { x: 0 - cam.x, y: y - cam.y, z: 0.86 - cam.z }
+      const zc = d.x * fw.x + d.y * fw.y + d.z * fw.z
+      const yc = d.x * u.x + d.y * u.y + d.z * u.z
+      return yc / zc / Math.tan((fov * Math.PI) / 180 / 2)
+    }
+
+    const look = { x: 1.08, y: tier.lookAtY, z: 0.72 }
+    // 竖屏 stepY = 0.52，取 ±2 档
+    const top = project(look, tier.theta, tier.phi, tier.radius, 2 * 0.52)
+    const bottom = project(look, tier.theta, tier.phi, tier.radius, -2 * 0.52)
+    expect((top + bottom) / 2).toBeCloseTo(-0.0716, 3)
+    expect(top - bottom).toBeCloseTo(-0.9247, 3)
   })
 
   it('退出跟拍只关 active；type 保留到相机收敛（上游 exitTimer+收敛语义）', () => {

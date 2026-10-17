@@ -201,6 +201,18 @@ export interface SonicHzBands {
   beatSub: number
   beatKick: number
   beatMelody: number
+  /**
+   * 上游 `tHigh`（`11-main-loop.js:390`）：
+   *
+   *     tHigh = beatBandRms(frequencyData, sr, fft, 6200, min(16000, sr/2))
+   *
+   * 这是喂给粒子归一化层 `uTreble` 的**真实来源** —— 镲片 / 空气感。
+   * 此前本项目把 `snap`（1800–9200Hz）当 tHigh 用，于是 `uTreble` 响应的是
+   * 人声 / 存在感而不是高频，整条高频视觉链都偏低。
+   *
+   * 上界的 `min(16000, sr/2)` 由 `hzToBin` 的 `len-1` 钳制等价实现。
+   */
+  beatHigh: number
 }
 export function computeHzBands(data: Uint8Array, meta: AnalysisMeta): SonicHzBands {
   const values: Record<string, number> = {}
@@ -227,6 +239,8 @@ export function computeHzBands(data: Uint8Array, meta: AnalysisMeta): SonicHzBan
   values.beatSub = hzRangeAverage(data, meta, 38, 74, false)
   values.beatKick = hzRangeAverage(data, meta, 52, 165, false)
   values.beatMelody = hzRangeAverage(data, meta, 2600, 6200, false)
+  // tHigh：6200Hz 以上（上界由 hzToBin 钳到 len-1，等价上游 min(16000, sr/2)）
+  values.beatHigh = hzRangeAverage(data, meta, 6200, 16000, false)
   return values as unknown as SonicHzBands
 }
 
@@ -370,6 +384,8 @@ export interface SonicAudioFrame {
   beatKick: number
   /** 拍点相机专属频段 2600–6200Hz（上游叫 `mInst`，即 melody）。 */
   beatMelody: number
+  /** 上游 `tHigh` 6200Hz+（喂粒子归一化层的真实高频来源）。 */
+  beatHigh: number
   // 聚合
   treble: number
   energy: number
@@ -424,6 +440,7 @@ function emptyFrame(): SonicAudioFrame {
     beatSub: 0,
     beatKick: 0,
     beatMelody: 0,
+    beatHigh: 0,
     treble: 0,
     energy: 0,
     beat: 0,
@@ -472,6 +489,7 @@ const DECAY_KEYS: Array<keyof SonicAudioFrame> = [
   'beatSub',
   'beatKick',
   'beatMelody',
+  'beatHigh',
   'treble',
   'energy',
   'kickEnvelope',

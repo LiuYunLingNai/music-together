@@ -151,8 +151,13 @@ export function buildStageLines(lines: readonly AMLLLyricLine[] | null | undefin
 /**
  * 计算某一行的逐字进度（0..1）。
  *
- * 与 Mineradio 的 getLyricLineProgress 行为一致：
- * 无逐字数据时回退为整行平滑推进。
+ * 与 Mineradio 的 `getLyricLineProgress`
+ * （14-stage-lyrics-rendering.js:2620-2648）行为一致。
+ *
+ * ★ `LYRIC_PROGRESS_LEAD`（上游 `now += 0.020`，:2642）：填充**提前 20ms**
+ *   起跑。这不是可有可无的补偿 —— 逐字填充由着色器按 `uProgress` 裁切文字
+ *   遮罩，而音频时钟每帧才更新一次（约 16ms 粒度）。没有这个提前量时，
+ *   唱到某个字的**当帧**填充还没跟上，听感上"字唱完了光才扫到"。
  *
  * @param nowSeconds 当前播放时间（秒，已含偏移校准）
  */
@@ -162,35 +167,58 @@ export function computeLineProgress(line: StageLine, nowSeconds: number, fallbac
   // 有真正的逐字时间轴时按字符区间插值
   if (words.length > 0 && hasWordTiming(words)) {
     let lastProgress = 0
+    // 上游在进入逐字分支**之前**就把 now 前移 20ms（:2642 在函数中部，
+    // 但逐字分支用的就是前移后的值 —— 见下方 `now` 的使用处）。
+    const now = nowSeconds + LYRIC_PROGRESS_LEAD
 
     for (const word of words) {
       const startSeconds = word.startTime / 1000
       const endSeconds = word.endTime / 1000
 
-      if (nowSeconds < startSeconds) return lastProgress
+      if (now < startSeconds) return lastProgress
 
       const span = Math.max(0.08, endSeconds - startSeconds)
-      const local = nowSeconds >= endSeconds ? 1 : Math.max(0, Math.min(1, (nowSeconds - startSeconds) / span))
+      const local = now >= endSeconds ? 1 : Math.max(0, Math.min(1, (now - startSeconds) / span))
 
       const p0 = word.charStart / charCount
       const p1 = word.charEnd / charCount
       const progress = p0 + (p1 - p0) * local
 
       lastProgress = Math.max(lastProgress, progress)
-      if (nowSeconds < endSeconds) return lastProgress
+      if (now < endSeconds) return lastProgress
     }
 
     return 1
   }
 
-  // 回退：整行在 [startTime, 下一行/估算结束] 之间平滑推进
+  // 回退：整行在 [startTime, 下一行/估算结束] 之间平滑推进。
+  //
+  // 上游同一分支（:2642-2648）：
+  //   now += 0.020;
+  //   nextT = nextLine.t > line.t ? nextLine.t : min(duration, line.t + (line.duration || 4.8))
+  //   span  = max(0.75, nextT - line.t)
+  //   prog  = clamp((now - line.t) / span)
+  //   return prog*prog*(3 - 2*prog)
+  //
+  // ★ 与上游的差异只有一处：上游优先用**下一行的起始**，其次才用行自带
+  //   `duration`；本项目传进来的 `fallbackEndSeconds` 已是"下一行起始或
+  //   估算值"的等价物（调用方见 `LyricStage`），因此这里不再重复推导。
   const startSeconds = line.startTime / 1000
   const endCandidate = line.endTime > line.startTime ? line.endTime / 1000 : fallbackEndSeconds
   const span = Math.max(0.75, endCandidate - startSeconds)
-  const raw = Math.max(0, Math.min(1, (nowSeconds - startSeconds) / span))
+  const raw = Math.max(0, Math.min(1, (nowSeconds + LYRIC_PROGRESS_LEAD - startSeconds) / span))
   // smoothstep，与上游的 prog * prog * (3 - 2 * prog) 一致
   return raw * raw * (3 - 2 * raw)
 }
+
+/**
+ * 逐字进度提前量（秒）—— 上游 `getLyricLineProgress` 的 `now += 0.020`
+ * （14-stage-lyrics-rendering.js:2642）。
+ *
+ * 提前量对**两个分支都生效**（上游那行在逐字分支的循环之后、回退分支之前，
+ * 但逐字分支用的 `now` 就是前移后的同一个变量）。
+ */
+export const LYRIC_PROGRESS_LEAD = 0.02
 
 /**
  * 判断这些字是否带有真实的逐字时间轴。

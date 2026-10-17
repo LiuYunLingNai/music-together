@@ -62,7 +62,47 @@ export interface LyricMotionProfile {
   floatAmp: number
   /** 呼吸缩放幅度 */
   breathe: number
+  /**
+   * 组级**进入**包络时长（秒）—— 上游 `lyricMotionProfile.enter`。
+   *
+   * 用于歌词组换行时的 `a = age/enter` 揭示：新行从一侧滑上来并伴随
+   * `0.96 → 0.96+a*0.055` 的放大（上游 `tickMesh`，:2220 / :2475）。
+   * 缺它时换行是瞬间切换，没有滑入。
+   *
+   * ★ `breathe` / `beatPulse` **不在**这个表里 —— 上游它们都是运行时量：
+   *   `breathe` 是 `(sin(t*0.92+seed)*0.050 + sin(t*0.41+seed*0.7)*0.028) * floatAmp`
+   *   （:2450），`beatPulse` 由主循环从音频推导（11-main-loop.js:450-455）。
+   *   本项目曾把 `breathe` 做成风格常量并直接乘进缩放，量纲整个错了
+   *   （上游是 ±0.05 的呼吸，那样是 ×1.0 的整体偏移）。
+   */
+  enter: number
+  /** 组级**退出**包络时长（秒）—— 上游 `lyricMotionProfile.exit`。 */
+  exit: number
+  /**
+   * 上下文行的**进度漂移**幅度（上游 `lyricMotionProfile.contextDrift`，
+   * `08-lyrics-display-modes.js:140/154/156/158/160/162/164`）。
+   *
+   * 上游 `12-lyrics-row-layers.js:1431/1599`：
+   *
+   *   rowDrift = (0.5 - shownProgress) * contextDrift * motionBlend;
+   *   yTarget  = -liveDelta * lineStepWorld
+   *            + (motionAnchor ? 0 : rowDrift * clampRange(0.70 + abs*0.10, 0.65, 1.20));
+   *
+   * 即**非锚定行**（非激活、非当前译词）会随当前行的逐字进度整体上下漂移：
+   * 进度走到一半时 rowDrift = 0，行首 +contextDrift/2、行尾 −contextDrift/2。
+   * `float`（出厂默认）的 0.120 在 |Δ|=1 的行上给出 ±0.048 世界单位的位移 ——
+   * 肉眼可见的"上下文随当前句一起呼吸"。
+   *
+   * ★ 上游传给 `updateLyricRowLayers` 的是 `contextDrift + |lineStepWorld| × 0.030`
+   *   （14-stage-lyrics-rendering.js:2396），本项目在调用处补那一项，
+   *   表里只放风格基值（与上游表一致）。
+   *
+   * ★ `motionBlend` 是上游的预览混合系数（预览锁定/过渡时 < 1）。
+   *   本项目没有预览锁定，恒取 1。
+   */
+  contextDrift: number
 }
+
 
 const MOTION_PROFILES: Record<LyricMotionStyle, LyricMotionProfile> = {
   float: {
@@ -75,6 +115,9 @@ const MOTION_PROFILES: Record<LyricMotionStyle, LyricMotionProfile> = {
     glitchRate: 1,
     floatAmp: 1.45,
     breathe: 1,
+    enter: 0.86,
+    exit: 0.76,
+    contextDrift: 0.12,
   },
   smooth: {
     sweep: 0.18,
@@ -86,6 +129,9 @@ const MOTION_PROFILES: Record<LyricMotionStyle, LyricMotionProfile> = {
     glitchRate: 1,
     floatAmp: 0.55,
     breathe: 0.6,
+    enter: 0.72,
+    exit: 0.62,
+    contextDrift: 0.03,
   },
   // glass 走上游的 else 分支（未单列的风格）
   glass: {
@@ -98,6 +144,9 @@ const MOTION_PROFILES: Record<LyricMotionStyle, LyricMotionProfile> = {
     glitchRate: 1,
     floatAmp: 1.0,
     breathe: 1.0,
+    enter: 0.62,
+    exit: 0.52,
+    contextDrift: 0.066,
   },
   quick: {
     sweep: 0.28,
@@ -109,6 +158,9 @@ const MOTION_PROFILES: Record<LyricMotionStyle, LyricMotionProfile> = {
     glitchRate: 1,
     floatAmp: 0.62,
     breathe: 1.4,
+    enter: 0.36,
+    exit: 0.32,
+    contextDrift: 0.034,
   },
   shine: {
     sweep: 1.22,
@@ -120,6 +172,9 @@ const MOTION_PROFILES: Record<LyricMotionStyle, LyricMotionProfile> = {
     glitchRate: 1,
     floatAmp: 0.82,
     breathe: 0.8,
+    enter: 0.5,
+    exit: 0.44,
+    contextDrift: 0.052,
   },
   glitch: {
     sweep: 0.54,
@@ -131,6 +186,9 @@ const MOTION_PROFILES: Record<LyricMotionStyle, LyricMotionProfile> = {
     glitchRate: 1.4,
     floatAmp: 0.7,
     breathe: 1.0,
+    enter: 0.4,
+    exit: 0.36,
+    contextDrift: 0.035,
   },
 }
 

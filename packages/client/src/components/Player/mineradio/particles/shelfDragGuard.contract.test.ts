@@ -12,14 +12,20 @@ import { describe, expect, it } from 'vitest'
  * 热区宽达视口 18%（保持区更达 **56%**），260ms 停留门槛在慢速划动下会被
  * 满足 → 相机突然被拉去跟拍，打断正在进行的旋转。
  *
- * **为什么上游没这个显式守卫**：上游歌单架默认**自动隐藏**
- * （`fx.shelfPresence` 出厂 `'auto'`），跟拍入口 `isSideShelfFocusHit`
- * 要求 `shelfVisibility > 0.34`（`05-card-interactions.js:19`）——
- * 平时不满足，误触概率极低。
+ * ============================ 这条守卫的定性变迁 ============================
  *
- * 而本项目**未移植悬停召唤包络**（HANDOFF §5.1），歌单架**常驻可见**，
- * 那个隐含门槛不存在 → 同样的手势就会误触。因此这条守卫是"因未移植项
- * 而产生的必要补偿"（登记于 HANDOFF §2 D11）。
+ * 最初它是「因未移植召唤包络而产生的必要补偿」（HANDOFF §2 D11）：
+ * 上游歌单架出厂自动隐藏，跟拍入口 `isSideShelfFocusHit` 要求
+ * `shelfVisibility > 0.34`（`05-card-interactions.js:19`），平时不满足；
+ * 而本项目当时常驻可见，那个隐含门槛不存在，于是必须显式补。
+ *
+ * **召唤包络移植后，上游那条隐含门槛已经恢复**（`shelfFocusEntryUnlocked`），
+ * 这条守卫的性质随之改变 —— 但它**仍然必须保留**，理由与上游同源：
+ * `canShowShelfHoverCueAt`（00-layout-hover.js:127）把 `isPointerOverUi`
+ * 列为否决项；本项目对应的是"指针正被拖拽手势占用"。方案一（浮现即跟拍）
+ * 之后跟拍来源多了一条 `shelfVisible && inShelfHoldZone`，拖拽期间
+ * `inShelfHoldZone` 为假，仍不会误触 —— 守卫从"必要补偿"变成
+ * "与上游同源的语义"，但强度不能降。
  *
  * 本测试读源码断言守卫存在，并**同时**断言"松手后仍能正常进入跟拍"
  * （避免有人把守卫写成永久禁用）。
@@ -48,10 +54,20 @@ describe('歌单架跟拍：拖拽期间不得误触', () => {
   })
 
   it('守卫不得写成永久禁用（松手后仍能进入跟拍）', () => {
-    // 跟拍进入路径必须仍然存在，且不依赖 rotating
-    expect(body).toMatch(/const shouldFocus = hoverCue\.zoneActive && now - hoverCue\.enteredAt > 260/)
+    // 跟拍进入路径必须仍然存在，且不依赖 rotating。
+    //
+    // ★ 这条断言随方案一（浮现即跟拍）改过形状：`shouldFocus` 现在是
+    //   「(hoverCue 停留 260ms) ‖ (已浮现 ∧ 指针在右侧宽区)」两个来源的析取，
+    //   两者都不得把 `rotating` 写进条件 —— 拖拽期间 `cardHit` /
+    //   `inShelfHoldZone` 已各自为假，这里再加就是重复门控。
+    expect(body).toMatch(/const shouldFocus =/)
+    expect(body).toMatch(/hoverCue\.zoneActive && now - hoverCue\.enteredAt > 260/)
     expect(body).toMatch(/setShelfCameraFocus\(true\)/)
+    // 浮现这条来源必须真的在（方案一的核心）
+    expect(body, '浮现→跟拍 的来源缺失').toMatch(/shelfVisible && inShelfHoldZone/)
     // inZone 的合成不得直接把 rotating 变成硬性 return / 早退
     expect(body).not.toMatch(/if \(rotating\) return/)
+    // 退出路径同样不得读 rotating（松手即按正常 exitTimer 走）
+    expect(body, '退出路径被 rotating 门控').not.toMatch(/const shouldExit =[^\n]*rotating/)
   })
 })

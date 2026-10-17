@@ -1309,6 +1309,39 @@ export function consumePrimeCamPunch(): number {
 }
 
 /**
+ * 回正时衰减在飞的节拍冲量 —— 上游 `dampCameraImpulseForRecenter`
+ * （`01-scene/01-orbit-free-camera.js:246-259`）：
+ *
+ * ```js
+ * function dampCameraImpulseForRecenter(strength) {
+ *   var damp = clampRange(strength == null ? 0.36 : strength, 0, 1);
+ *   orbit.cineTheta *= damp; orbit.cinePhi *= damp; orbit.cineRadius *= damp;
+ *   camPunch *= damp;
+ *   beatCam.thetaKick *= damp; beatCam.phiKick *= damp;
+ *   beatCam.radiusKick *= damp; beatCam.rollKick *= damp;
+ *   beatCam.punch *= damp;
+ * }
+ * ```
+ *
+ * ★ 为什么必须有：双击回正把相机**目标**拉回基准，但节拍 kick 是**叠加**在
+ *   目标之上的偏移量。不衰减的话，回正缓动与仍在飞的 kick 互相拉扯 ——
+ *   用户看到的是"双击了却弹回去一下才归位"。上游用 0.32（见
+ *   `recenterCamera()` 的调用点）把五个 kick 一起压掉。
+ *
+ * `cineTheta/cinePhi/cineRadius` 与 `camPunch` 在本项目分别归
+ * `CameraRig`（本地 idle 漂移）与 `orbitCameraState`（全局 punch）管理，
+ * 由调用方各自处理；这里只负责 `beatCam` 这五个量。
+ */
+export function dampBeatCameraImpulse(strength = 0.36): void {
+  const damp = Math.max(0, Math.min(1, strength))
+  beatCam.thetaKick *= damp
+  beatCam.phiKick *= damp
+  beatCam.radiusKick *= damp
+  beatCam.rollKick *= damp
+  beatCam.punch *= damp
+}
+
+/**
  * 切歌 / 离开舞台时重置。
  *
  * ★ 必须清空**事件队列**与**整曲自适应**：否则上一首的在飞事件会带进新歌，

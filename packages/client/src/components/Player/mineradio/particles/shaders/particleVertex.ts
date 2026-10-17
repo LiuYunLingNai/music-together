@@ -23,7 +23,12 @@
  * - `uScatter` / `uTwist` / `uLoading` 只有 uniform 声明、函数体零引用。
  * - 片元缺 `uBackdropAdapt`，亮底避光系数被写死。
  *
- * 以上已按 Mineradio 逐行修正。仍未移植的是 Mineradio 的预设 6-12
+ * 以上已按 Mineradio 逐行修正。`uLoading` 的**着色器侧**同样已补齐
+ * （见下方"加载形态"段），驱动侧见 `../loadingState.ts` —— 上游是
+ * `showLoading`/`hideLoading` 两个函数配 rAF 补间，本项目由音频缓冲区间
+ * 驱动、改由 `ParticleField` 的帧循环推进补间（算术逐项对齐）。
+ *
+ * 仍未移植的是 Mineradio 的预设 6-12
  * （安魂 / 音域回响 ×2 / 月蚀圣环 / 雨幕霓虹 / 折光蝶群 / 深海绽放）。
  * 预设编号保留 Mineradio 原值，便于日后逐行 diff。
  *

@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import type { VisualModeId } from '../../stages/VisualMode'
+import { dampBeatCameraImpulse } from './beatCamera'
 import { resetGestureRotation } from './gestureRotationState'
 import { SHELF_CENTER, shelfFocusLookAtOffset, shelfFollowTier, shelfSideX } from './floatingSongCard'
 
@@ -74,6 +75,15 @@ export function resetCameraPunch(): void {
   camPunch = 0
 }
 
+/**
+ * 回正时按系数衰减 `camPunch` —— 上游 `dampCameraImpulseForRecenter` 里的
+ * `camPunch *= damp` 那一行（`01-orbit-free-camera.js:251`）。
+ * `beatCam` 的五个 kick 由 `dampBeatCameraImpulse` 负责。
+ */
+export function dampCameraPunch(strength: number): void {
+  camPunch *= Math.max(0, Math.min(1, strength))
+}
+
 /** 跟拍类型：目前只用到歌单架侧栏。 */
 export type FocusType = 'shelf' | null
 
@@ -116,8 +126,20 @@ export interface OrbitCameraState {
    * 歌单架的悬停判定是**屏幕热区**而非射线命中，需要持续读取指针位置；
    * 上游同样把指针位置缓存在 `shelfHoverCue.x/y` 上逐帧复用。
    * `null` 表示指针不在画布上。
+   *
+   * ★ `movedAt` 是**真实 pointermove 事件**的时刻，不是读取时刻。
+   *
+   *   上游 `shelfHoverCue.lastAt` 只在 `updateShelfHoverCueFromPointer(e)`
+   *   里被写（`00-layout-hover.js:171`），而该函数**只由 DOM 事件驱动**
+   *   （`10-shell/02-peek-panels-upload.js:389,410` 的 mousemove）；
+   *   `tickShelfHoverCue` 则靠 `now - lastAt > 650` 判定"指针已停止活动"。
+   *
+   *   本项目的指针位置走这个共享槽、由渲染循环逐帧读取。若在逐帧读取处
+   *   把 `lastAt` 写成 `now`，就等于**每帧伪造一次 pointermove** ——
+   *   650ms 空闲永远累积不到，`target` 再也回不到 0，歌单架一旦浮现
+   *   就**永不淡出**。因此事件时刻必须由事件写入方（CameraRig）盖戳。
    */
-  pointerSlot: { x: number; y: number } | null
+  pointerSlot: { x: number; y: number; movedAt: number } | null
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -227,6 +249,15 @@ export function recenterCamera(): void {
   state.focus.active = false
   state.focus.type = null
   state.focus.lookAt.set(0, 0, 0)
+  // ★ 衰减在飞的节拍冲量（上游 `dampCameraImpulseForRecenter(0.32)`，
+  //   03-focus-cinema-camera.js:295）。
+  //
+  //   不做这一步，回正缓动会与仍在飞的 beatCam kick 互相拉扯约 0.25s ——
+  //   表现为"双击回正了却被弹回去一下才归位"。
+  //   `cineTheta/cinePhi/cineRadius` 在本项目是 `CameraRig` 的局部量
+  //   （每帧由 idle 漂移 + kick 重算，不持久），因此无需单独衰减。
+  dampCameraPunch(0.32)
+  dampBeatCameraImpulse(0.32)
 }
 
 /**
@@ -271,17 +302,13 @@ export function tickShelfFocusExitSettled(
  * （`03-focus-cinema-camera.js:192-196`）：
  *   theta 0.42 / phi -0.12 / radius 4.20 / lookAt(2.32, -0.10, 0.72)
  *
- * ★ 用户观感调整（2026-09-21）：**齐平档**。上表的 phi −0.12 /
- *   lookAt.y −0.10 是"俯拍"档 —— 相机低于 lookAt 平面再往下看，
- *   整列卡片因此整体下沉。实测投影（theta 0.42 / radius 4.2 / 横屏 16:9）：
+ * ★ 该档的 `phi` / `lookAt.y` 已**恢复上游值**（用户 2026-10-17 决策）。
+ *   此前（2026-09-21）曾按"齐平以保持上下间隙对称"把它们归零，实测
  *     上卡 ndcY +1.723、下卡 ndcY −1.983 → 列中心 −0.130
  *     上间隙 −0.723、下间隙 −0.983 → 上下差 0.261
- *   用户要求"齐平以保持上下间隙对称"，改为 phi 0 / lookAt.y 0：
- *     上卡 +1.859、下卡 −1.859 → 列中心 0.000，上下差 0.000（完全对称）。
- *   theta 与 lookAt.x/z 不动，保留右侧构图与推近幅度。
- *   注：上游对 preset 5（WALLPAPER）本就另有一档（phi 0.02），
- *   说明"按模式/观感分档"与上游结构一致；且此跟拍引自 OpenMusic，
- *   不属于 Mineradio 忠实还原范围。
+ *   但歌单架现已移植上游的悬停召唤包络（`./shelfSummonState`），
+ *   静止态整列不可见 —— "整列常驻时需要上下对称"这个前提已不成立，
+ *   因此改为忠实复刻上游的俯拍档。
  *
  * 与上游一致，激活跟拍同时解除 centerLock（`activateFocusZone` 首行
  * 就调用 `unlockCenteredView()`）；退出跟拍后由调用方决定是否回正。
@@ -314,27 +341,44 @@ export function setShelfCameraFocus(active: boolean): void {
   //   此前对所有档位用宽屏的 0.52：窄屏下注视点落到 1.96、上游是 2.32，
   //   差 0.36 world，推近后整列在构图里偏左。
   const shelfLookAtX = shelfSideX() + SHELF_CENTER.x - shelfFocusLookAtOffset()
-  // 跟拍档位参数也分档（上游竖屏 theta 0.24 / radius 5.28 —— 更正面、更远）。
-  // `phi` / `lookAt.y` 取 0 是已登记的 §2 D3"齐平"偏离，不随档位变化。
+  // 跟拍档位参数**分档**（上游竖屏 theta 0.24 / phi −0.06 / radius 5.28 /
+  // lookAt.y −0.18，横屏 theta 0.42 / phi −0.12 / radius 4.20 / lookAt.y −0.10）。
   const tier = shelfFollowTier()
   if (state.mode === 'topography') {
-    // 地形档：与粒子档同一"齐平"原则（phi 0 / lookAt.y 0 → 列中心 0.000、
-    // 上下间隙差 0.000）。半径 5.2 保留第二十二轮的"拉近幅度减半"——
+    // 地形档：与粒子档同一原则，但半径保留第二十二轮的"拉近幅度减半"——
     // 地形主相机基线更远（radius 8.4），拉近到 4.2 的落差比粒子档大一倍。
-    // 注：第二十二轮曾把 lookAt.y 抬到 0.30 去对齐"抬升后的歌词/地形视觉
-    // 中心"，但那会让列中心回到 −0.134、上下间隙差 0.267 —— 与"齐平对称"
-    // 直接冲突，故一并归零。
+    // 第二十二轮曾把 lookAt.y 抬到 0.30 去对齐"抬升后的歌词/地形视觉中心"，
+    // 但那与上游俯拍档冲突，故随 phi 一并对齐上游。
     state.focus.theta = tier.theta
-    state.focus.phi = 0.0
+    state.focus.phi = tier.phi
     state.focus.radius = 5.2
-    state.focus.lookAt.set(shelfLookAtX, 0.0, 0.72)
+    state.focus.lookAt.set(shelfLookAtX, tier.lookAtY, 0.72)
   } else {
     state.focus.theta = tier.theta
-    state.focus.phi = 0.0
+    state.focus.phi = tier.phi
     state.focus.radius = tier.radius
-    state.focus.lookAt.set(shelfLookAtX, 0.0, 0.72)
+    state.focus.lookAt.set(shelfLookAtX, tier.lookAtY, 0.72)
   }
+  // ★ 上游 `03-focus-cinema-camera.js:196` 的 `camPunch = Math.max(camPunch, 0.82)`
+  //   —— 只在 `setFocusZone('shelf-side')` 分支里，即**歌单架真正打开**
+  //   （上游 = 右键 `pinnedOpen`）时的那一次镜头前推。
+  //
+  //   此前本项目跟拍完全没有这一项：相机靠 ease 缓动滑到跟拍位，没有"推近"的
+  //   冲击感，观感是"画面慢慢飘过去"。补上后与上游一致。
+  //
+  //   ★ 放在 `if (!active) return` 之后：退出跟拍**不得**加冲击
+  //     （上游退出分支只有 `setFocusZone(null)`，没有 camPunch）。
+  //     否则每次指针移出右缘都会再推一次镜头。
+  boostCameraPunch(SHELF_FOCUS_CAM_PUNCH)
 }
+
+/**
+ * 上游跟拍开启时的镜头前推冲击（`03-focus-cinema-camera.js:196`，仅 shelf-side）。
+ *
+ * 其余分支的值不同（shelf-detail 0.38 / 壁纸安全档 0.28~0.30），本项目只有
+ * shelf-side 一档，故只取 0.82。
+ */
+export const SHELF_FOCUS_CAM_PUNCH = 0.82
 
 /** 无条件清除跟拍（卸载/无曲目时用）。 */
 export function clearShelfFocus(): void {

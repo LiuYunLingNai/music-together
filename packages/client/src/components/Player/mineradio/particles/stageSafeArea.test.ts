@@ -153,7 +153,12 @@ describe('侧栏退让 · 位移规则', () => {
   it('位移量是**最小**的：刚好让开，不多移', () => {
     const width = 1600
     const { left, right } = insets(width, false, true)
-    const pan = resolveStagePanFraction(left, right, width)
+    // ★ 必须把 `SHELF_COLUMN_X` 显式传进去。
+    //   此前这里漏传，函数退到默认值 3.18 —— 那正好是 `SHELF_CENTER.x = 0`
+    //   时代的列中心，于是"默认值"与测试自己算的 extent **偶然相等**，
+    //   断言全绿。`SHELF_CENTER.x` 回到上游 −0.34 后列中心变为 2.84，
+    //   两处脱节立刻暴露（contentRight 落到 0.734 < availRight 0.775）。
+    const pan = resolveStagePanFraction(left, right, width, 16 / 9, SHELF_COLUMN_X)
     const availRight = 1 - right / width
     // ★ 用**实算**的构图范围，不用写死的常量（§5.4 C1/C2）
     const extent = projectStageContentExtent(16 / 9, SHELF_COLUMN_X)
@@ -285,7 +290,7 @@ describe('侧栏退让 · 端到端屏幕位置', () => {
       [1920, 1080],
     ]) {
       const { left, right } = insets(width, false, true)
-      const pan = resolveStagePanFraction(left, right, width)
+      const pan = resolveStagePanFraction(left, right, width, width / height, SHELF_COLUMN_X)
       const availRight = 1 - right / width
       const noPan = shelfRightAt(width, height, 0)
       expect(noPan, `${width}: 让开前应当确实越界`).toBeGreaterThan(availRight)
@@ -300,7 +305,7 @@ describe('侧栏退让 · 端到端屏幕位置', () => {
       [1920, 1080],
     ]) {
       const { left, right } = insets(width, true, false)
-      const pan = resolveStagePanFraction(left, right, width)
+      const pan = resolveStagePanFraction(left, right, width, width / height, SHELF_COLUMN_X)
       expect(pan).toBe(0)
       expect(screenX(width, height, pan, SHELF_LEFT_WORLD, SHELF_Y, SHELF_Z)).toBeCloseTo(
         screenX(width, height, 0, SHELF_LEFT_WORLD, SHELF_Y, SHELF_Z),
@@ -317,7 +322,7 @@ describe('侧栏退让 · 端到端屏幕位置', () => {
       [2560, 1440],
     ]) {
       const { left, right } = insets(width, false, true)
-      const pan = resolveStagePanFraction(left, right, width)
+      const pan = resolveStagePanFraction(left, right, width, width / height, SHELF_COLUMN_X)
       const coverLeft = screenX(width, height, pan, -COVER_R)
       expect(coverLeft, `${width}: 退让把封面推到了左栏之下`).toBeGreaterThanOrEqual(left / width - 0.003)
     }

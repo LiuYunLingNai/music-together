@@ -72,6 +72,10 @@ export interface AudioBands {
   snap: number
   kickCore: number
   kickSub: number
+  /** 上游 `mInst`（2600–6200Hz）→ 归一化层 `uMid` 的来源。 */
+  melody: number
+  /** 上游 `tHigh`（6200–16000Hz）→ 归一化层 `uTreble` 的来源。 */
+  high: number
 }
 
 const EMPTY_SONIC: SonicBands = {
@@ -99,6 +103,8 @@ const EMPTY_BANDS: AudioBands = {
   snap: 0,
   kickCore: 0,
   kickSub: 0,
+  melody: 0,
+  high: 0,
 }
 
 let analyser: AnalyserNode | null = null
@@ -385,6 +391,13 @@ function projectFrame(frame: SonicAudioFrame): AudioBands {
     snap: frame.snap,
     kickCore: frame.kickCore,
     kickSub: frame.kickSub,
+    // ★ 上游粒子归一化层真正使用的两个频段（`11-main-loop.js:389-390`）：
+    //     mInst = beatBandRms(2600, 6200)  → uMid
+    //     tHigh = beatBandRms(6200, 16000) → uTreble
+    //   此前 caller 用 `snap`（1800–9200）同时顶替这两个值 —— 高频视觉链
+    //   （滚筒高频抖动、星河尺寸、uTreble 的一切响应）因此偏低且错位。
+    melody: frame.beatMelody,
+    high: frame.beatHigh,
   }
 }
 

@@ -39,23 +39,23 @@ const GROUND_MOTION_SPEED = 50
 const WHITE = new THREE.Color('#ffffff')
 
 /**
- * 地形辉光压制系数（用户观感调整，2026-09-21）。
+ * 地形辉光压制系数 —— 已回到 **1.0（上游无此系数）**。
  *
- * 上游 uGlowIntensity 公式出厂算得 ≈1.64，叠加顶面边缘 ×0.8、presence
- * 闪光等加项后整体观感偏亮。本项目在其上统一乘 0.78 压制 —— 这是**刻意
- * 偏离上游**的观感档（上游无此系数），只作用于 uGlowIntensity 汇聚点，
- * 涟漪/白色闪光/陨石等独立加项不受影响。若要恢复忠实还原，改回 1.0。
+ * 这两个 trim 当初是为了压制"整体偏亮"，但偏亮的**真正原因**是辉光公式
+ * 取错了默认值：`topographyTheme.ts` 把预设文件里的 fallback `68` 当成
+ * 出厂值，算出 1.6384，而上游真实的 `fx.sonicGroundGlow` 是 **20** →
+ * 0.9664。两者相差 70%，于是拿 0.78 去"兜"。
+ *
+ * 现在源头已修（见 `topographyTheme.ts` 的 `UPSTREAM_GROUND_GLOW`），
+ * 有效辉光 0.9664 比修复前的 1.278 低 24% —— trim 没有存在理由了。
+ * 保留常量只为标明"此处曾有一层非上游系数"，数值恒 1.0。
  */
-const TOPOGRAPHY_GLOW_TRIM = 0.78
+const TOPOGRAPHY_GLOW_TRIM = 1.0
 
 /**
- * 顶面「presence 闪光」压制系数（同一轮观感调整）。
- *
- * presence 直接乘进着色器 flashChance 与闪光强度，是最容易过曝的加项；
- * 压到 0.85 只削顶部随机闪光，snare 白色涟漪触发阈值走原始 sonic 值
- * （第 462 行的判定在 trim 之前），不受影响。
+ * 顶面「presence 闪光」压制系数 —— 同上，已回到 **1.0（上游无此系数）**。
  */
-const TOPOGRAPHY_PRESENCE_TRIM = 0.85
+const TOPOGRAPHY_PRESENCE_TRIM = 1.0
 /** 陨石生成最小间隔（秒），上游 `sonic-topography-preset.js:864`。 */
 const METEOR_SPAWN_INTERVAL = 0.55
 

@@ -169,8 +169,13 @@ describe('computeLineProgress', () => {
   })
 
   it('第一个字播完时进度到达该字区间终点', () => {
-    // 第一字占字符 0..2，总字符 4 → 区间终点 0.5
-    expect(computeLineProgress(stageLine(), 2.0, 4)).toBeCloseTo(0.5, 5)
+    // 第一字占字符 0..2，总字符 4 → 区间终点 0.5。
+    // ★ 含 20ms 提前量（上游 `now += 0.020`）：t=2.0 时 now=2.02，已经
+    //   **进入第二字** 20ms ⇒ 0.5 + 0.5 × (0.02 / 第二字时长) = 0.51。
+    //   上游同样如此 —— 提前量意味着"字一唱完就立刻往下走"。
+    expect(computeLineProgress(stageLine(), 2.0, 4)).toBeCloseTo(0.51, 5)
+    // 无提前量时 t=2.0 恰是 0.5 —— 差值 0.01 就是提前量的净效果
+    expect(computeLineProgress(stageLine(), 1.5, 4)).toBeCloseTo(0.26, 5)
   })
 
   it('整行播完为 1', () => {
@@ -178,8 +183,25 @@ describe('computeLineProgress', () => {
   })
 
   it('逐字中间按字符区间插值', () => {
-    // 第一字内部 50% → 0.25
-    expect(computeLineProgress(stageLine(), 1.5, 4)).toBeCloseTo(0.25, 5)
+    // 第一字 [1.0, 2.0]，t=1.5 + 0.020 提前量 ⇒ local = 0.52
+    // ⇒ 0 + 0.5 × 0.52 = 0.26
+    expect(computeLineProgress(stageLine(), 1.5, 4)).toBeCloseTo(0.26, 5)
+  })
+
+  /**
+   * 上游 `getLyricLineProgress:2642` 的 `now += 0.020`。
+   *
+   * 这不是补偿而是上游行为：逐字填充由着色器按 `uProgress` 裁切文字遮罩，
+   * 音频时钟每帧才更新一次（约 16ms 粒度）。没有提前量时，唱到某个字的
+   * **当帧**填充还没跟上，听感上"字唱完了光才扫到"。
+   */
+  it('进度比音频时钟提前 20ms（上游 now += 0.020）', () => {
+    const l = stageLine()
+    // 取第一字内部 40% 处：t=1.4 ⇒ local = 0.42
+    const withLead = computeLineProgress(l, 1.4, 4)
+    expect(withLead).toBeCloseTo(0.5 * 0.42, 6)
+    // 若无提前量，同一点只有 0.5 × 0.40 = 0.20 —— 差 0.01
+    expect(withLead).toBeGreaterThan(0.5 * 0.4)
   })
 
   it('进度单调不减', () => {
@@ -199,8 +221,10 @@ describe('computeLineProgress', () => {
     const p = computeLineProgress(single, 2, 4)
     expect(p).toBeGreaterThan(0)
     expect(p).toBeLessThan(1)
-    // smoothstep 在中点为 0.5
-    expect(p).toBeCloseTo(0.5, 2)
+    // smoothstep 在"中点"为 0.5。含 20ms 提前量 ⇒ 实际中点在 t = 2 - 0.02
+    // = 1.98s，故 t=2 时略高于 0.5。
+    expect(p).toBeGreaterThan(0.5)
+    expect(p).toBeLessThan(0.52)
   })
 
   it('多个字但共享同一时间区间时视为无逐字', () => {

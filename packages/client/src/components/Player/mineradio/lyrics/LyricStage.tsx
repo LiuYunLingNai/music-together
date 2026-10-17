@@ -1,6 +1,7 @@
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
+import { readShelfLyricAvoid } from '../particles/shelfSummonState'
 import {
   buildStageLines,
   computeLineProgress,
@@ -161,27 +162,91 @@ const RENDER_ORDER_OFFSET = 258
 const REVEAL_LANE_MS = 14
 
 /**
- * 译词独立行（上游 08-lyrics-display-modes.js 的虚拟槽位 + 14-...js 的
+ * 译词独立行（上游 08-lyrics-display-modes.js 的虚拟槽位 + 12-/14-...js 的
  * translationLine 条目 —— 译词是**独立网格**，绝不与主行同纹理）：
  *
  *   - 有译词的行（或其前一行有）占用更多主行槽位（见 `SLOT_WITH_TRANS`）
- *   - 译词行挂在父行 +`TRANS_GAP` 槽位处
+ *   - 译词行挂在父行 +`TRANS_GAP` 处
  *   - 滚动轨道以虚拟槽位为单位推进，主行与译词行各占各的槽 ——
  *     重叠在结构上不可能发生（此前译词画进主行纹理，行距不随纹理
  *     变高而展开，相邻行直接叠字）
  *
- * ★ 第二十五轮：间距基准从"上游槽位出厂值"改为"按主字号推导的 AMLL 比值"
- *   （`TRANS_GAP_WORLD` / `TRANS_GAP`），详见下方常量说明。
+ * 下面四个常量是这套槽位体系的全部数值来源，逐个对照上游出厂值修正过。
  */
-const SLOT_PLAIN = 1.0
 /**
- * 槽位 → 世界坐标的步长（world per slot）。主行与译词行的 `yTarget`
- * 都用它换算（`-delta * LYRIC_LINE_STEP_WORLD`）。
+ * 无译词主行的槽位步长。
  *
- * 提取为具名常量：此前这个 0.38 在两处硬编码，而译词间距要按"主字号"
- * 推导（见下），必须有一个单一来源。
+ * 上游 `08-lyrics-display-modes.js:69-72` 的 `lyricLineSlotStepValue()`：
+ *   `clampRange(1.04 + (lyricContextSpreadValue() - 1) * 0.10, 0.96, 1.24)`
+ * 出厂 `lyricContextSpread: 1.96`（`00-state/04-fx-defaults.js:42`）
+ *   → `clamp(1.04 + 0.96×0.10, 0.96, 1.24)` = **1.136**
+ *
+ * 此前写 1.0 —— 那是上游 `lyricTranslationLayoutActive() === false` 时的
+ * 提前返回值，而出厂 `lyricTranslationMode: 'multi'`（:32）下该分支不成立。
  */
-const LYRIC_LINE_STEP_WORLD = 0.38
+const SLOT_PLAIN = 1.136
+/**
+ * 同一主行的多条译词（译词 + 音译）之间的槽位间距。
+ *
+ * 上游 `applyLyricTranslationModeToEntries` 的 multi 分支
+ * （14-stage-lyrics-rendering.js:2740-2746）对每行**只插一条**译词行，
+ * 没有"同主行第二条译词"的概念，因此上游没有对应的显式步长常量。
+ *
+ * 本项目的 `roman`（音译）是自有的第二条译词。取 `1.06`：
+ * 它与上游把译词行距在 `lyricTrackLineStepWorld` 基础上放的 `×1.06`
+ * 同源（12-lyrics-row-layers.js:40），保持"槽位单位 = 主行步长"的口径。
+ * 此前这里是硬编码的 0.5，比一个主行步长（2.1214）窄 4 倍多。
+ */
+const TRANS_SUB_STEP = 1.06
+/**
+ * 槽位 → 世界坐标的步长（world per slot），对应上游
+ * `12-lyrics-row-layers.js:32-41` 的 `lyricTrackLineStepWorld()`。
+ *
+ * 上游推导（高度项**完全约掉**，所以与画布高度档位无关）：
+ *
+ *   worldH = 6.10 × (maskH / maskW)                 13-lyrics-mesh-build.js:49-50
+ *   step   = worldH × (lineHeight / maskH)
+ *          = 6.10 × lineHeight / maskW
+ *
+ *   行网格用 `stableStageLyricRowMaskLayout()`（:20-24）锁定的布局：
+ *     lineHeight = 128 × lyricLineHeightFactor() = 128 × 1.0 = 128
+ *     （`fx.lyricLineHeight` 出厂 1.0，见 04-fx-defaults.js:50；
+ *       上游源码里的 1.08 只是 `typeof !== 'function'` 的兜底，不是出厂值）
+ *   maskW 基宽 2048 →  step_base = 6.10 × 128 / 2048 = **0.38125**
+ *
+ * ★ 这就是此前硬编码的 0.38 —— 它只抄到了上游的**基准**，
+ *   漏掉了紧随其后的两个乘子（12-lyrics-row-layers.js:38-40）：
+ *
+ *     step *= clampRange(1 + (lyricContextSpreadValue() - 1) * 0.32, 0.86, 1.45)
+ *          →  1 + 0.96 × 0.32 = 1.3072        （出厂 spread 1.96）
+ *     if (lyricTranslationLayoutActive()) step *= 1.06
+ *          →  ×1.06                            （出厂 translationMode 'multi'）
+ *
+ *   0.38125 × 1.3072 × 1.06 = 0.528272…，在上游夹区 [0.22, 0.94] 内。
+ *   行距因此比此前**宽 39%** —— 这是歌词区最大的单项视觉偏差。
+ */
+const LYRIC_LINE_STEP_BASE_WORLD = 6.1 * 128 / 2048
+const LYRIC_CONTEXT_SPREAD = 1.96
+const LYRIC_LINE_STEP_WORLD = Math.min(
+  0.94,
+  Math.max(
+    0.22,
+    LYRIC_LINE_STEP_BASE_WORLD * Math.min(1.45, Math.max(0.86, 1 + (LYRIC_CONTEXT_SPREAD - 1) * 0.32)) * 1.06,
+  ),
+)
+/**
+ * 译词行**独立**的步长，对应上游 `12-lyrics-row-layers.js:42-49` 的
+ * `lyricTranslationLineStepWorld()` —— 同一个 0.38125 基准，但
+ * **不乘 spread 因子**，只乘 `×1.04`，夹区 [0.20, 0.78]：
+ *
+ *   0.38125 × 1.04 = 0.3965
+ *
+ * ★ 上游译词行的 Y **不走主行步长**（:63 / :77）：
+ *     y = -parentDelta × lineStepWorld − sign × visualGap × translationLineStepWorld
+ *   主行间距用宽的那个（0.5283），"主行→译词"用窄的这个（0.3965）。
+ *   此前本项目把译词 Y 也按主行步长换算，等于把这两个量混成一个。
+ */
+const LYRIC_TRANSLATION_STEP_WORLD = Math.min(0.78, Math.max(0.2, LYRIC_LINE_STEP_BASE_WORLD * 1.04))
 
 /** 1 栅格 px 对应的世界长度（遮罩画布 2048 基宽映射到 WORLD_W）。 */
 const WORLD_PER_RASTER_PX = WORLD_W / LYRIC_MASK_BASE_WIDTH
@@ -201,45 +266,47 @@ function glyphTouchDistance(upperFontWorld: number, lowerFontWorld: number): num
 }
 
 /**
- * 主歌词 → 译词的槽位偏移。
+ * 主歌词 → 译词的偏移量，对应上游 `08-lyrics-display-modes.js:50-54` 的
+ * `lyricTranslationVisualGapValue()`：
  *
- * ============================ 为什么不是"照搬 AMLL 的 0.3em" ============================
+ *   clampRange(0.98 + (gap − 0.28) × 0.36 + max(0, scale − 0.66) × 0.12, 0.92, 2.20)
  *
- * ★ 第二十五轮曾把 AMLL 的 `gap: 0.3em` 直接当成中心距使用 —— 这是**量纲错误**，
- *   导致译词与主歌词**重叠**（实测字形边缘间距 −0.46em，即叠进去近半个字高）。
+ * 出厂 `lyricTranslationGap: 0.92` / `lyricTranslationScale: 0.65`
+ * （04-fx-defaults.js:43-44）：
+ *   0.98 + (0.92 − 0.28) × 0.36 + max(0, −0.01) × 0.12 = 0.98 + 0.2304 = **1.2104**
  *
- *   AMLL 的 `0.3em` 是 flex 容器的 **box 到 box 空白**：它作用在两个
- *   `line-height` 盒子之间（主行盒 1.2em、副行盒 1.5em），换算成中心距是
- *   `0.6 + 0.3 + 0.375 = 1.275em`；而本项目这里需要的是**中心距**。
- *   两者不是同一个量，不能直接搬。
+ * ★ 此前这里取 `2.1214 / 2 = 1.0607`，是一处**刻意偏离**：当时认为上游
+ *   "译词离自己的主歌词远、离下一句近"的分布不合观感，于是把整段间距均分。
+ *   本轮按"尽可能接近上游视觉效果"的要求回归上游原值 —— 且换算到世界距离
+ *   后，上游本来就近乎均分（见下），当年那个"不合观感"的判断在槽位空间
+ *   成立、在世界空间并不成立。
  *
- * ★ 真正的约束是"译词必须和**它的**主歌词成组、和**下一句**分开"：
- *
- *     主歌词 ──(a)── 译词 ──(b)── 下一句主歌词
- *
- *   原始上游分布 a=1.2104 / b=0.9110 槽位，换算成**字形边缘间距**是
- *   a=+0.446em、b=+0.148em —— 译词离自己的主歌词远、离下一句近，
- *   眼睛会把译词**归到下一句**去，这正是"间距有点大"的真实观感来源。
- *
- * ★ 因此这里取 `a = b`（把整段间距**均分**到译词两侧），而不是照搬某个绝对值：
- *   既满足"译词紧贴自己的主歌词"，又保住"与下一句有明确分隔"，
- *   且**总高度完全不变**（a+b 仍是上游的 2.1214 槽位）——
- *   主歌词之间的整体节奏、可见半径、槽位布局全部不受影响。
- *
- *   均分后字形边缘间距：上方 +0.297em、下方 +0.297em（完全对称、无重叠）。
+ * ★ 同时修正量纲：上游这个值**不是**乘在主行步长上的槽位数，而是乘在
+ *   **译词独立步长** `LYRIC_TRANSLATION_STEP_WORLD` 上的系数（:63 / :77）。
+ *   上游实际世界间距：
+ *     主行 → 译词      = 1.2104 × 0.3965 = 0.4800
+ *     译词 → 下一主行  = 2.1214 × 0.5283 − 0.4800 = 0.6410
+ *   槽位空间的不对称（1.2104 vs 0.9110）被两个步长之差抵消，
+ *   换算成**字形边缘间距**后几乎相等（0.1902 vs 0.1915，比值 0.993）——
+ *   上游观感上译词近似居中在自己的主行与下一句之间。
  */
-const TRANS_GAP = 2.1214 / 2
+const TRANS_GAP = 1.2104
 /** 译词行的字形高度（世界单位），供间距校验与测试使用。 */
 export const TRANS_GLYPH_TOUCH_WORLD = glyphTouchDistance(MAIN_FONT_WORLD, MAIN_FONT_WORLD * TRANS_FONT_SCALE)
-/** 译词与主歌词之间的实际字形边缘间距（世界单位；负值 = 重叠）。 */
-export const TRANS_GLYPH_GAP_WORLD = TRANS_GAP * LYRIC_LINE_STEP_WORLD - TRANS_GLYPH_TOUCH_WORLD
+/**
+ * 译词与主歌词之间的实际字形边缘间距（世界单位；负值 = 重叠）。
+ * 按上游量纲用**译词独立步长**换算。
+ */
+export const TRANS_GLYPH_GAP_WORLD = TRANS_GAP * LYRIC_TRANSLATION_STEP_WORLD - TRANS_GLYPH_TOUCH_WORLD
 
 /**
- * 有译词行的主行槽位步长 —— 保持上游出厂总量不变。
+ * 有译词行的主行槽位步长 —— 上游 `08-lyrics-display-modes.js:58-61` 的
+ * `lyricPrimarySlotStepValue()`：
  *
- * `TRANS_GAP + (2.1214 − 1.2104)` 的写法已废弃：它把"主→译词"与
- * "译词→下一句"当成两段独立的量，但真正要调的是**这两段的比例**。
- * 现在 `TRANS_GAP = 总量/2`，两侧自动相等，总量恒为 2.1214。
+ *   clampRange(visualGap + 0.82 + translationScale × 0.14, 1.78, 2.88)
+ *   →  1.2104 + 0.82 + 0.65 × 0.14 = **2.1214**
+ *
+ * 只在 `lyricTranslationLayoutActive()`（出厂 'multi'）时生效；否则返回 1。
  */
 const SLOT_WITH_TRANS = 2.1214
 /** 当前译词行透明度基准（上游 14-stage-lyrics-rendering.js:2695：clamp(0.86+0.08, 0.48, 1) = 0.94）。 */
@@ -294,22 +361,51 @@ const READABILITY_KEEP_AFTER = 24
  * 歌词避让侧栏的偏移链（上游 `shelfLyricAvoid` 分支）：缩放 ×0.72、
  * x −1.36、y +0.06、z +0.72。
  *
- * ★★ 本项目**只取其中的缩放 ×0.72，位移三项刻意不用**（第三十三轮定案）。
+ * ============================ 上游的真实门控 ============================
  *
- *   上游那三项位移是配合 `fx.lyricCameraLock`（相机锁定在歌词上）用的：
- *   歌词被推到一边，相机跟着锁过去，构图重心因此整体移到左侧。本项目
- *   没有 camera-lock 开关，歌词恒定**世界锚定在封面中心**、相机也恒定
- *   看向封面 —— 若单独套用位移，歌词就会离开封面中心飘到左上方，
- *   而封面仍在原地旋转：**转起来明显是错位的**，构图也不再有轴心。
+ * 上游 `14-stage-lyrics-rendering.js:2117-2123`：
  *
- *   因此歌词保持在封面正上方居中；与歌单架的让位改由**歌单架侧**承担
- *   （见 `particles/floatingSongCard.ts` 的 `SHELF_CENTER`）与侧栏退让
- *   （`particles/stageSafeArea.ts`）。
+ *   var layoutScale = clampRange(Number(fx.lyricScale) || 1, 0.35, 1.65);
+ *   ...
+ *   } else if (!skullMouthLyrics && shelfLyricAvoid && fx.lyricCameraLock) {
+ *     layoutScale *= 0.72;  layoutX -= 1.36;  layoutY += 0.06;  layoutZ += 0.72;
+ *   }
+ *
+ * 也就是说 `×0.72` **只在 `shelfLyricAvoid && fx.lyricCameraLock` 同时成立时**
+ * 生效，而 `lyricCameraLock` 出厂 **false**（00-state/04-fx-defaults.js:97）。
+ * 上游静止态歌词**完全不缩**，`layoutScale` 恒为 `clamp(fx.lyricScale, ...)` = 1.0。
+ *
+ * ★★ 本项目此前把 `×0.72` **无条件乘到每一行**上，原因与
+ *   `SHELF_CENTER.x` 的偏离同源：歌单架当时常驻可见，不缩就会真的撞上。
+ *   召唤包络（`particles/shelfSummonState`）移植后该前提已消失。
+ *
+ * ★ 现在按上游口径，缩放因子由**召唤包络**驱动：
+ *   `shouldAvoidStageLyricsForShelf(state)`（上游
+ *   03-focus-cinema-camera.js:170-176）在 `shelfVisibility > 0.24` 或
+ *   `hoverCue.value > 0.28` 时成立 —— 即**歌单架浮现时**才避让。
+ *   本项目没有 `fx.lyricCameraLock` 开关，因此那个附加条件不再要求
+ *   （否则避让永远不会触发，等于回到"常驻可见"的老问题）。
+ *
+ *   位移三项仍**刻意不用**：上游它们配合 camera-lock 使用，本项目歌词恒定
+ *   世界锚定在封面中心、相机恒定看向封面 —— 单独套用位移会让歌词离开封面
+ *   轴心，封面旋转时明显错位。
  *
  *   `SHELF_AVOID_X/Z` 仍被地形固定姿态分支引用（无封面 / 无 camera-lock，
  *   上游无对应场景，属本项目自有布局）。
  */
 const SHELF_AVOID_SCALE = 0.72
+/**
+ * 歌词布局缩放 —— 上游 `layoutScale`（14-stage-lyrics-rendering.js:2082）。
+ *
+ * 静止态 = 1.0（上游 `clamp(fx.lyricScale, 0.35, 1.65)`，出厂 `lyricScale: 1`）；
+ * 歌单架浮现时 = 0.72（上游 :2117 的 `layoutScale *= 0.72`，由
+ * `shouldAvoidStageLyricsForShelf` 驱动，见 `SHELF_AVOID_SCALE` 上方注释）。
+ *
+ * 每帧读一次发布槽，避免在四处置入同一段条件。
+ */
+function lyricShelfAvoidScale(): number {
+  return readShelfLyricAvoid() ? SHELF_AVOID_SCALE : 1
+}
 const SHELF_AVOID_X = 1.36
 const SHELF_AVOID_Y = 0.06
 const SHELF_AVOID_Z = 0.72
@@ -328,6 +424,19 @@ const TOPOGRAPHY_LIFT_Y = 0.35
  * 出厂参数：lyricGlowStrength 0.28 → glowDrive = min(1.7, 0.28/0.50) = 0.56；
  * 辉光强度 currentLineGlow = min(1.05, (0.10 + solar×0.40 + beatGlow×0.24 +
  * beatPulse×0.08) × min(2.4, 0.56) × glowLift)。透明度渐变升 0.20 / 降 0.34。
+ *
+ * 透明度目标值（上游 :1718-1729，三条路径共用一个尾部压暗项）：
+ *
+ *   isActive   → target × rowGlow × (1 + rowGlowBeat×0.46) × depthFade
+ *   译词·当前  → target × rowGlow × (0.46 + rowGlowBeat×0.08) × focus × depthFade
+ *   译词·非当前→ target × rowGlow × (0.30 + rowGlowBeat×0.06) × focus × depthFade
+ *   其余主行   → 0
+ *   之后：if (backdropAdapt > 0.001) ×= (1 − backdropAdapt×0.30)
+ *
+ * ★ 压暗项是**无条件**乘的（只要 adapt > 0.001），因此三条路径都要带。
+ *   上游 `lyricBackgroundAdapt`（出厂 0.72）在亮封面下同时压暗辉光与
+ *   加重描边 —— 只做一半的话，亮底下描边变重而辉光依旧满亮度，
+ *   等于在亮底上又叠一层亮，文字反而更糊。
  */
 const GLOW_STRENGTH = 0.28
 const GLOW_DRIVE = Math.min(1.7, GLOW_STRENGTH / 0.5)
@@ -485,6 +594,97 @@ function lyricRowFitRatio(
  */
 function roundToLineOffset(delta: number): number {
   return Math.round(delta)
+}
+
+/**
+ * smoothstep —— 上游组级包络 `a = a*a*(3 - 2*a)`（`tickMesh`，:2221）。
+ *
+ * 必须是 smoothstep 而不是线性：上游换行的滑入是"先快后慢"的，
+ * 线性插值会让新行**匀速**滑上来，观感偏机械。
+ */
+function smoothstep(t: number): number {
+  const x = t <= 0 ? 0 : t >= 1 ? 1 : t
+  return x * x * (3 - 2 * x)
+}
+
+/**
+ * 歌词调色板补间（上游 `setStageLyricPalette`，`07-lyrics-palette-text-utils.js:217-243`）。
+ *
+ * ============================ 为什么需要 ============================
+ *
+ * 调色板由**封面**主导（`stageLyrics.coverPalette`）。本项目此前每帧
+ * `(color as THREE.Color).set(palette.primary)` —— 封面加载完成、切歌、
+ * 或暗色封面触发 `BACKDROP_ADAPT` 时，歌词颜色**瞬间跳变**。
+ *
+ * 上游是 520ms 的 smoothstep 补间，且逐通道插值
+ * （`lerpStageLyricPaletteColor`，夹 120~1200ms）。因此这里维护一份
+ * "当前显示中的调色板"，每帧朝目标靠近；目标没变时就地不动。
+ *
+ * ★ 与上游的差异：上游用 rAF 自起一段补间并在完成时写终值；本项目没有
+ *   独立的补间调度器（颜色在 useFrame 里逐帧写），改为**每帧按 dt 推进**
+ *   同一个 smoothstep —— 数学等价，且天然跟随渲染循环（标签页切走时
+ *   不会像 rAF 那样停在中途）。
+ */
+const LYRIC_PALETTE_TWEEN_MS = 520
+
+/** 补间态：当前显示中的调色板 + 目标 + 已耗时。 */
+const paletteTween = {
+  current: new THREE.Color(),
+  highlight: new THREE.Color(),
+  secondary: new THREE.Color(),
+  targetPrimary: new THREE.Color(),
+  targetHighlight: new THREE.Color(),
+  targetSecondary: new THREE.Color(),
+  /** 已耗时（ms）。`-1` = 尚未开始（首帧）。 */
+  elapsed: -1,
+}
+
+/**
+ * 推进调色板补间，返回当前应显示的三色。
+ *
+ * 状态机：
+ *   · `elapsed < 0`（首帧）      → 直接落位，不补间
+ *   · 目标变了                   → 当前显示值留作起点、计时归零
+ *   · 计时 < 520ms              → smoothstep 靠近
+ *   · 计时 ≥ 520ms              → 落终值（避免无限逼近）
+ *
+ * @param dt     本帧时长（秒）
+ * @param target 目标调色板
+ */
+function stepLyricPalette(
+  dt: number,
+  target: { primary: string; highlight: string; secondary: string },
+): { primary: THREE.Color; highlight: THREE.Color; secondary: THREE.Color } {
+  const { current, highlight, secondary, targetPrimary, targetHighlight, targetSecondary } = paletteTween
+  targetPrimary.set(target.primary)
+  targetHighlight.set(target.highlight)
+  targetSecondary.set(target.secondary)
+
+  if (paletteTween.elapsed < 0) {
+    paletteTween.elapsed = 0
+    current.copy(targetPrimary)
+    highlight.copy(targetHighlight)
+    secondary.copy(targetSecondary)
+    return { primary: current, highlight, secondary }
+  }
+
+  const changed =
+    !targetPrimary.equals(current) || !targetHighlight.equals(highlight) || !targetSecondary.equals(secondary)
+  if (changed) paletteTween.elapsed = 0
+
+  if (paletteTween.elapsed >= LYRIC_PALETTE_TWEEN_MS) {
+    current.copy(targetPrimary)
+    highlight.copy(targetHighlight)
+    secondary.copy(targetSecondary)
+    return { primary: current, highlight, secondary }
+  }
+
+  const t = smoothstep(Math.min(1, paletteTween.elapsed / LYRIC_PALETTE_TWEEN_MS))
+  current.lerp(targetPrimary, t)
+  highlight.lerp(targetHighlight, t)
+  secondary.lerp(targetSecondary, t)
+  paletteTween.elapsed += Math.max(0, dt) * 1000
+  return { primary: current, highlight, secondary }
 }
 
 function contextScaleFor(distance: number, style: LyricContextStyle): number {
@@ -649,7 +849,9 @@ export function LyricStage({
       slotStart[i] = s
       transOffset[i] = t0
       const subs = translationSubEntries(stageLines[i], effectiveTranslationMode)
-      if (subs.length > 0) transSlot[i] = subs.map((_, k) => s + TRANS_GAP + k * 0.5)
+      if (subs.length > 0) {
+        transSlot[i] = subs.map((_, k) => s + TRANS_GAP + k * TRANS_SUB_STEP)
+      }
       else transSlot[i] = null
       const prevHas = i > 0 && translationSubEntries(stageLines[i - 1], effectiveTranslationMode).length > 0
       s += subs.length > 0 || prevHas ? SLOT_WITH_TRANS : SLOT_PLAIN
@@ -691,6 +893,33 @@ export function LyricStage({
   colorsRef.current = colors
   const motionRef = useRef(motion)
   motionRef.current = motion
+
+  /**
+   * 歌词**组级**运动的三个跨帧量（上游 `tickMesh` 的 `mesh.userData`）：
+   *
+   *   · `age`       包络进度（秒）。上游 `mesh.userData.age`，换行时置 0
+   *                 （:2213-2219），每帧 `+= dt`；`a = age/enter` 再 smoothstep。
+   *   · `seed`      浮动/摆动的相位（上游 `userData.floatSeed = random()*100`）。
+   *                 固定值而非逐帧随机 —— 否则浮动会抖。
+   *   · `velocity`  上一次滚动增量，用于推 `enterDirection`
+   *                 （上游 `lineStep > 0 ? -1 : 1`）。
+   *
+   * `shownProgressRef` 单独放在下面（由逐字推进处写）。
+   */
+  const groupAgeRef = useRef(0)
+  const floatSeedRef = useRef(Math.random() * 100)
+  const trackVelocityRef = useRef(1)
+  /** 当前激活行的逐字进度（0..1）—— 组级 `progressLift` 的输入。 */
+  const shownProgressRef = useRef(0)
+  /** 上一次的激活行索引 —— 用于判"换行"以重置组级包络。 */
+  const lastActiveIndexRef = useRef(-1)
+  /**
+   * 行级 rot.z 摆动目标（上游 :2487 的 `rootRotationTarget`）。
+   *
+   * 由组姿态段算出、行循环消费。之所以走 ref 而不是在两处各算一遍：
+   * 它依赖 `seed` 与 `motionStyle`，分叉成两份就会有不同步的一天。
+   */
+  const rowRootRotationRef = useRef(0)
 
   const camera = useThree((s) => s.camera)
   const size = useThree((s) => s.size)
@@ -868,7 +1097,7 @@ export function LyricStage({
     // 行 Z / 缩放：上游 zBase 公式（构建时给初值，useFrame 逐帧驱动）
     const clampedDistance = Math.min(ROW_MAX_DELTA, distance)
     const baseZ = ROW_Z_BASE - Math.pow(clampedDistance, ROW_Z_POW) * ROW_Z_GAIN
-    const baseScale = Math.max(ROW_SCALE_MIN, 1 - clampedDistance * ROW_SCALE_FALLOFF) * SHELF_AVOID_SCALE
+    const baseScale = Math.max(ROW_SCALE_MIN, 1 - clampedDistance * ROW_SCALE_FALLOFF) * lyricShelfAvoidScale()
 
     const mesh = new THREE.Mesh(geometry, material)
     mesh.position.set(0, 0, baseZ)
@@ -1016,6 +1245,41 @@ export function LyricStage({
    * 世界高按纹理真实宽高比夹 [0.66, 1.36]×lineWorldH（避免长行辉光
    * 变成过厚的扇贝带）。
    */
+  /**
+   * 逐行辉光层（上游 `makeLyricRowGlowMesh`，12-lyrics-row-layers.js:309-348）。
+   *
+   * ★ 上游另有三层**整块**（非逐行）的静态发光层，本项目**有意未移植**：
+   *
+   *   · `data.sun`  / `sunMat`   太阳 bloom 面片（13-lyrics-mesh-build.js:96-111）
+   *   · `data.glow` / `glowMat`  整块辉光面片（:112-130）
+   *   · `data.sparks`/`sparkMat` 132 粒子火星（:131-200）
+   *
+   * 它们全部由 `suppressStaticGlow` 一票否决，而该标志是
+   * `rowLayersActive`（13-lyrics-mesh-build.js:219）—— 即"逐行层已建成"。
+   * 上游 `14-stage-lyrics-rendering.js` 对它们的处理是：
+   *
+   *   data.sun.visible = !data.suppressStaticGlow;      // :2337
+   *   data.glow.visible = !data.suppressStaticGlow;     // :2330
+   *   if (data.suppressStaticGlow) sunTarget = 0;       // :2441
+   *   if (data.suppressStaticGlow) glowTarget = 0;      // :2425
+   *   data.sunMat.opacity = (!data.suppressStaticGlow && …) ? … : 0;   // :2543
+   *   data.glowMat.opacity = (!data.suppressStaticGlow && …) ? … : 0;  // :2537
+   *
+   * 出厂 `lyricDisplayMode: 'cinema'` 必然走逐行轨道
+   * （`usesTrack === true` ⇒ `rowLayersActive`），因此这三层在出厂配置下
+   * **恒不可见、恒零透明度** —— 与 [[mineradio-port-dead-code-paths]] 记的
+   * `uLoading` / `shelfHoverCue` 同类：按上游原样保留（即不移植），
+   * 不捏造上游在该配置下不画的发光。
+   *
+   * 其中 `sparks` 还额外被 `fx.lyricGlowParticles`（出厂 false）门控，
+   * 双重不可达。
+   *
+   * 上游 420 粒子的**歌词星河流**（03-lyrics-star-river.js）同理：
+   * 它的 opacity 链也由 `fx.lyricGlowParticles` 门控。本项目
+   * `particles/StarRiver.tsx`（1400 粒子、六频段、uTintColor）是上游
+   * **背景**星河流（00-pointer-cover-particles.js:1060-1100）的移植，
+   * 与歌词星河流是两套东西，不要混淆。
+   */
   const ensureRowGlow = (row: LyricRow) => {
     const group = groupRef.current
     if (!group || row.glow) return
@@ -1062,8 +1326,13 @@ export function LyricStage({
     glow.position.set(0, row.mesh.position.y, row.mesh.position.z - 0.03)
     glow.scale.copy(row.mesh.scale)
     glow.visible = false
-    // 上游主行辉光 renderOrder = 42.48（相对组 base 43 固定 −0.52）
-    glow.renderOrder = 42.48 + RENDER_ORDER_OFFSET
+    // 上游辉光 renderOrder（12-lyrics-row-layers.js:1716，逐帧重写）：
+    //   主行   → renderBase − 0.52 = 42.48
+    //   译词行 → renderBase − 0.02 = 42.98
+    // 译词行的辉光排在**文字之上**（主行的排在文字之下）—— 译词更小更淡，
+    // 让它的晕从字面上方漫出来才不会把父行的字压暗。
+    // 此前两档共用 42.48，译词辉光被父行文字盖住一截。
+    glow.renderOrder = (row.isTranslation ? 42.98 : 42.48) + RENDER_ORDER_OFFSET
     group.add(glow)
     row.glow = glow
     row.glowMaterial = glowMaterial
@@ -1090,12 +1359,22 @@ export function LyricStage({
     dt: number,
     nowMs: number,
     currentLineGlow: number,
+    /** 本帧已推进的调色板补间结果（主行段算一次，全部行共用） */
+    paletteTweened: { primary: THREE.Color; highlight: THREE.Color; secondary: THREE.Color },
+    /**
+     * 换行后的上下文淡入包络（上游 `contextIntro`，:2362）。
+     * 主行段算一次，全部行共用 —— 译词行同样受它管
+     * （`rowIntro = motionAnchor ? 1 : contextIntro`，:1520）。
+     */
+    contextIntroForRow: number,
   ) => {
     const group = groupRef.current
     const rows = rowsRef.current
     if (!group) return
     const frameScale = Math.min(3, Math.max(0.25, dt * 60))
-    const ease = 1 - Math.pow(1 - 0.16, frameScale)
+    // baseEase 由 contextIntro 决定（上游 :2413）：淡入期间 0.19、稳定后 0.135。
+    const rowEaseBase = contextIntroForRow < 0.98 ? 0.19 : 0.135
+    const ease = 1 - Math.pow(1 - rowEaseBase, frameScale)
 
     let row = rows[slotIndex]
     if (!row) {
@@ -1154,7 +1433,7 @@ export function LyricStage({
       // 上游 translation renderOrder = 主行 −0.10（压在主行之下）
       mesh.renderOrder = 42.5 + RENDER_ORDER_OFFSET
       mesh.position.set(0, 0, ROW_Z_BASE)
-      mesh.scale.setScalar(SHELF_AVOID_SCALE)
+      mesh.scale.setScalar(lyricShelfAvoidScale())
       group.add(mesh)
       row = {
         lineIndex: -1,
@@ -1198,57 +1477,129 @@ export function LyricStage({
     const clampedDelta = Math.min(ROW_MAX_DELTA, absT)
     const zTarget = ROW_Z_BASE - Math.pow(clampedDelta, ROW_Z_POW) * ROW_Z_GAIN
     const floatY = Math.sin((nowMs / 1000) * 0.68 + slot * 0.71) * 0.008
-    const yTarget = -transDelta * LYRIC_LINE_STEP_WORLD + floatY
+    // 上游 12-lyrics-row-layers.js:63：
+    //   lineY = -parentDelta × lineStepWorld − sign × visualGap × translationLineStepWorld
+    // `transDelta` 已是 `subs[k] - scroll`（= 槽位空间的父行距 + 译词偏移），
+    // 因此不能整个乘主行步长 —— 只有**父行那一段**用宽步长，
+    // "主行→译词"这一段用窄步长 `LYRIC_TRANSLATION_STEP_WORLD`。
+    const transSign = transDelta >= 0 ? 1 : -1
+    const parentDelta = transDelta - transSign * TRANS_GAP
+    // ★ 上游 `lyricTranslationAnchoredY`（12-lyrics-row-layers.js:51-73）的
+    //   译词 Y 与主行不同 —— 它按**父行**的距离算漂移，且当前译词行不漂：
+    //
+    //     parentDrift = currentTranslation ? 0
+    //                 : rowDrift × clampRange(0.70 + |parentDelta|×0.10, 0.65, 1.20)
+    //     return −parentDelta × lineStepWorld + parentDrift
+    //            − sign × visualGap × translationLineStepWorld
+    //
+    //   （本项目逐行架构不涉及 `usesTrack` 那一支。）
+    // ★ `rowDrift` 的 `contextDrift` 输入同样是风格基值 + |lineStepWorld|×0.030
+    //   （上游 14-stage-lyrics-rendering.js:2396）。
+    const transRowDrift = isCurrentParent
+      ? 0
+      : (0.5 - shownProgressRef.current) * (motion.contextDrift + Math.abs(LYRIC_LINE_STEP_WORLD) * 0.03)
+    const transDriftGain = Math.max(0.65, Math.min(1.2, 0.7 + Math.abs(parentDelta) * 0.1))
+    const yTarget =
+      -parentDelta * LYRIC_LINE_STEP_WORLD -
+      transSign * TRANS_GAP * LYRIC_TRANSLATION_STEP_WORLD +
+      transRowDrift * transDriftGain +
+      floatY
     const depthScale = Math.max(ROW_SCALE_MIN, 1 - clampedDelta * ROW_SCALE_FALLOFF)
     const fitRatio = lyricRowFitRatio(mesh, row.raster, size.width, camera)
-    const scaleTarget = depthScale * SHELF_AVOID_SCALE * fitRatio
+    // 上游 :1616-1618 的译词缩放链：
+    //   baseScale *= 1.00 + translationFocus × 0.16
+    // （`singleLineTranslationSwap` 是 single 模式专用，本项目逐行架构不涉及）
+    // 再乘 :1626 的逐行缩放浮动（与主行同源同相位；译词行恒非锚定，
+    // 所以这项对译词行**总是**生效）。
+    const floatScaleWobble = 1 + Math.sin((nowMs / 1000) * 0.68 + slot * 0.71) * (motionStyle === 'float' ? 0.012 : 0.004)
+    const scaleTarget =
+      depthScale * lyricShelfAvoidScale() * (1 + parentFade * 0.16) * fitRatio * floatScaleWobble
+
+    // 上游 :1606/1640 的译词两项 z / renderOrder 修正：
+    //   zTarget = zBase − (motionAnchor ? 0 : |rowDrift|×0.18)
+    //             + translationFocus × 0.065
+    //   renderOrder = renderBase + 0.05 + (currentTranslation ? 0.34 : focus×0.30)
+    // 两者都由 parentFade 驱动 —— 父行越近，译词越被"提到前面来"，
+    // 既在深度上也在绘制次序上贴近父行。
+    mesh.renderOrder = 43.05 + (isCurrentParent ? 0.34 : parentFade * 0.3) + RENDER_ORDER_OFFSET
+    const zTargetWithFocus = zTarget - Math.abs(transRowDrift) * 0.18 + parentFade * 0.065
 
     mesh.position.y += (yTarget - mesh.position.y) * ease
-    mesh.position.z += (zTarget - mesh.position.z) * ease
+    mesh.position.z += (zTargetWithFocus - mesh.position.z) * ease
     const s = mesh.scale.x + (scaleTarget - mesh.scale.x) * ease
     mesh.scale.setScalar(s)
+    // 行级 rot.z 摆动（上游 :2487 的 `rootRotationTarget`，ease 0.18）。
+    mesh.rotation.z += (rowRootRotationRef.current - mesh.rotation.z) * 0.18
 
     const uniforms = row.material.uniforms
     uniforms.uTime.value += dt
     // 译词行永不激活：uActiveMix → 0（无逐字/扫光/节拍泛光）
+    // ★ 残值地板（上游 :1661-1662，主行同款）：指数缓动永远到不了 0，
+    //   < 0.015 直接置 0 —— 否则译词行长期残留一丝"激活态"逐字填充。
     uniforms.uActiveMix.value += (0 - (uniforms.uActiveMix.value as number)) * 0.48
+    if ((uniforms.uActiveMix.value as number) < 0.015) uniforms.uActiveMix.value = 0
     // 透明度：译词 alpha 基准（调用方已按上游 :1477-1495 把 parentFade
     // 算进去，这里**不得**再乘一次）× 距离淡出（上游 :1597 的
     // `opacity * (isActive ? 1 : contextAlpha) * rowIntro * visibleFade`）。
     const visibleFadeRaw = Math.max(0, Math.min(1, (visibleRadiusForTrans() + 1.1 - absT) / 1.1))
     const visibleFade = visibleFadeRaw * visibleFadeRaw * (3 - 2 * visibleFadeRaw)
     const depthFade = Math.max(0.54, 1 - absT * 0.055) * visibleFade
-    const opacityTarget = targetAlpha * depthFade
+    // ★ `rowIntro`（上游 :1520）：`motionAnchor = isActive || currentTranslation`。
+    //   译词行永不 isActive，所以只有**当前译词行**豁免淡入包络；
+    //   其余译词行随换行整体淡入（此前缺这项，译词行是硬切）。
+    const rowIntro = isCurrentParent ? 1 : contextIntroForRow
+    const opacityTarget = targetAlpha * depthFade * rowIntro
     uniforms.uOpacity.value += (opacityTarget - (uniforms.uOpacity.value as number)) * ease
 
-    ;(uniforms.uBaseColor.value as THREE.Color).set(colorsRef.current.primary)
-    ;(uniforms.uHiColor.value as THREE.Color).set(colorsRef.current.highlight)
-    ;(uniforms.uGlowColor.value as THREE.Color).set(colorsRef.current.secondary)
-    ;(uniforms.uSolarColor.value as THREE.Color).set(colorsRef.current.highlight)
+    // 配色：与主行同一份补间（上游 `applyLyricPaletteToMesh` 遍历 current +
+    // outgoing 全部 mesh）。补间状态是模块级单例，同一帧内多次调用会重复
+    // 推进 `elapsed` —— 因此这里用**本次帧已算好的结果**（由主行段传入），
+    // 而不是再调一次 `stepLyricPalette`。
+    ;(uniforms.uBaseColor.value as THREE.Color).copy(paletteTweened.primary)
+    ;(uniforms.uHiColor.value as THREE.Color).copy(paletteTweened.highlight)
+    ;(uniforms.uGlowColor.value as THREE.Color).copy(paletteTweened.secondary)
+    ;(uniforms.uSolarColor.value as THREE.Color).copy(paletteTweened.highlight)
 
-    // 可读性层：译词 mix 0.46 + focus×0.18（上游 :1685），boost ×(1+adapt×0.66)
+    // 可读性层：译词 mix 0.46 + focus×0.18（上游 :1685），
+    // backdropAdapt 亮底避光把 mix 抬到 max(mix, 0.54 + adapt×0.10)，
+    // 整体 boost ×(1 + adapt×0.66)（上游 :1684-1691）。
     if (!row.readability) ensureRowReadability(row)
     if (row.readability && row.readabilityMaterial) {
       row.readability.position.y = mesh.position.y
       row.readability.position.z = mesh.position.z - 0.012
       row.readability.scale.copy(mesh.scale)
-      const transMix = 0.46 + (isCurrentParent ? 0.18 : 0)
+      // ★ renderOrder 每帧跟随主网格（上游 :1680 的 `- 0.04`）——
+      //   建行时写的 `- 0.05`（:550）只是初值，逐帧那一行会覆盖它。
+      //   此前本项目只保留了初值，于是可读性层恒比上游低 0.01：
+      //   主行 renderOrder 是 `42.6 − dist×0.015`（逐行递变），
+      //   相邻两行的可读性层与文字层的**相对次序**会差半个身位。
+      row.readability.renderOrder = mesh.renderOrder - 0.04
+      const transMix = Math.max(0.46 + parentFade * 0.18, 0.54 + BACKDROP_ADAPT * 0.1)
       const transBoost = 1 + BACKDROP_ADAPT * 0.66
       const target = opacityTarget * 0.86 * transMix * transBoost
       row.readabilityMaterial.opacity += (Math.min(1, target) - row.readabilityMaterial.opacity) * ease
       row.readabilityMaterial.color.set('#ffffff').lerp(readabilityDarkColor, Math.min(0.92, BACKDROP_ADAPT * 0.92))
     }
-    // 译词辉光：淡得多（上游 translation 辉光分支 0.30 基准）
+    // 译词辉光（上游 translation 辉光分支 :1721）：
+    //   当前父行 → target × rowGlow × (0.46 + rowGlowBeat×0.08)
+    //   非当前   → target × rowGlow × (0.30 + rowGlowBeat×0.06) × translationGlowFocus
+    // 两者都要再乘 backdropAdapt 压暗项（1 − adapt×0.30，上游 :1722）。
     if (!row.glow) ensureRowGlow(row)
     if (row.glow && row.glowMaterial) {
       row.glow.position.copy(mesh.position)
       row.glow.position.z = mesh.position.z - 0.03
       row.glow.scale.copy(mesh.scale)
+      // 译词辉光排在文字之上（上游 :1716 每帧重写 renderBase − 0.02）
+      row.glow.renderOrder = 42.98 + RENDER_ORDER_OFFSET
       row.glowMaterial.color.set(glowColorForPalette(colorsRef.current))
-      const glowOpacityTarget = isCurrentParent ? targetAlpha * currentLineGlow * 0.46 * parentFade * depthFade : 0
+      const rowGlowBeat = Math.max(0, Math.min(1.5, glowStateRef.current.beatGlow))
+      const backdropAdaptDim = 1 - BACKDROP_ADAPT * 0.3
+      const glowOpacityTarget = isCurrentParent
+        ? targetAlpha * currentLineGlow * (0.46 + rowGlowBeat * 0.08) * parentFade * depthFade * backdropAdaptDim
+        : targetAlpha * currentLineGlow * (0.3 + rowGlowBeat * 0.06) * parentFade * depthFade * backdropAdaptDim
       const g = row.glowMaterial.opacity
       let nextGlow = g + (glowOpacityTarget - g) * (glowOpacityTarget > g ? GLOW_RISE : GLOW_FALL)
-      if (!isCurrentParent && nextGlow < GLOW_ZERO) nextGlow = 0
+      if (nextGlow < GLOW_ZERO) nextGlow = 0
       row.glowMaterial.opacity = nextGlow
     }
   }
@@ -1346,6 +1697,55 @@ export function LyricStage({
       newScroll = scroll + step
     }
     trackScrollRef.current = newScroll
+    // 组级 `enterDirection` 的输入（上游 `lineStep > 0 ? -1 : 1`）。
+    // 只在滚动真正发生时更新方向，静止时保留上次方向 —— 否则 `needsSnap`
+    // 那种零增量帧会把方向冲掉，换行瞬间的滑入方向随机。
+    if (Math.abs(newScroll - scroll) > 1e-6) {
+      trackVelocityRef.current = newScroll - scroll
+    }
+    // 换行 ⇒ 组级包络重新计时（上游 `userData.age = 0`）。
+    // 用**激活行索引**判换行，不用滚动量：滚到一半时行没变，包络不该重来。
+    if (runtimeRef.current.activeIndex !== lastActiveIndexRef.current) {
+      lastActiveIndexRef.current = runtimeRef.current.activeIndex
+      groupAgeRef.current = 0
+    }
+    groupAgeRef.current += dt
+
+    // ★ `contextIntro` —— 换行后**上下文行**的整体淡入包络
+    //   （上游 14-stage-lyrics-rendering.js:2362-2363）：
+    //
+    //     contextIntro = clampRange((age - 0.04) / 0.48, 0, 1)
+    //     contextIntro = smoothstep(contextIntro)
+    //
+    //   它有两条去向，本项目此前**两条都缺**：
+    //
+    //   a. 喂进 `updateLyricRowLayers` 的 `contextIntro`（:2394），在
+    //      `12-lyrics-row-layers.js:1329/1520` 变成 `rowIntro`：
+    //        rowIntro = motionAnchor ? 1 : contextIntro
+    //        target   = opacity × (isActive ? 1 : contextAlpha) × rowIntro × visibleFade
+    //      即换行后**非锚定行**（非激活、非当前译词）从 0 淡入，用 0.04s 延迟
+    //      + 0.48s 包络。缺它时上下文行在换行瞬间就是满亮度，没有"新的一屏
+    //      上下文渐渐浮出来"的层次 —— 激活行有滑入包络（groupASmooth），
+    //      上下文行却是硬切。
+    //
+    //   b. 决定行层的 `baseEase`（:2413）：
+    //        ease = contextIntro < 0.98 ? 0.19 : 0.135
+    //      即**淡入期间位置/缩放追得更快**（0.19），稳定后放慢到 0.135。
+    //      本项目两处行层都把 baseEase 写死成 0.16 —— 既不是淡入档也不是
+    //      稳定档，换行时跟得偏慢、稳定后又偏快。
+    //
+    //   ★ 这里**不含**上游 :2379 的 `contextY` / :2380 的 `contextScale` ——
+    //     那两项写的是 `data.context`（旧版聚合上下文网格）。它在
+    //     `13-lyrics-mesh-build.js:77-78` 声明后**从未被赋值**，
+    //     `data.contextMat` 恒为 null，整个 `if (data.contextMat)` 块
+    //     （:2366-2388）在行层架构下是死代码 —— 与 sun/glow/sparks 同类
+    //     （那三个由 `suppressStaticGlow = rowLayersActive` 关掉，
+    //     见 `ensureRowGlow` 处的说明）。逐行架构里这两项的等价物就是
+    //     已移植的逐行 `rowDrift` 与 `floatScaleWobble`。
+    const contextIntroRaw = Math.max(0, Math.min(1, (groupAgeRef.current - 0.04) / 0.48))
+    const contextIntro = smoothstep(contextIntroRaw)
+    // 上游 :2413 的两档 baseEase
+    const rowBaseEase = contextIntro < 0.98 ? 0.19 : 0.135
 
     // 节拍驱动（全行共享）
     const bands = readAudioBands()
@@ -1394,6 +1794,14 @@ export function LyricStage({
       1.05,
       (0.1 + glow.highBloom * 0.4 + glow.beatGlow * 0.24 + bands.beat * 0.08) * Math.min(2.4, GLOW_DRIVE) * glowLift,
     )
+    // 5) 调色板补间（上游 setStageLyricPalette 的 520ms）—— **必须在行循环
+    //    之前**推进一次，供本帧所有行共用（补间状态是模块级单例，
+    //    每多调一次就多推进一帧）。
+    const paletteTweened = stepLyricPalette(dt, {
+      primary: colorsRef.current.primary,
+      highlight: colorsRef.current.highlight,
+      secondary: colorsRef.current.secondary,
+    })
 
     // 可见半径（上游 12-lyrics-row-layers.js:364：
     // max(0.85, displayLineCount * 0.50 * lyricPrimarySlotStepValue()) ——
@@ -1554,6 +1962,8 @@ export function LyricStage({
             dt,
             nowMs,
             currentLineGlow,
+            paletteTweened,
+            contextIntro,
           )
         }
       }
@@ -1607,7 +2017,31 @@ export function LyricStage({
       // 每行轻微错相浮动（上游 verticalFloat：sin(t*0.68 + seed + index*0.71)）
       const floatPhase = t * 0.68 + lineIndex * 0.71
       const floatY = Math.sin(floatPhase) * 0.008
-      const yTarget = -liveDelta * LYRIC_LINE_STEP_WORLD + floatY
+      // ★ 上下文行的**进度漂移**（上游 :1599 的 `rowDrift` 项）：
+      //
+      //   rowDrift = (0.5 − shownProgress) × contextDrift × motionBlend
+      //   yTarget  = −liveDelta × lineStepWorld
+      //            + (motionAnchor ? 0 : rowDrift × clampRange(0.70 + |Δ|×0.10, 0.65, 1.20))
+      //
+      // `motionAnchor = isActive || currentTranslation`（:1519），所以激活行
+      // 与当前译词行不参与漂移，其余行随**当前行的逐字进度**整体上下移动：
+      // 进度 0 时 +contextDrift/2、进度 1 时 −contextDrift/2、过半时归零。
+      // 出厂风格 `float` 的 contextDrift = 0.120，|Δ| = 1 的行上给出
+      // ±0.048 世界单位的位移 —— 肉眼可见的"上下文随当前句一起呼吸"。
+      //
+      // ★ `contextDrift` 输入是**风格基值 + |lineStepWorld| × 0.030**
+      //   （上游 14-stage-lyrics-rendering.js:2396），表里只放风格基值，
+      //   这里补步长那一项（本项目在调用处补，与上游同源）。
+      // ★ `motionBlend`（预览混合系数）本项目没有预览锁定，恒取 1。
+      // ★ z 上还有一项 `− |rowDrift| × 0.18`（:1606，motionAnchor 时 0）——
+      //   漂移幅度越大行被压得越远，一并补上。
+      const rowDrift = isActive
+        ? 0
+        : (0.5 - shownProgressRef.current) *
+          (motion.contextDrift + Math.abs(LYRIC_LINE_STEP_WORLD) * 0.03)
+      const driftGain = Math.max(0.65, Math.min(1.2, 0.7 + absDelta * 0.1))
+      const yTarget = -liveDelta * LYRIC_LINE_STEP_WORLD + floatY + rowDrift * driftGain
+      const zTargetWithDrift = zTarget - Math.abs(rowDrift) * 0.18
 
       const mesh = row.mesh
       mesh.visible = revealed
@@ -1657,13 +2091,39 @@ export function LyricStage({
         const depthScale = Math.max(ROW_SCALE_MIN, 1 - scaleDistance * ROW_SCALE_FALLOFF)
         // 逐行视口适配：投影行文字两端，超宽收缩（见 lyricRowFitRatio）
         const fitRatio = lyricRowFitRatio(mesh, row.raster, size.width, camera)
-        const scaleTarget = depthScale * SHELF_AVOID_SCALE * fitRatio
+        // ★ 逐行**缩放**浮动（上游 :1626，`fx.lyricVerticalFloat` 出厂 true）：
+        //
+        //   scaleTarget = baseScale × (motionAnchor ? 1
+        //     : (1 + sin(t*0.68 + seed + stableMotionIndex*0.71)
+        //           × (style==='float' ? 0.012 : 0.004) × motionBlend))
+        //
+        // 即非锚定行的缩放也按各自错相的相位轻微呼吸 —— 与 Y 方向的
+        // `floatY` 同源同相位。本项目此前只移植了 Y 那一项
+        // （`floatY = sin(t*0.68 + lineIndex*0.71) * 0.008`，见上方），
+        // 缩放恒为定值，于是上下文行只有上下浮动、没有"鼓起来"的呼吸感。
+        // ★ `motionBlend` 本项目恒取 1（无预览锁定）。
+        const floatScaleWobble =
+          1 + Math.sin(floatPhase) * (motionStyle === 'float' ? 0.012 : 0.004)
+        const scaleTarget = depthScale * lyricShelfAvoidScale() * fitRatio * floatScaleWobble
 
-        const ease = 1 - Math.pow(1 - 0.16, Math.min(3, Math.max(0.25, dt * 60)))
+        // baseEase 由 contextIntro 决定（上游 :2413），不再写死 0.16
+        const ease = 1 - Math.pow(1 - rowBaseEase, Math.min(3, Math.max(0.25, dt * 60)))
+        // ★ 主行 renderOrder **每帧重写**（上游 :1640）：
+        //   isActive ? (renderBase + 0.40) : (renderBase − 0.40 − min(5.5,|Δ|)×0.015)
+        // 即激活行 43.4、上下文行 42.6 − |Δ|×0.015（未乘 RENDER_ORDER_OFFSET 的裸值）。
+        //
+        //   ★ 此前只在 buildRow 与 rebuildRowAsActive 里各写一次，于是
+        //     `rebuildRowAsActive` 把 renderOrder 提到 43.4 之后**再也没有人
+        //     把它放回去** —— 任何"曾经激活过"的行都永久停在 43.4，
+        //     压在所有上下文行（乃至后来的激活行）之上。
+        //     视觉后果：唱过去的句子盖在正在唱的那句前面。
+        mesh.renderOrder = (isActive ? 43.4 : 42.6 - Math.min(ROW_MAX_DELTA, clampedDelta) * 0.015) + RENDER_ORDER_OFFSET
         mesh.position.y += (yTarget - mesh.position.y) * ease
-        mesh.position.z += (zTarget - mesh.position.z) * ease
+        mesh.position.z += (zTargetWithDrift - mesh.position.z) * ease
         const s = mesh.scale.x + (scaleTarget - mesh.scale.x) * ease
         mesh.scale.setScalar(s)
+        // 行级 rot.z 摆动（上游 :2487，见 stepRow 处的同款说明）
+        mesh.rotation.z += (rowRootRotationRef.current - mesh.rotation.z) * 0.18
 
         // 材质
         const uniforms = row.material.uniforms
@@ -1673,6 +2133,14 @@ export function LyricStage({
         //   此前这些状态被冻结在构建时刻，"激活行高亮不消失"的逐帧侧根因。
         uniforms.uActiveMix.value +=
           ((isActive ? 1 : 0) - (uniforms.uActiveMix.value as number)) * (isActive ? 0.34 : 0.62)
+        // ★ 残值地板（上游 :1661/:1665-1667）：
+        //   非激活行 uActiveMix < 0.015 直接置 0、uSolar < 0.003 直接置 0。
+        //   指数缓动永远到不了 0，少了这一步会残留一个极小但非零的值 ——
+        //   而 uActiveMix 驱动逐字填充与扫光，uSolar 驱动太阳泛光，
+        //   残留量让"失活行"仍带一丝激活态着色，且永不消失。
+        if (!isActive && (uniforms.uActiveMix.value as number) < 0.015) {
+          uniforms.uActiveMix.value = 0
+        }
         if (isActive) {
           // ★ 行首次激活时按 active 规格重建（上游 asActive 语义）——
           //   懒建的行带着上下文规格（scale 0.82 / alpha 0.54），不重建
@@ -1703,6 +2171,10 @@ export function LyricStage({
           } else {
             uniforms.uProgress.value = 0
           }
+          // 组级 `progressLift` 的输入（上游 `shownProgress`，:2484）——
+          // 必须是**已显示**的进度（缓动后的值），不是目标值：否则文字会在
+          // 行首/行尾之间反复跳沉。上游同源取 `data.shownLyricProgress`。
+          shownProgressRef.current = uniforms.uProgress.value as number
           // uSolar 驱动源对齐上游（14-stage-lyrics-rendering.js:2414-2418）：
           // 激活行的 uSolar 跟随 highBloom（副歌持续泛光），ease 0.12 ——
           // 此前跟 bands.beat（逐拍闪烁），观感节奏与上游不同。
@@ -1711,6 +2183,8 @@ export function LyricStage({
         } else {
           uniforms.uProgress.value = 0
           uniforms.uSolar.value += (0 - (uniforms.uSolar.value as number)) * 0.48
+          // 残值地板（上游 :1666-1667）
+          if ((uniforms.uSolar.value as number) < 0.003) uniforms.uSolar.value = 0
         }
 
         // ★ 故障脉冲必须对**每一行、每一帧**更新（上游 `12-lyrics-row-layers.js:1663`）：
@@ -1742,14 +2216,20 @@ export function LyricStage({
                 Math.min(0.92, row.targetAlpha - Math.max(0, absDelta - 0.25) * CONTEXT_ALPHA_FALLOFF),
               )
         const depthFade = isActive ? 1 : Math.max(0.54, 1 - absDelta * 0.055) * visibleFade
-        const opacityTarget = contextAlpha * depthFade
+        // ★ `rowIntro`（上游 :1597 的 `(isActive ? 1 : contextAlpha) * rowIntro`
+        //   与 :1520 的 `rowIntro = motionAnchor ? 1 : contextIntro`）：
+        //   换行后非锚定行整体淡入。激活行（与当前译词行）不受影响。
+        const rowIntro = isActive ? 1 : contextIntro
+        const opacityTarget = contextAlpha * depthFade * rowIntro
         uniforms.uOpacity.value += (opacityTarget - (uniforms.uOpacity.value as number)) * ease
 
-        // 配色跟随封面调色板
-        ;(uniforms.uBaseColor.value as THREE.Color).set(palette.primary)
-        ;(uniforms.uHiColor.value as THREE.Color).set(palette.highlight)
-        ;(uniforms.uGlowColor.value as THREE.Color).set(palette.secondary)
-        ;(uniforms.uSolarColor.value as THREE.Color).set(palette.highlight)
+        // 配色：用帧首推进好的补间结果（见上方"5) 调色板补间"）。
+        // 这里**不得**再调 `stepLyricPalette` —— 补间状态是模块级单例，
+        // 重复调用会让同一帧的 `elapsed` 推进多次，补间速度变成 2 倍。
+        ;(uniforms.uBaseColor.value as THREE.Color).copy(paletteTweened.primary)
+        ;(uniforms.uHiColor.value as THREE.Color).copy(paletteTweened.highlight)
+        ;(uniforms.uGlowColor.value as THREE.Color).copy(paletteTweened.secondary)
+        ;(uniforms.uSolarColor.value as THREE.Color).copy(paletteTweened.highlight)
 
         // 可读性层跟随主网格
         if (row.readability && row.readabilityMaterial) {
@@ -1757,6 +2237,11 @@ export function LyricStage({
           row.readability.position.y = mesh.position.y
           row.readability.position.z = mesh.position.z - 0.012
           row.readability.scale.copy(mesh.scale)
+          // ★ renderOrder 每帧跟随主网格（上游 :1680 的 `- 0.04`）；
+          //   建行时写的 `- 0.05`（:550）只是初值，会被这一行覆盖。
+          //   主行 renderOrder 逐行递变（42.6 − dist×0.015），
+          //   少了这一步，可读性层相对文字层的次序会固定低半档。
+          row.readability.renderOrder = mesh.renderOrder - 0.04
           // 上游 :1685-1690：backdropAdapt 提升描边 mix 并整体加权
           const baseMix = isActive ? 0.74 : 0.52
           const readabilityMix = Math.max(baseMix, 0.6 + BACKDROP_ADAPT * 0.12)
@@ -1780,8 +2265,13 @@ export function LyricStage({
           // 辉光颜色跟随封面调色板（上游 setLyricMaterialColor 每帧同步）
           row.glowMaterial.color.set(glowColor)
           const rowGlowBeat = Math.max(0, Math.min(1.5, glow.beatGlow))
+          // ★ backdropAdapt 压暗项（上游 :1722）：`glowOpacityTarget *= (1 - adapt*0.30)`。
+          //   上游把它加在**所有**行（含主行激活支）之后、无条件执行
+          //   （只要 adapt > 0.001）。本项目此前只把 adapt 用在可读性层，
+          //   于是亮封面下辉光比上游亮 —— 这正是"亮底避光"机制的一半。
+          const backdropAdaptDim = 1 - BACKDROP_ADAPT * 0.3
           const glowOpacityTarget = isActive
-            ? row.targetAlpha * currentLineGlow * (1 + rowGlowBeat * 0.46) * depthFade
+            ? row.targetAlpha * currentLineGlow * (1 + rowGlowBeat * 0.46) * depthFade * backdropAdaptDim
             : 0
           const glowOpacity = row.glowMaterial.opacity
           let nextGlowOpacity =
@@ -1838,19 +2328,87 @@ export function LyricStage({
     }
 
     // ---- 歌词组姿态：锚定封面世界四元数（上游 free 分支 :2190-2204）----
-    const floatYGroup = Math.sin(t * 0.55) * 0.02 * m.floatAmp
-    const layoutScale = 1
+    //
+    // ★★ 上游 `tickMesh`（:2207-2222）还有一整层**组级运动**，此前整个漏掉了：
+    //
+    //     var a = min(1, age / (isCurrent ? motion.enter : motion.exit));
+    //     a = a*a*(3 - 2*a);                       // smoothstep 揭示/退出包络
+    //     rootScaleTarget = 0.96 + a*0.055 + breathe + bass*0.038 + beatPulse*0.014;
+    //     enterOffsetY    = enterDir * lineStepWorld * (1 - a);
+    //     progressLift   = -shownProgress * 0.026;
+    //     pos.y = 0.20 + enterOffsetY + progressLift
+    //           + (sin(t*0.55 + seed)*0.046 + sin(t*1.35 + seed)*0.012) * floatAmp
+    //     pos.z = 1.48 - |enterDir|*0.045*(1 - a) + cos(t*0.48 + seed)*0.070 * floatAmp
+    //     rot.z = (sin(t*0.34 + seed) * (style==='smooth'?0.006: style==='float'?0.026:0.018))
+    //
+    //   四项观感后果：换行时新行**从一侧滑上来并伴随 0.96→1.015 的放大**、
+    //   逐字推进时文字**微微下沉**（progressLift）、静止时有呼吸与轻微**摆动**。
+    //   本项目此前 `group.position` 每帧被**硬写**成固定值、`group.scale`
+    //   只留了一个 0.006 的正弦 —— 因此换行是"瞬间换"而不是"滑入"，
+    //   整组文字完全静止，是当前最大的单项目视差。
+    //
+    //   `age` 由换行事件重置（上游 :2213-2219 在 outgoing/current 上置 0），
+    //   本项目用 `groupAgeRef` 承载；`enterDir` 取滚动方向
+    //   （上游 `enterDirection`：`lineStep > 0 ? -1 : 1`）。
+    const groupAge = groupAgeRef.current
+    const groupEnter = Math.max(0.016, m.enter)
+    const groupA = Math.min(1, groupAge / groupEnter)
+    const groupASmooth = smoothstep(groupA)
+    // 滚动方向 → 上游 enterDirection。本项目 scroll 递增 = 歌词向下走。
+    const enterDir = trackVelocityRef.current >= 0 ? -1 : 1
+    const enterOffsetY = enterDir * LYRIC_LINE_STEP_WORLD * (1 - groupASmooth)
+    const progressLift = -shownProgressRef.current * 0.026
+    // 呼吸（上游 `breathe`，:2450）—— 是**运行时双正弦**，不是风格常量：
+    //   (sin(t*0.92 + seed)*0.050 + sin(t*0.41 + seed*0.7)*0.028) × floatAmp
+    // 本项目此前把 `m.breathe`（一个自拟的风格常量）直接乘进缩放，量纲与
+    // 上游完全不同：上游是 ±0.05 的呼吸，本项目是 ×1.0 的整体偏移。
+    const seed = floatSeedRef.current
+    const floatAmp = m.floatAmp
+    const breathe = (Math.sin(t * 0.92 + seed) * 0.05 + Math.sin(t * 0.41 + seed * 0.7) * 0.028) * floatAmp
+    const floatYGroup =
+      (Math.sin(t * 0.55 + seed) * 0.046 + Math.sin(t * 1.35 + seed) * 0.012) * floatAmp
+    // 节拍脉冲：上游 `beatPulse` 是主循环的量（11-main-loop.js:450-455，
+    //   `max(rtPulse, min(0.12, bassOnset*0.18))` 再 `*= 0.36^dt`）。
+    // 本项目没有等价的节拍脉冲量，用 `bands.beat`（引擎 frame 的同源投影）
+    // 作为输入 —— 上游系数 0.014 保留，故整体幅度与上游同阶。
+    const beatPulse = bands.beat
+    const rootScaleTarget = 0.96 + groupASmooth * 0.055 + breathe + bands.bass * 0.038 + beatPulse * 0.014
+    const baseY = 0.2 + enterOffsetY + progressLift + floatYGroup
+    const baseZ =
+      1.48 - Math.abs(enterDir) * 0.045 * (1 - groupASmooth) + Math.cos(t * 0.48 + seed) * 0.07 * floatAmp
+    const layoutScale = rootScaleTarget
+    // 行级 rot.z 摆动目标（上游 :2487 的 `rootRotationTarget`）。
+    //
+    // ★ 写在**组姿态段的末尾**而不是行循环里：行循环（`stepRow`）在本帧
+    //   **更早**执行（见下方 `useFrame` 开头的顺序说明），若在那里现算，
+    //   本帧用的是上一帧遗留值；写在段末则供**下一帧**的行循环消费 ——
+    //   一帧延迟对这个 0.018 量级的慢摆动无感，但避免了同一帧内的顺序耦合。
+    rowRootRotationRef.current =
+      Math.sin(t * 0.34 + seed) * (motionStyle === 'smooth' ? 0.006 : motionStyle === 'float' ? 0.026 : 0.018)
 
+    // 组级姿态 = 封面世界位姿 + 布局偏移（上游 :2202-2205）：
+    //   group.position = coverPos + applyStageLyricLayoutOffset(layoutX/Y/Z)
+    //   group.quaternion = coverQuat × tiltQuat
+    // 上游 `layoutX/Y/Z` 与 `tiltX/tiltY` 出厂全 0（fx-defaults），因此
+    // 组姿态就是封面位姿本身；本项目没有 FX 面板，直接锚定。
+    //
+    // ★★ `rot.z` 的摆动**不在组上**（上游 :2487 写在 `mesh` 上）——
+    //   组四元数每帧被封面覆盖，把 `group.rotation.z` 累加上去等于每帧
+    //   都在和封面四元数角力，结果是"封面转得快时摆动消失、转得慢时摆动
+    //   叠加成漂移"。因此它由行循环施加到每行的 mesh（见 stepRow 处的
+    //   `rowRootRotation`）。
     if (coverPose.active) {
       coverQuat.set(coverPose.quaternion.x, coverPose.quaternion.y, coverPose.quaternion.z, coverPose.quaternion.w)
       group.quaternion.copy(coverQuat)
-      group.position.set(coverPose.position.x, coverPose.position.y + floatYGroup, coverPose.position.z + LYRIC_PLANE_Z)
+      group.position.set(coverPose.position.x, coverPose.position.y + baseY, coverPose.position.z + LYRIC_PLANE_Z + baseZ)
     } else {
       group.quaternion.identity()
-      // 固定姿态分支 = 地形模式专属；抬升量让主行落在舞台视觉中心
-      group.position.set(-SHELF_AVOID_X, SHELF_AVOID_Y + TOPOGRAPHY_LIFT_Y + floatYGroup, LYRIC_PLANE_Z + SHELF_AVOID_Z)
+      // 固定姿态分支 = 地形模式专属；抬升量让主行落在舞台视觉中心。
+      // 注意这里**仍然叠加**组级运动的 y/z/缩放 —— 地形模式同样换行、同样
+      // 逐字推进，此前它比封面分支更静止。
+      group.position.set(-SHELF_AVOID_X, SHELF_AVOID_Y + TOPOGRAPHY_LIFT_Y + baseY, LYRIC_PLANE_Z + SHELF_AVOID_Z + baseZ)
     }
-    group.scale.setScalar(layoutScale * (1 + Math.sin(t * 0.48) * 0.006 * m.breathe))
+    group.scale.setScalar(layoutScale)
 
     // 把歌词世界位置发布出去，供相机看向它（上游 readSonicLyricLookAtTarget）
     lyricWorldPos.x = group.position.x

@@ -13,6 +13,43 @@
  *   着色器据此让非激活行不参与逐字高亮与辉光。
  *
  * 本模块是纯 Canvas2D，不依赖 three.js，便于单独测试与复用。
+ *
+ * ==================== 未移植：lyricEdgeFade（上游死设置） ====================
+ *
+ * 上游 `applyLyricVerticalEdgeFade`（`10-lyrics-mask-textures.js:1-19`，
+ * 由 `lyricEdgeFade` 驱动，出厂 0.32）在**三处**被调用：
+ *   :373 `makeLyricMask`（主遮罩）
+ *   :487 `stepLyricMaskQualityBuild`（主遮罩的画质重建）
+ *   :712 `stepLyricReadabilityTextureBuild`（可读性描边）
+ *
+ * 它第一行就早退：
+ *
+ *   if (!strength || lineCount < 2) return;
+ *
+ * 而本项目（与上游的**逐行架构**）所有遮罩都是**单行**的：
+ * 上游 `makeLyricLineMask`（`12-lyrics-row-layers.js:201-218`）传给
+ * `makeLyricMask` 的是 `entries: [drawEntry]` + `activeLine: 0`，
+ * `lines.length === 1` ⇒ 必然命中早退。
+ *
+ * 唯一能让它生效的路径是上游的**非 track** 分支
+ * （`usesTrack === false`，即 `displayMode === 'single'` 且
+ * `trackEntries` 为空 stub）：那时 `entries` 来自
+ * `payload.entries`，在**有译词**时是 2 项 ⇒ `lineCount === 2`。
+ *
+ * 出厂配置下这条路径同样走不到：
+ *   · 出厂 `lyricDisplayMode: 'cinema'` ⇒ `usesTrack === true` ⇒ 逐行架构
+ *   · 本项目只实现了逐行架构（`rasterizeLyricLineMask` 等），
+ *     从未实现多条目整块遮罩路径
+ *
+ * 结论：**出厂配置下 `lyricEdgeFade` 是死设置**，与
+ * [[mineradio-port-dead-code-paths]] 记的 `uLoading` / `shelfHoverCue`
+ * 同类 —— 按上游原样保留（即不移植一个不会执行的渐变），
+ * 不为了"看起来更完整"而捏造一个上游在该配置下不画的渐隐。
+ *
+ * 注：**辉光**纹理的边缘渐隐是另一套东西，与 `lyricEdgeFade` 无关 ——
+ * 上游 `finishLyricGlowTexturePixels`（:845-872）恒定画 X 0.10/0.90、
+ * Y 0.16/0.84 两段 destination-in，无设置门控。那一套本项目已逐行移植
+ * （见 `rasterizeLineGlowMask` 的「12. 边缘渐隐」）。
  */
 
 import type { CoverPalette } from './coverPalette'

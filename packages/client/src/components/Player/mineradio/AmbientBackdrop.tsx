@@ -18,6 +18,9 @@ interface AmbientBackdropProps {
  * - Mineradio `#album-bg`：封面放大模糊铺底
  *     filter: blur(120px) brightness(0.18) saturate(1.5)
  *     transform: scale(1.4)
+ *     opacity: 1（出厂 `backgroundAlbumCover: false` ⇒ albumMode 假
+ *                ⇒ `--custom-bg-album-opacity` 被写成 '1'）
+ *   这三项现已 1:1 落在 `index.css` 的 `.mt-mineradio-ambient__cover`。
  * - OpenMusic `RoomAmbientBackground`：颜色/图片环境层
  *
  * 之前的实现在没有自定义背景时直接返回 null，且画布不透明，
