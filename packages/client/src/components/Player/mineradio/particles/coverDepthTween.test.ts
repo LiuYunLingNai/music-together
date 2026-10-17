@@ -95,7 +95,12 @@ describe('stepCoverDepth', () => {
   it('走完后硬落位到目标并标记 done', () => {
     const s = createCoverDepthTween()
     beginCoverDepthTween(s, { depth: 0, ai: 0 }, { depth: 1, ai: 0.55 }, 180)
-    const stepped = stepCoverDepth(s, s.startedAt + 180, { depth: 0.5, ai: 0.2 })
+    // ★ 用 `startedAt + 180 + 1` 而不是恰好 `+180`：`raw = (now-start)/durationMs`
+    //   是浮点，`180/180` 在部分时钟读数下算出 0.9999999999999999，
+    //   于是 `raw < 1` 成立、走未完成支 ⇒ done 为 false。
+    //   上游判据就是 `t < 1`（15-ripples-cover-depth.js:507），**照搬不改**；
+    //   要测的是"越过终点后硬落位"，时钟就必须真的越过终点。
+    const stepped = stepCoverDepth(s, s.startedAt + 181, { depth: 0.5, ai: 0.2 })
     expect(stepped.depth).toBe(1)
     expect(stepped.ai).toBe(0.55)
     expect(stepped.done).toBe(true)

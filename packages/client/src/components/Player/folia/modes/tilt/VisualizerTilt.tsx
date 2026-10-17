@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useRef, useInsertionEffect } from 'react';
+import React, { useMemo, useState, useRef, useInsertionEffect, useLayoutEffect } from 'react';
 import { motion, AnimatePresence, motionValue } from 'motion/react';
 import type { MotionValue } from 'motion/react';
 
@@ -605,7 +605,12 @@ export function VisualizerTilt(props: FoliaSharedProps) {
         });
     }, [activeLine, layout]);
 
-    useInsertionEffect(() => {
+    // ★ 上游注释（tilt/VisualizerTilt.tsx:604）：
+    //   "A layout effect, not an insertion effect: the handler sets state,
+    //    which React refuses from an insertion effect."
+    //   `setVisibleSegmentIndex` 在 insertion effect 里会被 React 拒绝 ⇒
+    //   `visibleSegmentIndex` 永不更新。此前这里误用 useInsertionEffect。
+    useLayoutEffect(() => {
         const handler = (latest: number) => {
             if (!segmentTimings || !activeLine) {
                 setVisibleSegmentIndex(-1);

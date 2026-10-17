@@ -27,6 +27,63 @@ import { buildCladdaghGlowFilter } from './claddaghGlow';
 // src/components/visualizer/claddagh/CladdaghRingLine.tsx
 // 投影到 3D 椭圆环上的一行歌词：在 useLayoutEffect 里直接写每个字素 span 的变换与样式。
 
+/**
+ * 环形 settle —— 屏幕上所有环行**共用一帧**回调，把"本帧环转过、且此后没被重写过"
+ * 的那些行的字素重写一遍。它在**显示屏的每一帧**都跑，不受帧率上限约束。
+ *
+ * 上游注释（claddagh/CladdaghRingLine.tsx:29-36）：
+ *   "The ring settle: one animation-frame callback for all ring lines on screen, which
+ *    rewrites the glyphs of a line whose ring turned in this frame and has not been
+ *    rewritten since. It runs on every frame of the display, past the frame-rate cap.
+ *    A turn that waits for it must be written in the frame the ring's spring moved in,
+ *    and that spring is not always under the cap: framer-motion keeps the
+ *    `requestAnimationFrame` it found when its module loaded, so with the cap switched
+ *    on later the spring still moves on frames the cap skips."
+ *
+ * ★ 为什么用原生 rAF（上游这里是 `requestUncappedAnimationFrame`）：
+ *   上游那对函数的作用是"绕过它自己的全局限流器拿原生 rAF"
+ *   （`utils/frameRateLimiter.ts:161-171`）。本项目**没有**那个全局限流器
+ *   （`foliaAudio` 的 `bgFps` 只节流它自己的循环，不替换
+ *   `window.requestAnimationFrame`），因此"绕过限流"在这里就是原生 rAF 本身。
+ *   语义等价，且比移植整套 localStorage + 设置面板更贴合宿主。
+ */
+const requestUncappedAnimationFrame = (callback: FrameRequestCallback): number =>
+  requestAnimationFrame(callback)
+const cancelUncappedAnimationFrame = (handle: number): void => cancelAnimationFrame(handle)
+
+const ringSettleCallbacks = new Set<() => void>()
+let ringSettleFrame = 0
+/** settle 最后一次运行所在的帧，按文档时间线命名。 */
+let ringSettledAt: CSSNumberish | null = null
+
+const runRingSettle = () => {
+  ringSettledAt = document.timeline.currentTime
+  ringSettleCallbacks.forEach((callback) => callback())
+  ringSettleFrame = ringSettleCallbacks.size > 0 ? requestUncappedAnimationFrame(runRingSettle) : 0
+}
+
+/**
+ * 把一行加进环形 settle，返回把它取出的方式。
+ *
+ * settle 每次都**重新**索取，这让它排到已在等待的那些回调之后：
+ * 一行是在歌词行切换时加入的，于是随后那一次转动会在歌曲时间写完之后才跑。
+ */
+const joinRingSettle = (callback: () => void) => {
+  // 在某一帧内被索取的回圈会在下一帧跑。所以等本帧 settle 的那一行**现在就**重写，
+  // 而本帧剩下的部分算作已 settle。
+  ringSettleCallbacks.forEach((waiting) => waiting())
+  ringSettleCallbacks.add(callback)
+  cancelUncappedAnimationFrame(ringSettleFrame)
+  ringSettleFrame = requestUncappedAnimationFrame(runRingSettle)
+  ringSettledAt = document.timeline.currentTime
+  return () => {
+    ringSettleCallbacks.delete(callback)
+  }
+}
+
+/** settle 是否还没在"正在构建的这一帧"里跑过。 */
+const isRingSettleStillToCome = () => document.timeline.currentTime !== ringSettledAt
+
 /** The per-frame style of one glyph span, as strings ready to assign. */
 interface GlyphStyle {
     transform: string;
@@ -443,15 +500,44 @@ export const RingLine: React.FC<RingLineProps> = ({
             }
         };
 
-        const handleUpdate = () => {
-            handler(currentTime.get());
-        };
+        // 字素跟随歌曲时间与环的角度。换行后环转动的那一帧里两者都变，而过去每一次
+        // 都会立刻重写所有字素。歌曲时间**仍然**如此；环形弹簧的转动现在改为等环形
+        // settle（见 `joinRingSettle`）—— 只要它还没在同一帧里跑。到那时歌曲时间通常
+        // 已经用新角度重写过字素，没有的话就由 settle 来补。于是一帧的最后一次重写
+        // 仍然同时读到了两个值（与过去一致），而一帧少了一次重写。
+        //
+        // ★ 上游注释补充：这只有在 settle 于显示屏**每一帧**都跑时才成立
+        //   （见 `ringSettleCallbacks`）—— 这也是它必须绕过帧率上限的原因。
+        let anglePending = false
+        const leaveRingSettle = joinRingSettle(() => {
+            if (anglePending) {
+                anglePending = false
+                handler(currentTime.get())
+            }
+        })
+        const handleAngle = () => {
+            if (lineOffset.isAnimating() && isRingSettleStillToCome()) {
+                anglePending = true
+            } else {
+                handler(currentTime.get())
+            }
+        }
+        const handleTime = (latestTime: number) => {
+            // 播放重置时被保持的那一帧（见 `handler`）保留环在该帧达到的角度：
+            // 等待中的转动用重置前的时间写入。
+            if (anglePending && shouldHoldCladdaghFrameForPlaybackReset(previousTimeRef.current, latestTime, centerLineIndex)) {
+                handler(previousTimeRef.current)
+            }
+            anglePending = false
+            handler(latestTime)
+        }
 
-        const unsubscribeTime = currentTime.on("change", handler);
-        const unsubscribeOffset = lineOffset.on("change", handleUpdate);
+        const unsubscribeTime = currentTime.on("change", handleTime);
+        const unsubscribeOffset = lineOffset.on("change", handleAngle);
         handler(currentTime.get());
 
         return () => {
+            leaveRingSettle();
             unsubscribeTime();
             unsubscribeOffset();
         };

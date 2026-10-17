@@ -33,6 +33,15 @@ import { DEFAULT_PARTITA_TUNING, type Line } from '../../types'
  * 与上游的差异同 Luminous（外壳、字幕层、等待文案），
  * 布局与时序逻辑逐字保留。
  */
+
+/**
+ * 文字被隐藏时当前行怎么退场（上游 `TEXT_HIDDEN_EXIT`，`partita/VisualizerPartita.tsx:34`）。
+ *
+ * 上游注释：`A line hidden because the text is (a window over the player) only fades:
+ * the next line's exit grows and blurs it, and this layer covers most of the screen.`
+ */
+const TEXT_HIDDEN_EXIT = { opacity: 0, transition: { duration: 0.2, ease: 'easeOut' as const } }
+
 export function VisualizerPartita(props: FoliaSharedProps) {
   const {
     currentTime,
@@ -151,13 +160,18 @@ export function VisualizerPartita(props: FoliaSharedProps) {
         animate={lyricContainerFloat.animate}
         transition={lyricContainerFloat.transition}
       >
-        <AnimatePresence mode="popLayout">
+        {/* 文字被隐藏时只淡出；被下一行替换时才 grow+blur（上游 `custom` + `variants`） */}
+        <AnimatePresence mode="popLayout" custom={!showText}>
           {showText && activeLine && activeLineRenderProfile && (
             <motion.div
               key={activeLine.startTime}
               initial={activeLineContainerMotion.initial}
               animate={activeLineContainerMotion.animate}
-              exit={activeLineContainerMotion.exit}
+              custom={!showText}
+              variants={{
+                leave: (hidden: boolean) => (hidden ? TEXT_HIDDEN_EXIT : activeLineContainerMotion.exit),
+              }}
+              exit="leave"
               className="flex w-full max-w-5xl flex-row-reverse items-stretch justify-center"
               style={{
                 perspective: `${sequentialLayout.lineConfig.perspective}px`,

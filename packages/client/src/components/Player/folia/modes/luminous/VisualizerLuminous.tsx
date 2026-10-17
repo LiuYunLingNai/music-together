@@ -54,6 +54,15 @@ interface LineLayoutConfig {
 const clampClassicBreathingFloatMultiplier = (value: number) => Math.min(2, Math.max(0, value))
 const clampClassicWordSpacing = (value: number) => Math.min(2, Math.max(0, value))
 
+/**
+ * 文字被隐藏时当前行怎么退场（上游 `TEXT_HIDDEN_EXIT`，`classic/Visualizer.tsx:34`）。
+ *
+ * 上游注释：`A line hidden because the text is (a window over the player) only fades:
+ * the next line's exit grows and blurs it, and this layer covers most of the screen.`
+ * —— 被浮窗盖住时不该走 grow+blur，只淡出。
+ */
+const TEXT_HIDDEN_EXIT = { opacity: 0, transition: { duration: 0.2, ease: 'easeOut' as const } }
+
 const resolveClassicTuning = (tuning?: ClassicTuning): ClassicTuning => ({
   enableWordRotation: tuning?.enableWordRotation ?? DEFAULT_CLASSIC_TUNING.enableWordRotation,
   breathingFloatMultiplier: clampClassicBreathingFloatMultiplier(
@@ -308,13 +317,18 @@ export function VisualizerLuminous(props: FoliaSharedProps) {
         animate={lyricContainerFloat?.animate}
         transition={lyricContainerFloat?.transition}
       >
-        <AnimatePresence mode="popLayout">
+        {/* 文字被隐藏时只淡出；被下一行替换时才 grow+blur（上游 `custom` + `variants`） */}
+        <AnimatePresence mode="popLayout" custom={!showText}>
           {showText && activeLine && (
             <motion.div
               key={activeLine.startTime}
               initial={activeLineContainerMotion.initial}
               animate={activeLineContainerMotion.animate}
-              exit={activeLineContainerMotion.exit}
+              custom={!showText}
+              variants={{
+                leave: (hidden: boolean) => (hidden ? TEXT_HIDDEN_EXIT : activeLineContainerMotion.exit),
+              }}
+              exit="leave"
               className={`flex w-full max-w-6xl flex-wrap content-center ${lineConfig.justifyContent} ${lineConfig.alignItems}`}
               style={{ perspective: `${lineConfig.perspective}px`, minHeight: '300px' }}
             >
