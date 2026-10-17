@@ -187,3 +187,33 @@ describe('与实时路径的仲裁在真实链路里生效', () => {
     expect(readScheduledBeatPulse()).toBeGreaterThan(0)
   })
 })
+
+/**
+ * 拍点图就绪后实时路径必须关闭 —— 上游 `!beatMapReadyForCamera && …`
+ * （`11-main-loop.js:425` / `:444`）同时门控运镜与脉冲两个 if。
+ *
+ * 这条回归的理由：若漏了门控，同一拍会被实时与离线各排一次事件，
+ * 症状是"运镜比上游躁一倍"，而任何单项测试都看不出问题。
+ */
+describe('拍点图就绪后实时路径关闭', () => {
+  it('≥4 个运镜拍 ⇒ 实时命中不再排事件（只有拍点图在推）', () => {
+    // 拍点全在很远的未来 ⇒ 离线不会出队；此时若有推镜，只能来自实时路径。
+    const map = makeMap({
+      tempoSource: 'local',
+      cameraBeats: [cam(50), cam(51), cam(52), cam(53)],
+      pulseBeats: [pulse(50)],
+    })
+    installBeatMapForTest(map, 0)
+    stepBeatCameraAudio(1 / 60, 0.5, true)
+    expect(readBeatMapCursor(), '没有近处拍点可出队').toEqual({ camera: 0, pulse: 0 })
+
+    // 若实时路径仍在跑，它自己命中后会排事件；这里喂一段真实音频形态
+    // 的低频驱动，让引擎有机会命中 —— 但 ready 之后它不该被采纳。
+    let peak = 0
+    for (let i = 0; i < 30; i++) {
+      const f = stepBeatCameraFrame(1 / 60, 0.5 + i / 60, true)
+      peak = Math.max(peak, f.radiusKick)
+    }
+    expect(peak, '拍点图已就绪 ⇒ 实时路径不应产生任何推镜').toBe(0)
+  })
+})

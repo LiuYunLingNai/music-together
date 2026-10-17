@@ -104,6 +104,18 @@ export function resetScheduledBeatPulse(): void {
   scheduledBeatPulse = 0
 }
 
+/**
+ * 上游 `waitingForBeatMap` 的快照（拍点图未就绪 = true）。
+ *
+ * `beatCamera` 每音频帧写入，归一化据此选实时脉冲的系数档
+ * （上游 `11-main-loop.js:447-448`：等待期上限 0.56 且乘 0.68）。
+ */
+let beatMapWaiting = false
+
+export function setBeatMapWaiting(waiting: boolean): void {
+  beatMapWaiting = waiting
+}
+
 export function createAudioNormalizerState(): NormalizerState {
   return {
     bassPeak: 0.12,
@@ -187,9 +199,13 @@ export function stepAudioNormalize(
     // ---- beatPulse（:446-455）：实时引擎命中时抬升，随后指数衰减 ----
     // 上游的完整实时节拍引擎依赖 beatmap/置信度打分；本项目等价简化为
     // 「低频突升 + 能量突升」双门槛，衰减率用上游原值 pow(0.36, dt)。
-    const rtPulse = clamp01(bassOnset * 2.2 + energyOnset * 0.9)
+    // 上限与缩放按 `waitingForBeatMap` 切档（上游 :447-448）：
+    // 等待期上限 0.56 且乘 0.68（脉冲更收敛），否则上限 0.76。
+    const rtPulseCap = beatMapWaiting ? 0.56 : 0.76
+    const rtPulseScale = beatMapWaiting ? 0.68 : 1
+    const rtPulse = clamp01(bassOnset * 2.2 + energyOnset * 0.9) * rtPulseScale
     if (input.lowDrive > 0.42 && rb > 0.32 && bassOnset > 0.04 && energyOnset > 0.006) {
-      state.beatPulse = Math.max(state.beatPulse, rtPulse)
+      state.beatPulse = Math.max(state.beatPulse, Math.min(rtPulseCap, rtPulse))
     }
     state.beatPulse *= Math.pow(0.36, dt)
 

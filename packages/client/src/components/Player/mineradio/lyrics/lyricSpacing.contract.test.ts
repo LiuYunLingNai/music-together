@@ -104,7 +104,7 @@ function clampedConstant(source: string, name: string): number {
   // 允许 `Math.min/max` —— 被夹取的表达式内部还嵌着一层内层夹取
   // （如 `Math.min(1.45, Math.max(0.86, …))`，对应上游的 spread 夹区）。
   expect(expr, `${name} 的表达式含非算术内容，无法安全求值`).toMatch(
-    /^(?:[0-9.]+|Math\.(?:min|max)|[\s(),*/+\-])+$/,
+    /^(?:[0-9.]+|Math\.(?:min|max)|[\s(),*/+-])+$/,
   )
   return Number(new Function(`return (${expr})`)())
 }

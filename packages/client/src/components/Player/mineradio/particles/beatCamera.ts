@@ -19,12 +19,11 @@
  * 0.0048)` 等），于是**每一拍看起来都一样** —— 抒情歌与炸歌完全相同，
  * 没有 downbeat/drop/accent 的形态差异，也没有整曲动态。
  *
- * ============================ 移植范围（本轮）============================
+ * ============================ 移植范围 ============================
  *
- * · **只做实时路径**（上游 `source = 'live'`）。上游的"提前一点推镜"来自
- *   **离线 BPM/beat-grid 分析**（`04-beat-map-runtime.js`），无拍点图时
- *   实时路径本来就会接管（`11-main-loop.js:441` 的 `liveFallbackOk`）。
- *   离线分析含 Web Worker / 缓存 / 预取，需单独一轮（HANDOFF §5.1）。
+ * · **实时路径**（上游 `source = 'live'`）+ **离线拍点图**（`04-beat-map-runtime.js`，
+ *   提供 75ms 前瞻）。两者的仲裁：拍点图有 >= 4 个运镜拍后实时路径整条关闭，
+ *   否则实时接管并按是否还在等拍点图切换阈值（上游 `11-main-loop.js:414`）。
  * · **跳过 DJ 分支**。`djMode.active` 出厂恒为 `false`
  *   （`00-state/03-beat-dj-state.js:87`），且只对直播/DJ 音源可能为真 ——
  *   本项目无直播音源，该分支永不执行。跳过的是"振幅/包络/combo 系数的
@@ -36,7 +35,7 @@
  */
 
 import { getAudioTapRevision } from '@/lib/audioTap'
-import { pushScheduledBeatPulse, resetScheduledBeatPulse } from '../shared/audioNormalize'
+import { pushScheduledBeatPulse, resetScheduledBeatPulse, setBeatMapWaiting } from '../shared/audioNormalize'
 import { getSonicAudioFrame } from '../../stages/SonicAudioMonitor'
 
 // ---------------------------------------------------------------- 常量（上游 03-beat-dj-state.js:35-56）
@@ -310,14 +309,8 @@ const cam = createCameraAnalysis()
  *   即引擎命中之后，还必须**同时**有足够的置信度、强度、低频存在感，以及
  *   一记真实的低频起跳帧 —— 才真的推镜。
  *
- *   此前本项目**无条件**把每个引擎命中都排成事件（没有第二道门槛），
- *   于是密集段落的事件数明显多于上游、镜头明显更躁。
- *
- *   本项目无离线拍点图（§5.1），因此恒走 `!waitingForBeatMap` 那一支
- *   （即 `confidence > 0.68 && strength > 0.62 && low > 0.44 && (liveKickFrame || score > 0.52)`）。
- *
- *   ⚠️ `waitingForBeatMap` 分支依赖离线拍点图子系统（`beatMapBusy` /
- *   `beatAnalysisTimer` / `currentTime < 18`），本项目未移植，故不实现那一支。
+ *   `waitingForBeatMap` 两档阈值按拍点图状态切换（见 `readBeatMapCameraGate`）；
+ *   拍点图一旦就绪，实时路径整条关闭，不再走这里。
  */
 interface LiveBeatPayload {
   time: number
@@ -753,19 +746,11 @@ function scheduleBeatCamera(beat: BeatInput): void {
 
   // 预热期（拍点图未就绪）压低振幅 —— 上游 `livePreview` 分支。
   //
-  // ★ 本分支在**当前移植范围内不可达**（诚实标注，第三十四轮审计 #5）。
-  //   上游的 `preview` 语义是 `waitingForBeatMap`（`11-main-loop.js:414`
-  //   把 `preview: waitingForBeatMap` 传进 `scheduleBeatCamera`），而
-  //   `waitingForBeatMap` 依赖**离线拍点图**子系统（`beatMapBusy` /
-  //   `beatAnalysisTimer` / `currentTime < 18`）—— 本项目未移植（§5.1），
-  //   因此唯一的构造点恒传 `preview: false`。
+  // `preview` 由实时命中传入，语义是 `waitingForBeatMap`
+  // （`11-main-loop.js:441`）⇒ 拍点图还没到手时运镜更收敛。
   //
-  //   保留分支本身是为了：① 与上游结构逐行对应，将来补拍点图时直接可用；
-  //   ② 说明"这里的振幅差异不是遗漏"。**不要**为了让它"可达"而伪造一个
-  //   preview 值 —— 那会引入上游没有的行为。
-  //
-  //   另注：上游只有在**非** preview 时才有 `amp *= 0.92` 那一条（见上方 A3），
-  //   所以本分支同时意味着"preview 时不再乘 0.92"。
+  // 另注：上游只有在**非** preview 时才有 `amp *= 0.92` 那一条（见上方 A3），
+  // 所以本分支同时意味着"preview 时不再乘 0.92"。
   if (beat.preview) {
     const previewTone = clamp01(visualImpact * 0.54 + lowTone * 0.22 + confidence * 0.18 + strength * 0.06)
     amp *= 0.72 + previewTone * 0.16
@@ -1179,6 +1164,11 @@ export function stepBeatCameraAudio(dt: number, currentTime: number, playing: bo
   // ① 实时节拍引擎（命中时返回载荷，未命中返回 null）
   const hitPayload = processRealtimeBeatEngine(step, nowT)
 
+  // ★ 拍点图就绪后实时路径**整条关闭**（上游 `!beatMapReadyForCamera && …`
+  //   同时门控运镜与脉冲两个 if）。此时只有拍点图在推镜；若两条都跑，
+  //   同一拍会被排两次事件，`tickBeatMap` 的让位逻辑也救不回来。
+  const beatMapGate = readBeatMapCameraGate(nowT)
+
   // ★ A2：引擎命中后必须再过**第二道门槛** `liveFallbackOk`
   //   （上游 `11-main-loop.js:424-429`），不是无条件排事件。
   //
@@ -1186,21 +1176,27 @@ export function stepBeatCameraAudio(dt: number, currentTime: number, playing: bo
   //     它仍保留**上一次命中**的值 —— 只看 `liveFallbackOk` 会把同一记命中
   //     在每个分析帧重复排一次事件（镜头抖成一团）。
   //
-  //   非 DJ 且无拍点图时（本项目恒定如此，§5.1）：
-  //     liveKickFrame = low > 0.42 && rb > 0.34 && bassOnset > 0.048 && energyOnset > 0.008
-  //     liveFallbackOk = confidence > 0.68 && strength > 0.62 && low > 0.44
-  //                      && (liveKickFrame || score > 0.52)
-  //
-  //   即"引擎认为有拍"之外，还要**同时**满足高置信、高强度、强低频在场，
-  //   以及一记真实的低频起跳帧（或足够高的分数）。缺了这道门槛时，
-  //   密集段落会把每个引擎命中都推成事件 —— 镜头明显比上游躁。
-  if (hitPayload) {
+  //   上游按 `waitingForBeatMap` 切两套阈值：还在等拍点图时门槛低一档
+  //   （`liveStrongHit || liveTempoHit`），否则高一档。
+  if (hitPayload && !beatMapGate.ready) {
     const liveKickFrame = hitPayload.low > 0.42 && cam.rb > 0.34 && cam.bassOnset > 0.048 && cam.energyOnset > 0.008
-    const liveFallbackOk =
-      hitPayload.confidence > 0.68 &&
-      hitPayload.strength > 0.62 &&
-      hitPayload.low > 0.44 &&
-      (liveKickFrame || hitPayload.score > 0.52)
+    const liveStrongHit =
+      hitPayload.confidence > 0.62 &&
+      hitPayload.strength > 0.54 &&
+      hitPayload.score > 0.44 &&
+      liveKickFrame
+    const liveTempoHit =
+      hitPayload.tempoAssist &&
+      hitPayload.confidence > 0.62 &&
+      hitPayload.strength > 0.5 &&
+      hitPayload.low > 0.4 &&
+      cam.bassOnset > 0.036
+    const liveFallbackOk = beatMapGate.waiting
+      ? liveStrongHit || liveTempoHit
+      : hitPayload.confidence > 0.68 &&
+        hitPayload.strength > 0.62 &&
+        hitPayload.low > 0.44 &&
+        (liveKickFrame || hitPayload.score > 0.52)
 
     if (liveFallbackOk) {
       scheduleBeatCamera({
@@ -1215,7 +1211,7 @@ export function stepBeatCameraAudio(dt: number, currentTime: number, playing: bo
         tempoAssist: hitPayload.tempoAssist,
         combo: hitPayload.combo,
         impact: hitPayload.impact,
-        preview: false,
+        preview: beatMapGate.waiting,
         primary: true,
       })
     }
@@ -1235,6 +1231,8 @@ export function stepBeatCameraAudio(dt: number, currentTime: number, playing: bo
   // 分析调度器的状态快照（上游直接读 `audio.currentTime` / `audio.paused`）。
   lastBeatMapAudioTime = nowT
   lastBeatMapPlaying = playing
+  // 归一化的实时脉冲系数按 `waitingForBeatMap` 切档（上游 :447-448）。
+  setBeatMapWaiting(beatMapGate.waiting)
 }
 
 /**
@@ -1428,8 +1426,8 @@ export function resetBeatCamera(currentTime = 0, preserveMomentum = false): void
   // ★ 排定的分析也要作废：它属于上一首歌。上游在切歌时推进
   //   `beatMapToken`，调度器内部的 `token !== beatMapToken` 判据会让它
   //   自行早退 —— 但定时器与 Worker 仍会跑完一轮，这里显式取消。
-  if (beatAnalysisCancel) beatAnalysisCancel()
-  beatAnalysisCancel = null
+  if (beatAnalysis) beatAnalysis.cancel()
+  beatAnalysis = null
 }
 
 // ================================================================ 离线拍点图（03-beat/）
@@ -1447,6 +1445,7 @@ export function resetBeatCamera(currentTime = 0, preserveMomentum = false): void
 
 import {
   BEAT_MAP_LOOKAHEAD,
+  beatMapCameraEvents,
   cinemaProfileFromBeatMap,
   convergeCinemaScale,
   createBeatMapCursor,
@@ -1454,11 +1453,34 @@ import {
   scheduledBeatPulseAmount,
   syncBeatMapCursor,
   tickBeatMap,
+  type BeatAnalysisHandle,
   type BeatMap,
 } from './offlineBeatAnalysis'
 
+/**
+ * 上游 `11-main-loop.js:414`：`beatMapReadyForCamera` 要 `cameraBeats.length >= 4`；
+ * `waitingForBeatMap` 在播放前 18 秒内也算"还在等"。
+ */
+const BEAT_MAP_READY_MIN_EVENTS = 4
+const BEAT_MAP_WAIT_SEC = 18
+
 /** 当前拍点图（上游 `currentBeatMap`）。null = 分析未完成 ⇒ 只用实时路径。 */
 let currentBeatMap: BeatMap | null = null
+
+/**
+ * 上游 `beatMapReadyForCamera` / `waitingForBeatMap`（`11-main-loop.js:414`）。
+ *
+ * 拍点图有 >= 4 个运镜拍后实时路径整条关闭；否则实时接管，并按是否还在等
+ * 拍点图（分析中/已排程，或播放还没到 18 秒）切换阈值与振幅。
+ */
+function readBeatMapCameraGate(t: number): { ready: boolean; waiting: boolean } {
+  const cameraEvents = currentBeatMap ? beatMapCameraEvents(currentBeatMap) : []
+  const ready = cameraEvents.length >= BEAT_MAP_READY_MIN_EVENTS
+  const waiting =
+    !ready &&
+    (!!(beatAnalysis && (beatAnalysis.isBusy() || beatAnalysis.isPending())) || t < BEAT_MAP_WAIT_SEC)
+  return { ready, waiting }
+}
 /** 拍点图光标（上游 `beatCam.nextIdx` + `beatMapNextIdx`）。 */
 const beatMapCursor = createBeatMapCursor()
 // ★ 上游 `scheduledBeatPulse` 住在 `shared/audioNormalize`，不在这里 ——
@@ -1473,8 +1495,8 @@ const beatMapCursor = createBeatMapCursor()
 // 与 `stepBeatCameraAudio` 判切歌用的是同一个时钟。
 let lastBeatMapAudioTime = 0
 let lastBeatMapPlaying = false
-/** 当前排定的分析的取消函数（上游 `beatAnalysisTimer` 的持有者）。 */
-let beatAnalysisCancel: (() => void) | null = null
+/** 当前排定的分析（上游 `beatAnalysisTimer` 的持有者 + `beatMapBusy`）。 */
+let beatAnalysis: BeatAnalysisHandle | null = null
 
 /**
  * 拍点图交接 —— 上游 `smoothBeatMapHandoff`（`04-beat-map-runtime.js:1-21`）
@@ -1605,9 +1627,9 @@ export function startBeatMapAnalysis(
 ): () => void {
   // 上一次未完成的分析必须作废：它的 `token` 已过期，`.then` 里会自行
   // 早退，但 1600ms 的定时器与 Worker 仍在跑，白占 CPU。
-  if (beatAnalysisCancel) beatAnalysisCancel()
+  if (beatAnalysis) beatAnalysis.cancel()
   const token = getAudioTapRevision()
-  beatAnalysisCancel = scheduleBeatAnalysis(
+  beatAnalysis = scheduleBeatAnalysis(
     audioUrl,
     {
       token,
@@ -1622,11 +1644,11 @@ export function startBeatMapAnalysis(
     },
     song,
   )
-  return beatAnalysisCancel
+  return beatAnalysis ? beatAnalysis.cancel : () => {}
 }
 
 /** 供测试：取消当前排定的分析。 */
 export function cancelBeatMapAnalysis(): void {
-  if (beatAnalysisCancel) beatAnalysisCancel()
-  beatAnalysisCancel = null
+  if (beatAnalysis) beatAnalysis.cancel()
+  beatAnalysis = null
 }

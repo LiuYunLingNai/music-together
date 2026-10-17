@@ -28,10 +28,6 @@ beforeEach(() => {
   vi.useFakeTimers()
   analyze.mockReset()
   analyze.mockImplementation(async () => null)
-  // ★ `scheduleAnalysisTask` 走 `requestIdleCallback`，而 vitest 的假定时器
-  //   不驱动它（Node ≥18 原生有这个 API，但不会因时间推进而触发回调）
-  //   ⇒ 分析永远不会"跑起来"。这里把它换成"立即跑"，让时序完全由假
-  //   定时器掌控。被测的是**排程逻辑**，不是 idle 调度本身。
   ;(globalThis as unknown as { requestIdleCallback?: unknown }).requestIdleCallback = (
     fn: () => void,
   ) => {
@@ -131,10 +127,44 @@ describe('代次判据', () => {
 
   it('取消后不再跑', () => {
     const env = makeEnv()
-    const cancel = scheduleBeatAnalysis('http://x/a.mp3', env)
-    cancel()
+    scheduleBeatAnalysis('http://x/a.mp3', env).cancel()
     vi.advanceTimersByTime(BEAT_ANALYSIS_CONFIG.delayMs + 1000)
     expect(analyze).not.toHaveBeenCalled()
+  })
+})
+
+describe('状态探针', () => {
+  // `waitingForBeatMap`（11-main-loop.js:414）要区分"正在跑"与"已排程"。
+  it('排程后未开跑 ⇒ isPending 真、isBusy 假', () => {
+    const handle = scheduleBeatAnalysis('http://x/a.mp3', makeEnv())
+    expect(handle.isPending()).toBe(true)
+    expect(handle.isBusy()).toBe(false)
+    handle.cancel()
+  })
+
+  it('开跑后 ⇒ isBusy 真、isPending 假', async () => {
+    let release: () => void = () => {}
+    analyze.mockImplementation(
+      () =>
+        new Promise<BeatMap | null>((r) => {
+          release = () => r(null)
+        }),
+    )
+    const handle = scheduleBeatAnalysis('http://x/a.mp3', makeEnv())
+    await vi.advanceTimersByTimeAsync(BEAT_ANALYSIS_CONFIG.delayMs)
+    expect(analyze).toHaveBeenCalledTimes(1)
+    expect(handle.isBusy(), '分析进行中').toBe(true)
+    expect(handle.isPending(), '定时器已消费').toBe(false)
+    release()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(handle.isBusy()).toBe(false)
+  })
+
+  it('取消后两个探针都假', () => {
+    const handle = scheduleBeatAnalysis('http://x/a.mp3', makeEnv())
+    handle.cancel()
+    expect(handle.isPending()).toBe(false)
+    expect(handle.isBusy()).toBe(false)
   })
 })
 

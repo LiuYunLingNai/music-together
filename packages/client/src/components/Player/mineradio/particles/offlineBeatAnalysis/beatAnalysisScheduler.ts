@@ -73,7 +73,22 @@ export interface BeatAnalysisEnv {
 }
 
 /**
- * 排一次分析。返回取消函数。
+ * `scheduleBeatAnalysis` 的返回值 —— 取消函数 + 两个状态探针。
+ *
+ * `isBusy` / `isPending` 对应上游的 `beatMapBusy` / `beatAnalysisTimer`
+ * （`11-main-loop.js:414` 的 `waitingForBeatMap` 读它们）。
+ */
+export interface BeatAnalysisHandle {
+  /** 放弃本次分析（切歌/卸载时调）。 */
+  cancel: () => void
+  /** 分析正在跑。 */
+  isBusy: () => boolean
+  /** 已排程但还没开跑。 */
+  isPending: () => boolean
+}
+
+/**
+ * 排一次分析。
  *
  * 上游每次切歌都调 `scheduleBeatAnalysis(songId, audioUrl, token, song)`；
  * 这里签名去掉 `songId`（无磁盘缓存 ⇒ 不需要按歌去重），保留
@@ -87,7 +102,7 @@ export function scheduleBeatAnalysis(
   audioUrl: string,
   env: BeatAnalysisEnv,
   song?: { name?: string; title?: string; artist?: string } | null,
-): () => void {
+): BeatAnalysisHandle {
   const { token } = env
   let timer: ReturnType<typeof setTimeout> | null = null
   let attempts = 0
@@ -161,8 +176,12 @@ export function scheduleBeatAnalysis(
   }
 
   queue(BEAT_ANALYSIS_CONFIG.delayMs)
-  return () => {
-    cancelled = true
-    cancel()
+  return {
+    cancel: () => {
+      cancelled = true
+      cancel()
+    },
+    isBusy: () => busy,
+    isPending: () => timer !== null,
   }
 }
