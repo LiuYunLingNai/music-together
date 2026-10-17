@@ -71,6 +71,39 @@ export function readNormalizedAudio(): NormalizedAudio {
   return published
 }
 
+/**
+ * 上游 `scheduledBeatPulse` —— 离线拍点图（`tickBeatMap`）本帧要并入的脉冲量。
+ *
+ * ★ 为什么它住在**这里**而不是 `beatCamera.ts`：
+ *   上游的合并点就在这一段里（`11-main-loop.js:459-466`）——
+ *     if (scheduledBeatFlag) { beatOnsetFlag = true; scheduledBeatFlag = false }
+ *     if (scheduledBeatPulse > beatPulse) beatPulse = scheduledBeatPulse
+ *     scheduledBeatPulse *= pow(0.32, audioStepDt)
+ *   也就是**衰减与合并都发生在 `beatPulse` 自己的更新块内**，与实时路径的
+ *   `beatPulse *= pow(0.36, dt)` 相邻。拍点图是 beatPulse 的一个**来源**，
+ *   不是消费者 —— 把它并进 `beatCam.punch` 会漏掉 `bass`（`beatPulse*0.18`）、
+ *   `audioEnergy`（`beatPulse*0.30`）与 `beat` 三个出口。
+ *
+ *   `beatOnsetFlag` 未移植：上游全仓只有写入没有读取（`00-core-stores.js:18`
+ *   声明、`:274`/`:356` 重置、`:449`/`:461` 置位），是一个死标志位。
+ */
+let scheduledBeatPulse = 0
+
+/** 取走本帧累积的离线拍点脉冲（`tickBeatMapCursor` 写入）。 */
+export function readScheduledBeatPulse(): number {
+  return scheduledBeatPulse
+}
+
+/** 并入一次离线拍点脉冲（上游 `triggerScheduledBeat` 尾部）。 */
+export function pushScheduledBeatPulse(amount: number): void {
+  if (amount > scheduledBeatPulse) scheduledBeatPulse = amount
+}
+
+/** 清空离线拍点脉冲（上游 `resetAudioVisualState` 的 `scheduledBeatPulse = 0`）。 */
+export function resetScheduledBeatPulse(): void {
+  scheduledBeatPulse = 0
+}
+
 export function createAudioNormalizerState(): NormalizerState {
   return {
     bassPeak: 0.12,
@@ -160,6 +193,18 @@ export function stepAudioNormalize(
     }
     state.beatPulse *= Math.pow(0.36, dt)
 
+    // ---- 离线拍点图并入（11-main-loop.js:459-466）----
+    //
+    // 放在实时分支的衰减**之后**：上游 `tickBeatMap()` 在同一个
+    // `if (audioStepDt > 0)` 块里紧跟实时引擎跑，因此这里顺序一致 ——
+    // 先让实时脉冲衰减完，再用 `max` 合并离线脉冲，最后各自衰减。
+    //
+    // ★ 用 `>` 而不是 `>=`：上游即 `if (scheduledBeatPulse > beatPulse)`，
+    //   相等时保留 beatPulse（避免无谓覆盖，语义上与实时路径的
+    //   `beatPulse = Math.max(beatPulse, rtPulse)` 一致）。
+    if (scheduledBeatPulse > state.beatPulse) state.beatPulse = scheduledBeatPulse
+    scheduledBeatPulse *= Math.pow(0.32, dt)
+
     // ---- env 平滑（:484-487）----
     state.smoothBass = env(state.smoothBass, Math.min(0.82, rb * 0.78 + re * 0.025), 0.28, 0.075)
     state.smoothMid = env(state.smoothMid, Math.min(0.68, rm * 0.64 + re * 0.025), 0.18, 0.06)
@@ -173,6 +218,13 @@ export function stepAudioNormalize(
     state.smoothTreb *= Math.pow(0.91, idle)
     state.smoothEnergy *= Math.pow(0.91, idle)
     state.beatPulse *= Math.pow(0.82, idle)
+    // ★ 离线拍点脉冲在 idle 档**不并入**：上游 `tickBeatMap` 开头就有
+    //   `if (!currentBeatMap || !audio || audio.paused) return`，暂停时
+    //   `triggerScheduledBeat` 根本不会被调用，`scheduledBeatPulse` 保持
+    //   暂停前的残留值。上游主循环的合并句在 `if (audioStepDt > 0)` 内，
+    //   暂停时 `audioStepDt` 恒 0 ⇒ 合并与衰减都不跑。这里照此：暂停期间
+    //   `scheduledBeatPulse` **冻结**，恢复播放后第一帧才按原值合并。
+    //   （`stepBeatCameraAudio` 同样在 `!playing` 时早退，两侧一致。）
   }
 
   // ---- 最终合成（:536-539）----

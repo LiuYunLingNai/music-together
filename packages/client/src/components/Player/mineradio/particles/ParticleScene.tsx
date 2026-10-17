@@ -1,6 +1,9 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { usePlayerStore } from '@/stores/playerStore'
+import { useRoomStore } from '@/stores/roomStore'
+import { SERVER_URL } from '@/lib/config'
+import { getAudioTapRevision } from '@/lib/audioTap'
 import { lyricPlayerBridge } from '@/lib/lyricPlayerBridge'
 import { disposeAudioAnalyser, ensureAudioAnalyser, stepAudioFrame } from '../../stages/AudioAnalyser'
 import type { CoverAssets } from '../shared/CoverTextureLoader'
@@ -10,7 +13,7 @@ import { LyricStage } from '../lyrics/LyricStage'
 import type { CoverPalette } from '../lyrics/coverPalette'
 import { TopographyScene } from '../topography/TopographyScene'
 import type { LyricDisplayMode, LyricMotionStyle, LyricTranslationMode } from '../lyrics/lyricDisplayConfig'
-import { stepBeatCameraAudio } from './beatCamera'
+import { startBeatMapAnalysis, stepBeatCameraAudio } from './beatCamera'
 import { CameraRig } from './CameraRig'
 import { FloatingSongShelf } from './FloatingSongShelf'
 import { ParticleField } from './ParticleField'
@@ -181,6 +184,52 @@ function useDocumentVisible(): boolean {
 }
 
 /**
+ * 离线拍点分析的调度入口 —— 上游在主循环切歌分支里调
+ * `scheduleBeatAnalysis(songId, audioUrl, token, song)`。
+ *
+ * ★ 为什么挂在 `AudioStepDriver` 而不是 `ParticleField`：与音频接线同理 ——
+ *   `ParticleField` 在「声波地形」模式下不挂载，挂在那里会让地形模式
+ *   永远拿不到拍点图。而 `AudioStepDriver` 与渲染模式无关、始终挂载。
+ *
+ * ★ 判据用 `getAudioTapRevision()` 而不是 `currentTrack`：
+ *   上游的 `beatMapToken` 由切歌推进，本项目的对应物就是 tap 代次 ——
+ *   它是"真的换了音频源"的唯一判据（`stepBeatCameraAudio` 判切歌也用它）。
+ *   用 `currentTrack.id` 会在同一首歌重播时不重新分析（上游会）。
+ */
+function BeatMapAnalysisDriver() {
+  useEffect(() => {
+    let cancel: (() => void) | null = null
+    let lastRevision = getAudioTapRevision()
+    const run = () => {
+      const revision = getAudioTapRevision()
+      if (revision === lastRevision) return
+      lastRevision = revision
+      const track = usePlayerStore.getState().currentTrack
+      if (!track?.streamUrl) return
+      // 与 `useHowl` 的 URL 构造保持一致（同一个播放源）——
+      // 上游分析的也是播放用的那个 URL。
+      const roomId = useRoomStore.getState().room?.id ?? ''
+      const playbackUrl =
+        track.source === 'bilibili'
+          ? `${SERVER_URL}/api/music/bilibili-audio-proxy?url=${encodeURIComponent(track.streamUrl)}&bvid=${encodeURIComponent(track.urlId)}&roomId=${encodeURIComponent(roomId)}`
+          : track.source === 'kugou' || track.source === 'kugou_concept'
+            ? `${SERVER_URL}/api/music/kugou-audio-proxy?url=${encodeURIComponent(track.streamUrl)}`
+            : track.streamUrl
+      cancel = startBeatMapAnalysis(playbackUrl, { name: track.title, artist: track.artist?.[0] })
+    }
+    run()
+    // tap 代次只在 `publishStretchAnalyser` 时变，没有订阅机制 ⇒ 轮询。
+    // 250ms 足够（分析的 delayMs 是 1600ms，晚 250ms 察觉无影响）。
+    const timer = setInterval(run, 250)
+    return () => {
+      clearInterval(timer)
+      cancel?.()
+    }
+  }, [])
+  return null
+}
+
+/**
  * Three.js 舞台宿主。
  *
  * 同一时刻只应存在一个 Canvas —— 由父级保证在切回经典播放器时卸载本组件。
@@ -272,6 +321,11 @@ export function ParticleScene({
             此前让 6 个组件各自触发分析，破坏了共享状态（详见
             SonicAudioMonitor 顶部说明）。 */}
         <AudioStepDriver policy={policy} documentVisible={documentVisible} />
+
+        {/* ★ 离线拍点分析调度：切歌后延迟分析整首歌，产出拍点图交给
+            `beatCamera`（上游 `scheduleBeatAnalysis`）。与渲染模式无关，
+            同样必须常驻 —— 见 `BeatMapAnalysisDriver` 顶部说明。 */}
+        <BeatMapAnalysisDriver />
 
         {/* ★ 暂停时的帧泵：与 `resolveFrameloop` 的 `'demand'` 成对
             （见 `PausedFramePump` 说明）。缺了它舞台会整块变黑。 */}

@@ -175,8 +175,6 @@ export interface ShelfSummonState extends ShelfHoverCue {
   openAnimAt: number
   /** 切歌守卫截止时刻（ms） */
   switchGuardUntil: number
-  /** 上游 `shelfPinnedOpen` —— 本项目无固定开关，恒 false */
-  pinnedOpen: boolean
 }
 
 export function createShelfSummonState(): ShelfSummonState {
@@ -187,7 +185,6 @@ export function createShelfSummonState(): ShelfSummonState {
     openAnimAt: -SHELF_SUMMON.openDuration * 1000,
     visibility: 0,
     switchGuardUntil: 0,
-    pinnedOpen: false,
   }
 }
 

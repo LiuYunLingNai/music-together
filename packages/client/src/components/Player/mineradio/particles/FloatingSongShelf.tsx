@@ -189,7 +189,6 @@ export function FloatingSongShelf({ accent, onOpenQueue, motionEnabled }: Floati
   const { camera, gl } = useThree()
   const cardsRef = useRef<FloatingSongCardMesh[]>([])
   const drawKeysRef = useRef<string[]>([])
-  const hoversRef = useRef<number[]>([])
   /**
    * 每槽位的撞击脉冲（上游 `card.fxPulse`，`01-manager-core.js:261` 建卡时置 0）。
    *
@@ -202,16 +201,14 @@ export function FloatingSongShelf({ accent, onOpenQueue, motionEnabled }: Floati
   /**
    * 每槽位的选中抬升量（上游 `card.floatMix`，:261 建卡时置 0）。
    *
-   * ★ 与 `hoversRef` **不是一回事**，尽管两者的目标值都是"指针是否在这张卡上"：
+   * ★ 抬升只走这一个量。上游的 `lift` 由 `card.selected` 决定，而
+   *   `selected` 来自 `updateShelfCardHoverSelection` → `setSelected(idx)`
+   *   （`05-card-interactions.js:22-63`）—— 是**布尔命中**而非连续量，
+   *   本项目同样用 `hoveredRef.current === index` 这个布尔量。
    *
-   *   hoversRef    eased 0.14 每帧，直接作为**偏移量**参与姿态
-   *                （这是本项目此前的自创用法，上游没有）
-   *   pulsesRef    双速趋近（升 0.20 / 降 0.13，上游 :443-448），
-   *                作为 `lift` 参与姿态，且**只对 selected 卡**生效
-   *
-   *   上游的 `lift` 由 `card.selected` 决定，而 `selected` 来自
-   *   `updateShelfCardHoverSelection` → `setSelected(idx)`
-   *   （`05-card-interactions.js:22-63`）—— 是**布尔命中**而非连续量。
+   *   曾经还有一个 `hoversRef`（本项目自创的"指针 hover 连续量"），
+   *   它有 5 处写入、0 处读取，且上游 placeCard 的 side 分支里没有任何
+   *   "指针 hover 直接当偏移"的项 —— 已删除。
    */
   const floatMixRef = useRef<number[]>([])
   /**
@@ -335,7 +332,6 @@ export function FloatingSongShelf({ accent, onOpenQueue, motionEnabled }: Floati
       card.mesh.userData.cardIndex = -1
       cardsRef.current.push(card)
       drawKeysRef.current.push('')
-      hoversRef.current.push(0)
       pulsesRef.current.push(createCardPulse())
       floatMixRef.current.push(0)
       coverDirtyRef.current.push(false)
@@ -344,7 +340,6 @@ export function FloatingSongShelf({ accent, onOpenQueue, motionEnabled }: Floati
       const card = cardsRef.current.pop()
       if (card) disposeFloatingSongCardMesh(card)
       drawKeysRef.current.pop()
-      hoversRef.current.pop()
       pulsesRef.current.pop()
       floatMixRef.current.pop()
       coverDirtyRef.current.pop()
@@ -396,7 +391,6 @@ export function FloatingSongShelf({ accent, onOpenQueue, motionEnabled }: Floati
       // 新槽位追加到旧数组末尾，前 11 个旧 drawKey 可能让新纹理跳过首次绘制
       // 而显示空白。
       drawKeysRef.current = []
-      hoversRef.current = []
       pulsesRef.current = []
       floatMixRef.current = []
       coverDirtyRef.current = []
@@ -860,14 +854,6 @@ export function FloatingSongShelf({ accent, onOpenQueue, motionEnabled }: Floati
       // —— 归零要**干净**，否则永远有一个 ~1e-4 的残值卡在公式里。
       if (!liftTarget && nextMix < 0.004) nextMix = 0
       floatMixRef.current[slotIndex] = nextMix
-      // ---- 指针悬停（本项目此前的自创量，保留以兼容绘制键）----
-      //
-      // ★ 它**不再**参与姿态：上游 placeCard 的 side 分支里没有任何
-      //   "指针 hover 直接当偏移"的项。抬升走上面的 `lift`（双速、
-      //   只对 selected 卡），命中反馈走纹理高亮（`drawFloatingSongCard`
-      //   的 `hovered` 参数）。
-      const targetHover = hoveredRef.current === index ? 1 : 0
-      hoversRef.current[slotIndex] += (targetHover - hoversRef.current[slotIndex]) * 0.14
       // ---- 揭示（上游 `reveal`，:453-455）----
       //
       // `absD` = |index - center|，与 placeCard 里 `delta`/`absD` 同源

@@ -38,6 +38,7 @@
     "jss-preset-default": "^10.10.0",
     "lucide-react": "^0.563.0",
     "motion": "^12.34.0",
+    "music-tempo": "1.0.3",
     "nanoid": "^5.1.16",
     "pixi.js": "^8.22.0",
     "radix-ui": "^1.6.7",
