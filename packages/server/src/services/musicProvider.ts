@@ -17,6 +17,7 @@ import * as kugouAuth from './kugouAuthService.js'
 import * as tencentAuth from './tencentAuthService.js'
 import * as bilibiliAuth from './bilibiliAuthService.js'
 import { getKugouQualityFallbacks } from './audioQualityPolicy.js'
+import { parseKugouSongFields } from './kugouTrackFields.js'
 import { collectBilibiliAudioCandidates, selectBilibiliAudioCandidate } from './bilibiliAudioQuality.js'
 import {
   BILIBILI_BVID_PATTERN,
@@ -1148,52 +1149,24 @@ class MusicProvider {
 
       const tracks: Track[] = []
       for (const song of songList) {
-        const hash = String(song.hash || song.FileHash || '')
-        if (!hash) continue
-
-        const filename = String(song.filename || song.songname || song.SongName || '')
-        const parts = filename.split(' - ')
-        let trackName = filename
-        const artists: string[] = String(song.SingerName || song.singername || '')
-          .split(/[,，、]/)
-          .map((artist) => artist.trim())
-          .filter(Boolean)
-        if (parts.length >= 2) {
-          artists.length = 0
-          for (const a of parts[0].split(/[、,，&]/)) {
-            const trimmed = a.trim()
-            if (trimmed) artists.push(trimmed)
-          }
-          trackName = parts.slice(1).join(' - ')
-        }
-
-        let duration = Number(song.duration ?? song.Duration ?? song.timelen ?? 0)
-        if (duration > 100000) duration = Math.floor(duration / 1000)
-
-        const cover = normalizeKugouCoverUrl(
-          song.trans_param?.union_cover ||
-            song.audio_info?.trans_param?.union_cover ||
-            song.imgurl ||
-            song.Image ||
-            song.album_img,
-        )
-
-        const privilege = Number(song.privilege ?? song.pay_type ?? 0)
-        const isVip = (privilege & 8) !== 0 || privilege > 0
+        // 字段解析收敛在 `parseKugouSongFields`：概念版返回 PascalCase
+        // （`FileName` / `PayType`），标准版返回小写，两者都要认。
+        const fields = parseKugouSongFields(song as Record<string, unknown>)
+        if (!fields.hash) continue
 
         tracks.push({
           id: nanoid(),
           source,
-          sourceId: hash,
-          title: trackName || 'Unknown',
-          artist: artists.length > 0 ? artists : ['Unknown'],
-          album: String(song.album_name || song.AlbumName || ''),
-          duration,
-          cover,
-          urlId: hash,
-          lyricId: hash,
-          picId: hash,
-          vip: isVip,
+          sourceId: fields.hash,
+          title: fields.title || 'Unknown',
+          artist: fields.artists.length > 0 ? fields.artists : ['Unknown'],
+          album: fields.album,
+          duration: fields.duration,
+          cover: normalizeKugouCoverUrl(fields.cover),
+          urlId: fields.hash,
+          lyricId: fields.hash,
+          picId: fields.hash,
+          vip: fields.vip,
         })
       }
 
@@ -3043,50 +3016,24 @@ class MusicProvider {
   }
 
   /** Convert a kugou song object from getPlaylistTracks to a Track. */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- external Kugou API response shape
   private kugouSongToTrack(song: Record<string, unknown>, source: 'kugou' | 'kugou_concept' = 'kugou'): Track | null {
-    // Cast for convenient dynamic property access
-    const song_ = song as Record<string, any>
-    const hash = song_.hash || song_.audio_info?.hash || ''
-    if (!hash) return null
-
-    // filename is typically "Artist - Title" or "Artist1、Artist2 - Title"
-    const filename = String(song_.filename || song_.name || '')
-    const parts = filename.split(' - ')
-    const artistStr = parts.length > 1 ? parts[0].trim() : ''
-    const artists = artistStr
-      ? artistStr
-          .split(/[、,，&]/)
-          .map((a: string) => a.trim())
-          .filter(Boolean)
-      : []
-    const title = parts.length > 1 ? parts.slice(1).join(' - ').trim() : filename
-
-    // Duration: Kugou's native API returns seconds (e.g. 240), but some endpoints
-    // return milliseconds (e.g. 240000). Threshold 100000 (~27 hours in seconds)
-    // safely distinguishes the two — any value above it is assumed to be milliseconds.
-    let duration = Number(song_.duration ?? song_.timelen ?? 0)
-    if (duration > 100000) duration = Math.floor(duration / 1000)
-
-    // VIP / privilege
-    const privilege = song_.privilege ?? song_.pay_type ?? 0
-    const isVip = privilege > 0
+    // 与搜索共用同一套字段解析：漫游/歌单同样可能拿到概念版的 PascalCase 行。
+    const fields = parseKugouSongFields(song)
+    if (!fields.hash) return null
 
     return {
       id: nanoid(),
       source,
-      sourceId: hash,
-      title,
-      artist: artists,
-      album: String(song_.album_name || song_.remark || ''),
-      duration,
-      cover: normalizeKugouCoverUrl(
-        song_.trans_param?.union_cover || song_.audio_info?.trans_param?.union_cover || song_.imgurl || song_.album_img,
-      ),
-      lyricId: hash,
-      urlId: hash,
-      picId: hash,
-      vip: isVip,
+      sourceId: fields.hash,
+      title: fields.title,
+      artist: fields.artists,
+      album: fields.album,
+      duration: fields.duration,
+      cover: normalizeKugouCoverUrl(fields.cover),
+      lyricId: fields.hash,
+      urlId: fields.hash,
+      picId: fields.hash,
+      vip: fields.vip,
     }
   }
 

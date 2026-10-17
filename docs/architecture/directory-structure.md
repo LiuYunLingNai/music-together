@@ -215,6 +215,7 @@ src/
 │   ├── musicProvider.ts        #   音乐数据聚合（3 层引用式 LRU 缓存 + 外部 API 超时保护 + 歌单分页获取；Netease 歌单使用 ncmApi.playlist_track_all 分块请求突破 1000 首限制，Kugou 用户歌单使用原生 API (get_other_list_file_nofilt) + Meting fallback，Tencent 使用 Meting 原始模式保留 VIP/时长字段）
 │   ├── coverArtwork.ts         #   高分辨率封面规范化与列表缩略图派生
 │   ├── kugouLyricService.ts    #   基于原生 fetch/zlib 的 KRC 获取、解密与逐字解析
+│   ├── kugouTrackFields.ts     #   酷狗歌曲字段解析（标准版小写 + 概念版 PascalCase 双命名兼容：FileName/PayType/Singers/OriSongName；搜索、漫游、歌单三条路径共用同一套解析，避免概念版歌名落到占位名）
 │   ├── lyricSupplementService.ts # 严格匹配其他音乐平台并聚合 YRC/KRC/LRC 候选，含缓存、并发合并和超时降级
 │   ├── authService.ts          #   Cookie 池管理（房间级作用域；getAnyCookie 用于 VIP 播放共享，getUserCookie 用于歌单等用户私有操作）
 │   ├── authProvider.ts         #   统一认证接口（AuthProvider 接口定义 + GetUserInfoResult/UserInfoData 共享类型 + AUTH_PROVIDERS 策略映射表）
