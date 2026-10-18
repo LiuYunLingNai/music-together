@@ -4,6 +4,7 @@ import {
   enrichLyricAuxiliary,
   enrichLyricStructure,
   evaluateLyricAnimationQuality,
+  measureTimelineAgreement,
   needsLyricAuxiliary,
   normalizeLyricTimeline,
   repairLyricTimeline,
@@ -136,6 +137,24 @@ describe('normalizeLyricTimeline', () => {
 
     expect(repaired.lines[0].words[0]?.word).toBe('你说：我们还会再见')
     expect(repaired.lines[0]).toMatchObject({ startTime: 10_000, endTime: 11_500 })
+  })
+
+  it('recovers the background flag together with the timing from a parenthesized LRC line', () => {
+    // TTML 缺失的坏行只能从 LRC 取时间，而 LRC 的 `（和声）` 恰好也说明了
+    // 它的背景人声属性 —— 两件事来自同一条候选，一并回填。
+    const ttml = [lyricLine('主句', 10_000, 12_000), lyricLine('和声', 0, 0)]
+    const repaired = repairLyricTimeline(ttml, [{ lrc: '[00:10.00]主句\n[00:12.00]（和声）' }])
+
+    expect(repaired.lines[1]).toMatchObject({ startTime: 12_000, isBG: true })
+    expect(repaired.lines[1].words[0]?.word).toBe('和声')
+    expect(repaired.lines[0].isBG).toBe(false)
+  })
+
+  it('does not clear an existing background flag when the candidate lacks one', () => {
+    const ttml = [lyricLine('主句', 10_000, 12_000), lyricLine('和声', 0, 0, { isBG: true })]
+    const repaired = repairLyricTimeline(ttml, [{ lrc: '[00:10.00]主句\n[00:12.00]和声' }])
+
+    expect(repaired.lines[1].isBG).toBe(true)
   })
 })
 
@@ -374,5 +393,59 @@ describe('enrichLyricStructure', () => {
     const unrelated = [lyricLine('其他内容一', 10_000, 11_000, { isDuet: true })]
 
     expect(enrichLyricStructure(target, unrelated)).toMatchObject({ changed: false })
+  })
+})
+
+describe('measureTimelineAgreement', () => {
+  const timeline = (times: number[]) => times.map((time, index) => lyricLine(`第${index}句`, time, time + 1_800))
+
+  it('reports the offset and full agreement for a shifted copy of the same timeline', () => {
+    const base = timeline([10_000, 20_000, 30_000, 40_000])
+    const shifted = timeline([10_400, 20_400, 30_400, 40_400])
+
+    const measured = measureTimelineAgreement(shifted, base)
+
+    expect(measured.offset).toBe(400)
+    expect(measured.agreement).toBe(1)
+  })
+
+  it('reports low agreement when the two timelines disagree line by line', () => {
+    const base = timeline([10_000, 20_000, 30_000, 40_000, 50_000, 60_000])
+    // 行数相同但每句都挪了 5s 以上：偏移仍然是"整首"，只是逐行对不上。
+    const scrambled = timeline([10_000, 22_000, 30_000, 44_000, 50_000, 62_000])
+
+    const measured = measureTimelineAgreement(scrambled, base)
+
+    expect(measured.agreement).not.toBeNull()
+    expect(measured.agreement!).toBeLessThan(0.8)
+  })
+
+  it('returns null agreement rather than guessing when there is not enough evidence', () => {
+    const base = timeline([10_000, 20_000])
+    const other = timeline([10_000, 20_000])
+
+    expect(measureTimelineAgreement(other, base).agreement).toBeNull()
+  })
+
+  it('estimates an offset for repeated choruses instead of giving up', () => {
+    // 副歌重复三遍：旧实现要求文本唯一，因此一个样本都凑不出来。
+    const chorus = ['副歌一句', '副歌两句']
+    const texts = [...chorus, ...chorus, ...chorus, '尾声一句']
+    const times = [10_000, 14_000, 30_000, 34_000, 50_000, 54_000, 70_000]
+    const base = texts.map((text, index) => lyricLine(text, times[index], times[index] + 1_800))
+    const shifted = texts.map((text, index) => lyricLine(text, times[index] + 300, times[index] + 2_100))
+
+    const measured = measureTimelineAgreement(shifted, base)
+
+    expect(measured.offset).toBe(300)
+    expect(measured.agreement).toBe(1)
+  })
+
+  it('ignores background rows on both sides when measuring agreement', () => {
+    // 参考侧若把背景行算进"最近参考时刻"，会给它配出一份并不存在的命中。
+    const base = timeline([10_000, 20_000, 30_000, 40_000, 50_000])
+    const withBackground = [...base, lyricLine('和声', 24_500, 26_300, { isBG: true })]
+
+    expect(measureTimelineAgreement(base, withBackground).agreement).toBe(1)
   })
 })

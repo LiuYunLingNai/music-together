@@ -180,4 +180,18 @@ describe('歌词元素间距：不重叠 + 成组正确', () => {
     //   clamp(1.04 + (1.96 − 1) × 0.10, 0.96, 1.24) = 1.136
     expect(SLOT_PLAIN).toBeCloseTo(1.136, 6)
   })
+
+  it('已经唱过的行，译词与自己的主歌词间距与激活行相同', () => {
+    // 回归：上游 track 分支的 sign 恒为 +1（译词槽位 = 父行 + visualGap），
+    // 曾经按 `transDelta` 取号 ⇒ 父行滚到上方后 transDelta 变负、符号翻成
+    // −1，译词被推远 2×TRANS_GAP（0.480 → 0.799 world，宽 66%）。
+    const yOf = (parentDelta: number) => -parentDelta * STEP - TRANS_GAP * TRANS_STEP
+    const gapToOwnParent = (parentDelta: number) => -parentDelta * STEP - yOf(parentDelta)
+
+    const active = gapToOwnParent(0)
+    for (const parentDelta of [-2 * SLOT_WITH_TRANS, -SLOT_WITH_TRANS, SLOT_WITH_TRANS, 2 * SLOT_WITH_TRANS]) {
+      expect(gapToOwnParent(parentDelta)).toBeCloseTo(active, 10)
+    }
+    expect(active).toBeCloseTo(TRANS_GAP * TRANS_STEP, 10)
+  })
 })

@@ -1,6 +1,14 @@
 import type { LyricLine, LyricWord } from '@applemusic-like-lyrics/core'
 
-const LRC_TIMESTAMP_PATTERN = /\[(\d{2}):(\d{2})(?:\.(\d{1,3}))?\](.*)/g
+/**
+ * 一行 LRC 的**全部**时间戳与其后的正文。
+ *
+ * ★ 一行可带多个时间戳（`[00:12.00][01:30.00]副歌`）：同一句在两处各唱一遍。
+ *   只取第一个会让后一个时刻没有行（上一行被拉长到它之后，画面停住），
+ *   并把 `[01:30.00]` 留在正文里 —— 显示出来、还被算进字符数污染打分。
+ */
+const LRC_TIMESTAMP_PATTERN = /\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?\]/g
+const LRC_LINE_PATTERN = /^(?:\s*\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?\])+/
 const SPEAKER_PREFIX_PATTERN = /^[^:：]{1,16}[:：]\s*/
 const LYRIC_CREDIT_PATTERN =
   /^(?:作?词|作?曲|编曲|制作人|监制|混音|母带|录音(?:师|棚)?|封面设计|吉他|贝斯|鼓|弦乐|和声|发行|出品|op|sp|isrc)\s*[:：]/iu
@@ -11,6 +19,8 @@ interface LyricCandidate {
   endTime: number
   normalizedText: string
   hasWordTiming: boolean
+  /** 背景人声行：不参与行序配对，但可以回填背景标志。 */
+  isBG: boolean
 }
 
 interface TimedLyricText {
@@ -60,6 +70,24 @@ export interface LyricAnimationQuality {
   backgroundLineCount: number
 }
 
+/** 两个时间轴之间的一致程度。 */
+export interface LyricTimelineAgreement {
+  /** 实测偏移（毫秒，正数表示 `lines` 相对 `reference` 更晚）。 */
+  offset: number
+  /** 参与中位数的样本数；越大越可信。 */
+  support: number
+  /**
+   * 一致性 0–1：偏移扣除后，两轴在该偏移附近的样本占多大比例。
+   * 样本不足时为 `null` —— 没有证据，不能当作"一致"。
+   */
+  agreement: number | null
+}
+
+/** 两轴被判为"同一时间轴"的容差（毫秒）。 */
+const TIMELINE_AGREEMENT_TOLERANCE_MS = 120
+/** 参与一致性统计所需的最小样本数。 */
+const TIMELINE_AGREEMENT_MIN_SUPPORT = 4
+
 interface LyricGroup {
   lines: LyricLine[]
   originalIndex: number
@@ -82,21 +110,65 @@ function lineText(line: LyricLine): string {
   return line.words.map((word) => word.word).join('')
 }
 
-function parseTimedLyricText(lrc: string): TimedLyricText[] {
-  const parsed: TimedLyricText[] = []
-  LRC_TIMESTAMP_PATTERN.lastIndex = 0
-  let match: RegExpExecArray | null
-  while ((match = LRC_TIMESTAMP_PATTERN.exec(lrc)) !== null) {
-    const minutes = Number(match[1])
-    const seconds = Number(match[2])
-    const milliseconds = match[3] ? Number(match[3].padEnd(3, '0')) : 0
-    const text = match[4].trim()
-    const normalizedText = normalizeLyricText(text)
-    if (text && normalizedText) {
-      parsed.push({ text, normalizedText, startTime: (minutes * 60 + seconds) * 1_000 + milliseconds })
+interface LrcTimedLine {
+  text: string
+  startTime: number
+  isBG: boolean
+}
+
+const LRC_BACKGROUND_LINE = /^[(（](.+)[)）]$/
+
+/**
+ * 逐行解析 LRC：每一行按它携带的**全部**时间戳展开成多条记录。
+ *
+ * 行内正文里残留的时间戳（部分平台把时间戳写在正文中间）一并剥掉，
+ * 保证 `text` 只含真正的歌词字符 —— 否则它会被显示出来，也会混进
+ * `normalizeLyricText` 的字符数里污染打分。
+ *
+ * 整行被括号包住即背景人声（上游 `parseLrc` 的 `bgRegex` 同语义），括号要剥掉：
+ * 上游解析器同样剥，不剥会让同一句在两个源里无法按文本配对。
+ */
+function parseLrcLines(lrc: string): LrcTimedLine[] {
+  const parsed: LrcTimedLine[] = []
+
+  for (const rawLine of lrc.split(/\r?\n/)) {
+    // 旧实现不锚定行首：时间戳写在行中间（`作词：[00:12]某某`）也能取到。
+    // 这里保持同一语义 —— 从第一个时间戳起算，只是把**连续的**整组都展开。
+    const start = rawLine.search(LRC_TIMESTAMP_PATTERN)
+    if (start < 0) continue
+    const leading = LRC_LINE_PATTERN.exec(rawLine.slice(start))
+    if (!leading) continue
+    let text = rawLine
+      .slice(start + leading[0].length)
+      .replace(LRC_TIMESTAMP_PATTERN, '')
+      .trim()
+    if (!text) continue
+    const background = LRC_BACKGROUND_LINE.exec(text)
+    if (background) text = background[1].trim()
+    if (!text) continue
+    const isBG = Boolean(background)
+
+    LRC_TIMESTAMP_PATTERN.lastIndex = 0
+    for (const match of leading[0].matchAll(LRC_TIMESTAMP_PATTERN)) {
+      const minutes = Number(match[1])
+      const seconds = Number(match[2])
+      const milliseconds = match[3] ? Number(match[3].padEnd(3, '0')) : 0
+      parsed.push({ text, startTime: (minutes * 60 + seconds) * 1_000 + milliseconds, isBG })
     }
   }
-  return parsed.sort((left, right) => left.startTime - right.startTime)
+
+  // 稳定排序：同一时刻的多行保持源文件顺序。
+  return parsed
+    .map((line, index) => ({ line, index }))
+    .sort((left, right) => left.line.startTime - right.line.startTime || left.index - right.index)
+    .map(({ line }) => line)
+}
+
+function parseTimedLyricText(lrc: string): TimedLyricText[] {
+  return parseLrcLines(lrc).flatMap(({ text, startTime }) => {
+    const normalizedText = normalizeLyricText(text)
+    return normalizedText ? [{ text, normalizedText, startTime }] : []
+  })
 }
 
 function countNormalizedCharacters(value: string): number {
@@ -108,15 +180,12 @@ function referenceText(lrc: string): string {
 }
 
 function referenceLines(lrc: string): string[] {
-  const lines: string[] = []
-  LRC_TIMESTAMP_PATTERN.lastIndex = 0
-  let match: RegExpExecArray | null
-  while ((match = LRC_TIMESTAMP_PATTERN.exec(lrc)) !== null) {
-    if (LYRIC_CREDIT_PATTERN.test(match[4].trim())) continue
-    const text = normalizeLyricText(match[4])
-    if (text) lines.push(text)
-  }
-  return lines
+  // 按时间戳展开（多时间戳行算作它实际被唱到的次数），署名行不参与比对。
+  return parseLrcLines(lrc).flatMap(({ text }) => {
+    if (LYRIC_CREDIT_PATTERN.test(text)) return []
+    const normalized = normalizeLyricText(text)
+    return normalized ? [normalized] : []
+  })
 }
 
 /** Line wrapping differs between providers, so compare the ordered lyric text rather than exact lines. */
@@ -238,16 +307,7 @@ export function evaluateLyricAnimationQuality(
 }
 
 function parseLrcCandidates(lrc: string): LyricCandidate[] {
-  const parsed: Array<{ text: string; startTime: number }> = []
-  LRC_TIMESTAMP_PATTERN.lastIndex = 0
-  let match: RegExpExecArray | null
-  while ((match = LRC_TIMESTAMP_PATTERN.exec(lrc)) !== null) {
-    const minutes = Number(match[1])
-    const seconds = Number(match[2])
-    const milliseconds = match[3] ? Number(match[3].padEnd(3, '0')) : 0
-    const text = match[4].trim()
-    if (text) parsed.push({ text, startTime: (minutes * 60 + seconds) * 1_000 + milliseconds })
-  }
+  const parsed = parseLrcLines(lrc)
 
   return parsed.map((line, index) => {
     const endTime = Math.max(line.startTime + 800, parsed[index + 1]?.startTime ?? line.startTime + 1_500)
@@ -265,6 +325,7 @@ function parseLrcCandidates(lrc: string): LyricCandidate[] {
       endTime,
       normalizedText: normalizeLyricText(line.text),
       hasWordTiming: false,
+      isBG: line.isBG,
     }
   })
 }
@@ -279,12 +340,34 @@ function wordByWordCandidates(lines: readonly LyricLine[]): LyricCandidate[] {
         endTime: line.endTime,
         normalizedText: normalizeLyricText(lineText(line)),
         hasWordTiming: true,
+        isBG: line.isBG ?? false,
       },
     ]
   })
 }
 
 function estimateTimelineOffset(lines: readonly LyricLine[], candidates: readonly LyricCandidate[]): number {
+  const { offset, support } = measureTimelineOffset(lines, candidates)
+  // 保持原契约：样本不足 3 条时按"没有测到偏移"处理，不拿一两条噪声去挪对齐窗口。
+  return support >= 3 ? offset : 0
+}
+
+/**
+ * 估计 `lines` 相对 `candidates` 的整体时间偏移（毫秒，正数表示 lines 更晚）。
+ *
+ * 只用**唯一文本**配对的旧做法在副歌重复 3~4 遍的流行歌上经常凑不满样本，
+ * 于是偏移恒为 0，翻译/罗马音只能在 ±6s 的宽容差里乱配。这里改为：
+ *
+ *   ① 唯一文本行直接配对（最可信）；
+ *   ② 剩不下足够样本时，退到**按行序配对**：两侧都是时间有序的主行序列，
+ *      同下标相减再取中位数 —— 重复段落因此也能贡献样本。
+ *
+ * `support` 是参与中位数的样本数，消费方可据此判断这次估计是否可信。
+ */
+function measureTimelineOffset(
+  lines: readonly LyricLine[],
+  candidates: readonly LyricCandidate[],
+): { offset: number; support: number } {
   const lineTimes = new Map<string, number[]>()
   const candidateTimes = new Map<string, number[]>()
 
@@ -309,9 +392,115 @@ function estimateTimelineOffset(lines: readonly LyricLine[], candidates: readonl
     const difference = targetTimes[0] - sourceTimes[0]
     if (Math.abs(difference) <= 3_000) differences.push(difference)
   }
-  if (differences.length < 3) return 0
-  differences.sort((left, right) => left - right)
-  return differences[Math.floor(differences.length / 2)]
+  // 文本配对是最可信的证据，够 3 条就直接用。
+  if (differences.length >= 3) return { offset: median(differences), support: differences.length }
+
+  // 退路：按行序配对。两侧都滤掉背景行并保持时间有序，同下标即同一句 ——
+  // 重复副歌因此也能贡献样本。行数差太多说明有一侧缺行/多行，下标不再对位，
+  // 这时宁可放弃也不给出错误的正值。
+  const orderedLines = lines.filter((line) => !line.isBG && isValidRange(line.startTime, line.endTime))
+  // 两侧必须用同一条过滤规则，否则背景行会让一侧的下标整体偏移。
+  const orderedCandidates = candidates.filter((candidate) => candidate.normalizedText && !candidate.isBG)
+  const paired = Math.min(orderedLines.length, orderedCandidates.length)
+  const lengthGap = Math.abs(orderedLines.length - orderedCandidates.length)
+  if (paired < 3 || lengthGap > Math.max(2, Math.ceil(paired * 0.1))) {
+    return { offset: differences.length ? median(differences) : 0, support: differences.length }
+  }
+
+  const positional: number[] = []
+  for (let index = 0; index < paired; index += 1) {
+    const difference = orderedLines[index].startTime - orderedCandidates[index].startTime
+    if (Math.abs(difference) <= 5_000) positional.push(difference)
+  }
+  if (positional.length < 3) return { offset: differences.length ? median(differences) : 0, support: differences.length }
+  return { offset: median(positional), support: positional.length }
+}
+
+/** 中位数（就地排序副本）。 */
+function median(values: readonly number[]): number {
+  if (values.length === 0) return 0
+  const sorted = [...values].sort((left, right) => left - right)
+  return sorted[Math.floor(sorted.length / 2)]
+}
+
+/**
+ * 比对两套歌词时间轴，给出它们的整体偏移与一致程度。
+ *
+ * ============================ 为什么需要这个 ============================
+ *
+ * `evaluateLyricAnimationQuality` 的四个分量里**没有时间维度**:
+ * `textCoverage` 是忽略时间戳的有序字符 LCS，`validTimingCoverage` 只看
+ * 区间"格式合法"。因此「逐字完美但整首晚 400ms」与「逐字完美且对齐」
+ * 得分完全相同 —— 选源实际上是在比格式质量，不是在比对齐质量。
+ *
+ * 这里补上那一维：两个候选都给出时，先用文本配对（或按行序退路）实测
+ * 它们的整体偏移，再统计扣除该偏移后有多少行落在容差内。消费方据此：
+ *
+ *   · 两轴**一致** → 现有评分已经够用，不必干预；
+ *   · 两轴**不一致** → 没有第三方真值可判谁对，此时应当**避免中途换源**
+ *     （换源会让当前行突然前跳/后跳），而不是猜一个更"对"的。
+ *
+ * 只有两个源时 `agreement` 的含义是"它们是不是同一条时间轴"，而不是
+ * "哪条对" —— 后者需要音频强制对齐，本项目没有那条数据源。
+ */
+export function measureTimelineAgreement(
+  lines: readonly LyricLine[],
+  reference: readonly LyricLine[],
+): LyricTimelineAgreement {
+  const toCandidates = (source: readonly LyricLine[]): LyricCandidate[] =>
+    source.flatMap((line) => {
+      if (!isValidRange(line.startTime, line.endTime)) return []
+      const normalizedText = normalizeLyricText(lineText(line))
+      if (!normalizedText) return []
+      return [
+        {
+          words: [],
+          startTime: line.startTime,
+          endTime: line.endTime,
+          normalizedText,
+          hasWordTiming: line.words.length > 1,
+          isBG: line.isBG ?? false,
+        },
+      ]
+    })
+
+  const candidates = toCandidates(reference)
+  const { offset, support } = measureTimelineOffset(lines, candidates)
+  if (support < TIMELINE_AGREEMENT_MIN_SUPPORT) return { offset, support, agreement: null }
+
+  // 扣除偏移后，逐行判断最近的一条参考行是否落在容差内。两侧都按时间
+  // 预排序，用游标推进（两侧时间都单调，指针不会回退）。
+  // 背景行两侧都要排除：`ownTimes` 已经滤掉，参考侧若留着，会为它算出一份
+  // 并不存在的"命中"，把一致度虚抬上去。
+  const referenceTimes = candidates
+    .filter((candidate) => !candidate.isBG)
+    .map((candidate) => candidate.startTime)
+    .sort((left, right) => left - right)
+  const ownTimes = lines
+    .filter((line) => !line.isBG && isValidRange(line.startTime, line.endTime))
+    .map((line) => line.startTime)
+    .sort((left, right) => left - right)
+  if (ownTimes.length === 0 || referenceTimes.length === 0) return { offset, support, agreement: null }
+
+  const nearestDistance = (time: number): number => {
+    let low = 0
+    let high = referenceTimes.length - 1
+    while (low < high) {
+      const mid = (low + high) >> 1
+      if (referenceTimes[mid] < time) low = mid + 1
+      else high = mid
+    }
+    const after = Math.abs(referenceTimes[low] - time)
+    const before = low > 0 ? Math.abs(referenceTimes[low - 1] - time) : after
+    return Math.min(after, before)
+  }
+
+  let matched = 0
+  for (const time of ownTimes) {
+    if (nearestDistance(time - offset) <= TIMELINE_AGREEMENT_TOLERANCE_MS) matched += 1
+  }
+
+  return { offset, support, agreement: matched / ownTimes.length }
 }
 
 function auxiliaryCoverage(lines: readonly LyricLine[], field: 'translatedLyric' | 'romanLyric'): number {
@@ -389,6 +578,7 @@ function alignAuxiliarySource(
     endTime: line.startTime + 1_500,
     normalizedText: line.normalizedText,
     hasWordTiming: false,
+    isBG: false,
   }))
   const offset = estimateTimelineOffset(lines, candidates)
   const width = original.length + 1
@@ -692,6 +882,9 @@ function repairInvalidLines(lines: readonly LyricLine[], sources: readonly Lyric
         words,
         startTime: match.startTime,
         endTime,
+        // 时间来自这条候选；它的背景人声属性也一并对齐（目标行本来就没有可用时间）。
+        // 只做加法：目标行已有的标志不因候选缺标记而丢失。
+        isBG: target.isBG || match.candidate.isBG,
       }
       break
     }

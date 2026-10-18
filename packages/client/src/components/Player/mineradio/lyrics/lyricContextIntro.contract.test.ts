@@ -99,19 +99,28 @@ describe('rowIntro 的消费（上游 :1520 / :1597）', () => {
 
   it('主行：锚定行豁免，其余乘 contextIntro', () => {
     expect(body).toMatch(/const rowIntro = isActive \? 1 : contextIntro/)
-    expect(body).toMatch(/const opacityTarget = contextAlpha \* depthFade \* rowIntro/)
+    // 上游 :1597：target = opacity × (isActive ? 1 : contextAlpha) × rowIntro × visibleFade
+    expect(body).toMatch(
+      /const targetOpacity = CURRENT_LINE_OPACITY \* contextAlpha \* rowIntro \* visibleFade/,
+    )
+    expect(body).toMatch(/const opacityTarget = targetOpacity \* depthFade/)
   })
 
   it('译词行：只有当前译词行豁免，其余同样淡入', () => {
     // 译词行永不 isActive，所以上游 motionAnchor 落在 currentTranslation 上
     expect(body).toMatch(/const rowIntro = isCurrentParent \? 1 : contextIntroForRow/)
-    expect(body).toMatch(/const opacityTarget = targetAlpha \* depthFade \* rowIntro/)
+    // 上游 :1522：target = opacity × contextAlpha × rowIntro × visibleFade，
+    // 与主行同式；译词行的 contextAlpha 就是调用方算好的 targetAlpha。
+    expect(body).toMatch(
+      /const opacityTarget = CURRENT_LINE_OPACITY \* targetAlpha \* rowIntro \* visibleFade \* depthFade/,
+    )
   })
 
   it('stepRow 的签名收下 contextIntroForRow（两条链共用同一份包络）', () => {
     expect(body).toMatch(/contextIntroForRow: number,/)
-    // 调用处必须是实参列表的**最后一项**（主行段算一次，全部行共用）。
+    // 调用处必须传实参（主行段算一次，全部行共用），且与同帧的
+    // glitchPulse 一起收尾 —— 两者都是主行段算好、所有行共用的量。
     // ★ 用 \r? 兼容 CRLF：这个文件是 CRLF 行尾，裸 \n 匹配不到。
-    expect(body).toMatch(/\r?\n\s+contextIntro,\r?\n\s+\)/)
+    expect(body).toMatch(/\r?\n\s+contextIntro,\r?\n\s+glitchPulse,\r?\n\s+\)/)
   })
 })

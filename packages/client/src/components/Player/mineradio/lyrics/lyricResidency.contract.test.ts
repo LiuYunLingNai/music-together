@@ -121,7 +121,7 @@ describe('歌词常驻轨道与激活门控契约', () => {
     const source = stripComments(LYRIC_STAGE)
     expect(source).toMatch(/uGlitchBurst\.value\s*\+=/)
     // 非激活行必须拿到 0.35 倍目标（而不是 0）
-    expect(source).toMatch(/bassHit\s*\?\s*\(isActive\s*\?\s*1\s*:\s*0\.35\)/)
+    expect(source).toMatch(/glitchPulse\s*\*\s*\(isActive\s*\?\s*1\s*:\s*0\.35\)/)
   })
 
   it('重建依赖不得含视口尺寸（否则 resize 每帧全量拆建 + 重栅格化）', () => {

@@ -20,6 +20,7 @@ import type { LyricLine as AMLLLyricLine } from '@applemusic-like-lyrics/core'
 interface LrcLine {
   time: number
   text: string
+  isBG: boolean
 }
 
 /** 供舞台消费的简化行形状（翻译可选）。 */
@@ -27,30 +28,66 @@ export interface MergedLyricLine {
   time: number
   text: string
   translation?: string
+  isBG: boolean
 }
+
+/** 行首时间戳（可连续多个）与其后的正文。 */
+const LEADING_TIMESTAMPS = /^(?:\s*\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?\])+/
+const SINGLE_TIMESTAMP = /\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?\]/g
+/** 整行被一对括号包住 = 背景人声（上游 `parseLrc` 的 `bgRegex` 同语义）。 */
+const BACKGROUND_LINE = /^[(（](.+)[)）]$/
 
 /**
  * 解析 LRC 文本。
  *
- * 支持 `[mm:ss]`、`[mm:ss.x]`、`[mm:ss.xx]`、`[mm:ss.xxx]` 四种精度。
+ * 支持 `[mm:ss]`、`[mm:ss.x]`、`[mm:ss.xx]`、`[mm:ss.xxx]` 四种精度
+ * （小数分隔符 `.` 与 `:` 都接受，后者是部分平台导出的写法）。
+ *
+ * ★ 一行可带**多个**时间戳：`[00:12.00][01:30.00]副歌` 表示同一句歌词在
+ *   两个时刻各唱一遍。只取第一个会同时造成三处错误 —— 后一个时刻没有行
+ *   （上一行被拉长，画面停住）、时间戳留在正文里被显示出来、并且混进
+ *   `normalizeLyricText` 的字符数污染打分。因此这里按时间戳逐个展开。
+ *
+ * ★ 整行被括号包住 `（和声）` 是背景人声：上游 `parseLrc` / `parseYrc` 都这么
+ *   判定，且会把括号剥掉再显示。不剥的话括号会留在画面上，并且这行会被当成
+ *   普通主行 —— 与 TTML 路径的处置不一致。
  */
 export function parseLRC(lrc: string): LrcLine[] {
   const lines: LrcLine[] = []
-  const regex = /\[(\d{2}):(\d{2})(?:\.(\d{1,3}))?\](.*)/g
-  let match
 
-  while ((match = regex.exec(lrc)) !== null) {
-    const minutes = parseInt(match[1], 10)
-    const seconds = parseInt(match[2], 10)
-    const ms = match[3] ? parseInt(match[3].padEnd(3, '0'), 10) : 0
-    const time = minutes * 60 + seconds + ms / 1000
-    const text = match[4].trim()
-    if (text) {
-      lines.push({ time, text })
+  for (const rawLine of lrc.split(/\r?\n/)) {
+    // 与旧实现一致：不要求时间戳在行首（`作词：[00:12]某某` 也取得到），
+    // 只是把连续的整组时间戳逐个展开。
+    const start = rawLine.search(SINGLE_TIMESTAMP)
+    if (start < 0) continue
+    SINGLE_TIMESTAMP.lastIndex = 0
+    const leading = LEADING_TIMESTAMPS.exec(rawLine.slice(start))
+    if (!leading) continue
+    // 去掉全部时间戳后剩下的正文；行内其余 `[..]` 若仍是时间戳也一并剥掉。
+    let text = rawLine
+      .slice(start + leading[0].length)
+      .replace(SINGLE_TIMESTAMP, '')
+      .trim()
+    if (!text) continue
+    const background = BACKGROUND_LINE.exec(text)
+    if (background) text = background[1].trim()
+    if (!text) continue
+    const isBG = Boolean(background)
+
+    SINGLE_TIMESTAMP.lastIndex = 0
+    for (const match of leading[0].matchAll(SINGLE_TIMESTAMP)) {
+      const minutes = parseInt(match[1], 10)
+      const seconds = parseInt(match[2], 10)
+      const ms = match[3] ? parseInt(match[3].padEnd(3, '0'), 10) : 0
+      lines.push({ time: minutes * 60 + seconds + ms / 1000, text, isBG })
     }
   }
 
-  return lines.sort((a, b) => a.time - b.time)
+  // 稳定排序：同一时刻的多行（如对唱叠行）保持源文件顺序。
+  return lines
+    .map((line, index) => ({ line, index }))
+    .sort((left, right) => left.line.time - right.line.time || left.index - right.index)
+    .map(({ line }) => line)
 }
 
 /**
@@ -121,7 +158,7 @@ export function toAMLLLines(lines: MergedLyricLine[]): AMLLLyricLine[] {
       romanLyric: '',
       startTime: startMs,
       endTime: endMs,
-      isBG: false,
+      isBG: line.isBG,
       isDuet: false,
     }
   })

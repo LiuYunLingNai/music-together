@@ -60,9 +60,15 @@ describe('上下文行进度漂移 rowDrift（上游 :1599）', () => {
   })
 
   it('主行 yTarget 带上 rowDrift × driftGain', () => {
-    expect(body).toMatch(
-      /const yTarget = -liveDelta \* LYRIC_LINE_STEP_WORLD \+ floatY \+ rowDrift \* driftGain/,
-    )
+    expect(body).toMatch(/const yTarget = -liveDelta \* LYRIC_LINE_STEP_WORLD \+ rowDrift \* driftGain/)
+  })
+
+  it('主行 Y 不得再有自创的正弦浮动（上游只有故障 jitterY）', () => {
+    // 上游 :1630 `rowYTarget = yTarget + jitterY`，而 `jitterY` 仅由
+    // `glitchPulse` 生成（14-stage:2296），非故障风格恒 0。
+    // 曾经存在的 `sin(t×0.68 + i×0.71) × 0.008` 是把**缩放**浮动的相位
+    // 误抄到 Y 上 —— 上下文行会整体上下漂 0.008 世界单位。
+    expect(body).not.toMatch(/const floatY = Math\.sin\(floatPhase\)/)
   })
 
   it('主行 z 上补上游的 −|rowDrift| × 0.18（:1606）', () => {
@@ -86,8 +92,21 @@ describe('译词行漂移（上游 lyricTranslationAnchoredY :51-73）', () => {
 
   it('译词 yTarget 按父行段加漂移', () => {
     expect(body).toMatch(
-      /const yTarget =\s*-parentDelta \* LYRIC_LINE_STEP_WORLD -\s*transSign \* TRANS_GAP \* LYRIC_TRANSLATION_STEP_WORLD \+\s*transRowDrift \* transDriftGain \+\s*floatY/,
+      /const yTarget =\s*-parentDelta \* LYRIC_LINE_STEP_WORLD -\s*TRANS_GAP \* LYRIC_TRANSLATION_STEP_WORLD \+\s*transRowDrift \* transDriftGain/,
     )
+  })
+
+  it('译词 Y 也不得带正弦浮动（上游同样只有故障 jitterY）', () => {
+    expect(body).not.toMatch(/const floatY = Math\.sin\(\(nowMs \/ 1000\) \* 0\.68/)
+  })
+
+  it('译词段的符号恒为 +1（不得按 transDelta 取号）', () => {
+    // 上游 track 分支判 `rowVirtual >= parentVirtual`，而译词槽位恒等于
+    // 父行 + visualGap（>0）⇒ 永远 +1。按 `transDelta` 取号会让**已唱过**
+    // 的行翻成 −1，译词被推离自己的主歌词 2×TRANS_GAP。
+    expect(body).not.toMatch(/transDelta >= 0 \? 1 : -1/)
+    expect(body).not.toMatch(/const transSign = transDelta/)
+    expect(body).toMatch(/const parentDelta = transDelta - TRANS_GAP\b/)
   })
 
   it('译词 z 同时带 −|rowDrift|×0.18 与 +translationFocus×0.065', () => {
@@ -137,17 +156,18 @@ describe('逐行缩放浮动（上游 :1626，fx.lyricVerticalFloat 出厂 true�
 
   it('浮动幅度按风格分 0.012 / 0.004 两档（上游 style===\'float\' 分支）', () => {
     expect(body).toMatch(
-      /const floatScaleWobble =\s*\n?\s*1 \+ Math\.sin\(floatPhase\) \* \(motionStyle === 'float' \? 0\.012 : 0\.004\)/,
+      /isActive \? 1 : 1 \+ Math\.sin\(floatPhase\) \* \(motionStyle === 'float' \? 0\.012 : 0\.004\)/,
     )
   })
 
-  it('译词行同样带上（译词行恒非锚定，该项对它总是生效）', () => {
+  it('译词行同样带上，但**当前译词行**豁免（motionAnchor）', () => {
     expect(body).toMatch(
       /depthScale \* lyricShelfAvoidScale\(\) \* \(1 \+ parentFade \* 0\.16\) \* fitRatio \* floatScaleWobble/,
     )
-    // 译词的相位与主行 floatY 同源：sin(t*0.68 + slot*0.71)
+    // 上游 :1626 `motionAnchor || !verticalFloatOn ? 1 : …` —— 当前译词行
+    // （isCurrentParent）是锚定行，缩放不抖。
     expect(body).toMatch(
-      /const floatScaleWobble = 1 \+ Math\.sin\(\(nowMs \/ 1000\) \* 0\.68 \+ slot \* 0\.71\) \* \(motionStyle === 'float' \? 0\.012 : 0\.004\)/,
+      /const floatScaleWobble =\s*isCurrentParent\s*\? 1\s*: 1 \+ Math\.sin\(\(nowMs \/ 1000\) \* 0\.68 \+ slot \* 0\.71\) \* \(motionStyle === 'float' \? 0\.012 : 0\.004\)/,
     )
   })
 

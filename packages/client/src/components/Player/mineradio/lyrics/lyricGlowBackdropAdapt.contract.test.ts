@@ -46,19 +46,23 @@ describe('辉光 backdropAdapt 压暗（上游 :1722）', () => {
   it('主行辉光链带 (1 − BACKDROP_ADAPT×0.30) 压暗项', () => {
     // 上游那一行是**无条件**乘（只要 adapt > 0.001），因此必须是
     // 目标值表达式的一部分，而不是只在某个 if 分支里乘。
+    // 基准是 `target`（= opacity × contextAlpha × rowIntro × visibleFade），
+    // 不是条目的上下文 α —— 上游 :1720 的 `target * rowGlow * …`。
     expect(body).toMatch(
-      /row\.targetAlpha \* currentLineGlow \* \(1 \+ rowGlowBeat \* 0\.46\) \* depthFade \* backdropAdaptDim/,
+      /targetOpacity \* currentLineGlow \* \(1 \+ rowGlowBeat \* 0\.46\) \* depthFade \* backdropAdaptDim/,
     )
   })
 
   it('译词辉光链同样带压暗项（两个分支都要）', () => {
     // 上游对 isTranslation 的非激活支与激活支是同一个 `if` 之后的乘法，
     // 两条路径都受影响。
+    // ★ 基准是 `glowBase`（= opacity × contextAlpha × rowIntro × visibleFade），
+    //   且 `translationFocus` 只乘非当前支（当前支的 0.46 已是焦点满值）。
     expect(body).toMatch(
-      /targetAlpha \* currentLineGlow \* \(0\.46 \+ rowGlowBeat \* 0\.08\) \* parentFade \* depthFade \* backdropAdaptDim/,
+      /glowBase \* currentLineGlow \* \(0\.46 \+ rowGlowBeat \* 0\.08\) \* depthFade \* backdropAdaptDim/,
     )
     expect(body).toMatch(
-      /targetAlpha \* currentLineGlow \* \(0\.3 \+ rowGlowBeat \* 0\.06\) \* parentFade \* depthFade \* backdropAdaptDim/,
+      /glowBase \* currentLineGlow \* \(0\.3 \+ rowGlowBeat \* 0\.06\) \* parentFade \* depthFade \* backdropAdaptDim/,
     )
   })
 
