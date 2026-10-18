@@ -2,7 +2,7 @@ import type { LyricLine as AMLLLyricLine } from '@applemusic-like-lyrics/core'
 import { useEffect, useMemo, useState } from 'react'
 import { usePlayerStore } from '@/stores/playerStore'
 import { buildAMLLLinesFromLrc } from '@/lib/lyricLrc'
-import { buildLineRenderHints } from '../lib/renderHints'
+import { buildLineRenderHints } from '../upstream/utils/lyrics/renderHints'
 import type { Line, Theme, Word } from '../types'
 import { attachFoliaInterludes } from './lyricPresentation'
 
@@ -111,7 +111,7 @@ export function useFoliaLines(): Line[] {
 
 /**
  * 把 AMLL `isBG` 行折叠为紧邻前一个主行的 `backgroundVocal`，供顶部和声叠层
- * （`FoliaHarmonyOverlay`）消费 —— 上游 TTML 解析器的同语义：每条主行携带
+ * （`VisualizerHarmonyOverlay`）消费 —— 上游 TTML 解析器的同语义：每条主行携带
  * 自己的背景唱词，主时间轴不含背景行。
  *
  * ★ 折叠规则：先按 AMLL `optimizeLyricLines` 折叠连续 isBG（只保留每段第一个，

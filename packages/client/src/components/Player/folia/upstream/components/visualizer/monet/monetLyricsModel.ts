@@ -255,7 +255,8 @@ const getMonetVerticalMeasureContext = () => {
 };
 
 /** Measures the tallest painted glyph bounds so descenders remain inside Monet's clipped line box. */
-const measureMonetLineHeight = (text: string, fontSpec: string, _fontPx: number, defaultLineHeightPx: number): number => {
+const measureMonetLineHeight = (text: string, fontSpec: string, fontPx: number, defaultLineHeightPx: number): number => {
+    void fontPx;
     const cacheKey = `${fontSpec}|${text}`;
     const cached = monetVerticalMetricsCache.get(cacheKey);
     if (cached !== undefined) {

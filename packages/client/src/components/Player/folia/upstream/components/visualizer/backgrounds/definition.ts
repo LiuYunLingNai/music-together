@@ -11,9 +11,21 @@ import type {
     UrlBackgroundItem,
     VisualizerBackgroundMode,
 } from '../../../types';
+import type { VisualizerModeCommand } from '../definition';
 
 // src/components/visualizer/backgrounds/definition.ts
 // Shared contracts for discoverable visualizer background modes.
+
+/** A background's tuning as the background config carries it, under the background's id. */
+export interface BackgroundTuningSlot<T> {
+    tuning?: T;
+}
+
+/** The actions of a background's tuning as the background actions carry them, under the background's id. */
+export interface BackgroundTuningActionSlot<T> {
+    onTuningChange?: (patch: Partial<T>) => void;
+    onResetTuning?: () => void;
+}
 
 export interface VisualizerBackgroundConfig {
     mode?: VisualizerBackgroundMode | null;
@@ -25,6 +37,12 @@ export interface VisualizerBackgroundConfig {
         disableVignette?: boolean;
     };
     customImage?: MonetBackgroundImage | null;
+    /*
+     * 上游把每个背景的调参写在 `BackgroundTuningSlot<T>` 里，由各背景的 `tuning.ts` 用
+     * `declare module` 补上成员；本项目没有那套 settings store（背景调参直接存在
+     * `settingsStore.foliaSettings.backgroundConfig`），因此这里把四个成员写死，形状与
+     * 上游的 slot 完全一致。
+     */
     monet?: {
         tuning?: MonetBackgroundTuning;
     };
@@ -83,6 +101,7 @@ export interface VisualizerBackgroundActions {
 export interface VisualizerBackgroundRenderProps {
     config?: VisualizerBackgroundConfig;
     theme: Theme;
+    /** 见 `definition.ts` 的说明：本项目只有深色主题，恒为 `false`。 */
     isDaylight: boolean;
     coverUrl?: string | null;
     audioPower: MotionValue<number>;
@@ -90,6 +109,13 @@ export interface VisualizerBackgroundRenderProps {
     seed?: string | number;
     staticMode: boolean;
     paused: boolean;
+    /**
+     * 就地换色的背景（entry 没有 `song`）用多久过渡到新颜色（`useBlendedColors`）：
+     * 上游给的是柔焦过渡的长度（`transition.enter.delay + duration`），不播放过渡时为 0。
+     */
+    blendMs?: number;
+    /** Where given, that blend plays along this (0..1, a blend's song hand-off) instead of over blendMs. */
+    blendProgress?: MotionValue<number>;
 }
 
 export interface VisualizerBackgroundSettingsProps {
@@ -118,6 +144,19 @@ export interface VisualizerBackgroundRegistryEntry {
     order: number;
     labelKey: string;
     labelFallback: string;
+    /*
+     * The small line icon shown beside the background's name: the children of the 24x24 stroked
+     * <svg> that modeGlyphs.tsx draws. A background without one (a mod's, say) gets the generic icon.
+     */
+    glyph?: React.ReactNode;
+    /** The command that switches to this background (id `background-<mode>`). A background without one has no plain switch command. */
+    command?: VisualizerModeCommand;
+    /*
+     * 这个背景随歌曲改变的输入（封面、布局种子）。这些值一变，整个背景就换一份：
+     * 新的副本挂上来（过渡层播放柔焦），旧副本留在下面画旧的歌。
+     * 不带这一个成员的背景不随歌换，就地重绘。
+     */
+    song?: (props: VisualizerBackgroundRenderProps) => readonly unknown[];
     render: (props: VisualizerBackgroundRenderProps) => React.ReactNode;
     renderSettingsPanel?: (props: VisualizerBackgroundSettingsProps) => React.ReactNode;
     renderQuickControls?: (props: VisualizerBackgroundQuickControlsProps) => React.ReactNode;

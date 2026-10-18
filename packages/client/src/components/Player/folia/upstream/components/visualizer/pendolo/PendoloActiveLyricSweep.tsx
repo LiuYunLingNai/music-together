@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/immutability -- 上游在 map 回调里累加外层游标得到逐字偏移；这是上游原样代码。 */
 import React, { useMemo } from 'react';
 import { motion, useTransform, type MotionValue } from 'motion/react';
 import { type Line, type Theme } from '../../../types';
@@ -144,14 +145,15 @@ const PendoloActiveLyricSweep: React.FC<PendoloActiveLyricSweepProps> = ({
         [text, matchers],
     );
     const charTokens: WordColorToken[] = useMemo(() => {
-        const chars = splitLyricGraphemes(text);
-        return chars.map((char, index) => {
-            const startOffset = chars.slice(0, index).reduce((sum, value) => sum + value.length, 0);
+        let cursor = 0;
+        return splitLyricGraphemes(text).map((char, index) => {
+            const startOffset = cursor;
+            cursor += char.length;
             return {
                 key: String(index),
                 timed: true,
                 startOffset,
-                endOffset: startOffset + char.length,
+                endOffset: cursor,
             };
         });
     }, [text]);

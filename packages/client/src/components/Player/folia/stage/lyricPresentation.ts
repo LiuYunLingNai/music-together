@@ -1,5 +1,5 @@
 import type { Line } from '../types'
-import { buildLineRenderHints } from '../lib/renderHints'
+import { buildLineRenderHints } from '../upstream/utils/lyrics/renderHints'
 
 /** Match Folia's parser: long gaps get timed interlude dots; lyric timing remains untouched. */
 export function attachFoliaInterludes(lines: Line[]): Line[] {

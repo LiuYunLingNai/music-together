@@ -30,18 +30,53 @@ import type { VisualizerBackgroundConfig } from './backgrounds/definition';
 // Shared contracts for discoverable visualizer modes.
 export type VisualizerTuningKind = 'none' | 'classic' | 'cadenza' | 'partita' | 'fume' | 'claddagh' | 'cappella' | 'tilt' | 'monet' | 'diorama' | 'pendolo' | 'sonnet' | 'tempera' | 'lumiere';
 
+/** The command-palette line that switches to a lyric style or a background. The command list builds its id from the mode. */
+export interface VisualizerModeCommand {
+    title: string;
+    description: string;
+    keywords: string[];
+}
+
+/**
+ * An automix/crossfade blend handing the picture from the song on screen to the next one. The main
+ * window only, and only for a style that says it draws one (`followsSongHandoff`): everywhere else
+ * the song changes when the blend has settled, as it did.
+ */
+export interface VisualizerSongHandoff {
+    /** How far the hand-off has come, 0..1: 0 until the blend is announced. */
+    progress: MotionValue<number>;
+    /** The incoming song as the props will name it once the blend settles. */
+    seed: string | number;
+    songTitle?: string | null;
+    songArtist?: string | null;
+    songAlbum?: string | null;
+    coverUrl?: string | null;
+    /** The incoming song's theme, once it has come: the props keep the song on screen's until the blend settles. */
+    theme: Theme;
+    subtitleTheme?: Theme;
+    /** The incoming song's lyrics (none until they load), its own lyric clock and line. */
+    lines: Line[];
+    currentTime: MotionValue<number>;
+    currentLineIndex: number;
+}
+
 export interface VisualizerSharedProps {
     currentTime: MotionValue<number>;
+    /** The song's length in seconds, 0 or absent while unknown; in a preview, the preview's length. Mod styles read it (getDuration). */
+    duration?: number;
     currentLineIndex: number;
     lines: Line[];
     theme: Theme;
     subtitleTheme?: Theme;
+    /**
+     * 上游的日夜模式标志。本项目只有深色主题（见 `useFoliaTheme`），从不传入，恒为 `false`：
+     * 上游按它分叉的地方（still 的暗角、monet 的 `baseImageOpacity`、nomand 的反色、
+     * sora 的底色）在这里都走深色那一支。保留字段是为了把各模式按上游原样搬过来。
+     */
     isDaylight?: boolean;
     audioPower: MotionValue<number>;
     audioBands: AudioBands;
     showText?: boolean;
-    /** Host preference: suppress waiting text while retaining the mode's gap/exit behavior. */
-    showWaitingPlaceholder?: boolean;
     songTitle?: string | null;
     songArtist?: string | null;
     songAlbum?: string | null;
@@ -53,6 +88,8 @@ export interface VisualizerSharedProps {
      */
     temperaLayerImageAssets?: { id: string; name: string; url: string }[];
     seed?: string | number;
+    /** A blend handing over to the next song, while it runs (see VisualizerSongHandoff). */
+    songHandoff?: VisualizerSongHandoff | null;
     staticMode?: boolean;
     backgroundStaticMode?: boolean;
     visualizerOpacity?: number;
@@ -178,6 +215,27 @@ export interface VisualizerRegistryEntry {
     labelFallback: string;
     previewSeed: string;
     previewStartOffset: number;
+    /*
+     * The small line icon shown beside the style's name: the children of the 24x24 stroked <svg>
+     * that modeGlyphs.tsx draws. A style without one (a mod's, say) gets the generic icon.
+     */
+    glyph?: React.ReactNode;
+    /** The command that switches to this style (id `visualizer-<mode>`). A style without one has no command. */
+    command?: VisualizerModeCommand;
+    /** True when the renderer reads a click on a lyric line and the song should jump there. */
+    seeksOnLineClick?: boolean;
+    /** True when the renderer draws a blend's song hand-off (`songHandoff`); the rest are not fed one. */
+    followsSongHandoff?: boolean;
+    /*
+     * The background this style is drawn over. VisualizerRenderer draws one background for every
+     * style and keeps it through a style switch, so a style that changes it says so here, not only
+     * in its own shell: false for none at all (Still), or the config to draw it with (Fume hides the
+     * geometric shapes). Left out: the background in the props, as it is.
+     *
+     * ★ 本项目：各模式的 entry 没有搬（见 `FoliaRenderer` 的 `MODE_BACKGROUNDS`），宿主在那里
+     *   按模式给出同一份映射；字段保留是为了契约完整。
+     */
+    background?: false | ((props: VisualizerSharedProps) => VisualizerBackgroundConfig | undefined);
     tuningKind: VisualizerTuningKind;
     /*
      * 各模式的 entry.tsx 把真正的 renderer 包成 React.lazy —— registry 用 eager glob 发现
@@ -187,6 +245,14 @@ export interface VisualizerRegistryEntry {
      */
     render: (props: VisualizerSharedProps) => React.ReactElement;
     renderSettingsPanel?: (props: VisualizerSettingsPanelProps) => React.ReactNode;
+    /*
+     * 上游这里还有 `renderQuickControls`（播放面板里的快捷参数）。它的 props 依赖上游的
+     * `VisualizerTuningSettings`（settings store 的字段表，由各 `tuning.ts` 用 `declare module`
+     * 拼出来）——本项目没有那套 store，调参由 `stage/foliaTunings.ts` 解析后以 props 传入，
+     * 因此不搬这一个字段。
+     */
+    /** For a style that sizes its own lyrics: the notice (an i18n key) the settings window shows where it switches the font size off. */
+    ownFontSizeNoticeKey?: string;
     resetSettings?: (props: VisualizerSettingsResetProps) => void;
     /*
      * True when this mode's layout atoms come from whole-line word segmentation

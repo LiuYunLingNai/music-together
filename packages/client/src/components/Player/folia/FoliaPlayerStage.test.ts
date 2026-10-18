@@ -26,15 +26,13 @@ vi.mock('./stage/lyricAdapter', async (importOriginal) => {
 })
 vi.mock('./renderers', async () => ({
   FOLIA_MODE_RENDERERS: {
-    still: (await import('./modes/still/VisualizerStill')).VisualizerStill,
+    still: (await import('./upstream/components/visualizer/still/VisualizerStill')).default,
     luminous: ({
       showText,
-      showWaitingPlaceholder,
       currentLineIndex,
       lines,
     }: {
       showText: boolean
-      showWaitingPlaceholder: boolean
       currentLineIndex: number
       lines: { fullText: string }[]
     }) =>
@@ -46,12 +44,15 @@ vi.mock('./renderers', async () => ({
           'data-line-index': currentLineIndex,
         },
         createElement('span', { 'data-testid': 'scene-effect' }),
-        showText && lines[currentLineIndex] ? '歌词画面' : showWaitingPlaceholder ? '等待音乐' : '',
+        // 上游 `ui.waitingForMusic` 是空串，没有歌词时这一行什么都不渲染。
+        showText && lines[currentLineIndex] ? '歌词画面' : '',
       ),
   },
 }))
-vi.mock('./backgrounds/FoliaBackground', () => ({
-  FoliaBackground: () => createElement('div', { 'data-testid': 'background' }),
+// 背景层由上游 `VisualizerBackgroundRenderer` 绘制（默认 latent 背景会拉起 Paper shader，
+// jsdom 里没有 WebGL）。这里只验证舞台结构里有背景层，替身即可。
+vi.mock('./upstream/components/visualizer/backgrounds/VisualizerBackgroundRenderer', () => ({
+  default: () => createElement('div', { 'data-testid': 'background' }),
 }))
 vi.mock('./FoliaControlBar', () => ({ FoliaControlBar: () => createElement('div', { 'data-testid': 'controls' }) }))
 
@@ -184,10 +185,10 @@ describe('Folia 无歌词画面', () => {
     ])
     usePlayerStore.getState().setCurrentTime(2)
     mount('still')
-    const stage = container.querySelector('.folia-still')
+    const stage = container.querySelector('.visualizer-still')
     expect(stage?.textContent).toContain('第一句')
     act(() => usePlayerStore.getState().setCurrentTime(4))
-    expect(container.querySelector('.folia-still')).toBe(stage)
+    expect(container.querySelector('.visualizer-still')).toBe(stage)
     expect(stage?.textContent).toContain('第一句')
     expect(stage?.textContent).toContain('first')
     expect(stage?.textContent).not.toContain('等待')

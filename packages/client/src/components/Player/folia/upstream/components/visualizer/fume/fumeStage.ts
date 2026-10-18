@@ -1,6 +1,6 @@
 import type { MotionValue } from 'motion/react';
 import type { AudioBands, Line, Theme } from '../../../types';
-import type { FumeBackgroundAudioLevels, FumeBackgroundScene } from '../FumeBackground';
+import type { FumeBackgroundAudioLevels, FumeBackgroundScene } from './FumeBackground';
 import type { FumeCameraState } from './fumeCameraStep';
 import type { CameraViewTarget, FumeArticleLayout, ViewportSize } from './fumeTypes';
 

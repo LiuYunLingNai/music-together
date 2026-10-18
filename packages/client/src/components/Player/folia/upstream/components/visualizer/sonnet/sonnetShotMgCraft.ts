@@ -61,7 +61,8 @@ const drawPaperPlaneTrail = ({ target, radius, seed, primary, secondary }: Addit
 };
 
 // 78: woven band — vertical strips pass over/under two horizontals via gaps.
-const drawWeaveBand = ({ target, radius, primary, secondary }: AdditionalSonnetMgOptions) => {
+const drawWeaveBand = ({ target, radius, seed, primary, secondary }: AdditionalSonnetMgOptions) => {
+    void seed;
     const bandY = [-radius * 0.12, radius * 0.12];
     const strips = 7;
     // Horizontal strips first (behind), each broken at every other crossing.
@@ -92,7 +93,8 @@ const drawWeaveBand = ({ target, radius, primary, secondary }: AdditionalSonnetM
 };
 
 // 79: figure-eight knot drawn in segments with crossing gaps for over/under.
-const drawKnotLoop = ({ target, radius, primary, secondary }: AdditionalSonnetMgOptions) => {
+const drawKnotLoop = ({ target, radius, seed, primary, secondary }: AdditionalSonnetMgOptions) => {
+    void seed;
     const s = radius * 0.34;
     // Left loop, broken where the right loop passes over.
     target.moveTo(0, 0);
@@ -116,7 +118,8 @@ const drawKnotLoop = ({ target, radius, primary, secondary }: AdditionalSonnetMg
 };
 
 // 80: cross-stitch sampler rows that fade toward the edges.
-const drawStitchSampler = ({ target, radius, primary, secondary }: AdditionalSonnetMgOptions) => {
+const drawStitchSampler = ({ target, radius, seed, primary, secondary }: AdditionalSonnetMgOptions) => {
+    void seed;
     const stitch = (x: number, y: number, size: number, color: number, alpha: number) => {
         target.moveTo(x - size, y - size).lineTo(x + size, y + size).stroke({ color, width: 1.5, alpha });
         target.moveTo(x + size, y - size).lineTo(x - size, y + size).stroke({ color, width: 1.5, alpha });
@@ -133,7 +136,8 @@ const drawStitchSampler = ({ target, radius, primary, secondary }: AdditionalSon
 };
 
 // 81: folded fan — ribs from a pivot, double guard arc, open at the top.
-const drawFoldedFan = ({ target, radius, primary, secondary }: AdditionalSonnetMgOptions) => {
+const drawFoldedFan = ({ target, radius, seed, primary, secondary }: AdditionalSonnetMgOptions) => {
+    void seed;
     const pivotY = radius * 0.42;
     const ribs = 11;
     const spread = Math.PI * 0.9;
@@ -176,7 +180,8 @@ const drawRibbonCurl = ({ target, radius, seed, primary, secondary }: Additional
 };
 
 // 83: three overlapping patchwork triangles with hand-built inner stripes.
-const drawPatchworkTrio = ({ target, radius, primary, secondary }: AdditionalSonnetMgOptions) => {
+const drawPatchworkTrio = ({ target, radius, seed, primary, secondary }: AdditionalSonnetMgOptions) => {
+    void seed;
     const configs = [
         { x: -radius * 0.22, y: -radius * 0.05, s: radius * 0.3, up: true },
         { x: radius * 0.18, y: -radius * 0.12, s: radius * 0.24, up: false },

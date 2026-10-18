@@ -489,6 +489,7 @@ export class PendoloClockworkRenderer {
             phase: input.phase,
             bassOscillation: input.bassOscillation,
             secondGearAngle: input.secondGearAngle,
+            transBeatAngle: input.transBeatAngle,
         };
         fillPendoloTransformTables(scene.parts, motion, this.originTable, this.rotationTable);
 

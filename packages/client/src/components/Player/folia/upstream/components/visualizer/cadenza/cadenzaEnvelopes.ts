@@ -1,4 +1,4 @@
-import type { Line,Word as WordType } from '../../../types';
+import { type Line, type Word as WordType } from '../../../types';
 import { type GraphemeTiming } from '../../../utils/lyrics/graphemeTiming';
 import { getLineTransitionTiming } from '../../../utils/lyrics/renderHints';
 import { colorWithAlpha } from '../colorMix';
@@ -277,8 +277,8 @@ export const resolveLineRenderTiming = (line: Line): ResolvedLineRenderTiming =>
     };
 };
 
-export const buildDomTextShadow = (color: string, intensity: number, _blurScale = 1) => {
-    void _blurScale;
+export const buildDomTextShadow = (color: string, intensity: number, blurScale = 1) => {
+    void blurScale;
     const glow = clamp(intensity, 0, 1.6);
     if (glow <= 0.01) {
         return 'none';

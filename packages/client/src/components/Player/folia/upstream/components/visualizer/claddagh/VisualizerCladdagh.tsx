@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/immutability, @typescript-eslint/no-explicit-any -- 上游把调试用的尺寸/半径挂到 window 上供外部读取；这是上游原样代码，不是渲染状态。 */
 // Only for the you who has yet to exist in this world.
 // DO NOT REMOVE THE LINE ABOVE.
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
@@ -50,11 +51,12 @@ const VisualizerCladdagh: React.FC<VisualizerSharedProps> = (props) => {
         return Math.max(0, Math.min(1, isRawScaleRef.current ? power / 255 : power));
     }, []);
 
-    const { activeLine, recentCompletedLine, nextLines } = useVisualizerRuntime({
+    const { activeLine, upcomingLine, recentCompletedLine, nextLines } = useVisualizerRuntime({
         currentTime,
         currentLineIndex,
         lines,
     });
+    void upcomingLine;
 
     const isChorus = activeLine?.isChorus ?? false;
 
@@ -145,7 +147,7 @@ const VisualizerCladdagh: React.FC<VisualizerSharedProps> = (props) => {
         return () => {
             cancelAnimationFrame(frameId);
         };
-    }, [smoothedBass, smoothedVocal, theme.primaryColor, theme.accentColor, theme.secondaryColor, centerNormalTiltDeg, paused, isChorus, claddaghTuning.showAxisLine, normalizePower]);
+    }, [smoothedBass, smoothedVocal, theme.primaryColor, theme.accentColor, theme.secondaryColor, centerNormalTiltDeg, paused, isChorus, claddaghTuning.showAxisLine]);
 
     // Initialize dimensions on mount to avoid zero size on first render
     useEffect(() => {
@@ -176,6 +178,12 @@ const VisualizerCladdagh: React.FC<VisualizerSharedProps> = (props) => {
     const focusSpacingScale = (1 + claddaghTuning.focusScaleRatio) / (1 + DEFAULT_CLADDAGH_TUNING.focusScaleRatio);
     const activeTextSpacingScale = focusSpacingScale;
 
+    if (typeof window !== 'undefined') {
+        (window as any).visualizerDimensions = dimensions;
+        (window as any).visualizerRx = Rx;
+        (window as any).visualizerRy = Ry;
+    }
+
     // Determine the focus line index
     const focusIndex = currentLineIndex !== -1
         ? currentLineIndex
@@ -203,12 +211,12 @@ const VisualizerCladdagh: React.FC<VisualizerSharedProps> = (props) => {
 
         if (Math.abs(curr - prev) > 1) {
             lineOffset.set(curr * Math.PI);
-
+            setRenderBaseIndex(curr);
         } else {
             // Update renderBaseIndex immediately so activeSpacingInfo tracks
             // the new active line from the start. This prevents the wordOffset
             // discontinuity that occurred when onComplete switched it later.
-
+            setRenderBaseIndex(curr);
             const controls = animate(lineOffset, curr * Math.PI, {
                 type: 'spring',
                 stiffness: 55,
@@ -218,9 +226,6 @@ const VisualizerCladdagh: React.FC<VisualizerSharedProps> = (props) => {
             return () => controls.stop();
         }
     }, [centerLineIndex, lineOffset]);
-
-    const [previousCenter, setPreviousCenter] = useState(centerLineIndex);
-    if (previousCenter !== centerLineIndex) { setPreviousCenter(centerLineIndex); setRenderBaseIndex(centerLineIndex); }
 
     // Keep the transition pair + one preceding line rendered so the outgoing
     // line remains visible during the spring rotation.
@@ -250,7 +255,7 @@ const VisualizerCladdagh: React.FC<VisualizerSharedProps> = (props) => {
                 animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
                 exit={{ opacity: 0, scale: 1.04, filter: 'blur(4px)' }}
                 transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-                ref={containerRef}
+                ref={containerRef as any}
                 className="relative flex flex-col items-center justify-center w-full h-full overflow-hidden select-none"
             >
                 {/* Background Dedicated Visuals */}

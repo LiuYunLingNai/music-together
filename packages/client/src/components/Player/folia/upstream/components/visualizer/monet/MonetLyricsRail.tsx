@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/refs -- 上游在渲染期读 ref（布局缓存、手动滚动锚点）；这是上游原样代码。 */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, MotionValue } from 'motion/react';
 import { type Theme, type AudioBands, type Line, type SubtitleContentMode } from '../../../types';
@@ -53,11 +54,14 @@ const MonetLyricsRail: React.FC<MonetLyricsRailProps> = ({
     emptyText,
     subtitleContentMode = 'translation',
     audioPower,
+    audioBands,
     onLyricLineSeek,
     seekDisabled = false,
     layoutScale = 1,
 }) => {
+    void audioBands;
     const railRef = useRef<HTMLDivElement | null>(null);
+    const layoutCacheRef = useRef<MonetLayoutCache>(new Map());
     const manualScrollResetRef = useRef<number | null>(null);
     const wheelAccumulatorRef = useRef(0);
     const wheelDirectionRef = useRef(0);
@@ -67,10 +71,7 @@ const MonetLyricsRail: React.FC<MonetLyricsRailProps> = ({
     const [manualScrollAnchorIndex, setManualScrollAnchorIndex] = useState<number | null>(null);
     const railSize = useMonetRailSize(railRef);
     const fontsEpoch = useFontsEpoch();
-    const layoutCache = useMemo<MonetLayoutCache>(() => {
-        if (fontsEpoch >= 0) clearMonetMeasurementCaches();
-        return new Map();
-    }, [fontsEpoch]);
+    const handledFontsEpochRef = useRef(0);
     const glowBufferPx = Math.round(lyricFontPx * 1.2);
     const vGlowBufferPx = Math.round(lyricFontPx * 1.2);
     // Grows with the same factor as the font, so the column-to-font ratio — and the wrapping — holds.
@@ -97,6 +98,11 @@ const MonetLyricsRail: React.FC<MonetLyricsRailProps> = ({
             // A line measured against a fallback face wraps differently from what is painted, which
             // under-reserves its height and drops the translation onto the next lyric. Invalidate
             // here rather than in an effect, so the recompute below already sees fresh metrics.
+            if (handledFontsEpochRef.current !== fontsEpoch) {
+                handledFontsEpochRef.current = fontsEpoch;
+                clearMonetMeasurementCaches();
+                layoutCacheRef.current.clear();
+            }
 
             return buildPositionedEntries(
                 visibleEntries,
@@ -114,10 +120,10 @@ const MonetLyricsRail: React.FC<MonetLyricsRailProps> = ({
                     subtitleContentMode,
                 },
                 glowBufferPx,
-                layoutCache,
+                layoutCacheRef.current,
             );
         },
-        [visibleEntries, railSize, theme, lyricFontPx, inactiveFontPx, translationFontPx, fontStack, translationFontStack, lyricFontWeight, translationFontWeight, secondaryTranslationFontWeight, glowBufferPx, subtitleContentMode, layoutCache],
+        [visibleEntries, railSize, theme, lyricFontPx, inactiveFontPx, translationFontPx, fontStack, translationFontStack, lyricFontWeight, translationFontWeight, secondaryTranslationFontWeight, glowBufferPx, subtitleContentMode, fontsEpoch],
     );
     const wordColorMatchers = useMemo(
         () => prepareWordColorMatchers(theme.wordColors, keywordColoringEnabled),

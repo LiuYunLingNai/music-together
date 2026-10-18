@@ -67,7 +67,7 @@ export interface SegmentView {
     enterY: number;
     vertical: boolean;
     timingPhase: number;
-    guide: SonnetGuideView & { update?: (progress: number) => void };
+    guide: SonnetGuideView;
     frameDecor?: SonnetFrameDecorView | null;
     glyphs: GlyphView[];
     trackingGlyphs: GlyphView[];
@@ -145,6 +145,9 @@ export const buildSonnetTextView = (
     // Parallax depth assignment
     const zDepth = resolveSonnetSegmentDepth(placement.role);
 
+    const blurAmount = Math.abs(zDepth) * fontSize * 0.12;
+    const isBlurry = blurAmount > 2;
+    void isBlurry;
 
     const baseDropShadow = options.glowEnabled && !isDecoration ? {
         color: glowColor,
@@ -355,7 +358,7 @@ export const buildSonnetTextView = (
         bgWrapper.position.set(placement.x, placement.y);
         bgWrapper.rotation = placement.rotation;
         bgWrapper.alpha = 0;
-
+        
         const bgShape = buildSonnetTextFixedGeo(pixi, {
             seed: textSeed,
             isChorusEffect,
@@ -363,10 +366,10 @@ export const buildSonnetTextView = (
             layoutWidth: options.width,
             theme: options.theme,
         });
-
+        
         bgWrapper.addChild(bgShape);
         options.textLayer.addChildAt(bgWrapper, 0); // Ensure it stays behind the text
-
+        
         const firstGlyph = glyphs[0];
         const bgGlyph: GlyphView = {
             display: bgWrapper,

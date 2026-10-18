@@ -97,7 +97,8 @@ const drawCircuitDelta = ({ target, radius, width, height, seed, primary, second
 };
 
 // 90: signal tower mast with radiating wave arcs on both sides.
-const drawSignalTower = ({ target, radius, primary, secondary }: AdditionalSonnetMgOptions) => {
+const drawSignalTower = ({ target, radius, seed, primary, secondary }: AdditionalSonnetMgOptions) => {
+    void seed;
     const baseY = radius * 0.45;
     const topY = -radius * 0.3;
     target.moveTo(-radius * 0.12, baseY).lineTo(0, topY).lineTo(radius * 0.12, baseY)
@@ -204,7 +205,8 @@ const drawRippleDrop = ({ target, radius, seed, primary, secondary }: Additional
 };
 
 // 95: suspension bridge — sagging main cable, two towers, open deck line.
-const drawSuspensionBridge = ({ target, radius, width, height, primary, secondary }: AdditionalSonnetMgOptions) => {
+const drawSuspensionBridge = ({ target, radius, width, height, seed, primary, secondary }: AdditionalSonnetMgOptions) => {
+    void seed;
     const bleed = resolveSonnetShotMgBleed(width, height, radius);
     const deckY = radius * 0.3;
     const towerX = radius * 0.34;
@@ -241,7 +243,8 @@ const drawSuspensionBridge = ({ target, radius, width, height, primary, secondar
 };
 
 // 96: magnetic field loops through two poles, mirrored top and bottom.
-const drawFieldLines = ({ target, radius, primary, secondary }: AdditionalSonnetMgOptions) => {
+const drawFieldLines = ({ target, radius, seed, primary, secondary }: AdditionalSonnetMgOptions) => {
+    void seed;
     const poleGap = radius * 0.2;
     for (let loop = 0; loop < 4; loop += 1) {
         const bulge = radius * (0.2 + loop * 0.16);
@@ -264,7 +267,8 @@ const drawFieldLines = ({ target, radius, primary, secondary }: AdditionalSonnet
 };
 
 // 97: prism splitting one inbound beam into a fanned spectrum.
-const drawPrismBeam = ({ target, radius, width, height, primary, secondary }: AdditionalSonnetMgOptions) => {
+const drawPrismBeam = ({ target, radius, width, height, seed, primary, secondary }: AdditionalSonnetMgOptions) => {
+    void seed;
     const bleed = resolveSonnetShotMgBleed(width, height, radius);
     const s = radius * 0.24;
     const topY = -s * 0.7;
@@ -288,7 +292,8 @@ const drawPrismBeam = ({ target, radius, width, height, primary, secondary }: Ad
 };
 
 // 98: echo arcs bouncing between two unseen walls, offset per hop.
-const drawEchoArcs = ({ target, radius, primary, secondary }: AdditionalSonnetMgOptions) => {
+const drawEchoArcs = ({ target, radius, seed, primary, secondary }: AdditionalSonnetMgOptions) => {
+    void seed;
     for (let hop = 0; hop < 5; hop += 1) {
         const side = hop % 2 === 0 ? -1 : 1;
         const cx = side * radius * 0.52;

@@ -11,13 +11,12 @@ import { FOLIA_MODE_RENDERERS } from './renderers'
 import { useFoliaClock } from './stage/foliaClock'
 import { findFoliaActiveLineIndex, useFoliaLines, useFoliaTheme } from './stage/lyricAdapter'
 import { FoliaControlBar } from './FoliaControlBar'
-import { FoliaBackground } from './backgrounds/FoliaBackground'
+import { FoliaRenderer } from './FoliaRenderer'
 import { useFoliaAudio } from './stage/foliaAudio'
 import { useFoliaRenderState } from './stage/foliaRenderState'
 import { getFoliaTuningProps } from './stage/foliaTunings'
 import { useCappellaCustomImages } from './stage/cappellaAssets'
 import { useMonetPortraitImage } from './stage/monetPortraitAssets'
-import FoliaHarmonyOverlay from './stage/FoliaHarmonyOverlay'
 
 // 播放列表浮岛：folia 舞台的队列外壳。惰性加载 —— 只在第一次打开时拉代码，
 // 且不进主 chunk（与模式的懒加载同红线）。
@@ -137,20 +136,18 @@ export function FoliaPlayerStage({
   const songTitle = currentTrack?.title ?? null
   const songArtist = currentTrack?.artist?.filter(Boolean).join(' / ') ?? null
 
-  const ModeRenderer = FOLIA_MODE_RENDERERS[mode]
-
   const modeProps: FoliaSharedProps = {
     ...audio,
     ...renderState,
     ...getFoliaTuningProps(mode, settings),
     currentTime,
+    duration: currentTrack?.duration ?? 0,
     currentLineIndex,
     lines,
     theme,
     // Match the upstream player-page flag: the mode stays visible even without an
     // active lyric, retaining its instrumental scene, tails and held subtitles.
     showText: true,
-    showWaitingPlaceholder: false,
     songTitle,
     songArtist,
     songAlbum: currentTrack?.album,
@@ -170,33 +167,37 @@ export function FoliaPlayerStage({
       : settings.showRomanization
         ? 'romanization'
         : 'none',
+    background: settings.background === 'solid' ? { transparent: true } : settings.backgroundConfig,
+    // 上游 `useVisualizerRendererModel` 的 `backgroundStaticMode`：只暂停背景，不停模式层。
+    // 上游还叠加了「latent 仅在播放页动态」与「非播放页且关掉首页动态背景」两条，
+    // 本项目只有播放页，因此只剩用户自己的「背景动效」开关。
+    backgroundStaticMode: !settings.backgroundMotion,
     onLyricLineSeek: onLyricSeek,
   }
 
   return (
     <div
       className="folia-root absolute inset-0 overflow-hidden"
-      style={{ '--folia-bar-offset': `${settings.barOffset}px` } as CSSProperties}
+      style={{
+        '--folia-bar-offset': `${settings.barOffset}px`,
+        backgroundColor: theme.backgroundColor,
+      } as CSSProperties}
     >
-      <FoliaBackground theme={theme} coverUrl={coverUrl} audio={audio} renderState={renderState} />
       <MotionConfig reducedMotion="user">
         <div className="folia-lyrics-layer absolute inset-0">
-          <Suspense fallback={<FoliaFallback />}>
-            {/* 错误边界由上层 `AudioPlayer` 的 `StageErrorBoundary` 提供：
-            它会在捕获异常时把持久化舞台回写为 classic，因此这里不再套一层。 */}
-            <ModeRenderer {...modeProps} />
-          </Suspense>
+          {/* 舞台画布：背景层与模式层都在里面，各自可过渡（上游 VisualizerRenderer 的树）。
+              错误边界由上层 `AudioPlayer` 的 `StageErrorBoundary` 提供：
+              它会在捕获异常时把持久化舞台回写为 classic，因此这里不再套一层。 */}
+          <FoliaRenderer
+            {...modeProps}
+            mode={mode}
+            renderers={FOLIA_MODE_RENDERERS}
+            // 切换时还在退场的旧模式要用它自己的调参（上游 `applyVisualizerTuning` 的语义）。
+            tuningsFor={(styleMode) => getFoliaTuningProps(styleMode, settings)}
+            animateStyleSwitch
+            backgroundDim={settings.backgroundDim}
+          />
         </div>
-        {/* 顶部和声叠层（上游 VisualizerRenderer 挂在模式渲染之外的同层语义）：
-        数据来自 lyricAdapter 折叠的 isBG 背景唱词，不改变任何模式的歌词布局。 */}
-        <FoliaHarmonyOverlay
-          currentTime={currentTime}
-          lines={lines}
-          showText
-          theme={theme}
-          subtitleContentMode={modeProps.subtitleContentMode}
-          subtitleFontScale={subtitleFontScale}
-        />
       </MotionConfig>
 
       {/* 独立 Folia 胶囊外壳；权限、投票、去重与 Seek 预览仍共用 Transport。 */}
@@ -223,9 +224,4 @@ export function FoliaPlayerStage({
       )}
     </div>
   )
-}
-
-/** 舞台加载中的占位：保持深色底，避免白闪（与 mineradio 舞台同做法）。 */
-function FoliaFallback() {
-  return <div className="absolute inset-0 bg-[#05070b]" aria-hidden="true" />
 }

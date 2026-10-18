@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
     FlutedGlass,
     HalftoneDots,
@@ -15,8 +15,12 @@ import {
     resolveDaylightInversion,
     resolveHalftoneInversion,
 } from './nomandShaderAdjustments';
+import { PAPER_SHADER_CONTEXT_ATTRIBUTES } from '../../../../utils/paperShaderContext';
+import type { PaperShaderElement } from '@paper-design/shaders';
+import { useFirstFrameDrawn } from '../../styleTransition/firstFrame';
 
 // src/components/visualizer/backgrounds/nomand/NomandBackgroundLayer.tsx
+/* eslint-disable react-refresh/only-export-components -- `resolveNomandSourceUrl` 供 entry 计算 song，上游同文件导出。 */
 // Renders the selected Paper image shader with the current theme palette.
 
 interface NomandBackgroundLayerProps {
@@ -27,6 +31,39 @@ interface NomandBackgroundLayerProps {
     isDaylight?: boolean;
 }
 
+const useShaderDrawn = (shaderRef: React.RefObject<PaperShaderElement | null>, shader: string | null) => {
+    const drawn = useFirstFrameDrawn();
+    useEffect(() => {
+        if (shader === null) {
+            drawn();
+            return undefined;
+        }
+        let frame = 0;
+        const look = () => {
+            frame = requestAnimationFrame(shaderRef.current?.paperShaderMount ? drawn : look);
+        };
+        look();
+        return () => cancelAnimationFrame(frame);
+    }, [shaderRef, shader, drawn]);
+};
+
+/** The image the shader draws: the cover, or the uploaded image where that comes first. */
+export const resolveNomandSourceUrl = (
+    coverUrl: string | null | undefined,
+    monetBackgroundImage: MonetBackgroundImage | null | undefined,
+    tuning: NomandBackgroundTuning,
+) => (
+    tuning.imageSource === 'uploaded-global'
+        ? monetBackgroundImage?.url ?? coverUrl
+        : coverUrl ?? monetBackgroundImage?.url
+);
+
+/**
+ * For a copy mounted for a new song (or type): says it is ready once its shader has loaded the
+ * image, built itself and drawn a frame. The shader builds itself after the image has loaded and
+ * gives no sign, so its element is looked at once a frame until it holds its mount, and one frame
+ * more.
+ */
 const NomandBackgroundLayer: React.FC<NomandBackgroundLayerProps> = ({
     coverUrl,
     monetBackgroundImage,
@@ -35,9 +72,9 @@ const NomandBackgroundLayer: React.FC<NomandBackgroundLayerProps> = ({
     isDaylight,
 }) => {
     const tuning = { ...DEFAULT_NOMAND_BACKGROUND_TUNING, ...tuningOverride };
-    const sourceUrl = tuning.imageSource === 'uploaded-global'
-        ? monetBackgroundImage?.url ?? coverUrl
-        : coverUrl ?? monetBackgroundImage?.url;
+    const sourceUrl = resolveNomandSourceUrl(coverUrl, monetBackgroundImage, tuning);
+    const shaderRef = useRef<PaperShaderElement | null>(null);
+    useShaderDrawn(shaderRef, sourceUrl ? `${sourceUrl}:${tuning.effect}` : null);
 
     if (!sourceUrl) {
         return (
@@ -53,10 +90,12 @@ const NomandBackgroundLayer: React.FC<NomandBackgroundLayerProps> = ({
         const commonProps = {
             width: '100%' as const,
             height: '100%' as const,
+            ref: shaderRef,
             image: sourceUrl,
             fit: 'cover' as const,
             minPixelRatio: 1,
             maxPixelCount: 1920 * 1080,
+            webGlContextAttributes: PAPER_SHADER_CONTEXT_ATTRIBUTES,
             style: { width: '100%', height: '100%' },
         };
 

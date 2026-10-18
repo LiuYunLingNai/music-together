@@ -40,7 +40,8 @@ export interface GlyphLine {
     destroy: () => void;
 }
 
-const UPRIGHT = /[ᄀ-ᇿ⺀-⿿\u3000-〿぀-ヿ㄀-ㇿ㈀-鿿가-힯豈-﫿︰-﹏＀-￯]|[\u{20000}-\u{3134f}]/u;
+// eslint-disable-next-line no-irregular-whitespace -- 上游正则里的全角空格（U+3000）是字符区间端点，不能替换。
+const UPRIGHT = /[ᄀ-ᇿ⺀-⿿　-〿぀-ヿ㄀-ㇿ㈀-鿿가-힯豈-﫿︰-﹏＀-￯]|[\u{20000}-\u{3134f}]/u;
 
 /** Canvas 2D / pretext 的字体串：画字与测量必须用同一个格式。 */
 export const glyphFont = (weight: number, px: number, family: string) => `${weight} ${px}px ${family}`;

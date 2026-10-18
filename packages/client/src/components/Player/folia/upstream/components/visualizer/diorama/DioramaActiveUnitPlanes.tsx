@@ -7,6 +7,8 @@ import { type DioramaUnitPlanes } from './dioramaSceneFrame';
 // src/components/visualizer/diorama/DioramaActiveUnitPlanes.tsx
 // 当前行逐单元的三层平面：普通辉光（叠加的心象辉光栅格）、灵魂出窍（叠加的清晰副本）、字身。
 // 只负责挂载与登记材质 / 网格引用，每帧的颜色、透明度与位移由 dioramaSceneFrame 写入。
+// 每个单元的三层平面放在同一个 group 里，智能动感模式下正在唱的字随拍跳起时整体移动（DioramaScene）；
+// 平时 group 不动，画面和不分组时一样。
 
 interface DioramaActiveUnitPlanesProps {
     units: readonly PlacedUnitRaster[];
@@ -16,6 +18,8 @@ interface DioramaActiveUnitPlanesProps {
     accentColor: string;
 }
 
+// 上游在 ref 回调里直接写 `planes.xxx[i] = el`；本项目 `react-hooks/immutability` 禁止在 JSX 里改值，
+// 故接收 ref 对象、在函数体内登记（行为与上游一致）。
 function registerPlane<K extends keyof DioramaUnitPlanes>(planes: React.RefObject<DioramaUnitPlanes>, key: K, index: number, value: DioramaUnitPlanes[K][number]) {
     const entries = planes.current[key] as Array<DioramaUnitPlanes[K][number]>;
     entries[index] = value;
@@ -24,7 +28,7 @@ function registerPlane<K extends keyof DioramaUnitPlanes>(planes: React.RefObjec
 export const DioramaActiveUnitPlanes: React.FC<DioramaActiveUnitPlanesProps> = ({ units, planes, primaryColor, accentColor }) => (
     <>
         {units.map((placed, unitIndex) => (
-            <React.Fragment key={unitIndex}>
+            <group key={unitIndex} ref={el => registerPlane(planes, 'unitGroups', unitIndex, el)}>
                 <mesh
                     ref={el => registerPlane(planes, 'glowMeshes', unitIndex, el)}
                     visible={false}
@@ -60,7 +64,7 @@ export const DioramaActiveUnitPlanes: React.FC<DioramaActiveUnitPlanesProps> = (
                         depthTest={false}
                         depthWrite={false}
                         blending={THREE.AdditiveBlending}
-                        color={accentColor}
+                        color={primaryColor}
                     />
                 </mesh>
                 <mesh position={[placed.centerX, 0, 0]} renderOrder={19}>
@@ -75,7 +79,7 @@ export const DioramaActiveUnitPlanes: React.FC<DioramaActiveUnitPlanesProps> = (
                         color={primaryColor}
                     />
                 </mesh>
-            </React.Fragment>
+            </group>
         ))}
     </>
 );

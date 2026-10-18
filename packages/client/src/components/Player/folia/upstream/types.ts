@@ -102,6 +102,7 @@ export interface Theme {
 export type BuiltinVisualizerMode = 'classic' | 'cadenza' | 'partita' | 'fume' | 'monet';
 
 export type VisualizerMode = BuiltinVisualizerMode | (string & {});
+export type VisualizerFrameRate = 'off' | 120 | 90 | 60;
 
 
 export interface ClassicTuning {
@@ -740,6 +741,10 @@ export interface SoraBackgroundTuning {
   /** Skips the WebGL starfield and shows a static solid black (night) / white (daylight) frame. */
   blank: boolean;
 }
+
+export const DEFAULT_SORA_BACKGROUND_TUNING: SoraBackgroundTuning = {
+  blank: false,
+};
 
 
 export interface MonetTuning {

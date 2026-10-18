@@ -66,7 +66,6 @@ const VisualizerCadenza: React.FC<VisualizerProps> = (props) => {
         audioPower,
         audioBands,
         showText = true,
-        showWaitingPlaceholder = true,
         cadenzaTuning = DEFAULT_CADENZA_TUNING,
         lyricsFontScale = 1,
         subtitleFontScale = 1,
@@ -524,7 +523,7 @@ const VisualizerCadenza: React.FC<VisualizerProps> = (props) => {
 
             <div className="relative z-10 w-full h-[70vh] flex items-center justify-center p-8 pointer-events-none">
                 <AnimatePresence mode="wait">
-                    {showText && showWaitingPlaceholder && !activeLine && (
+                    {showText && !activeLine && (
                         <motion.div
                             key="empty"
                             initial={{ opacity: 0 }}

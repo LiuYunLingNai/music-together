@@ -16,7 +16,7 @@
  *
  * ★ **纯数据，不得 import 任何舞台组件。** 本模块被 `AudioPlayer.tsx`
  *   （在经典播放器路径上同步加载）、设置面板与切换菜单共同引用；一旦它
- *   import 了 `mineradio/*` 或 `folia/modes/*`，经典路径就会连带拉进
+ *   import 了 `mineradio/*` 或 `folia/upstream/*`，经典路径就会连带拉进
  *   three.js 与全部歌词布局代码，破坏按需加载红线
  *   （`lib/visualStageSupport.test.ts` 专门钉住这一点）。
  *   真正的组件入口在各自的懒加载宿主里。

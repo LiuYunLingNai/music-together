@@ -25,11 +25,10 @@ export const FOLIA_MODE_RENDERERS: Record<FoliaModeId, ComponentType<FoliaShared
   pendolo: lazy(() => import('./upstream/components/visualizer/pendolo/VisualizerPendolo')),
   sonnet: lazy(() => import('./upstream/components/visualizer/sonnet/VisualizerSonnet')),
   tempera: lazy(() => import('./upstream/components/visualizer/tempera/VisualizerTempera')),
-  still: lazy(() => import('./modes/still/VisualizerStill').then((m) => ({ default: m.VisualizerStill }))),
-  luminous: lazy(() =>
-    import('./modes/luminous/VisualizerLuminous').then((m) => ({ default: m.VisualizerLuminous })),
-  ),
-  partita: lazy(() => import('./modes/partita/VisualizerPartita').then((m) => ({ default: m.VisualizerPartita }))),
-  tilt: lazy(() => import('./modes/tilt/VisualizerTilt').then((m) => ({ default: m.VisualizerTilt }))),
-  cappella: lazy(() => import('./modes/cappella/VisualizerCappella').then((m) => ({ default: m.VisualizerCappella }))),
+  // 这五个模式同样来自上游目录（`classic` 在本项目叫 `luminous`，id 映射见 `lib/foliaModes`）。
+  still: lazy(() => import('./upstream/components/visualizer/still/VisualizerStill')),
+  luminous: lazy(() => import('./upstream/components/visualizer/classic/Visualizer')),
+  partita: lazy(() => import('./upstream/components/visualizer/partita/VisualizerPartita')),
+  tilt: lazy(() => import('./upstream/components/visualizer/tilt/VisualizerTilt')),
+  cappella: lazy(() => import('./upstream/components/visualizer/cappella/VisualizerCappella')),
 }

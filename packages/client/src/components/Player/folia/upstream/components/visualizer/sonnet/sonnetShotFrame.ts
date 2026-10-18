@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- 上游用 any 承接 pixi.js 动态挂载的字段/回调；逐处改写类型会偏离上游，故整文件放行。 */
 import type { MotionValue } from 'motion/react';
 import type { AudioBands, SonnetTuning, Theme } from '../../../types';
 import {
@@ -91,7 +92,7 @@ export const updateSonnetShot = (
         const dRot = cameraFrame.rotation - tailStart.rotation;
 
         // Continue drifting in that direction at a slow, relaxed PV pace
-        // speed = 0.8 means it takes 1.25 seconds of gap to drift the same distance
+        // speed = 0.8 means it takes 1.25 seconds of gap to drift the same distance 
         // the camera covered in the last 20% of the shot.
         const maxDrift = 2.0;
         const driftSpeed = (1 - Math.exp(-gapTime * 0.4)) * maxDrift * mod('driftScale');
@@ -168,13 +169,13 @@ export const updateSonnetShot = (
         const particleParallaxX = (cameraFrame.x * width + shake.x * width) * camera * 0.4 * mod('parallaxScale');
         const particleParallaxY = (cameraFrame.y * height + shake.y * height) * camera * 0.4 * mod('parallaxScale');
         view.mgParticleLayer.position.set(particleParallaxX, particleParallaxY);
-
+        
         // Continuous independent rotation based on shot time
         view.mgParticleLayer.rotation = (time - view.shot.startTime) * 0.05 * mod('mgSwimScale');
         // Slower scale response creates depth illusion
         view.mgParticleLayer.scale.set(1 + (cameraFrame.scale - 1) * 0.3);
     }
-
+    
     if (view.mgFixedGeoLayer) {
         // Keep fixed geometry upright regardless of camera rotation
         view.mgFixedGeoLayer.rotation = -view.container.rotation;
@@ -184,8 +185,8 @@ export const updateSonnetShot = (
     const audioPower = audioPowerValue?.get() ?? 0;
     const audioVocal = audioBands?.vocal?.get() ?? 0;
 
-    if (view.mgLayer.updateTime) {
-        view.mgLayer.updateTime(
+    if ((view.mgLayer as any).updateTime) {
+        (view.mgLayer as any).updateTime(
             time,
             view.shot.cues,
             view.shot.startTime,
@@ -204,9 +205,9 @@ export const updateSonnetShot = (
             const guideProgress = clamp01(
                 (time - guide.startTime) / Math.max(0.001, guide.endTime - guide.startTime),
             );
-            if (guide.update) {
+            if ((guide as any).update) {
                 guide.container.alpha = guide.maxAlpha;
-                guide.update(guideProgress);
+                (guide as any).update(guideProgress);
             } else {
                 const eased = easeSonnetInOut(guideProgress);
                 guide.container.alpha = Math.sin(eased * Math.PI) * guide.maxAlpha;

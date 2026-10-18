@@ -16,6 +16,10 @@ export default defineConfig({
   server: {
     host: true,
   },
+  // 与上游一致：worker 以 ES module 打包（monet 背景绘制在 worker 里跑）。
+  worker: {
+    format: 'es',
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

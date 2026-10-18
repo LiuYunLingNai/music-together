@@ -3,6 +3,7 @@ import type { UrlBackgroundItem } from '../../../../types';
 import { sanitizeUrlBackgroundItem } from '../../../../utils/urlBackground';
 
 // src/components/visualizer/backgrounds/url/UrlBackgroundLayer.tsx
+/* eslint-disable react-hooks/set-state-in-effect -- 上游在 effect 里同步 setReady(false/true)：换源时先复位再按容器尺寸重新放行，派生状态会晚一帧、旧 iframe 会多活一帧。 */
 // Renders a webpage as background via iframe.
 // Uses key={url} to force full iframe recreation on URL change,
 // avoiding chrome-error://chromewebdata cross-origin navigation errors.
@@ -24,8 +25,7 @@ const UrlBackgroundLayer: React.FC<UrlBackgroundLayerProps> = ({
     );
 
     const containerRef = useRef<HTMLDivElement>(null);
-    const [readyUrl, setReadyUrl] = useState<string | null>(null);
-    const ready = readyUrl === selectedItem?.url;
+    const [ready, setReady] = useState(false);
 
     // Defer iframe rendering until container has non-zero dimensions.
     // This prevents embedded page scripts from initialising with a 0x0 canvas/viewport,
@@ -33,19 +33,19 @@ const UrlBackgroundLayer: React.FC<UrlBackgroundLayerProps> = ({
     // Resets ready=false on selectedItem change so the dimension check re-runs fresh.
     // Includes a max retry guard to prevent infinite rAF loop in extreme edge cases.
     useEffect(() => {
-        if (!selectedItem) return;
+        setReady(false);
         const el = containerRef.current;
         if (!el) return;
         const rect = el.getBoundingClientRect();
         if (rect.width > 0 && rect.height > 0) {
-            const frame = requestAnimationFrame(() => setReadyUrl(selectedItem.url));
-            return () => cancelAnimationFrame(frame);
+            setReady(true);
+            return;
         }
         const observer = new ResizeObserver((entries) => {
             for (const entry of entries) {
                 const { width, height } = entry.contentRect;
                 if (width > 0 && height > 0) {
-                    setReadyUrl(selectedItem.url);
+                    setReady(true);
                     observer.disconnect();
                 }
             }

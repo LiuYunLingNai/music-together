@@ -118,7 +118,9 @@ const MonetWordSweep: React.FC<{
     fontSpec,
     fontsEpoch,
     isChorus,
+    audioPower,
 }) => {
+    void audioPower;
         const isLineActive = lineStatus === 'active';
         const canRenderGlow = lineStatus === 'active' || lineStatus === 'passed';
         const graphemeOffsets = useMemo(

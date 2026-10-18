@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/refs -- 上游在渲染期读 ref 的当前值构造舞台驱动；这是上游原样代码。 */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { Hourglass } from 'lucide-react';
@@ -6,9 +7,10 @@ import { getLineRenderEndTime } from '../../../utils/lyrics/renderHints';
 import { colorWithAlpha } from '../colorMix';
 
 import { type VisualizerSharedProps } from '../definition';
-import { buildFumeBackgroundScene } from '../FumeBackground';
+import { buildFumeBackgroundScene } from './FumeBackground';
 import { getRecentCompletedLine, getUpcomingLines } from '../runtime';
 import VisualizerShell from '../VisualizerShell';
+import { fumeBackgroundConfig } from './backgroundConfig';
 import VisualizerSubtitleOverlay from '../VisualizerSubtitleOverlay';
 import type { FumeArticleLayout, ViewportSize } from './fumeTypes';
 import { createFumeCameraState, type FumeCameraState } from './fumeCameraStep';
@@ -17,10 +19,12 @@ import { clamp } from './fumeMath';
 
 import { resolveFumePassedFadeDuration } from './fumeTextStyle';
 
-import { buildArticleLayout, buildLayoutCacheKey } from './fumeArticleLayout';
+import { buildArticleLayout, buildLayoutCacheKey, runLayoutInSlices } from './fumeArticleLayout';
 import { resolveArticleOverviewCamera } from './fumeCamera';
 import type { FumeStageDriver, FumeStageScene } from './fumeStage';
 import { useFumeCanvasStage } from './useFumeCanvasStage';
+import { useFirstFrameDrawn } from '../styleTransition/firstFrame';
+import { ARRIVING_MARK } from '../preview/frozenPicture';
 
 // This mode is basically "turn the whole lyric into an article, then move a camera through it".
 // So the pipeline is much bigger than the others: prebuild the article layout, split it into blocks/render lines/graphemes,
@@ -33,10 +37,19 @@ import { useFumeCanvasStage } from './useFumeCanvasStage';
 // passed -> line becomes already-read text, keep some paper trace and fade it out with textHoldRatio instead of removing it instantly.
 type VisualizerProps = VisualizerSharedProps;
 
-let lastFumeLayoutCache: {
-    key: string;
-    article: FumeArticleLayout | null;
-} | null = null;
+// Article layouts by what they were laid out from, the one used last at the end. More than one is
+// kept: the playing page, the small pictures in the pickers and the sample in the settings window
+// each lay out lines of their own, and with room for one they threw each other's layout away, so
+// every switch back to this style laid the whole song out again.
+const FUME_LAYOUT_CACHE_SIZE = 4;
+const fumeLayoutCache = new Map<string, FumeArticleLayout | null>();
+const keepFumeLayout = (key: string, article: FumeArticleLayout | null) => {
+    fumeLayoutCache.delete(key);
+    fumeLayoutCache.set(key, article);
+    if (fumeLayoutCache.size > FUME_LAYOUT_CACHE_SIZE) {
+        fumeLayoutCache.delete(fumeLayoutCache.keys().next().value as string);
+    }
+};
 
 const LAYOUT_REBUILD_DEBOUNCE_MS = 96;
 
@@ -67,7 +80,7 @@ const VisualizerFume: React.FC<VisualizerProps> = (props) => {
     const viewportRef = useRef<HTMLDivElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const currentLineIndexRef = useRef(currentLineIndex);
-    const [cameraState] = useState<FumeCameraState>(() => createFumeCameraState());
+    const cameraStateRef = useRef<FumeCameraState>(createFumeCameraState());
     const layoutBuildVersionRef = useRef(0);
     const hasResolvedArticleRef = useRef(false);
     const [viewport, setViewport] = useState<ViewportSize>({ width: 0, height: 0 });
@@ -75,6 +88,10 @@ const VisualizerFume: React.FC<VisualizerProps> = (props) => {
     const [isLayoutPending, setIsLayoutPending] = useState(false);
     const [hasPrintedContent, setHasPrintedContent] = useState(false);
     const hasPrintedContentRef = useRef(false);
+    // The first layout of a song is the slow part of this style's start (about a second on a slow
+    // machine, in slices): a style switch waits until the article is laid out and drawn, or there is
+    // none to lay out.
+    const firstFrameDrawn = useFirstFrameDrawn();
 
     useEffect(() => {
         currentLineIndexRef.current = currentLineIndex;
@@ -115,7 +132,7 @@ const VisualizerFume: React.FC<VisualizerProps> = (props) => {
             }),
             nextLines: getUpcomingLines(lines, currentLineIndex, 2),
         };
-    }, [currentLineIndex, lines, currentTime]);
+    }, [currentLineIndex, lines]);
     const resolvedFumeTuning = useMemo<FumeTuning>(() => ({
         hidePrintSymbols: fumeTuning?.hidePrintSymbols ?? DEFAULT_FUME_TUNING.hidePrintSymbols,
         disableGeometricBackground: fumeTuning?.disableGeometricBackground ?? DEFAULT_FUME_TUNING.disableGeometricBackground,
@@ -153,46 +170,55 @@ const VisualizerFume: React.FC<VisualizerProps> = (props) => {
 
         if (viewport.width <= 0 || viewport.height <= 0 || lines.length === 0) {
             hasResolvedArticleRef.current = false;
-            const resetFrame = requestAnimationFrame(() => { setArticle(null); setIsLayoutPending(false); });
-            return () => cancelAnimationFrame(resetFrame);
+            setArticle(null);
+            setIsLayoutPending(false);
+            if (lines.length === 0) firstFrameDrawn();
+            return;
         }
 
-
+        setIsLayoutPending(true);
 
         let rafId = 0;
         let timeoutId = 0;
+        let stopLayout: (() => void) | null = null;
         const delay = hasResolvedArticleRef.current ? LAYOUT_REBUILD_DEBOUNCE_MS : 0;
 
         rafId = window.requestAnimationFrame(() => {
-            setIsLayoutPending(true);
             timeoutId = window.setTimeout(() => {
                 if (layoutBuildVersionRef.current !== requestVersion) {
                     return;
                 }
 
                 const layoutCacheKey = buildLayoutCacheKey(lines, viewport, layoutTheme, lyricsFontScale, layoutFumeTuning);
-                const nextArticle = lastFumeLayoutCache?.key === layoutCacheKey
-                    ? lastFumeLayoutCache.article
-                    : buildArticleLayout(lines, viewport, layoutTheme, lyricsFontScale, layoutFumeTuning);
-                if (layoutBuildVersionRef.current !== requestVersion) {
+                const applyArticle = (nextArticle: FumeArticleLayout | null) => {
+                    if (layoutBuildVersionRef.current !== requestVersion) {
+                        return;
+                    }
+
+                    keepFumeLayout(layoutCacheKey, nextArticle);
+                    hasResolvedArticleRef.current = nextArticle !== null;
+                    setArticle(nextArticle);
+                    setIsLayoutPending(false);
+                    if (!nextArticle) firstFrameDrawn();
+                };
+                if (fumeLayoutCache.has(layoutCacheKey)) {
+                    applyArticle(fumeLayoutCache.get(layoutCacheKey) ?? null);
                     return;
                 }
-
-                lastFumeLayoutCache = {
-                    key: layoutCacheKey,
-                    article: nextArticle,
-                };
-                hasResolvedArticleRef.current = nextArticle !== null;
-                setArticle(nextArticle);
-                setIsLayoutPending(false);
+                // Laying a whole song out is long work on a slow machine: done in slices, frames keep coming.
+                stopLayout = runLayoutInSlices(
+                    buildArticleLayout(lines, viewport, layoutTheme, lyricsFontScale, layoutFumeTuning),
+                    applyArticle,
+                );
             }, delay);
         });
 
         return () => {
             window.cancelAnimationFrame(rafId);
             window.clearTimeout(timeoutId);
+            stopLayout?.();
         };
-    }, [layoutFumeTuning, layoutTheme, lines, lyricsFontScale, viewport]);
+    }, [firstFrameDrawn, layoutFumeTuning, layoutTheme, lines, lyricsFontScale, viewport]);
     const lastRenderableLine = useMemo(() => {
         for (let index = lines.length - 1; index >= 0; index -= 1) {
             const line = lines[index];
@@ -241,8 +267,7 @@ const VisualizerFume: React.FC<VisualizerProps> = (props) => {
 
     useEffect(() => {
         hasPrintedContentRef.current = false;
-        const resetFrame = requestAnimationFrame(() => setHasPrintedContent(false));
-        return () => cancelAnimationFrame(resetFrame);
+        setHasPrintedContent(false);
     }, [article]);
 
     const stageScene = useMemo<FumeStageScene>(() => ({
@@ -284,33 +309,27 @@ const VisualizerFume: React.FC<VisualizerProps> = (props) => {
         currentTime,
         audioPower,
         audioBands,
-        cameraState,
+        cameraState: cameraStateRef.current,
         getLineIndex: () => currentLineIndexRef.current,
         onPrintedContent: () => {
             if (hasPrintedContentRef.current) return;
             hasPrintedContentRef.current = true;
             setHasPrintedContent(true);
         },
-    }), [audioBands, audioPower, cameraState, currentTime]);
+    }), [audioBands, audioPower, currentTime]);
 
     useFumeCanvasStage(canvasRef, stageScene, stageDriver, paused);
+    // After the stage's effect, which draws the article's first frame.
+    useEffect(() => {
+        if (article) firstFrameDrawn();
+    }, [article, firstFrameDrawn]);
 
     return (
         <VisualizerShell
             theme={theme}
             audioPower={audioPower}
             audioBands={audioBands}
-            sharedProps={{
-                ...props,
-                background: {
-                    ...props.background,
-                    common: {
-                        ...props.background?.common,
-                        disableGeometricBackground: Boolean(props.background?.common?.disableGeometricBackground)
-                            || resolvedFumeTuning.disableGeometricBackground,
-                    },
-                },
-            }}
+            sharedProps={{ ...props, background: fumeBackgroundConfig(props) }}
         >
             <div ref={viewportRef} className="relative z-10 h-full w-full pointer-events-none">
                 {(article || lines.length === 0) && (
@@ -332,7 +351,9 @@ const VisualizerFume: React.FC<VisualizerProps> = (props) => {
                 )}
 
                 {isLayoutPending && (
+                    // The layout runs while frames keep coming: a picture made of this stage waits for the article.
                     <motion.div
+                        {...{ [ARRIVING_MARK]: '' }}
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}

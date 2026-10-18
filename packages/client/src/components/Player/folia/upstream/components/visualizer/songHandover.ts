@@ -183,7 +183,8 @@ export const useVisualizerSongCommit = ({
     // Behind a ref so the effect can read the newest lines WITHOUT depending on the array
     // identity - see getLyricsSignature on why that dependency would break the gate.
     const linesRef = useRef(lines);
-    useEffect(() => { linesRef.current = lines; }, [lines]);
+    // eslint-disable-next-line react-hooks/refs -- 上游在渲染期同步 ref，effect 读最新歌词且不依赖数组身份。
+    linesRef.current = lines;
 
     const lyricsSignature = getLyricsSignature(lines);
     const committedSignature = getLyricsSignature(committed.lines);

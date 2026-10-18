@@ -1,4 +1,4 @@
-import type { SonnetMgContainer } from './sonnetShotMg';
+/* eslint-disable @typescript-eslint/no-explicit-any -- 上游用 any 承接 pixi.js 动态挂载的字段/回调；逐处改写类型会偏离上游，故整文件放行。 */
 import type { SonnetTuning, Theme } from '../../../types';
 import { normalizeFontWeight, resolveThemeFontStack } from '../../../utils/fontStacks';
 import type { SonnetParagraph, SonnetShot } from './types';
@@ -42,7 +42,7 @@ export interface ShotView {
     basePivotX: number;
     basePivotY: number;
     haloLayer: import('pixi.js').Container;
-    mgLayer: SonnetMgContainer;
+    mgLayer: import('pixi.js').Container;
     mgBackgroundLayer?: import('pixi.js').Container;
     mgGeoLayer?: import('pixi.js').Container;
     mgParticleLayer?: import('pixi.js').Container;
@@ -82,7 +82,8 @@ export const buildSonnetScene = (
     iconTextures: Map<string, import('pixi.js').Texture>,
     paragraph: SonnetParagraph,
 ): SceneView => {
-    const { Container, Graphics } = pixi;
+    const { Container, Graphics, Sprite } = pixi;
+    void Sprite;
     const width = Math.max(options.host.clientWidth, 320);
     const height = Math.max(options.host.clientHeight, 240);
     const container = new Container();
@@ -147,7 +148,7 @@ export const buildSonnetScene = (
         nameText.anchor.set(0, 1);
         if (showOuterMetadata) sceneBackgroundLayer.addChild(nameText);
     }
-
+    
     if (options.theme.description) {
         const descText = new Text({
             text: options.theme.description,
@@ -204,10 +205,10 @@ export const buildSonnetScene = (
             iconTextures
         );
         shotContainer.addChild(mgLayer);
-        const mgBackgroundLayer = mgLayer.bgLayer as import('pixi.js').Container | undefined;
-        const mgGeoLayer = mgLayer.geoLayer as import('pixi.js').Container | undefined;
-        const mgParticleLayer = mgLayer.particleLayer as import('pixi.js').Container | undefined;
-        const mgFixedGeoLayer = mgLayer.fixedGeoLayer as import('pixi.js').Container | undefined;
+        const mgBackgroundLayer = (mgLayer as any).bgLayer as import('pixi.js').Container | undefined;
+        const mgGeoLayer = (mgLayer as any).geoLayer as import('pixi.js').Container | undefined;
+        const mgParticleLayer = (mgLayer as any).particleLayer as import('pixi.js').Container | undefined;
+        const mgFixedGeoLayer = (mgLayer as any).fixedGeoLayer as import('pixi.js').Container | undefined;
         mgLayer.visible = showBackgroundMg || showFixedGeo || showBackgroundDecor;
         if (mgBackgroundLayer) mgBackgroundLayer.visible = showBackgroundMg;
         if (mgGeoLayer) mgGeoLayer.visible = showBackgroundMg;
@@ -232,7 +233,8 @@ export const buildSonnetScene = (
         postProcessFilters.push(...haloFilters);
         // Virtual instrumental lines can share one shot; the complete staff belongs to the shot, not each line.
         let staffViewAdded = false;
-        placements.forEach((placement) => {
+        placements.forEach((placement, placementIndex) => {
+            void placementIndex;
             const segment = segments[placement.segmentIndex];
             if (segment.text === '♪') {
                 if (staffViewAdded) return;
@@ -283,7 +285,7 @@ export const buildSonnetScene = (
             placements,
             segmentTexts: segments.map(segment => segment.text),
         });
-
+        
         // Poster blocks start centered before runtime tracking; other templates start on the hero word.
         const heroPlacement = placements.find(p => p.role === 'hero');
         const focusX = shot.kind === 'poster-blocks'
@@ -292,7 +294,7 @@ export const buildSonnetScene = (
         const focusY = shot.kind === 'poster-blocks'
             ? 0
             : heroPlacement ? heroPlacement.y : (bounds.y + bounds.height / 2);
-
+        
         shotContainer.pivot.set(focusX, focusY);
         shotContainer.position.set(
             width * (shot.kind === 'poster-blocks' ? 0.5 : 0.5 + shot.camera.x),

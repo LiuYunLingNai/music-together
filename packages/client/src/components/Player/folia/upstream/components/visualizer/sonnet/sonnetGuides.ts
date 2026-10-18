@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- 上游用 any 承接 pixi.js 动态挂载的字段/回调；逐处改写类型会偏离上游，故整文件放行。 */
 import type { Theme } from '../../../types';
 import type { SonnetSemanticSegment } from './types';
 import { isSonnetEmphasisRole, type SonnetTypographyPlacement } from './sonnetTypographyLayout';
@@ -75,7 +76,7 @@ export const createSonnetGuide = (
 
     // Create random small geometric shapes
     const numShapes = isHero ? 6 : 3;
-    const shapeData: { obj: import("pixi.js").Graphics; angle: number; speed: number; rotSpeed: number }[] = [];
+    const shapeData: any[] = [];
 
     for (let i = 0; i < numShapes; i++) {
         const shape = new pixi.Graphics();
@@ -103,7 +104,7 @@ export const createSonnetGuide = (
     }
 
     // Create elegant close-range silk threads weaving around the text
-    const trackingTrails: { p0: { x: number; y: number }; p1: { x: number; y: number }; p2: { x: number; y: number }; p3: { x: number; y: number }; delay: number }[] = [];
+    const trackingTrails: any[] = [];
     if (isHero || Math.random() > 0.4) {
         // Thread 1: Tight S-Curve weaving through the text
         const d = Math.random() > 0.5 ? 1 : -1;
@@ -128,7 +129,7 @@ export const createSonnetGuide = (
         });
     }
     // Create growing rectangular spline (modern HUD style)
-    let rectSpline: { p0: { x: number; y: number }; p1: { x: number; y: number }; thickness: number; delay: number; duration: number } | null = null;
+    let rectSpline: any = null;
     if (Math.random() > 0.4) {
         const length = fontSize * (1.2 + Math.random() * 1.5);
         const thickness = (isHero ? 6 : 3) + Math.random() * 8;
@@ -151,21 +152,14 @@ export const createSonnetGuide = (
 
     const cue = resolveSonnetGuideCue(segment, textStartTime);
 
-    let graphicsEmpty = true;
     const update = (progress: number) => {
         // Curve draws in quickly from 0 to 0.35, then fades out from 0.4 to 0.7
         const drawProgress = Math.min(1, Math.max(0, progress / 0.35));
         const fadeOut = 1 - Math.min(1, Math.max(0, (progress - 0.4) / 0.3));
 
-        // Past the fade the curve layer stays empty; clearing an empty Graphics still dirties
-        // its context and re-batches, so it is only cleared on the way out.
-        if (fadeOut > 0) {
-            graphics.clear();
-            graphicsEmpty = false;
-        } else if (!graphicsEmpty) {
-            graphics.clear();
-            graphicsEmpty = true;
-        }
+        // Empty already (the guide has faded out, or has not begun): clearing an empty Graphics
+        // still dirties its context and re-batches.
+        if (graphics.context.instructions.length > 0) graphics.clear();
         if (drawProgress > 0 && fadeOut > 0) {
             const steps = 20;
             let prevP = p0;

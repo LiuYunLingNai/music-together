@@ -1448,9 +1448,10 @@ body[data-room-cover-tint='true'] {
   --folia-subtitle-bottom: calc(min(var(--folia-bar-offset, 32px), max(16px, 100% - 220px)) + 176px);
 }
 
-/* Folia 的前景与背景分层；控制栏/字幕跟随可调离底距离。 */
+/* Folia 的前景与背景分层；控制栏/字幕跟随可调离底距离。
+   背景层现在由上游 `VisualizerBackdrop` 画在 `.folia-lyrics-layer` 里面，不再有独立的
+   `.folia-background` 层（它原来只被宿主那版背景组件使用）。 */
 .folia-lyrics-layer { z-index: 1; }
-.folia-background { z-index: 0; }
 
 .folia-console {
   position: absolute;
@@ -1574,16 +1575,10 @@ body[data-room-cover-tint='true'] {
   .folia-console__inner { transition: none; backdrop-filter: none; background: rgb(0 0 0 / 85%); }
 }
 
-/* 歌词层默认不可交互：五个模式的歌词都是展示性的，交互（点击跳转）本轮
-   未接入 —— 与上游"视觉舞台下无点击跳转"的决策一致。控制栏在
-   `.folia-console__inner` 内自带 `pointer-events: auto`，不受此规则影响。 */
-.folia-still,
-.folia-luminous,
-.folia-partita,
-.folia-tilt,
-.folia-cappella {
-  pointer-events: none;
-}
+/* 歌词层的指针语义由上游 `VisualizerShell` 自己决定：在背景层内时外壳
+   `pointer-events: none`，内容包一层 `display: contents; pointer-events: auto`
+   还给样式层。各模式的歌词容器本身也带 `pointer-events-none`，因此这里不再
+   需要按模式类名关指针。 */
 
 /* 装饰环（`.mt-player-stage::before`）会横穿居中的歌词文字。mineradio 舞台
    已按同一理由隐藏它（见上方 `:has(.mt-mineradio-root)`），folia 的歌词同样
@@ -1596,7 +1591,7 @@ body[data-room-cover-tint='true'] {
    `motion` 自身会读取该偏好并跳过 transform 类动画。这里额外关掉 cappella
    的循环关键帧（它们不受 motion 管辖，会持续消耗合成器）。 */
 @media (prefers-reduced-motion: reduce) {
-  .folia-cappella [style*='cappella-'] {
+  .folia-root [style*='cappella-'] {
     animation: none !important;
   }
 }

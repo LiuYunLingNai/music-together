@@ -5,14 +5,18 @@ import type { MotionValue } from 'motion/react';
 import {
     DEFAULT_LATENT_BACKGROUND_TUNING,
     type AudioBands,
+    type LatentBackgroundColorSource,
     type LatentBackgroundTuning,
     type Theme,
 } from '../../../../types';
 import { extractRepresentativeColors } from '../../../../utils/colorExtractor';
 import { updatePaperShaderUniforms } from '../../../../utils/paperShaderUniforms';
 import { createPaperShaderReleaseRef, PAPER_SHADER_CONTEXT_ATTRIBUTES } from '../../../../utils/paperShaderContext';
+import { useFirstFrameDrawn } from '../../styleTransition/firstFrame';
+import { useBlendedColors } from '../useBlendedColors';
 
 // src/components/visualizer/backgrounds/latent/LatentBackground.tsx
+/* eslint-disable react-refresh/only-export-components -- 上游把音频/配色 helper 与组件放在同一文件，这里保留文件布局。 */
 // Layers two cover-colored Paper shaders and drives their uniforms without React frame updates.
 
 interface LatentBackgroundProps {
@@ -23,12 +27,93 @@ interface LatentBackgroundProps {
     staticMode: boolean;
     paused: boolean;
     tuning?: LatentBackgroundTuning;
+    /** How long new colours take to blend in (useBlendedColors); 0 or left out, at once. */
+    blendMs?: number;
 }
 
-import { resolveLatentBroadbandEnergy, resolveLatentAudioSpeedTarget, resolveLatentOnsetPulse, resolveLatentShaderColors, resolveLatentShaderSpeed } from './latentMath';
 const MAX_SHADER_PIXELS = 1280 * 720;
+const PAUSED_SPEED_SCALE = 0.12;
+// How fast the speed goes from playing to paused or back, as a time constant: settled in about a second.
+const PAUSE_EASE_MS = 300;
 const normalizeAudio = (value: number) => Math.min(1, Math.max(0, value / 255));
-const easeTowards = (current: number, target: number, amount: number) => current + (target-current) * amount;
+const clampShaderSpeed = (value: number) => Math.min(2, Math.max(0, value));
+const clampAudioAmount = (value: number) => Math.min(1, Math.max(0, value));
+const easeTowards = (current: number, target: number, amount: number) => (
+    current + (target - current) * amount
+);
+export const resolveLatentBroadbandEnergy = (
+    bass: number,
+    lowMid: number,
+    mid: number,
+    vocal: number,
+    treble: number,
+) => {
+    const broadbandEnergy = (
+        normalizeAudio(bass) * 0.22
+        + normalizeAudio(lowMid) * 0.18
+        + normalizeAudio(mid) * 0.22
+        + normalizeAudio(vocal) * 0.28
+        + normalizeAudio(treble) * 0.1
+    );
+    return Math.pow(broadbandEnergy, 0.55);
+};
+// Accents broadband energy rises so shader speed lands on musical onsets instead of following loudness alone.
+export const resolveLatentOnsetPulse = (
+    currentEnergy: number,
+    previousEnergy: number,
+    previousPulse: number,
+) => Math.max(
+    previousPulse * 0.84,
+    clampAudioAmount((currentEnergy - previousEnergy) * 7),
+);
+export const resolveLatentBeatSpeedTarget = (
+    broadbandEnergy: number,
+    onsetPulse: number,
+) => clampAudioAmount(broadbandEnergy * 0.42 + onsetPulse * 0.85);
+export const resolveLatentAudioSpeedTarget = (
+    broadbandEnergy: number,
+    onsetPulse: number,
+    enhancedBeatResponse: boolean,
+) => enhancedBeatResponse
+    ? resolveLatentBeatSpeedTarget(broadbandEnergy, onsetPulse)
+    : clampAudioAmount(broadbandEnergy);
+export const resolveLatentShaderSpeed = (
+    baseSpeed: number,
+    audioSpeed: number,
+    audioAmount: number,
+    paused: boolean,
+) => clampShaderSpeed(
+    paused
+        ? baseSpeed * PAUSED_SPEED_SCALE
+        : easeTowards(baseSpeed, audioSpeed, audioAmount),
+);
+export const resolveLatentShaderColors = (
+    coverColors: string[],
+    theme: Theme,
+    colorSource: LatentBackgroundColorSource,
+) => {
+    const primary = coverColors[0] ?? theme.secondaryColor;
+    if (colorSource === 'cover-only') {
+        const secondary = coverColors[1] ?? primary;
+        const tertiary = coverColors[2] ?? secondary;
+        const quaternary = coverColors[3] ?? primary;
+        const quinary = coverColors[4] ?? secondary;
+        const senary = coverColors[5] ?? tertiary;
+        return {
+            ditheringBack: tertiary,
+            ditheringFront: primary,
+            mesh: [primary, secondary, tertiary, quaternary, quinary, senary],
+        };
+    }
+    const secondary = coverColors[1] ?? theme.primaryColor;
+    const tertiary = coverColors[2] ?? primary;
+    const quaternary = coverColors[3] ?? secondary;
+    return {
+        ditheringBack: theme.backgroundColor,
+        ditheringFront: primary,
+        mesh: [primary, secondary, tertiary, quaternary, theme.backgroundColor, theme.accentColor],
+    };
+};
 
 const LatentBackground: React.FC<LatentBackgroundProps> = ({
     theme,
@@ -38,6 +123,7 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
     staticMode,
     paused,
     tuning: tuningOverride,
+    blendMs = 0,
 }) => {
     const ditheringRef = useRef<PaperShaderElement | null>(null);
     const meshRef = useRef<PaperShaderElement | null>(null);
@@ -47,17 +133,25 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
     const ditheringLayerRef = useRef<HTMLDivElement | null>(null);
     const meshLayerRef = useRef<HTMLDivElement | null>(null);
     const pausedRef = useRef(paused);
+    // How far the loop below has eased between paused (0) and playing (1). Outside the loop's effect,
+    // so a re-run of it (a setting changed mid-ease) goes on from there.
+    const playingRef = useRef(paused ? 0 : 1);
     const [coverColors, setCoverColors] = useState<string[]>([]);
     const tuning = tuningOverride ?? DEFAULT_LATENT_BACKGROUND_TUNING;
     const showDithering = tuning.displayMode !== 'mesh';
     const showMesh = tuning.displayMode !== 'dithering';
-    useEffect(() => { pausedRef.current = paused; }, [paused]);
+    // 上游在渲染期同步写这个 ref：下面的 rAF 循环每帧读它，晚一帧就会在暂停后继续推进一步。
+    // eslint-disable-next-line react-hooks/refs -- 上游写法，见上
+    pausedRef.current = paused;
+    // A copy mounted for a change of type is ready once the cover's colours are read.
+    const colorsDrawn = useFirstFrameDrawn();
 
     useEffect(() => {
         let active = true;
 
         if (!coverUrl) {
-            return;
+            setCoverColors([]);
+            colorsDrawn();
             return () => {
                 active = false;
             };
@@ -66,17 +160,29 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
         void extractRepresentativeColors(coverUrl, 6).then(colors => {
             if (active) {
                 setCoverColors(colors);
+                colorsDrawn();
             }
         });
 
         return () => {
             active = false;
         };
-    }, [coverUrl]);
+    }, [coverUrl, colorsDrawn]);
 
-    const shaderColors = useMemo(
+    // A new song's colours blend in where the host plays transitions: a second copy for the soft focus
+    // would mount and compile both shaders again on every song change.
+    const resolvedColors = useMemo(
         () => resolveLatentShaderColors(coverColors, theme, tuning.colorSource),
         [coverColors, theme, tuning.colorSource],
+    );
+    const blendedColors = useBlendedColors(
+        [theme.backgroundColor, resolvedColors.ditheringBack, resolvedColors.ditheringFront, ...resolvedColors.mesh],
+        blendMs,
+    );
+    const [backgroundColor, ditheringBack, ditheringFront] = blendedColors;
+    const shaderColors = useMemo(
+        () => ({ ditheringBack, ditheringFront, mesh: blendedColors.slice(3) }),
+        [blendedColors, ditheringBack, ditheringFront],
     );
 
     useEffect(() => {
@@ -110,10 +216,28 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
         let smoothedBeatSpeed = 0;
         let previousBeatEnergy = 0;
         let latentOnsetPulse = 0;
+        // A pause slows the fluid over about a second and play speeds it up the same way, as the sound
+        // does: a pause of a moment (the player reads paused while the next track loads) is not a
+        // stop and a lurch.
+        let lastFrameAt: number | null = null;
+        const speedOf = (baseSpeed: number, audioSpeed: number) => easeTowards(
+            resolveLatentShaderSpeed(baseSpeed, audioSpeed, smoothedBeatSpeed, true),
+            resolveLatentShaderSpeed(baseSpeed, audioSpeed, smoothedBeatSpeed, false),
+            playingRef.current,
+        );
 
         // Keep audio-rate changes inside the shader/DOM layer so React only rerenders on palette changes.
-        const updateAudioResponse = () => {
+        const updateAudioResponse = (frameAt: number) => {
+            // Asked for first, so that in the next frame this runs ahead of the shader mounts' own
+            // frame callbacks: the uniforms written below (updatePaperShaderUniforms, which leaves the
+            // drawing to a running shader's own loop) are then in the frame that loop draws.
+            animationFrame = requestAnimationFrame(updateAudioResponse);
+
             const isPaused = pausedRef.current;
+            // By the time since the last frame: as fast at any frame rate.
+            const pauseStep = lastFrameAt === null ? 0 : 1 - Math.exp((lastFrameAt - frameAt) / PAUSE_EASE_MS);
+            lastFrameAt = frameAt;
+            playingRef.current = easeTowards(playingRef.current, isPaused ? 0 : 1, pauseStep);
             const targetPower = isPaused ? 0 : normalizeAudio(audioPower.get());
             const targetBass = isPaused ? 0 : normalizeAudio(audioBands.bass.get());
             const targetBeatEnergy = isPaused
@@ -158,24 +282,14 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
             const currentMeshMount = meshRef.current?.paperShaderMount;
 
             if (currentDitheringMount) {
-                const ditheringSpeed = resolveLatentShaderSpeed(
-                    tuning.ditheringSpeed,
-                    tuning.ditheringAudioSpeed,
-                    smoothedBeatSpeed,
-                    isPaused,
-                );
+                const ditheringSpeed = speedOf(tuning.ditheringSpeed, tuning.ditheringAudioSpeed);
                 currentDitheringMount.setSpeed(ditheringSpeed);
                 updatePaperShaderUniforms(currentDitheringMount, {
                     u_pxSize: Math.max(0.5, tuning.ditheringSize - smoothedBass * tuning.ditheringSize * 0.34),
                 }, ditheringSpeed !== 0);
             }
             if (currentMeshMount) {
-                const meshSpeed = resolveLatentShaderSpeed(
-                    tuning.meshSpeed,
-                    tuning.meshAudioSpeed,
-                    smoothedBeatSpeed,
-                    isPaused,
-                );
+                const meshSpeed = speedOf(tuning.meshSpeed, tuning.meshAudioSpeed);
                 currentMeshMount.setSpeed(meshSpeed);
                 updatePaperShaderUniforms(currentMeshMount, {
                     u_distortion: tuning.meshDistortion + smoothedPower * 0.62,
@@ -193,18 +307,18 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
                 writeLayerStyle(meshLayerRef.current, 'filter', `saturate(${1.04 + smoothedMid * 0.34}) brightness(${0.94 + smoothedPower * 0.16})`);
                 writeLayerStyle(meshLayerRef.current, 'transform', `scale(${1.025 + smoothedPower * 0.018})`);
             }
-
-            animationFrame = requestAnimationFrame(updateAudioResponse);
         };
 
         animationFrame = requestAnimationFrame(updateAudioResponse);
         return () => cancelAnimationFrame(animationFrame);
     }, [audioBands, audioPower, showMesh, staticMode, tuning]);
 
+    // The shaders' `speed` prop is only where they start, and 0 where static: the frame loop sets the
+    // speed from there and eases a pause in. A prop that followed `paused` would set it at once.
     return (
         <div
             className="absolute inset-0 z-0 overflow-hidden"
-            style={{ backgroundColor: theme.backgroundColor, pointerEvents: 'none' }}
+            style={{ backgroundColor, pointerEvents: 'none' }}
         >
             {showMesh && (
                 <div
@@ -221,9 +335,7 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
                         swirl={tuning.meshSwirl}
                         grainMixer={0}
                         grainOverlay={0.01}
-                        speed={staticMode
-                            ? 0
-                            : resolveLatentShaderSpeed(tuning.meshSpeed, tuning.meshAudioSpeed, 0, paused)}
+                        speed={staticMode ? 0 : tuning.meshSpeed}
                         minPixelRatio={1}
                         maxPixelCount={MAX_SHADER_PIXELS}
                         webGlContextAttributes={PAPER_SHADER_CONTEXT_ATTRIBUTES}
@@ -251,9 +363,7 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
                         shape="warp"
                         type="4x4"
                         size={tuning.ditheringSize}
-                        speed={staticMode
-                            ? 0
-                            : resolveLatentShaderSpeed(tuning.ditheringSpeed, tuning.ditheringAudioSpeed, 0, paused)}
+                        speed={staticMode ? 0 : tuning.ditheringSpeed}
                         minPixelRatio={1}
                         maxPixelCount={MAX_SHADER_PIXELS}
                         webGlContextAttributes={PAPER_SHADER_CONTEXT_ATTRIBUTES}
@@ -265,7 +375,7 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
                 <div
                     className="absolute inset-0"
                     style={{
-                        backgroundColor: theme.backgroundColor,
+                        backgroundColor,
                         opacity: tuning.overlayOpacity,
                     }}
                 />

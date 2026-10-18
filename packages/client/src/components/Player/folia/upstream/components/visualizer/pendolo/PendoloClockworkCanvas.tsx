@@ -237,6 +237,7 @@ const PendoloClockworkCanvas: React.FC<PendoloClockworkCanvasProps> = ({
                 phase: motion.phase,
                 bassOscillation: motion.bassOscillation,
                 secondGearAngle: motion.secondGearAngle,
+                transBeatAngle: motion.transBeatAngle,
                 primaryTextColor: p.primaryTextColor,
                 accentTextColor: p.accentTextColor,
                 backgroundColor: p.backgroundColor || '#000000',

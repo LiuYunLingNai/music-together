@@ -3,7 +3,7 @@ import type { AudioBands, SonnetTuning, Theme } from '../../../types';
 import type { SonnetProgram } from './types';
 import { findSonnetParagraphIndexAtTime } from './sonnetProgram';
 import { buildSonnetScene, type SceneView } from './sonnetSceneBuilder';
-import { snapResolutionToTexturePool } from '../pixiTextureBudget';
+import { snapResolutionToTexturePool } from '../pixi/pixiTextureBudget';
 import {
     destroySonnetContainerChildren,
     destroySonnetDisplayTree,
@@ -14,7 +14,9 @@ import {
     hasSonnetCreditsMetadata,
     resolveSonnetCreditsFrame,
 } from './sonnetCredits';
-import { loadPixi } from '../loadPixi';
+import { loadPixi } from '../pixi/loadPixi';
+import { linkPixiPrograms } from '../pixi/pixiProgramLinks';
+import { makePixiContext } from '../pixi/pixiWebGLContext';
 import { PixiSceneCache } from '../pixiSceneCache';
 import { sonnetDebugState } from './sonnetDebug';
 import { readSonnetModulation, type SonnetShotFrameContext, updateSonnetShot } from './sonnetShotFrame';
@@ -134,20 +136,30 @@ export class SonnetPixiRuntime {
 
     static async create(options: SonnetRuntimeOptions) {
         const pixi = await loadPixi();
+        // 上游注释：The options the WebGL context is made with, ahead of Pixi (makePixiContext).
+        const contextOptions = {
+            backgroundAlpha: 0,
+            // 上游注释：With post-processing the scene is drawn into the filter's own multisampled target and
+            // the canvas only gets the filtered picture and the frame marks: its 4-sample buffers
+            // would cost about 190 MB of video memory for those. The marks' edges are then not
+            // smoothed. postProcessEnabled is part of the host's rebuild key, so the switch applies.
+            antialias: !options.tuning.postProcessEnabled,
+            powerPreference: 'high-performance',
+        } as const;
+        const context = await makePixiContext(pixi, contextOptions, options.signal);
         const app = new pixi.Application();
         const width = Math.max(options.host.clientWidth, 320);
         const height = Math.max(options.host.clientHeight, 240);
         await app.init({
             width,
             height,
-            backgroundAlpha: 0,
-            antialias: true,
+            ...contextOptions,
+            ...context,
             autoDensity: true,
             resolution: snapResolutionToTexturePool(width, height, options.tuning.textureResolution),
             autoStart: false,
             sharedTicker: false,
             preference: 'webgl',
-            powerPreference: 'high-performance',
         });
         const runtime = new SonnetPixiRuntime(pixi, options, app);
         runtime.sceneContainer = new pixi.Container();
@@ -160,26 +172,40 @@ export class SonnetPixiRuntime {
             runtime.destroy();
             throw new DOMException('Sonnet runtime creation was cancelled', 'AbortError');
         }
-        options.host.appendChild(app.canvas);
-        app.canvas.style.cssText = 'width:100%;height:100%;display:block';
         await runtime.preloadIcons();
         if (options.signal?.aborted) {
             runtime.destroy();
             throw new DOMException('Sonnet runtime creation was cancelled', 'AbortError');
         }
-        runtime.install();
+        await runtime.install();
+        if (options.signal?.aborted) {
+            runtime.destroy();
+            throw new DOMException('Sonnet runtime creation was cancelled', 'AbortError');
+        }
         return runtime;
     }
 
-    private install() {
+    /**
+     * 上游注释：The first frame, in steps the page runs between: the first scene is built in a task of its own,
+     * its shader programs are linked while the page goes on (linkPixiPrograms), and only then does the
+     * canvas go on the page, drawn. Returns early when the creation is cancelled meanwhile.
+     */
+    private async install() {
+        await new Promise((resolve) => { window.setTimeout(resolve); });
+        if (this.options.signal?.aborted) return;
         this.resizeToHost();
+        this.renderFrame();
+        await linkPixiPrograms(this.pixi, this.app.renderer, this.app.stage, 'Sonnet', this.options.signal);
+        if (this.options.signal?.aborted) return;
+        this.options.host.appendChild(this.app.canvas);
+        this.app.canvas.style.cssText = 'width:100%;height:100%;display:block';
         this.app.ticker.add(this.renderFrame);
         this.resizeObserver = new ResizeObserver(() => {
             if (this.destroyed || !this.resizeToHost()) return;
             if (this.options.paused) this.renderOnce();
         });
         this.resizeObserver.observe(this.options.host);
-        this.renderOnce();
+        this.app.renderer.render(this.app.stage);
         if (!this.options.paused) this.app.start();
     }
 
@@ -601,7 +627,8 @@ export class SonnetPixiRuntime {
     /**
      * Applies a settings change to the live runtime. Every scene is rebuilt against the new
      * tuning, but the WebGL context, the canvas and the icon textures stay; the settings that
-     * shape those (`textureResolution`, `showOnlyText`, `showBackgroundDecor`) are part of the
+     * shape those (`textureResolution`, `showOnlyText`, `showBackgroundDecor`, and
+     * `postProcessEnabled` for the canvas's antialiasing) are part of the
      * host's rebuild key instead.
      */
     setTuning(tuning: SonnetTuning) {

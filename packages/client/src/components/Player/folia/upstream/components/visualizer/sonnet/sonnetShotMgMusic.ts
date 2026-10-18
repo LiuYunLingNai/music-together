@@ -67,7 +67,8 @@ const drawEqualizerBloom = ({ target, radius, seed, primary, secondary }: Additi
 };
 
 // 71: five eighth notes stepping along an arc, joined by one open beam.
-const drawNoteArc = ({ target, radius, primary, secondary }: AdditionalSonnetMgOptions) => {
+const drawNoteArc = ({ target, radius, seed, primary, secondary }: AdditionalSonnetMgOptions) => {
+    void seed;
     const headR = radius * 0.045;
     const points: { x: number; y: number }[] = [];
     for (let i = 0; i < 5; i += 1) {
@@ -122,7 +123,8 @@ const drawTuningFork = ({ target, radius, seed, primary, secondary }: Additional
 };
 
 // 73: piano keys riding a shallow ribbon curve — alternating long/short bars.
-const drawPianoRibbon = ({ target, radius, width, height, primary, secondary }: AdditionalSonnetMgOptions) => {
+const drawPianoRibbon = ({ target, radius, width, height, seed, primary, secondary }: AdditionalSonnetMgOptions) => {
+    void seed;
     const bleed = resolveSonnetShotMgBleed(width, height, radius);
     // Ribbon guide curve, open at both ends.
     target.moveTo(-bleed.x, radius * 0.18)

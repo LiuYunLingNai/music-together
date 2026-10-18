@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- 上游用 any 承接 pixi.js 动态挂载的字段/回调；逐处改写类型会偏离上游，故整文件放行。 */
 import type { Theme } from '../../../types';
 import type { SonnetShotKind } from './types';
 import {
@@ -38,10 +39,6 @@ type PixiModule = typeof import('pixi.js');
 const colorNumber = (pixi: PixiModule, color: string) => pixi.Color.shared.setValue(color).toNumber();
 const normalizeAudioLevel = (value: number) => Math.min(1, Math.max(0, value > 1 ? value / 255 : value));
 
-export type SonnetMgContainer = import('pixi.js').Container & {
- bg?: AnimatedGraphics; bgLayer?: import('pixi.js').Container; geo?: AnimatedGraphics; geoLayer?: import('pixi.js').Container; fixedGeoParts?: AnimatedGraphics[]; fixedGeoLayer?: import('pixi.js').Container; particleLayer?: import('pixi.js').Container; decorVariant?: ReturnType<typeof resolveSonnetBackgroundDecorVariant>;
- updateTime?: (time: number, cues: import('./types').SonnetAnimationCue[], start: number, end: number, bass?: number, power?: number, vocal?: number) => void;
-};
 export const buildSonnetShotMg = (
     pixi: PixiModule,
     kind: SonnetShotKind,
@@ -52,14 +49,14 @@ export const buildSonnetShotMg = (
     iconTextures: Map<string, import('pixi.js').Texture>,
 ) => {
     const { Container } = pixi;
-    const container = new Container() as SonnetMgContainer;
+    const container = new Container();
     const primary = colorNumber(pixi, theme.primaryColor);
     const secondary = colorNumber(pixi, theme.secondaryColor);
     const radius = Math.min(width, height);
-
+    
     // Background UI layer
     const bg = new AnimatedGraphics(pixi);
-
+    
     // --- Component: HUD Overlays (seeded background MG variant) ---
     const hw = width / 2;
     const hh = height / 2;
@@ -81,9 +78,9 @@ export const buildSonnetShotMg = (
         // Massive overlapping geometries
         geo = new AnimatedGraphics(pixi);
         if (!geo) throw new Error('Unreachable');
-
+        
         const geoVariant = resolveSonnetGeoVariant(seed);
-
+        
         if (geoVariant === 0) {
             // Variant 0: Huge circular frame with sunburst
             geo!.circle(0, 0, radius * 0.6).stroke({ color: primary, width: 6, alpha: 0.8 });
@@ -124,7 +121,7 @@ export const buildSonnetShotMg = (
         } else if (geoVariant === 3) {
             // Variant 3: Organic Molecules
             const molVariant = resolveSonnetMoleculeVariant(seed);
-
+            
             if (molVariant === 0) {
                 // Sub-variant 0: Benzene Cluster
                 const hexR = radius * 0.22;
@@ -135,7 +132,7 @@ export const buildSonnetShotMg = (
                         geo!.lineTo(cx + r*Math.sin(j*Math.PI/3 + rotationOffset), cy - r*Math.cos(j*Math.PI/3 + rotationOffset));
                     }
                     geo!.stroke({color: primary, width: 3, alpha: 0.8});
-
+                    
                     // Double bonds
                     for(let j=0; j<6; j+=2) {
                         const innerR = r * 0.82;
@@ -144,18 +141,18 @@ export const buildSonnetShotMg = (
                            .stroke({color: primary, width: 2, alpha: 0.5});
                     }
                 };
-
+                
                 const rMain = hexR * 1.2;
                 drawBenzene(0, 0, 1.2); // Central ring
-
+                
                 // Right fused ring
                 const dx = Math.sin(Math.PI/3) * rMain * 2;
-                drawBenzene(dx, 0, 1.2);
-
+                drawBenzene(dx, 0, 1.2); 
+                
                 // Left-top fused ring
                 const branchDist = Math.sin(Math.PI/3) * rMain * 2;
                 drawBenzene(-Math.sin(Math.PI/6) * branchDist, -Math.cos(Math.PI/6) * branchDist, 1.2);
-
+                
                 // Connecting structural line
                 geo!.moveTo(0, rMain)
                    .lineTo(0, rMain + radius * 0.2)
@@ -167,14 +164,14 @@ export const buildSonnetShotMg = (
                 geo!.moveTo(0, -hexR);
                 for(let j=1; j<=6; j++) geo!.lineTo(hexR*Math.sin(j*Math.PI/3), -hexR*Math.cos(j*Math.PI/3));
                 geo!.stroke({color: primary, width: 3, alpha: 0.8});
-
+                
                 geo!.moveTo(hexR*0.8*Math.sin(Math.PI/3), -hexR*0.8*Math.cos(Math.PI/3))
                    .lineTo(hexR*0.8*Math.sin(2*Math.PI/3), -hexR*0.8*Math.cos(2*Math.PI/3))
                    .stroke({color: primary, width: 2, alpha: 0.5});
                 geo!.moveTo(hexR*0.8*Math.sin(4*Math.PI/3), -hexR*0.8*Math.cos(4*Math.PI/3))
                    .lineTo(hexR*0.8*Math.sin(5*Math.PI/3), -hexR*0.8*Math.cos(5*Math.PI/3))
                    .stroke({color: primary, width: 2, alpha: 0.5});
-
+                   
                 const px1 = hexR * Math.sqrt(3)/2;
                 const py1 = -hexR/2;
                 const px2 = hexR * Math.sqrt(3)/2;
@@ -185,29 +182,29 @@ export const buildSonnetShotMg = (
                 const pentMidY = 0;
                 const pentBotX = px2 + hexR*0.8;
                 const pentBotY = py2 + hexR*0.1;
-
+                
                 geo!.moveTo(px1, py1).lineTo(pentTopX, pentTopY).lineTo(pentMidX, pentMidY)
                    .lineTo(pentBotX, pentBotY).lineTo(px2, py2).stroke({color: primary, width: 3, alpha: 0.8});
-
+                   
                 const drawBranch = (sx: number, sy: number, angle: number, len: number, node: boolean) => {
                     const ex = sx + Math.cos(angle)*len;
                     const ey = sy + Math.sin(angle)*len;
                     geo!.moveTo(sx, sy).lineTo(ex, ey).stroke({color: primary, width: 2, alpha: 0.6});
                     if (node) geo!.circle(ex, ey, 6).stroke({color: primary, width: 2, alpha: 0.8});
                 };
-
-                drawBranch(0, -hexR, -Math.PI/2, radius*0.15, true);
-                drawBranch(-hexR*Math.sqrt(3)/2, hexR/2, Math.PI*0.8, radius*0.2, true);
+                
+                drawBranch(0, -hexR, -Math.PI/2, radius*0.15, true); 
+                drawBranch(-hexR*Math.sqrt(3)/2, hexR/2, Math.PI*0.8, radius*0.2, true); 
                 drawBranch(-hexR*Math.sqrt(3)/2, -hexR/2, -Math.PI*0.8, radius*0.15, false);
-                drawBranch(pentMidX, pentMidY, 0, radius*0.18, false);
-                drawBranch(pentMidX + radius*0.18, pentMidY, Math.PI/4, radius*0.1, true);
+                drawBranch(pentMidX, pentMidY, 0, radius*0.18, false); 
+                drawBranch(pentMidX + radius*0.18, pentMidY, Math.PI/4, radius*0.1, true); 
             } else {
                 // Sub-variant 2: Linear Polymer Chain (Zig-Zag backbone with functional groups)
                 const segLen = radius * 0.18;
                 const steps = 7;
                 const startX = -segLen * (steps/2) * Math.cos(Math.PI/6);
                 const pts: {x: number, y: number}[] = [];
-
+                
                 let cx = startX;
                 let cy = 0;
                 pts.push({x: cx, y: cy});
@@ -216,18 +213,18 @@ export const buildSonnetShotMg = (
                     cy = (i % 2 === 0 ? 1 : -1) * segLen * Math.sin(Math.PI/6);
                     pts.push({x: cx, y: cy});
                 }
-
+                
                 geo!.moveTo(pts[0].x, pts[0].y);
                 for(let i=1; i<=steps; i++) geo!.lineTo(pts[i].x, pts[i].y);
                 geo!.stroke({color: primary, width: 3, alpha: 0.8});
-
+                
                 // Offset normal for double bond
                 const nx = -Math.sin(Math.PI/6) * 6;
                 const ny = Math.cos(Math.PI/6) * 6;
                 geo!.moveTo(pts[1].x + nx, pts[1].y + ny)
                    .lineTo(pts[2].x + nx, pts[2].y + ny)
                    .stroke({color: primary, width: 2, alpha: 0.5});
-
+                
                 for(let i=1; i<steps; i++) {
                     const angle = i % 2 === 0 ? Math.PI/2 : -Math.PI/2;
                     const bx = pts[i].x;
@@ -271,7 +268,7 @@ export const buildSonnetShotMg = (
             const ringRx = radius * 0.6;
             const ringRy = radius * 0.15;
             const angle = Math.PI / 6; // 30 degrees tilt
-
+            
             const drawTiltedEllipse = (rx: number, ry: number, w: number, a: number, segments = 60) => {
                 for(let j=0; j<=segments; j++) {
                     const t = j * Math.PI * 2 / segments;
@@ -279,17 +276,17 @@ export const buildSonnetShotMg = (
                     const ey = Math.sin(t) * ry;
                     const rotX = ex * Math.cos(angle) - ey * Math.sin(angle);
                     const rotY = ex * Math.sin(angle) + ey * Math.cos(angle);
-
+                    
                     if(j===0) geo!.moveTo(rotX, rotY);
                     else geo!.lineTo(rotX, rotY);
                 }
                 geo!.stroke({color: primary, width: w, alpha: a});
             }
-
+            
             drawTiltedEllipse(ringRx, ringRy, 4, 0.5);
             drawTiltedEllipse(ringRx * 1.1, ringRy * 1.15, 1, 0.3);
             drawTiltedEllipse(ringRx * 1.25, ringRy * 1.3, 2, 0.2);
-
+            
             // Distant orbit path
             geo!.circle(0, 0, radius * 0.7).stroke({ color: primary, width: 1, alpha: 0.2 });
             geo!.circle(Math.cos(Math.PI/4) * radius * 0.7, Math.sin(Math.PI/4) * radius * 0.7, 8).fill({ color: primary, alpha: 0.6 });
@@ -299,13 +296,13 @@ export const buildSonnetShotMg = (
             const w = bleed.x * 1.08;
             const h = radius * 0.8;
             const baseY = radius * 0.2;
-
+            
             // Draw a sun/moon in background
             geo!.circle(0, baseY - h * 0.6, radius * 0.3).stroke({ color: primary, width: 2, alpha: 0.4 });
             for (let i = 0; i < 5; i++) {
                 geo!.moveTo(-bleed.x, baseY - h * 0.6 + i * 15).lineTo(bleed.x, baseY - h * 0.6 + i * 15).stroke({ color: primary, width: 1, alpha: 0.3 });
             }
-
+            
             // Draw mountain peaks (layered polygons)
             const peaks = 7;
             for (let layer = 0; layer < 3; layer++) {
@@ -320,16 +317,16 @@ export const buildSonnetShotMg = (
                 geo!.lineTo(layerW / 2, baseY);
                 geo!.stroke({ color: primary, width: 3 - layer, alpha: 0.6 - layer * 0.15 });
             }
-
+            
             // Base line
             geo!.moveTo(-w, baseY).lineTo(w, baseY).stroke({ color: primary, width: 4, alpha: 0.8 });
-
+            
             // Grid floor
             for (let i = 0; i < 5; i++) {
                 const gridY = baseY + Math.pow(i, 1.5) * 12;
                 geo!.moveTo(-w, gridY).lineTo(w, gridY).stroke({ color: primary, width: 1, alpha: 0.4 - i * 0.08 });
             }
-
+            
             // Perspective lines
             for (let i = -4; i <= 4; i++) {
                 geo!.moveTo(i * radius * 0.2, baseY).lineTo(i * bleed.x * 0.32, bleed.y).stroke({ color: primary, width: 1, alpha: 0.3 });
@@ -343,14 +340,14 @@ export const buildSonnetShotMg = (
             // Crosshairs
             geo!.moveTo(-radius * 0.9, 0).lineTo(radius * 0.9, 0).stroke({ color: primary, width: 1, alpha: 0.4 });
             geo!.moveTo(0, -radius * 0.9).lineTo(0, radius * 0.9).stroke({ color: primary, width: 1, alpha: 0.4 });
-
+            
             // Radar sweep arc
             geo!.moveTo(0, 0);
             geo!.arc(0, 0, radius * 0.75, 0, Math.PI / 4);
             geo!.lineTo(0, 0);
             geo!.fill({ color: primary, alpha: 0.1 });
             geo!.stroke({ color: primary, width: 2, alpha: 0.5 });
-
+            
             // Outer tick marks
             const rOuter = radius * 0.8;
             for (let i = 0; i < 72; i++) {
@@ -360,7 +357,7 @@ export const buildSonnetShotMg = (
                    .lineTo(Math.cos(angle) * (rOuter + len), Math.sin(angle) * (rOuter + len))
                    .stroke({ color: primary, width: 1, alpha: 0.4 });
             }
-
+            
             // Floating target lock
             const lockAngle = (seed % 360) * Math.PI / 180;
             const lockR = radius * 0.45;
@@ -373,7 +370,7 @@ export const buildSonnetShotMg = (
             // Variant 8: Technical HUD Decorative Frame
             const fw = radius * 0.85;
             const fh = radius * 0.65;
-
+            
             // Corner brackets
             const bracketSize = radius * 0.15;
             const drawBracket = (cx: number, cy: number, sx: number, sy: number) => {
@@ -391,18 +388,18 @@ export const buildSonnetShotMg = (
             drawBracket(fw, -fh, 1, -1);
             drawBracket(-fw, fh, -1, 1);
             drawBracket(fw, fh, 1, 1);
-
+            
             // Rulers
             for (let i = -fw + 20; i < fw - 20; i += 20) {
                 geo!.moveTo(i, -fh).lineTo(i, -fh - (i % 60 === 0 ? 12 : 6)).stroke({ color: primary, width: 1, alpha: 0.5 });
                 geo!.moveTo(i, fh).lineTo(i, fh + (i % 60 === 0 ? 12 : 6)).stroke({ color: primary, width: 1, alpha: 0.5 });
             }
-
+            
             // Center target reticle
             geo!.circle(0, 0, radius * 0.1).stroke({ color: primary, width: 2, alpha: 0.4 });
             geo!.moveTo(-radius * 0.15, 0).lineTo(radius * 0.15, 0).stroke({ color: primary, width: 1, alpha: 0.4 });
             geo!.moveTo(0, -radius * 0.15).lineTo(0, radius * 0.15).stroke({ color: primary, width: 1, alpha: 0.4 });
-
+            
             // Data blocks
             geo!.rect(-fw, -fh + 20, 10, 40).fill({ color: primary, alpha: 0.5 });
             geo!.rect(-fw, -fh + 65, 10, 15).fill({ color: primary, alpha: 0.3 });
@@ -412,7 +409,7 @@ export const buildSonnetShotMg = (
             const drawCube = (cx: number, cy: number, size: number, alpha: number) => {
                 const dy = size * 0.5; // Isometric projection roughly
                 const dx = size * 0.866; // sqrt(3)/2
-
+                
                 // Top face
                 geo!.moveTo(cx, cy - size)
                    .lineTo(cx + dx, cy - dy)
@@ -421,7 +418,7 @@ export const buildSonnetShotMg = (
                    .lineTo(cx, cy - size)
                    .fill({ color: primary, alpha: alpha * 0.15 })
                    .stroke({ color: primary, width: 2, alpha: alpha * 0.8 });
-
+                   
                 // Right face
                 geo!.moveTo(cx, cy)
                    .lineTo(cx + dx, cy - dy)
@@ -430,7 +427,7 @@ export const buildSonnetShotMg = (
                    .lineTo(cx, cy)
                    .fill({ color: primary, alpha: alpha * 0.3 })
                    .stroke({ color: primary, width: 2, alpha: alpha * 0.8 });
-
+                   
                 // Left face
                 geo!.moveTo(cx, cy)
                    .lineTo(cx - dx, cy - dy)
@@ -440,12 +437,12 @@ export const buildSonnetShotMg = (
                    .fill({ color: primary, alpha: alpha * 0.05 })
                    .stroke({ color: primary, width: 2, alpha: alpha * 0.8 });
             };
-
+            
             drawCube(0, 0, radius * 0.35, 0.8);
             drawCube(radius * 0.4, -radius * 0.15, radius * 0.2, 0.5);
             drawCube(-radius * 0.45, radius * 0.25, radius * 0.25, 0.6);
             drawCube(0, radius * 0.45, radius * 0.15, 0.4);
-
+            
             // Background connection lines
             geo!.moveTo(0, 0).lineTo(radius * 0.4, -radius * 0.15).stroke({ color: primary, width: 1, alpha: 0.3 });
             geo!.moveTo(0, 0).lineTo(-radius * 0.45, radius * 0.25).stroke({ color: primary, width: 1, alpha: 0.3 });
@@ -453,19 +450,19 @@ export const buildSonnetShotMg = (
             // Variant 10: Constellation Network
             geo!.circle(0, 0, radius * 0.75).stroke({ color: primary, width: 1, alpha: 0.2 });
             geo!.circle(0, 0, radius * 0.73).stroke({ color: primary, width: 2, alpha: 0.1 });
-
+            
             const nodes: {x: number, y: number}[] = [];
             for (let i = 0; i < 18; i++) {
                 const r = radius * (0.1 + ((seed * 17 + i * 23) % 65) / 100);
                 const angle = ((seed * 11 + i * 37) % 360) * Math.PI / 180;
                 nodes.push({ x: Math.cos(angle) * r, y: Math.sin(angle) * r });
             }
-
+            
             // Draw nodes and connect nearby nodes
             for (let i = 0; i < nodes.length; i++) {
                 geo!.circle(nodes[i].x, nodes[i].y, 3).fill({ color: primary, alpha: 0.7 });
                 geo!.circle(nodes[i].x, nodes[i].y, 6).stroke({ color: primary, width: 1, alpha: 0.3 });
-
+                
                 for (let j = i + 1; j < nodes.length; j++) {
                     const dist = Math.hypot(nodes[i].x - nodes[j].x, nodes[i].y - nodes[j].y);
                     if (dist < radius * 0.45) {
@@ -485,22 +482,22 @@ export const buildSonnetShotMg = (
             // Inner arc to create crescent
             geo!.quadraticCurveTo(-moonR * 0.4, 0, 0, -moonR);
             geo!.fill({ color: primary, alpha: 0.8 });
-
+            
             // Draw a full moon wireframe behind it
             geo!.circle(0, 0, moonR).stroke({ color: primary, width: 1, alpha: 0.3 });
-
+            
             // Draw lunar phase orbit
             const orbitR = radius * 0.65;
             geo!.circle(0, 0, orbitR).stroke({ color: primary, width: 1, alpha: 0.2 });
-
+            
             // Draw mini moons (phases)
             for(let i = 0; i < 8; i++) {
                 const angle = (i / 8) * Math.PI * 2 - Math.PI/2;
                 const mx = Math.cos(angle) * orbitR;
                 const my = Math.sin(angle) * orbitR;
-
+                
                 geo!.circle(mx, my, 8).stroke({ color: primary, width: 1, alpha: 0.5 });
-
+                
                 if (i === 0) { // New Moon
                     // empty
                 } else if (i === 4) { // Full Moon
@@ -509,7 +506,7 @@ export const buildSonnetShotMg = (
                     geo!.moveTo(mx, my - 6).arc(mx, my, 6, -Math.PI/2, Math.PI/2, i > 4).lineTo(mx, my - 6).fill({ color: primary, alpha: 0.5 });
                 }
             }
-
+            
             // Some geometric stars
             const drawStar = (sx: number, sy: number, sr: number) => {
                 geo!.moveTo(sx, sy - sr).lineTo(sx + sr*0.2, sy - sr*0.2)
@@ -529,24 +526,24 @@ export const buildSonnetShotMg = (
                 const endX = cx + Math.cos(angle) * length;
                 const endY = cy + Math.sin(angle) * length;
                 const ctrlDist = length * 0.5;
-
+                
                 // Left curve
                 const lca = angle - width;
                 const c1x = cx + Math.cos(lca) * ctrlDist;
                 const c1y = cy + Math.sin(lca) * ctrlDist;
-
+                
                 // Right curve
                 const rca = angle + width;
                 const c2x = cx + Math.cos(rca) * ctrlDist;
                 const c2y = cy + Math.sin(rca) * ctrlDist;
-
+                
                 geo!.moveTo(cx, cy);
                 geo!.quadraticCurveTo(c1x, c1y, endX, endY);
                 geo!.quadraticCurveTo(c2x, c2y, cx, cy);
                 geo!.stroke({ color: primary, width: 1, alpha: alpha });
                 if(alpha > 0.5) geo!.fill({ color: primary, alpha: alpha * 0.2 });
             };
-
+            
             // Multi-layered lotus
             for(let layer = 0; layer < 4; layer++) {
                 const petals = 8 + layer * 4;
@@ -558,11 +555,11 @@ export const buildSonnetShotMg = (
                     drawPetal(angle, currentLen, currentWidth, 0.8 - layer * 0.15);
                 }
             }
-
+            
             // Central stamen
             geo!.circle(0, 0, radius * 0.08).stroke({ color: primary, width: 2, alpha: 0.8 });
             geo!.circle(0, 0, radius * 0.03).fill({ color: primary, alpha: 0.9 });
-
+            
             // Geometric stems/vines looping around
             const stemR = radius * 0.65;
             for(let i = 0; i < 3; i++) {
@@ -573,7 +570,7 @@ export const buildSonnetShotMg = (
                     Math.cos(startAngle + 2) * stemR * 0.8, Math.sin(startAngle + 2) * stemR * 0.8,
                     Math.cos(startAngle + 3) * stemR, Math.sin(startAngle + 3) * stemR
                 ).stroke({ color: primary, width: 1, alpha: 0.4 });
-
+                
                 // Add some leaf nodes on the vines
                 const lx = Math.cos(startAngle + 1.5) * stemR * 1.05;
                 const ly = Math.sin(startAngle + 1.5) * stemR * 1.05;
@@ -585,10 +582,10 @@ export const buildSonnetShotMg = (
             const drawIntersectingCircle = (cx: number, cy: number, alpha: number) => {
                 geo!.circle(cx, cy, soflR).stroke({ color: primary, width: 1.5, alpha });
             };
-
+            
             // Center circle (stronger)
             drawIntersectingCircle(0, 0, 0.35);
-
+            
             // 6 surrounding circles
             for(let i = 0; i < 6; i++) {
                 const angle = (i / 6) * Math.PI * 2;
@@ -596,7 +593,7 @@ export const buildSonnetShotMg = (
                 const cy = Math.sin(angle) * soflR;
                 drawIntersectingCircle(cx, cy, 0.2); // Mid opacity
             }
-
+            
             // 12 outer circles for next layer
             for(let i = 0; i < 12; i++) {
                 const angle = (i / 12) * Math.PI * 2;
@@ -606,11 +603,11 @@ export const buildSonnetShotMg = (
                 const cy = Math.sin(angle) * dist;
                 geo!.circle(cx, cy, soflR).stroke({ color: secondary, width: 1, alpha: 0.1 }); // Recessive secondary color
             }
-
+            
             // Bounding circles
             geo!.circle(0, 0, soflR * 3).stroke({ color: primary, width: 1.5, alpha: 0.2 });
             geo!.circle(0, 0, soflR * 3.1).stroke({ color: secondary, width: 1, alpha: 0.08 });
-
+            
             // Radial connection lines (barely visible to avoid spiderweb feel)
             for(let i = 0; i < 12; i++) {
                 const angle = (i / 12) * Math.PI * 2;
@@ -656,7 +653,7 @@ export const buildSonnetShotMg = (
         }
 
         // Randomized Geometric Composition moved to sonnetTextViewBuilder so they accompany text
-
+        
         // Selectively apply deterministic rotation based on variant compatibility
         const keepsUpright = [6, 8, 9, 14, 15, 16, 17, 20, 22, 23].includes(geoVariant)
             || geoVariant >= SONNET_THEMED_GEO_VARIANT_START;
@@ -667,7 +664,7 @@ export const buildSonnetShotMg = (
             // HUD frames rotate in 90-degree increments
             geo!.rotation = resolveSonnetHudRotationQuarterTurns(seed) * (Math.PI / 2);
         }
-
+        
         container.addChild(geo!.display);
 
         // Fixed geometry stays upright while the camera moves, so it can be toggled independently
@@ -707,15 +704,15 @@ export const buildSonnetShotMg = (
             ).fill({ color: primary, alpha: 0.4 });
         }
     }
-
-    container.bg = bg;
-    container.bgLayer = bg.display;
+    
+    (container as any).bg = bg;
+    (container as any).bgLayer = bg.display;
     if (geo) {
-        container.geo = geo;
-        container.geoLayer = geo.display;
+        (container as any).geo = geo;
+        (container as any).geoLayer = geo.display;
     }
-    container.fixedGeoParts = fixedGeoParts;
-    container.fixedGeoLayer = fixedGeoLayer;
+    (container as any).fixedGeoParts = fixedGeoParts;
+    (container as any).fixedGeoLayer = fixedGeoLayer;
 
     container.addChild(bg.display);
 
@@ -739,10 +736,10 @@ export const buildSonnetShotMg = (
     });
 
     container.addChild(particleLayer);
-    container.particleLayer = particleLayer;
-    container.decorVariant = resolveSonnetBackgroundDecorVariant(seed);
+    (container as any).particleLayer = particleLayer;
+    (container as any).decorVariant = resolveSonnetBackgroundDecorVariant(seed);
 
-    container.updateTime = (
+    (container as any).updateTime = (
         time: number,
         cues: import('./types').SonnetAnimationCue[],
         startTime: number,
@@ -753,7 +750,7 @@ export const buildSonnetShotMg = (
     ) => {
         // Continuous bezier curve animation (ease-out cubic), ignoring rhythm cues for jumping,
         // but spanning the progress across the actual duration of the lyrics in this shot.
-
+        
         let targetFinishTime = endTime;
         if (cues.length > 0) {
             // Previously this just used cues[cues.length - 1].at, but if the last word is a long held note,
@@ -767,16 +764,16 @@ export const buildSonnetShotMg = (
         } else {
             targetFinishTime = startTime + (endTime - startTime) * 0.95;
         }
-
+        
         targetFinishTime = Math.min(endTime, targetFinishTime);
-
+        
         const drawDuration = Math.max(1.0, targetFinishTime - startTime);
         const rawProgress = Math.min(1, Math.max(0, (time - startTime) / drawDuration));
-
+        
         // Pass rawProgress down; AnimatedGraphics handles its own local easing
         // to prevent staggered elements from having their curves truncated
-
-        const c = container;
+        
+        const c = container as any;
         if (c.geo) c.geo.update(rawProgress);
         if (c.bg) c.bg.update(rawProgress);
         if (c.fixedGeoParts) {

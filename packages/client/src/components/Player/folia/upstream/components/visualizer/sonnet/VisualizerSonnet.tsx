@@ -5,7 +5,7 @@ import type { Line } from '../../../types';
 import { resolveThemeFontStack, resolveThemeFontWeight } from '../../../utils/fontStacks';
 import { getLineRenderEndTime } from '../../../utils/lyrics/renderHints';
 import type { VisualizerSharedProps } from '../definition';
-import { useVisualizerPixiHost } from '../pixiRuntimeHost';
+import { useVisualizerPixiHost } from '../pixi/pixiRuntimeHost';
 import { useVisualizerRuntime } from '../runtime';
 import { useVisualizerSongCommit } from '../songHandover';
 import VisualizerShell from '../VisualizerShell';
@@ -20,7 +20,8 @@ import { compileSonnetProgram } from './sonnetProgram';
 // src/components/visualizer/sonnet/VisualizerSonnet.tsx
 // Mounts the lazily loaded Pixi director while React retains shell and subtitle responsibilities.
 const EMPTY_SONNET_LINES: Line[] = [];
-const NEUTRAL_MODULATION: Readonly<Record<string, number>> = Object.freeze({});
+/** 上游的 `useFoliumTunings('sonnet')`；本项目没有 mod 运行时，恒为空表。 */
+const EMPTY_MODULATION: Readonly<Record<string, number>> = Object.freeze({});
 
 const VisualizerSonnet: React.FC<VisualizerSharedProps> = (props) => {
     const {
@@ -55,7 +56,8 @@ const VisualizerSonnet: React.FC<VisualizerSharedProps> = (props) => {
     // Mod-driven per-frame multipliers (K3Panel etc.). Read once per render; the
     // runtime hot-swaps them via setModulation so the Pixi context is never rebuilt.
     // Keys are the Folium tunables declared in ./entry.tsx.
-    const modulation = NEUTRAL_MODULATION;
+    // 本项目没有 Folium mod 运行时，调制值恒为空（各键回落到 identity 1）。
+    const modulation: Readonly<Record<string, number>> = EMPTY_MODULATION;
     const hostRef = useRef<HTMLDivElement>(null);
     const pausedRef = useRef(paused);
     pausedRef.current = paused;
@@ -126,12 +128,14 @@ const VisualizerSonnet: React.FC<VisualizerSharedProps> = (props) => {
         label: 'Sonnet',
         // Only inputs that genuinely need a new WebGL context. The song is handed to the live
         // runtime instead - see SonnetPixiRuntime.swapSong.
-        // Of the tuning, only what shapes the canvas or the icon textures; the rest goes through
-        // setTuning, which rebuilds the scenes on the live context.
+        // Of the tuning, only what shapes the canvas or the icon textures (post-processing decides
+        // whether the canvas is antialiased); the rest goes through setTuning, which rebuilds the
+        // scenes on the live context.
         rebuildKey: [
             currentTime,
             lyricsFontScale,
             sonnetTuning.textureResolution,
+            sonnetTuning.postProcessEnabled,
             sonnetTuning.showOnlyText,
             sonnetTuning.showBackgroundDecor,
             staticMode,
@@ -174,23 +178,23 @@ const VisualizerSonnet: React.FC<VisualizerSharedProps> = (props) => {
 
     useEffect(() => {
         runtimeRef.current?.setSongMetadata(latestSongMetadataRef.current);
-    }, [songAlbum, songArtist, songTitle, runtimeRef]);
+    }, [songAlbum, songArtist, songTitle]);
 
     useEffect(() => {
         runtimeRef.current?.setPaused(paused);
-    }, [paused, runtimeRef]);
+    }, [paused]);
 
     useEffect(() => {
         runtimeRef.current?.setTuning(sonnetTuning);
-    }, [sonnetTuning, runtimeRef]);
+    }, [sonnetTuning]);
 
     useEffect(() => {
         runtimeRef.current?.setModulation(modulation);
-    }, [modulation, runtimeRef]);
+    }, [modulation]);
 
     useEffect(() => currentTime.on('change', () => {
         if (paused) runtimeRef.current?.renderOnce();
-    }), [currentTime, paused, runtimeRef]);
+    }), [currentTime, paused]);
 
     const fallbackFontFamily = resolveThemeFontStack(theme);
     const fallbackFontWeight = resolveThemeFontWeight(theme, 600);
@@ -218,7 +222,7 @@ const VisualizerSonnet: React.FC<VisualizerSharedProps> = (props) => {
                             fontSize: `clamp(2rem, ${5.4 * lyricsFontScale}vw, 5.6rem)`,
                         }}
                     >
-                        {showText && !isInstrumental ? (activeLine?.fullText || (props.showWaitingPlaceholder === false ? null : t('ui.waitingForMusic'))) : null}
+                        {showText && !isInstrumental ? (activeLine?.fullText || t('ui.waitingForMusic')) : null}
                     </div>
                 )}
             </div>

@@ -1,33 +1,23 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- 上游用 any 承接 pixi.js 动态挂载的字段/回调；逐处改写类型会偏离上游，故整文件放行。 */
 // src/components/visualizer/sonnet/sonnetAnimatedGraphics.ts
 // Records Graphics commands so strokes/fills can grow with the shared stagger
 // schedule during playback instead of appearing fully drawn at scene build.
-import type { FillStyle, StrokeStyle, Graphics } from 'pixi.js';
-type PathPart =
- | { type: 'moveTo'; x: number; y: number }
- | { type: 'rect_hint'; x: number; y: number; w: number; h: number }
- | { type: 'lineTo'; x: number; y: number; len: number; lastX: number; lastY: number }
- | { type: 'circle'; x: number; y: number; r: number; len: number }
- | { type: 'arc'; cx: number; cy: number; r: number; start: number; end: number; anticlockwise: boolean; len: number; diff: number }
- | { type: 'quadraticCurveTo'; cx: number; cy: number; tx: number; ty: number; len: number; lastX: number; lastY: number }
- | { type: 'bezierCurveTo'; c1x: number; c1y: number; c2x: number; c2y: number; tx: number; ty: number; len: number; lastX: number; lastY: number };
-type DrawCommand = { path: PathPart[]; length: number; staggerDelay: number; staggerSpan: number } & ({ type: 'fill'; options: FillStyle } | { type: 'stroke'; options: StrokeStyle });
-
 type PixiModule = typeof import('pixi.js');
 
 // Whether replaying `cmd` starts a fresh polygon: fills always lead with moveTo(0, 0), strokes only when
 // their recorded path does. Anything else continues from the previous command's end point.
-const opensOwnPath = (cmd: DrawCommand) => {
+const opensOwnPath = (cmd: any) => {
     if (cmd.type === 'fill') return true;
     if (cmd.length <= 0) return false;
-    const first = cmd.path.find((p: PathPart) => p.type !== 'rect_hint');
+    const first = cmd.path.find((p: any) => p.type !== 'rect_hint');
     return first?.type === 'moveTo';
 };
 
 export class AnimatedGraphics {
     public display: import('pixi.js').Graphics;
 
-    private commands: DrawCommand[] = [];
-    private currentPath: PathPart[] = [];
+    private commands: any[] = [];
+    private currentPath: any[] = [];
     private currentLength = 0;
     private lastX = 0;
     private lastY = 0;
@@ -44,7 +34,7 @@ export class AnimatedGraphics {
     set rotation(v: number) { this.display.rotation = v; }
 
     get mask() { return this.display.mask; }
-    set mask(v: Graphics["mask"]) { this.display.mask = v; }
+    set mask(v: any) { this.display.mask = v; }
 
     moveTo(x: number, y: number) {
         this.currentPath.push({ type: 'moveTo', x, y });
@@ -115,18 +105,18 @@ export class AnimatedGraphics {
         return this;
     }
 
-    stroke(options: StrokeStyle) {
+    stroke(options: any) {
         if (this.currentPath.length > 0) {
-            this.commands.push({ type: 'stroke', path: [...this.currentPath], length: this.currentLength, staggerDelay: 0, staggerSpan: 1, options });
+            this.commands.push({ type: 'stroke', path: [...this.currentPath], length: this.currentLength, options });
             this.currentPath = [];
             this.currentLength = 0;
         }
         return this;
     }
 
-    fill(options: FillStyle) {
+    fill(options: any) {
         if (this.currentPath.length > 0) {
-            this.commands.push({ type: 'fill', path: [...this.currentPath], length: this.currentLength, options, staggerDelay: 0, staggerSpan: 1 });
+            this.commands.push({ type: 'fill', path: [...this.currentPath], length: this.currentLength, options });
             this.currentPath = [];
             this.currentLength = 0;
         }
@@ -158,7 +148,7 @@ export class AnimatedGraphics {
     update(rawProgress: number) {
         // Every command's local window sits inside 0..1, so any progress outside it draws the
         // same thing as the nearest end. Once a shot has fully drawn in, re-tessellating the
-        // identical geometry every frame is pure waste.
+        // identical geometry every frame is pure waste. Recording another command makes it stale.
         const key = Math.min(1, Math.max(0, rawProgress));
         if (key === this.drawnProgress && this.commands.length === this.drawnCommandCount) return;
         this.drawnProgress = key;

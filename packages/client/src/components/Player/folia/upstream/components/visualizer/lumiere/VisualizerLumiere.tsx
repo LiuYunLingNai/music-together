@@ -7,7 +7,7 @@ import { loadLucideIcons } from '../../../services/lucideIconResolver';
 import { resolveThemeFontStack, resolveThemeFontWeight } from '../../../utils/fontStacks';
 import { getLineRenderEndTime } from '../../../utils/lyrics/renderHints';
 import type { VisualizerSharedProps } from '../definition';
-import { useVisualizerPixiHost } from '../pixiRuntimeHost';
+import { useVisualizerPixiHost } from '../pixi/pixiRuntimeHost';
 import { useVisualizerRuntime } from '../runtime';
 import { useVisualizerSongCommit } from '../songHandover';
 import { resolveSubtitleFontSizes } from '../subtitleFontSizes';
@@ -187,7 +187,7 @@ const VisualizerLumiere: React.FC<VisualizerSharedProps> = (props) => {
                             fontSize: `clamp(2rem, ${5.4 * lyricsFontScale}vw, 5.6rem)`,
                         }}
                     >
-                        {showText && !committedSong.isInstrumental ? (activeLine?.fullText || (props.showWaitingPlaceholder === false ? null : t('ui.waitingForMusic'))) : null}
+                        {showText && !committedSong.isInstrumental ? (activeLine?.fullText || t('ui.waitingForMusic')) : null}
                     </div>
                 )}
             </div>

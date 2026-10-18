@@ -59,9 +59,15 @@ const VisualizerPendolo: React.FC<VisualizerSharedProps> = (props) => {
         onLyricLineSeek,
         lyricsFontScale = 1,
         subtitleTheme,
+        subtitleOverlayOpacity,
+        subtitleOverlayBackground,
         subtitleFontScale,
+        isPlayerChromeHidden = false,
         hideTranslationSubtitle = false,
     } = props;
+    void subtitleOverlayOpacity;
+    void subtitleOverlayBackground;
+    void isPlayerChromeHidden;
 
     const [viewportSize, setViewportSize] = useState({
         width: typeof window !== 'undefined' ? window.innerWidth : 1920,
@@ -411,7 +417,7 @@ const VisualizerPendolo: React.FC<VisualizerSharedProps> = (props) => {
             lyricRadiusOffset,
             lineBlockHeights,
         );
-    }, [lineBlockHeights, lines, targetLineIndex, viewportSize, pendoloTuning, lyricRadiusOffset]);
+    }, [lineBlockHeights, lines, targetLineIndex, viewportSize, pendoloTuning]);
 
     const primaryTextColor = theme.primaryColor || '#FFFFFF';
     const accentTextColor = theme.accentColor || '#3B82F6';

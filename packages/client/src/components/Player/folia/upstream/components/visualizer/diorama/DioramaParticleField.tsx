@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+/* eslint-disable react-hooks/refs -- 上游用「懒初始化 ref」持有 GPU 材质（必须恰好存在一份）；这是 React 文档给这类资源写的用法，改成 useState 会偏离上游。 */
+import React, { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { type MotionValue } from 'motion/react';
 import * as THREE from 'three';
@@ -206,8 +207,14 @@ export const DioramaParticleField: React.FC<DioramaParticleFieldProps> = ({
     // the glow intensity is pushed by the effect below. Lazy refs, not useMemo: useMemo is a cache React
     // is explicitly allowed to discard and rebuild, and these own GPU resources - "must exist exactly
     // once" is a lifetime, not a performance hint. This is React's own documented pattern for it.
-    const [material] = useState(() => createDioramaParticleMaterial(targetColors));
-    const [glowMaterial] = useState(() => createDioramaParticleGlowMaterial(targetColors, particleGlowIntensity));
+    const materialRef = useRef<ReturnType<typeof createDioramaParticleMaterial> | null>(null);
+    if (materialRef.current === null) materialRef.current = createDioramaParticleMaterial(targetColors);
+    const material = materialRef.current;
+    const glowMaterialRef = useRef<ReturnType<typeof createDioramaParticleGlowMaterial> | null>(null);
+    if (glowMaterialRef.current === null) {
+        glowMaterialRef.current = createDioramaParticleGlowMaterial(targetColors, particleGlowIntensity);
+    }
+    const glowMaterial = glowMaterialRef.current;
     // One valley/peak tracker per band. These are what keep a steady beat reading as a beat for the whole
     // song instead of fading into the background - see stepDioramaBandTracker.
     const trackersRef = useRef(RIPPLE_BANDS.map(() => createDioramaBandTracker()));
@@ -227,9 +234,8 @@ export const DioramaParticleField: React.FC<DioramaParticleFieldProps> = ({
         glowMaterial.dispose();
     }, [glowMaterial, material]);
 
-    const glowResourceRef = useRef(glowMaterial);
     useEffect(() => {
-        glowResourceRef.current.uniforms.uGlow.value = particleGlowIntensity;
+        glowMaterial.uniforms.uGlow.value = particleGlowIntensity;
     }, [glowMaterial, particleGlowIntensity]);
 
     useEffect(() => {

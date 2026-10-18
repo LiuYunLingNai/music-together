@@ -154,7 +154,7 @@ const DioramaScene: React.FC<DioramaSceneProps> = ({
     // tints it), glow material/mesh (additive cadenza glow raster - 普通辉光), and soul material/mesh
     // (additive crisp ghost copy that drifts out - 灵魂出窍).
     const unitsGroupRef = useRef<THREE.Group>(null);
-    const unitPlanesRef = useRef<DioramaUnitPlanes>({ baseMats: [], glowMats: [], glowMeshes: [], soulMats: [], soulMeshes: [] });
+    const unitPlanesRef = useRef<DioramaUnitPlanes>({ baseMats: [], glowMats: [], glowMeshes: [], soulMats: [], soulMeshes: [], unitGroups: [] });
     // Per-unit smoothed values (one slot per unit): lightVals drive the glow (fast release), soulVals
     // the ghost (slow release so it lingers and drifts after the word finishes). Both reset on a line
     // change via prevActiveGlobalRef. 渐变跟唱 keeps no state here - it is a pure function of the clock.
@@ -504,6 +504,7 @@ const DioramaScene: React.FC<DioramaSceneProps> = ({
             planes.glowMeshes.length = activeLineUnits.length;
             planes.soulMats.length = activeLineUnits.length;
             planes.soulMeshes.length = activeLineUnits.length;
+            planes.unitGroups.length = activeLineUnits.length;
         }
         if (unitsGroup && activeUnitsRaster && activeEntry && activeLine) {
             const fit = resolveFrameFitScale(activeUnitsRaster.lineWidth, DIORAMA_HERO_DISTANCE, fov, aspect)
