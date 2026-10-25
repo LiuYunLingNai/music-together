@@ -19,8 +19,10 @@ import type {
   VoteState,
   RoomAutoFallbackEvent,
   GlobalBackgroundSettings,
+  LocalQqAccount,
   NeteaseRoamingMode,
   RoamingSource,
+  SavedAccountSummary,
 } from './types.js'
 
 /** 服务端 → 客户端 事件接口 */
@@ -77,7 +79,15 @@ export interface ServerToClientEvents {
   [EVENTS.VOTE_RESULT]: (data: { passed: boolean; action: VoteAction; reason?: string }) => void
 
   // Auth
-  [EVENTS.AUTH_QR_GENERATED]: (data: { key: string; qrimg: string }) => void
+  [EVENTS.AUTH_QR_GENERATED]: (data: {
+    key: string
+    qrimg: string
+    /**
+     * 该平台已保存的账号（仅展示信息）。
+     * 凭据本身绝不出现在事件载荷里 —— 只用于在弹窗中提供「继续使用」入口。
+     */
+    savedAccount?: SavedAccountSummary
+  }) => void
   [EVENTS.AUTH_QR_STATUS]: (data: { status: number; message: string; key?: string }) => void
   [EVENTS.AUTH_SET_COOKIE_RESULT]: (data: {
     success: boolean
@@ -91,6 +101,27 @@ export interface ServerToClientEvents {
   [EVENTS.AUTH_STATUS_UPDATE]: (data: PlatformAuthStatus[]) => void
   [EVENTS.AUTH_MY_STATUS]: (data: MyPlatformAuth[]) => void
   [EVENTS.AUTH_CLAIM_KUGOU_CONCEPT_VIP_RESULT]: (data: { success: boolean; message: string }) => void
+  [EVENTS.AUTH_QUICK_LOGIN_RESULT]: (data: {
+    success: boolean
+    message: string
+    platform?: MusicSource
+    nickname?: string
+    avatarUrl?: string
+    reason?: 'not_found' | 'reauth_required' | 'error'
+  }) => void
+  /** 服务端所在机器上已登录的 QQ 客户端账号（仅同机访问时才有内容）。 */
+  [EVENTS.AUTH_LOCAL_QQ_ACCOUNTS]: (data: {
+    available: boolean
+    accounts: LocalQqAccount[]
+    message?: string
+  }) => void
+  [EVENTS.AUTH_LOCAL_QQ_LOGIN_RESULT]: (data: {
+    success: boolean
+    message: string
+    nickname?: string
+    avatarUrl?: string
+    reason?: 'not_found' | 'reauth_required' | 'error'
+  }) => void
 
   // Playlist
   [EVENTS.PLAYLIST_MY_LIST]: (data: { platform: MusicSource; playlists: Playlist[] }) => void
@@ -155,6 +186,12 @@ export interface ClientToServerEvents {
   [EVENTS.AUTH_LOGOUT]: (data: { platform: MusicSource }) => void
   [EVENTS.AUTH_GET_STATUS]: () => void
   [EVENTS.AUTH_CLAIM_KUGOU_CONCEPT_VIP]: () => void
+  /** 使用服务端已保存的账号直接登录。 */
+  [EVENTS.AUTH_QUICK_LOGIN]: (data: { platform: MusicSource }) => void
+  /** 探测服务端所在机器上已登录的 QQ 客户端账号。 */
+  [EVENTS.AUTH_LOCAL_QQ_PROBE]: () => void
+  /** 使用本机 QQ 客户端的某个账号完成一键登录。 */
+  [EVENTS.AUTH_LOCAL_QQ_LOGIN]: (data: { uin: string }) => void
 
   // Playlist
   [EVENTS.PLAYLIST_GET_MY]: (data: { platform: MusicSource }) => void

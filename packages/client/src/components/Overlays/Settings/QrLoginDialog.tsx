@@ -1,9 +1,12 @@
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Separator } from '@/components/ui/separator'
 import { PLATFORM_LABELS } from '@/lib/platform'
-import type { MusicSource } from '@music-together/shared'
+import type { LocalQqAccount, MusicSource, SavedAccountSummary } from '@music-together/shared'
 import { QR_STATUS, QR_TIMING } from '@music-together/shared'
-import { Loader2, RefreshCw, CheckCircle2, AlertCircle, Smartphone } from 'lucide-react'
+import { Loader2, RefreshCw, CheckCircle2, AlertCircle, Smartphone, Zap } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 
 interface QrLoginDialogProps {
@@ -15,6 +18,15 @@ interface QrLoginDialogProps {
   isLoading: boolean
   onRefresh: () => void
   onCheckStatus: (key: string) => void
+  // 快捷登录（已保存账号）
+  savedAccount?: SavedAccountSummary | null
+  isQuickLoggingIn?: boolean
+  onQuickLogin?: (platform: MusicSource) => void
+  // 本机 QQ 一键登录（仅 tencent 平台、同机访问时有内容）
+  localQqAccounts?: LocalQqAccount[]
+  localQqAvailable?: boolean
+  isLocalQqLoggingIn?: boolean
+  onLoginLocalQq?: (uin: string) => void
 }
 
 export function QrLoginDialog({
@@ -26,6 +38,13 @@ export function QrLoginDialog({
   isLoading,
   onRefresh,
   onCheckStatus,
+  savedAccount,
+  isQuickLoggingIn = false,
+  onQuickLogin,
+  localQqAccounts = [],
+  localQqAvailable = false,
+  isLocalQqLoggingIn = false,
+  onLoginLocalQq,
 }: QrLoginDialogProps) {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const pollPendingAtRef = useRef<number>(0)
@@ -88,18 +107,95 @@ export function QrLoginDialog({
   }, [qrStatus?.status])
 
   const statusCode = qrStatus?.status ?? 0
+  const hasQuickOptions = Boolean(savedAccount) || (platform === 'tencent' && localQqAvailable)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle>{label}扫码登录</DialogTitle>
-          <DialogDescription>使用{scanApp}扫描二维码登录</DialogDescription>
+          <DialogTitle>{label}账号登录</DialogTitle>
+          <DialogDescription>
+            使用{scanApp}扫码，或选择下方已保存 / 本机账号快捷登录
+          </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col items-center gap-4 py-4">
+        <div className="flex flex-col gap-4 py-4">
+          {/* 快捷登录：已保存账号 */}
+          {savedAccount && (
+            <div className="flex items-center gap-3 rounded-lg border p-3">
+              <Avatar size="lg">
+                {savedAccount.avatarUrl ? (
+                  <AvatarImage src={savedAccount.avatarUrl} alt={savedAccount.nickname} />
+                ) : null}
+                <AvatarFallback>{savedAccount.nickname.slice(0, 1)}</AvatarFallback>
+              </Avatar>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="truncate font-medium">{savedAccount.nickname}</span>
+                  {savedAccount.vipLabel ? (
+                    <Badge variant="secondary" className="shrink-0">
+                      {savedAccount.vipLabel}
+                    </Badge>
+                  ) : null}
+                </div>
+                <p className="text-muted-foreground truncate text-xs">已保存的账号，可一键继续登录</p>
+              </div>
+              <Button
+                size="sm"
+                className="gap-1.5"
+                disabled={isQuickLoggingIn}
+                onClick={() => onQuickLogin?.(platform)}
+              >
+                {isQuickLoggingIn ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Zap className="h-3.5 w-3.5" />
+                )}
+                继续使用
+              </Button>
+            </div>
+          )}
+
+          {/* 本机 QQ 一键登录（仅 tencent + 同机访问） */}
+          {platform === 'tencent' && localQqAvailable && (
+            <div className="space-y-2">
+              <p className="text-muted-foreground text-xs">本机 QQ 已登录，点击即可一键登录：</p>
+              {localQqAccounts.length > 0 ? (
+                <div className="flex flex-col gap-2">
+                  {localQqAccounts.map((acc) => (
+                    <button
+                      key={acc.uin}
+                      type="button"
+                      disabled={isLocalQqLoggingIn}
+                      onClick={() => onLoginLocalQq?.(acc.uin)}
+                      className="flex items-center gap-3 rounded-lg border p-2.5 text-left transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <Avatar size="default">
+                        <AvatarImage src={acc.avatarUrl} alt={acc.nickname} />
+                        <AvatarFallback>{acc.nickname.slice(0, 1)}</AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{acc.nickname}</p>
+                        <p className="text-muted-foreground truncate text-xs">{acc.uin}</p>
+                      </div>
+                      {isLocalQqLoggingIn ? (
+                        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
+                      ) : (
+                        <Zap className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-muted-foreground text-xs">未检测到本机已登录的 QQ 客户端，请改用扫码登录。</p>
+              )}
+            </div>
+          )}
+
+          {hasQuickOptions && <Separator />}
+
           {/* QR Code */}
-          <div className="relative flex h-52 w-52 items-center justify-center rounded-lg border bg-white">
+          <div className="relative flex h-52 w-52 items-center justify-center self-center rounded-lg border bg-white">
             {isLoading && <Loader2 className="text-muted-foreground h-8 w-8 animate-spin" />}
             {!isLoading && qrData?.qrimg && (
               <>
@@ -127,7 +223,7 @@ export function QrLoginDialog({
           </div>
 
           {/* Status message */}
-          <div className="flex items-center gap-2 text-sm">
+          <div className="flex items-center justify-center gap-2 text-sm">
             {statusCode === QR_STATUS.WAITING_SCAN && (
               <>
                 <Smartphone className="text-muted-foreground h-4 w-4" />
@@ -156,7 +252,7 @@ export function QrLoginDialog({
 
           {/* Refresh button */}
           {(statusCode === QR_STATUS.EXPIRED || (!qrData && !isLoading)) && (
-            <Button variant="outline" size="sm" onClick={onRefresh} className="gap-1.5">
+            <Button variant="outline" size="sm" onClick={onRefresh} className="gap-1.5 self-center">
               <RefreshCw className="h-3.5 w-3.5" />
               重新获取二维码
             </Button>

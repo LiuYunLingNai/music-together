@@ -39,16 +39,20 @@ export function ManualCookieDialog({ open, onOpenChange, platform, onSubmit }: M
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>手动输入 Cookie — {PLATFORM_LABELS[platform]}</DialogTitle>
-          <DialogDescription>从浏览器中复制 Cookie 并粘贴到下方。</DialogDescription>
+          <DialogDescription>从浏览器中复制 Cookie 字符串粘贴到下方，也可直接粘贴「Copy as cURL」命令。</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3 py-2">
           <textarea
             className="border-input bg-background placeholder:text-muted-foreground focus-visible:ring-ring h-32 w-full resize-none rounded-md border px-3 py-2 text-sm focus-visible:ring-1 focus-visible:outline-none"
-            placeholder="粘贴 Cookie 字符串..."
+            placeholder="粘贴 Cookie 字符串，或直接粘贴浏览器「复制为 cURL」(Copy as cURL) 命令..."
             value={cookie}
             onChange={(e) => setCookie(e.target.value)}
           />
+
+          <p className="text-muted-foreground text-xs">
+            提示：在开发者工具的 Network 面板中右键任意请求 →「Copy as cURL」(复制为 cURL)，直接粘贴整段命令即可，系统会自动提取其中的 Cookie。
+          </p>
 
           <div className="text-muted-foreground space-y-1.5 text-xs">
             <p className="font-medium">如何获取 Cookie：</p>

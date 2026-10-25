@@ -1,11 +1,14 @@
 import { EVENTS, QR_STATUS } from '@music-together/shared'
-import type { MusicSource } from '@music-together/shared'
+import type { MusicSource, SavedAccountSummary } from '@music-together/shared'
 import * as authService from '../services/authService.js'
 import { AUTH_PROVIDERS } from '../services/authProvider.js'
 import * as kugouAuth from '../services/kugouAuthService.js'
 import * as tencentAuth from '../services/tencentAuthService.js'
+import * as localQqLogin from '../services/localQqLoginService.js'
+import { platformAuthRepo } from '../repositories/platformAuthRepository.js'
 import { roomRepo } from '../repositories/roomRepository.js'
 import { logger } from '../utils/logger.js'
+import { normalizeCookieInput } from '../utils/cookieUtils.js'
 import type { TypedServer, TypedSocket } from '../middleware/types.js'
 import { checkAuthRateLimit } from '../middleware/socketRateLimiter.js'
 import * as roomService from '../services/roomService.js'
@@ -20,6 +23,47 @@ const QR_PLATFORMS = new Set<MusicSource>(['netease', 'kugou', 'kugou_concept', 
 
 /** 支持 Cookie 登录的平台集合 */
 const VALID_PLATFORMS = new Set<MusicSource>(['netease', 'tencent', 'kugou', 'kugou_concept', 'bilibili'])
+
+/**
+ * 判断某个对端地址是否与**服务端所在机器**相同。
+ *
+ * 「本机 QQ 一键登录」读取的是服务端所在机器上运行的 QQ 客户端，
+ * 只有访问者也在同一台机器上时，探测结果才等于「访问者自己的在线 QQ」。
+ * 远端访问拿到的是服务端的账号列表，对访问者毫无意义，还会泄露服务端机器的账号信息，
+ * 因此这个判定是安全边界而非体验优化。
+ *
+ * 判定覆盖 IPv4 回环（127.0.0.0/8）、IPv6 回环（::1）、
+ * IPv4-mapped 回环（::ffff:127.0.0.1）以及主机名 `localhost`。
+ */
+export function isSameMachineAddress(address: string | undefined): boolean {
+  if (!address) return false
+  const normalized = address.trim().toLowerCase()
+  if (!normalized) return false
+  if (normalized === 'localhost') return true
+  // IPv4-mapped IPv6（::ffff:127.0.0.1）先还原成 IPv4 再判断
+  const ipv4 = normalized.startsWith('::ffff:') ? normalized.slice('::ffff:'.length) : normalized
+  if (ipv4 === '::1') return true
+  const match = ipv4.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+  if (!match) return false
+  const [a, b] = [Number(match[1]), Number(match[2])]
+  if (a !== 127) return false
+  if (b < 0 || b > 255) return false
+  return true
+}
+
+/** 读取该用户在该平台已保存账号的展示摘要（不含任何凭据） */
+function getSavedAccountSummary(userId: string, platform: MusicSource): SavedAccountSummary | null {
+  const entry = platformAuthRepo.loadUser(userId).find((item) => item.platform === platform)
+  if (!entry) return null
+  return {
+    platform,
+    nickname: entry.nickname,
+    avatarUrl: entry.avatarUrl,
+    vipType: entry.vipType,
+    vipLabel: entry.vipLabel,
+    vipLevel: entry.vipLevel,
+  }
+}
 
 export function registerAuthController(io: TypedServer, socket: TypedSocket) {
   // 防止同一 QR 会话重复处理 803 成功状态
@@ -69,7 +113,11 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
       }
 
       activeQr = { key: result.key, platform, authorization }
-      socket.emit(EVENTS.AUTH_QR_GENERATED, { key: result.key, qrimg: result.qrimg })
+      // 附带已保存账号的展示信息，让弹窗能直接提供「继续使用该账号」的入口。
+      // 只下发昵称/头像/会员等展示字段，凭据绝不出现在事件载荷里。
+      const mapping = authorization.mapping
+      const savedAccount = mapping ? getSavedAccountSummary(mapping.userId, platform) : null
+      socket.emit(EVENTS.AUTH_QR_GENERATED, { key: result.key, qrimg: result.qrimg, savedAccount: savedAccount ?? undefined })
     } catch (err) {
       logger.error('AUTH_REQUEST_QR error', err, { socketId: socket.id })
       if (requestVersion !== qrRequestVersion) return
@@ -225,6 +273,236 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
   })
 
   // -------------------------------------------------------------------------
+  // 快捷登录：直接使用服务端已保存的账号，无需重新扫码
+  // -------------------------------------------------------------------------
+
+  socket.on(EVENTS.AUTH_QUICK_LOGIN, async (data) => {
+    if (!(await checkAuthRateLimit(socket))) return
+    try {
+      const platform = data?.platform as MusicSource
+      if (!platform || !VALID_PLATFORMS.has(platform)) {
+        socket.emit(EVENTS.AUTH_QUICK_LOGIN_RESULT, {
+          success: false,
+          message: '参数不完整',
+          reason: 'error',
+        })
+        return
+      }
+
+      const mapping = getSocketMapping(socket.id)
+      if (!mapping) {
+        socket.emit(EVENTS.AUTH_QUICK_LOGIN_RESULT, {
+          success: false,
+          message: '请先进入房间',
+          reason: 'error',
+        })
+        return
+      }
+
+      const saved = platformAuthRepo.loadUser(mapping.userId).find((entry) => entry.platform === platform)
+      if (!saved) {
+        socket.emit(EVENTS.AUTH_QUICK_LOGIN_RESULT, {
+          success: false,
+          message: '没有已保存的账号，请先扫码登录',
+          platform,
+          reason: 'not_found',
+        })
+        return
+      }
+
+      const authorization = captureAuthorization(platform)
+      const provider = AUTH_PROVIDERS[platform]
+
+      // 校验保存的凭据是否仍然有效
+      let infoResult = await provider.getUserInfo(saved.cookie)
+      if (!infoResult.ok && infoResult.reason === 'error') {
+        await new Promise((resolve) => setTimeout(resolve, 1_000))
+        infoResult = await provider.getUserInfo(saved.cookie)
+      }
+
+      if (!authorization.current()) return
+
+      if (!infoResult.ok) {
+        // 记录保留，用户可以扫码覆盖，而不是静默丢失账号
+        socket.emit(EVENTS.AUTH_QUICK_LOGIN_RESULT, {
+          success: false,
+          message: infoResult.reason === 'expired' ? '登录状态已过期，请重新扫码登录' : '登录状态校验失败，请重新扫码登录',
+          platform,
+          nickname: saved.nickname,
+          avatarUrl: saved.avatarUrl,
+          reason: 'reauth_required',
+        })
+        return
+      }
+
+      const userInfo = infoResult.data
+      authService.addCookie(
+        mapping.roomId,
+        platform,
+        mapping.userId,
+        saved.cookie,
+        userInfo.nickname || saved.nickname,
+        userInfo.vipType,
+        true,
+        { vipLabel: userInfo.vipLabel, vipLevel: userInfo.vipLevel },
+        userInfo.avatarUrl ?? saved.avatarUrl,
+      )
+      broadcastAuthStatus(io, socket, mapping)
+
+      socket.emit(EVENTS.AUTH_QUICK_LOGIN_RESULT, {
+        success: true,
+        message: `已登录为 ${userInfo.nickname || saved.nickname}`,
+        platform,
+        nickname: userInfo.nickname || saved.nickname,
+        avatarUrl: userInfo.avatarUrl ?? saved.avatarUrl,
+      })
+      logger.info(`${platform} 快捷登录成功：${userInfo.nickname || saved.nickname}`, {
+        event: 'auth.quick_login_succeeded',
+        platform,
+      })
+    } catch (err) {
+      logger.error('AUTH_QUICK_LOGIN error', err, { socketId: socket.id })
+      socket.emit(EVENTS.AUTH_QUICK_LOGIN_RESULT, {
+        success: false,
+        message: '快捷登录失败，请重试',
+        reason: 'error',
+      })
+    }
+  })
+
+  // -------------------------------------------------------------------------
+  // 本机 QQ 一键登录：使用服务端所在机器上已登录的 QQ 客户端
+  // 仅同机访问时可用 —— 详见 isSameMachineAddress 的说明
+  // -------------------------------------------------------------------------
+
+  socket.on(EVENTS.AUTH_LOCAL_QQ_PROBE, async () => {
+    if (!(await checkAuthRateLimit(socket))) return
+    try {
+      if (!isSameMachineAddress(socket.handshake?.remoteAddress)) {
+        socket.emit(EVENTS.AUTH_LOCAL_QQ_ACCOUNTS, {
+          available: false,
+          accounts: [],
+          message: '本机一键登录仅在服务端所在电脑上可用',
+        })
+        return
+      }
+
+      const probe = await localQqLogin.listLocalAccounts()
+      socket.emit(EVENTS.AUTH_LOCAL_QQ_ACCOUNTS, {
+        available: probe.available,
+        accounts: probe.accounts.map((account) => ({
+          uin: account.uin,
+          nickname: account.nickname,
+          avatarUrl: account.avatarUrl,
+        })),
+        message: probe.message,
+      })
+    } catch (err) {
+      logger.error('AUTH_LOCAL_QQ_PROBE error', err, { socketId: socket.id })
+      socket.emit(EVENTS.AUTH_LOCAL_QQ_ACCOUNTS, {
+        available: false,
+        accounts: [],
+        message: '本机 QQ 探测失败',
+      })
+    }
+  })
+
+  socket.on(EVENTS.AUTH_LOCAL_QQ_LOGIN, async (data) => {
+    if (!(await checkAuthRateLimit(socket))) return
+    try {
+      if (!isSameMachineAddress(socket.handshake?.remoteAddress)) {
+        socket.emit(EVENTS.AUTH_LOCAL_QQ_LOGIN_RESULT, {
+          success: false,
+          message: '本机一键登录仅在服务端所在电脑上可用',
+          reason: 'error',
+        })
+        return
+      }
+
+      const uin = typeof data?.uin === 'string' ? data.uin.trim() : ''
+      if (!/^\d{5,12}$/.test(uin)) {
+        socket.emit(EVENTS.AUTH_LOCAL_QQ_LOGIN_RESULT, {
+          success: false,
+          message: '账号标识无效',
+          reason: 'error',
+        })
+        return
+      }
+
+      const mapping = getSocketMapping(socket.id)
+      if (!mapping) {
+        socket.emit(EVENTS.AUTH_LOCAL_QQ_LOGIN_RESULT, {
+          success: false,
+          message: '请先进入房间',
+          reason: 'error',
+        })
+        return
+      }
+
+      const authorization = captureAuthorization('tencent')
+      const credential = await localQqLogin.loginWithLocalAccount(uin)
+      if (!credential) {
+        socket.emit(EVENTS.AUTH_LOCAL_QQ_LOGIN_RESULT, {
+          success: false,
+          message: '本机 QQ 登录失败，请确认客户端已登录或改用扫码',
+          reason: 'reauth_required',
+        })
+        return
+      }
+
+      if (!authorization.current()) return
+
+      const provider = AUTH_PROVIDERS.tencent
+      let infoResult = await provider.getUserInfo(credential)
+      if (!infoResult.ok && infoResult.reason === 'error') {
+        await new Promise((resolve) => setTimeout(resolve, 1_000))
+        infoResult = await provider.getUserInfo(credential)
+      }
+
+      if (!infoResult.ok) {
+        socket.emit(EVENTS.AUTH_LOCAL_QQ_LOGIN_RESULT, {
+          success: false,
+          message: '本机 QQ 登录成功但无法获取用户信息',
+          reason: 'reauth_required',
+        })
+        return
+      }
+
+      const userInfo = infoResult.data
+      authService.addCookie(
+        mapping.roomId,
+        'tencent',
+        mapping.userId,
+        credential,
+        userInfo.nickname,
+        userInfo.vipType,
+        true,
+        { vipLabel: userInfo.vipLabel, vipLevel: userInfo.vipLevel },
+        userInfo.avatarUrl,
+      )
+      broadcastAuthStatus(io, socket, mapping)
+
+      socket.emit(EVENTS.AUTH_LOCAL_QQ_LOGIN_RESULT, {
+        success: true,
+        message: `已登录为 ${userInfo.nickname}`,
+        nickname: userInfo.nickname,
+        avatarUrl: userInfo.avatarUrl,
+      })
+      logger.info(`本机 QQ 一键登录成功：${userInfo.nickname}`, {
+        event: 'auth.local_qq_succeeded',
+        uin,
+      })
+    } catch (err) {
+      logger.error('AUTH_LOCAL_QQ_LOGIN error', err, { socketId: socket.id })
+      socket.emit(EVENTS.AUTH_LOCAL_QQ_LOGIN_RESULT, {
+        success: false,
+        message: '本机 QQ 登录失败，请重试',
+        reason: 'error',
+      })
+    }
+  })
+
+  // -------------------------------------------------------------------------
   // 手动 Cookie 登录（同时用于 localStorage 自动恢复）
   // 策略模式：所有平台统一流程 — getUserInfo → 重试 → 成功/失败处理
   // -------------------------------------------------------------------------
@@ -246,7 +524,17 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
         return
       }
 
-      const { cookie } = data
+      // 用户常常直接粘贴 DevTools 的「Copy as cURL」结果或带 `Cookie:` 前缀，
+      // 这里统一归一化成纯 Cookie 串再往下走。
+      const cookie = normalizeCookieInput(data.cookie)
+      if (!cookie) {
+        socket.emit(EVENTS.AUTH_SET_COOKIE_RESULT, {
+          success: false,
+          message: 'Cookie 为空',
+        })
+        return
+      }
+
       const platform = data.platform as MusicSource
       const authorization = captureAuthorization(platform)
       const mapping = authorization.mapping
@@ -277,11 +565,55 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
       }
 
       if (platform === 'tencent' && !tencentAuth.isRefreshableCredential(cookie)) {
+        // 手机浏览器登录只能拿到 qm_keyst：这类会话凭证可以播放，但无法自动续期。
+        // 归一化后接受它，并明确告知用户需要重新扫码才能恢复自动续期。
+        const sessionCookie = tencentAuth.buildSessionCredentialCookie(cookie)
+        if (!sessionCookie || !tencentAuth.isSessionCredential(sessionCookie)) {
+          socket.emit(EVENTS.AUTH_SET_COOKIE_RESULT, {
+            success: false,
+            message: 'QQ 音乐登录凭证已升级，请重新扫码登录',
+            platform,
+            reason: 'reauth_required',
+          })
+          if (mapping) broadcastAuthStatus(io, socket, mapping)
+          return
+        }
+
+        const sessionAuthorization = captureAuthorization(platform)
+        const sessionInfo = await AUTH_PROVIDERS.tencent.getUserInfo(sessionCookie)
+        if (!sessionAuthorization.current()) return
+
+        if (!sessionInfo.ok) {
+          socket.emit(EVENTS.AUTH_SET_COOKIE_RESULT, {
+            success: false,
+            message: '登录凭证验证失败，请重新扫码登录',
+            platform,
+            reason: sessionInfo.reason === 'expired' ? 'expired' : 'error',
+          })
+          if (mapping) broadcastAuthStatus(io, socket, mapping)
+          return
+        }
+
+        if (mapping && mapping.roomId) {
+          authService.addCookie(
+            mapping.roomId,
+            platform,
+            mapping.userId,
+            sessionCookie,
+            sessionInfo.data.nickname,
+            sessionInfo.data.vipType,
+            data.persist !== false,
+            { vipLabel: sessionInfo.data.vipLabel, vipLevel: sessionInfo.data.vipLevel },
+            sessionInfo.data.avatarUrl,
+          )
+        }
         socket.emit(EVENTS.AUTH_SET_COOKIE_RESULT, {
-          success: false,
-          message: 'QQ 音乐登录凭证已升级，请重新扫码登录',
+          success: true,
+          message: `已登录为 ${sessionInfo.data.nickname}（该凭证无法自动续期，失效后需重新扫码）`,
           platform,
-          reason: 'reauth_required',
+          cookie: sessionCookie,
+          nickname: sessionInfo.data.nickname,
+          avatarUrl: sessionInfo.data.avatarUrl,
         })
         if (mapping) broadcastAuthStatus(io, socket, mapping)
         return

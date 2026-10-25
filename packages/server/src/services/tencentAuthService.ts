@@ -206,6 +206,70 @@ export function buildTencentCredentialCookie(previousCookie: string, data: Music
     .join('; ')
 }
 
+/**
+ * Build a playback-only credential from a browser session cookie.
+ *
+ * 手机浏览器登录 y.qq.com 后，DevTools 里只能看到 `uin` 与可读的 `qm_keyst`，
+ * 拿不到 `refresh_token` / `refresh_key`。这类 Cookie 足以播放，但无法自动续期。
+ *
+ * 这里把散落的字段归一化成服务端统一识别的形态，并保留其余无关 Cookie
+ * （部分 QQ 接口依赖 `_qpsvr_localtk` 之类的字段）。
+ *
+ * @returns 归一化后的 Cookie；缺少可用的 uin 或播放 key 时返回 null
+ */
+export function buildSessionCredentialCookie(cookie: string): string | null {
+  const values = parseCookieString(cookie)
+  const rawMusicid = values.musicid || values.uin || values.qqmusic_uin || values.o_cookie
+  const musicid = Number.parseInt(nonEmptyString(rawMusicid).replace(/^o0*/, ''), 10)
+  const musickey = nonEmptyString(values.musickey || values.qm_keyst || values.qqmusic_key)
+  if (!Number.isFinite(musicid) || musicid <= 0 || !musickey) return null
+
+  // 与 parseTencentCredential 保持同一套 loginType 判定，避免归一化后语义漂移
+  const loginType = numberValue(values.loginType || values.login_type) || (musickey.startsWith('W_X') ? 1 : 2)
+  const keepRefresh = isRefreshableCredential(cookie)
+
+  const next: Record<string, string> = { ...values }
+  next.musicid = String(musicid)
+  next.uin = String(musicid)
+  next.qqmusic_uin = String(musicid)
+  next.o_cookie = String(musicid)
+  next.musickey = musickey
+  next.qm_keyst = musickey
+  next.qqmusic_key = musickey
+  next.loginType = String(loginType)
+  next.str_musicid = nonEmptyString(values.str_musicid) || String(musicid)
+
+  if (keepRefresh) {
+    // 本来就是可续期凭证，保留续期字段
+    next.qqmusic_refresh_v = '1'
+  } else {
+    // 会话凭证：显式清掉续期相关字段，避免被误判为可续期
+    delete next.qqmusic_refresh_v
+    delete next.refresh_token
+    delete next.o_refresh_token
+    delete next.refresh_key
+    delete next.o_refresh_key
+  }
+
+  return Object.entries(next)
+    .filter(([, value]) => value.length > 0)
+    .map(([key, value]) => `${key}=${value}`)
+    .join('; ')
+}
+
+/**
+ * 该 Cookie 是一份「可播放但不可续期」的会话凭证。
+ *
+ * 与可续期凭证互斥：两者都不满足时返回 false。
+ */
+export function isSessionCredential(cookie: string): boolean {
+  if (!cookie) return false
+  const credential = parseTencentCredential(cookie)
+  if (!credential) return false
+  if (isRefreshableCredential(cookie)) return false
+  return Boolean(credential.musickey)
+}
+
 /** Refresh the QQ Music musickey using the refresh credentials from the cookie. */
 export async function refreshCredential(cookie: string): Promise<string> {
   const credential = parseTencentCredential(cookie)
@@ -1021,6 +1085,40 @@ async function fetchMusicKeySession(code: string): Promise<string | null> {
     return null
   } catch (err) {
     logger.error('QQ QR: MusicKey Session Exchange Failed', err)
+    return null
+  }
+}
+
+/**
+ * 使用本机/浏览器会话 Cookie（必须含 `p_skey`）完成「授权码 → musickey」兑换。
+ *
+ * 流程：
+ *   1. 校验 cookie 中存在 `p_skey`（graph.qq.com 依赖它校验来源会话；缺失则直接返回 null，不触网）
+ *   2. 调 oauth2.0/authorize 换取 OAuth code（复用 fetchOAuthCode）
+ *   3. 用 code 调 QQConnectLogin.LoginServer 兑换可续期 musickey（复用 fetchMusicKeySession）
+ *
+ * 任何环节失败均返回 `null`，调用方应回退到扫码登录。
+ * 主要用于本机一键登录（localQqLoginService）以及测试。
+ */
+export async function loginWithSessionCookie(cookie: string): Promise<string | null> {
+  try {
+    // 没有 p_skey 就无法完成 oauth2 authorize（graph.qq.com 会一并校验来源会话）
+    const pSkey = getCookieValue(cookie, 'p_skey')
+    if (!pSkey) {
+      logger.debug('loginWithSessionCookie: 缺少 p_skey，无法兑换，直接返回 null')
+      return null
+    }
+
+    const authCode = await fetchOAuthCode(pSkey, cookie)
+    if (!authCode) {
+      logger.warn('loginWithSessionCookie: 未能取得 OAuth 授权码')
+      return null
+    }
+
+    const finalCookie = await fetchMusicKeySession(authCode)
+    return finalCookie
+  } catch (err) {
+    logger.error('loginWithSessionCookie failed', err)
     return null
   }
 }

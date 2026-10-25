@@ -43,6 +43,8 @@ export function PlatformHub() {
   const handleQrLogin = useCallback(
     (platform: MusicSource = activePlatform) => {
       auth.requestQrCode(platform)
+      // 同机访问 tencent 时探测本机已登录的 QQ 客户端，提供一键登录入口
+      if (platform === 'tencent') auth.probeLocalQq()
       setQrDialogOpen(true)
     },
     [auth, activePlatform],
@@ -186,7 +188,10 @@ export function PlatformHub() {
         open={qrDialogOpen}
         onOpenChange={(open: boolean) => {
           setQrDialogOpen(open)
-          if (!open) auth.resetQr()
+          if (!open) {
+            auth.resetQr()
+            auth.resetLocalQq()
+          }
         }}
         platform={auth.qrPlatform}
         qrData={auth.qrData}
@@ -194,6 +199,13 @@ export function PlatformHub() {
         isLoading={auth.isQrLoading}
         onRefresh={() => auth.requestQrCode(auth.qrPlatform)}
         onCheckStatus={(key: string) => auth.checkQrStatus(key)}
+        savedAccount={auth.savedAccount}
+        isQuickLoggingIn={auth.isQuickLoggingIn}
+        onQuickLogin={auth.quickLogin}
+        localQqAccounts={auth.localQqAccounts}
+        localQqAvailable={auth.localQqAvailable}
+        isLocalQqLoggingIn={auth.isLocalQqLoggingIn}
+        onLoginLocalQq={auth.loginWithLocalQq}
       />
 
       {/* Manual Cookie Dialog */}

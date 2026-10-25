@@ -1,6 +1,6 @@
 import { storage } from '@/lib/storage'
 import { useSocketContext } from '@/providers/socket-context'
-import type { MusicSource, MyPlatformAuth, PlatformAuthStatus } from '@music-together/shared'
+import type { MusicSource, MyPlatformAuth, PlatformAuthStatus, LocalQqAccount, SavedAccountSummary } from '@music-together/shared'
 import { EVENTS, QR_STATUS } from '@music-together/shared'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
@@ -27,6 +27,13 @@ export function useAuth() {
   const [isQrLoading, setIsQrLoading] = useState(false)
   const [isClaimingKugouConceptVip, setIsClaimingKugouConceptVip] = useState(false)
   const [qrPlatform, setQrPlatform] = useState<MusicSource>('netease')
+  /** 该平台已保存的账号（仅展示信息），用于提供「继续使用」入口。 */
+  const [savedAccount, setSavedAccount] = useState<SavedAccountSummary | null>(null)
+  /** 本机 QQ 客户端已登录的账号列表（仅同机访问时有内容）。 */
+  const [localQqAccounts, setLocalQqAccounts] = useState<LocalQqAccount[]>([])
+  const [localQqAvailable, setLocalQqAvailable] = useState(false)
+  const [isLocalQqLoggingIn, setIsLocalQqLoggingIn] = useState(false)
+  const [isQuickLoggingIn, setIsQuickLoggingIn] = useState(false)
 
   // Ref 跟踪最新的 qrPlatform，避免重建回调导致重启轮询
   const qrPlatformRef = useRef<MusicSource>(qrPlatform)
@@ -43,10 +50,11 @@ export function useAuth() {
       setStatusLoaded(true)
     }
 
-    const onQrGenerated = (data: { key: string; qrimg: string }) => {
+    const onQrGenerated = (data: { key: string; qrimg: string; savedAccount?: SavedAccountSummary }) => {
       qrCompletedRef.current = false
       qrKeyRef.current = data.key
       setQrData(data)
+      setSavedAccount(data.savedAccount ?? null)
       setQrStatus({ status: 801, message: '等待扫码' })
       setIsQrLoading(false)
     }
@@ -70,11 +78,35 @@ export function useAuth() {
       else toast.error(data.message)
     }
 
+    const onQuickLoginResult = (data: {
+      success: boolean
+      message: string
+      nickname?: string
+    }) => {
+      setIsQuickLoggingIn(false)
+      if (data.success) toast.success(data.message)
+      else toast.error(data.message)
+    }
+
+    const onLocalQqAccounts = (data: { available: boolean; accounts: LocalQqAccount[] }) => {
+      setLocalQqAvailable(data.available)
+      setLocalQqAccounts(data.accounts)
+    }
+
+    const onLocalQqLoginResult = (data: { success: boolean; message: string }) => {
+      setIsLocalQqLoggingIn(false)
+      if (data.success) toast.success(data.message)
+      else toast.error(data.message)
+    }
+
     socket.on(EVENTS.AUTH_STATUS_UPDATE, onStatusUpdate)
     socket.on(EVENTS.AUTH_MY_STATUS, onMyStatus)
     socket.on(EVENTS.AUTH_QR_GENERATED, onQrGenerated)
     socket.on(EVENTS.AUTH_QR_STATUS, onQrStatus)
     socket.on(EVENTS.AUTH_CLAIM_KUGOU_CONCEPT_VIP_RESULT, onKugouConceptVipClaim)
+    socket.on(EVENTS.AUTH_QUICK_LOGIN_RESULT, onQuickLoginResult)
+    socket.on(EVENTS.AUTH_LOCAL_QQ_ACCOUNTS, onLocalQqAccounts)
+    socket.on(EVENTS.AUTH_LOCAL_QQ_LOGIN_RESULT, onLocalQqLoginResult)
 
     // 挂载时拉取当前状态（覆盖延迟挂载场景）
     socket.emit(EVENTS.AUTH_GET_STATUS)
@@ -85,12 +117,16 @@ export function useAuth() {
       socket.off(EVENTS.AUTH_QR_GENERATED, onQrGenerated)
       socket.off(EVENTS.AUTH_QR_STATUS, onQrStatus)
       socket.off(EVENTS.AUTH_CLAIM_KUGOU_CONCEPT_VIP_RESULT, onKugouConceptVipClaim)
+      socket.off(EVENTS.AUTH_QUICK_LOGIN_RESULT, onQuickLoginResult)
+      socket.off(EVENTS.AUTH_LOCAL_QQ_ACCOUNTS, onLocalQqAccounts)
+      socket.off(EVENTS.AUTH_LOCAL_QQ_LOGIN_RESULT, onLocalQqLoginResult)
     }
   }, [socket])
 
   const requestQrCode = useCallback(
     (platform: MusicSource) => {
       setQrData(null)
+      setSavedAccount(null)
       qrCompletedRef.current = false
       qrKeyRef.current = null
       setQrStatus(null)
@@ -139,6 +175,39 @@ export function useAuth() {
     socket.emit(EVENTS.AUTH_CLAIM_KUGOU_CONCEPT_VIP)
   }, [isClaimingKugouConceptVip, socket])
 
+  /** 使用已保存的账号直接登录（免扫码）。 */
+  const quickLogin = useCallback(
+    (platform: MusicSource) => {
+      if (isQuickLoggingIn) return
+      setIsQuickLoggingIn(true)
+      socket.emit(EVENTS.AUTH_QUICK_LOGIN, { platform })
+    },
+    [isQuickLoggingIn, socket],
+  )
+
+  /** 探测服务端所在机器上已登录的 QQ 客户端账号（仅同机访问有效）。 */
+  const probeLocalQq = useCallback(() => {
+    setLocalQqAvailable(false)
+    setLocalQqAccounts([])
+    socket.emit(EVENTS.AUTH_LOCAL_QQ_PROBE, {})
+  }, [socket])
+
+  /** 使用本机 QQ 客户端的某个账号完成一键登录。 */
+  const loginWithLocalQq = useCallback(
+    (uin: string) => {
+      if (isLocalQqLoggingIn) return
+      setIsLocalQqLoggingIn(true)
+      socket.emit(EVENTS.AUTH_LOCAL_QQ_LOGIN, { uin })
+    },
+    [isLocalQqLoggingIn, socket],
+  )
+
+  /** 清空本机 QQ 探测结果（弹窗关闭时调用）。 */
+  const resetLocalQq = useCallback(() => {
+    setLocalQqAvailable(false)
+    setLocalQqAccounts([])
+  }, [])
+
   return {
     platformStatus,
     myStatus,
@@ -154,5 +223,16 @@ export function useAuth() {
     resetQr,
     claimKugouConceptVip,
     isClaimingKugouConceptVip,
+    // 快捷登录（已保存账号）
+    savedAccount,
+    isQuickLoggingIn,
+    quickLogin,
+    // 本机 QQ 一键登录
+    localQqAccounts,
+    localQqAvailable,
+    isLocalQqLoggingIn,
+    probeLocalQq,
+    loginWithLocalQq,
+    resetLocalQq,
   }
 }

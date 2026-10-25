@@ -23,3 +23,5 @@ Thumbs.db
 /packages/server/data/
 /data/
 /backups/
+/.workbuddy
+/.workbuddy-ai

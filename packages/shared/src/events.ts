@@ -72,6 +72,15 @@ export const EVENTS = {
   AUTH_GET_STATUS: 'auth:get_status',
   AUTH_CLAIM_KUGOU_CONCEPT_VIP: 'auth:claim_kugou_concept_vip',
   AUTH_CLAIM_KUGOU_CONCEPT_VIP_RESULT: 'auth:claim_kugou_concept_vip_result',
+  /** 使用已保存的账号直接登录（免扫码）。 */
+  AUTH_QUICK_LOGIN: 'auth:quick_login',
+  AUTH_QUICK_LOGIN_RESULT: 'auth:quick_login_result',
+  /** 探测服务端所在机器上已登录的 QQ 客户端账号（本机一键登录）。 */
+  AUTH_LOCAL_QQ_PROBE: 'auth:local_qq_probe',
+  AUTH_LOCAL_QQ_ACCOUNTS: 'auth:local_qq_accounts',
+  /** 使用本机 QQ 客户端完成一键登录。 */
+  AUTH_LOCAL_QQ_LOGIN: 'auth:local_qq_login',
+  AUTH_LOCAL_QQ_LOGIN_RESULT: 'auth:local_qq_login_result',
 
   // Playlist
   PLAYLIST_GET_MY: 'playlist:get_my',

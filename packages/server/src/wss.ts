@@ -38,6 +38,13 @@ function sendBounded(ws: WebSocket, message: string): boolean {
 
 export interface Handshake {
   headers: Record<string, string | string[] | undefined>
+  /**
+   * 客户端的对端地址。
+   *
+   * 用于「本机一键登录」这类**依赖服务端所在机器**能力的同机判定 ——
+   * 只有访问者与服务端在同一台机器上时，探测服务端本机的 QQ 客户端才有意义。
+   */
+  remoteAddress?: string
 }
 
 type EventHandler = (...args: any[]) => void
@@ -66,7 +73,10 @@ export class TypedSocket<
     this.id = nanoid(12)
     this.ws = ws
     this.server = server
-    this.handshake = { headers: req.headers as Record<string, string | string[] | undefined> }
+    this.handshake = {
+      headers: req.headers as Record<string, string | string[] | undefined>,
+      remoteAddress: req.socket?.remoteAddress,
+    }
 
     this.ws.on('message', (raw: RawData) => {
       try {

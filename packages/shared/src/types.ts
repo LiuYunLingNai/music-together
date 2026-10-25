@@ -324,6 +324,33 @@ export interface PlatformAuthStatus {
   maxVipLevel?: number
 }
 
+/**
+ * 已保存账号的展示摘要。
+ *
+ * 只包含昵称、头像、会员等展示字段 —— **绝不能包含 cookie 或任何凭据**。
+ * 用于在登录弹窗里提供「继续使用该账号」的入口。
+ */
+export interface SavedAccountSummary {
+  platform: MusicSource
+  nickname: string
+  avatarUrl?: string
+  vipType?: number
+  vipLabel?: string
+  vipLevel?: number
+}
+
+/**
+ * 服务端所在机器上已登录的 QQ 客户端账号。
+ *
+ * 仅当访问者与服务端同机时才会下发 —— 远端访问拿到的永远是服务端机器的账号，
+ * 对访问者没有意义，同时也会泄露服务端机器的账号信息。
+ */
+export interface LocalQqAccount {
+  uin: string
+  nickname: string
+  avatarUrl: string
+}
+
 /** 当前用户自己在某平台的认证信息 */
 export interface MyPlatformAuth {
   platform: MusicSource
