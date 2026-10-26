@@ -189,7 +189,7 @@ export function useAuth() {
   const probeLocalQq = useCallback(() => {
     setLocalQqAvailable(false)
     setLocalQqAccounts([])
-    socket.emit(EVENTS.AUTH_LOCAL_QQ_PROBE, {})
+    socket.emit(EVENTS.AUTH_LOCAL_QQ_PROBE)
   }, [socket])
 
   /** 使用本机 QQ 客户端的某个账号完成一键登录。 */
