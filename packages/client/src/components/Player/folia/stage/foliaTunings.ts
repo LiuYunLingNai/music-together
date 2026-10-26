@@ -23,6 +23,7 @@ export const FOLIA_TUNING_DEFAULTS = {
   sonnet: defaults.DEFAULT_SONNET_TUNING,
   tempera: defaults.DEFAULT_TEMPERA_TUNING,
   lumiere: defaults.DEFAULT_LUMIERE_TUNING,
+  hanabi: defaults.DEFAULT_HANABI_TUNING,
 } as const
 
 /** Saved patches cannot replace a tuning object or introduce invalid primitive types. */

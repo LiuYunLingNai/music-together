@@ -80,15 +80,17 @@ src/
 │   │   │   ├── MineradioLyricStage.tsx  # AMLL 回退用的 DOM 歌词层
 │   │   │   ├── MineradioControlBar.tsx  # Mineradio 底部悬浮玻璃控制台（Transport 行为与 Folia 共用）
 │   │   │   ├── lyrics/         #     WebGL 歌词：数据模型 / 栅格化 / 着色器 / 网格
-│   │   │   ├── particles/      #     粒子场、星河、统一轨道相机、3D 队列架 + 分叉着色器
+│   │   │   ├── particles/      #     粒子场、星河、统一轨道相机、3D 队列架 + 分叉着色器（离线拍点分析已移至 services/beatFx）
 │   │   │   └── shared/         #     VisualMode / RenderPolicy / AudioAnalyser / 封面纹理
 │   │   ├── folia/              #     Folia 播放器：DOM/CSS 歌词、独立背景与胶囊控制栏
 │   │   │   ├── FoliaPlayerStage.tsx     # 宿主：歌词/时钟/主题适配 + 懒加载模式/背景 + 控制栏
-│   │   │   ├── FoliaEntryButton.tsx     # 独立入口；再次点击打开设置
-│   │   │   ├── FoliaSettingsPopover.tsx # 无遮罩紧凑浮层，样式/背景/播放器页签
+│   │   │   ├── FoliaSettingsPopover.tsx # 入口：打开歌词样式工作窗口
+│   │   │   ├── FoliaStyleWindow.tsx     # 上游 VisPlayground 的宿主壳层（映射设置到窗口 props）
+│   │   │   ├── stage/foliaAssetStore.ts # 群唱表情/头像与莫奈人像、背景图（舞台与窗口共用）
+│   │   │   ├── stage/useRandomFoliaMode.ts # 每首随机歌词样式（换歌时从池里换一种）
 │   │   │   ├── FoliaControlBar.tsx      # 自动隐藏/展开/离底距离 + 共用 Transport 行为
 │   │   │   ├── backgrounds/            # 六类上游背景的按需加载宿主 + 快捷背景
-│   │   │   ├── upstream/               # 上游九个缺失模式、六类背景与运行时；仅视觉依赖
+│   │   │   ├── upstream/               # 上游十五个模式、六类背景、运行时、设置套件与歌词样式窗口
 │   │   │   ├── registry.ts              # 模式注册表（纯数据，不 import 组件）
 │   │   │   ├── renderers.ts             # 模式 → React.lazy 映射（仅宿主引用）
 │   │   │   ├── types.ts                 # Folia 的 Line/Word/Theme/各模式 tuning
@@ -153,7 +155,11 @@ src/
 │   ├── useIsMobile.ts          #   布局维度：orientation 检测（portrait=竖屏布局，landscape=横屏布局）
 │   ├── useHasHover.ts          #   交互维度：hover 能力检测（(hover: hover) 媒体查询，触控设备=false）
 │   ├── useContainerPortrait.ts #   容器宽高比检测（ResizeObserver，用于播放器横竖屏切换）
-│   └── useCoverWidth.ts        #   封面容器最小尺寸测量（约束信息栏/控件宽度与封面对齐）
+│   ├── useCoverWidth.ts        #   封面容器最小尺寸测量（约束信息栏/控件宽度与封面对齐）
+│   └── useBeatFxTrack.ts       #   智能动感模式：把当前歌曲的拍点表装进实时时钟（视觉层共用）
+│
+├── services/                   # 客户端服务（非 UI）：智能动感拍点时钟与离线拍点分析
+│   └── beatFx/                #   智能动感：拍点时钟 / 重音换算 / 拍点来源桥接 / 离线拍点分析（原 mineradio 目录）
 │
 ├── stores/                     # Zustand 状态仓库
 │   ├── playerStore.ts          #   播放状态（currentTrack, isPlaying, volume 等）

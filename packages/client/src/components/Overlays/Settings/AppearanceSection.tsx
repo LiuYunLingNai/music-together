@@ -12,7 +12,6 @@ import { VISUAL_MODES } from '@/components/Player/stages/VisualMode'
 import { isFoliaModeId } from '@/components/Player/folia/registry'
 import { FoliaSettingsPopover } from '@/components/Player/folia/FoliaSettingsPopover'
 import { Button } from '@/components/ui/button'
-import { useState } from 'react'
 import { Settings2 } from 'lucide-react'
 import { VISUAL_QUALITIES, VISUAL_QUALITY_LABELS } from '@/components/Player/stages/RenderPolicy'
 import {
@@ -32,7 +31,6 @@ import { SettingRow } from './SettingRow'
 
 export function AppearanceSection() {
   const s = useSettingsStore()
-  const [foliaSettingsOpen, setFoliaSettingsOpen] = useState(false)
   const foliaActive = isFoliaModeId(s.visualStage)
   /**
    * 移动端（触摸设备）不提供视觉舞台 —— 设置面板是**第二个**入口，
@@ -118,9 +116,15 @@ export function AppearanceSection() {
           >
             <Select
               value={foliaActive ? 'folia' : s.visualStage}
-              onValueChange={(value) =>
-                s.setVisualStage(value === 'folia' ? s.foliaSettings.lyricMode : (value as typeof s.visualStage))
-              }
+              onValueChange={(value) => {
+                if (value !== 'folia') {
+                  s.setVisualStage(value as typeof s.visualStage)
+                  return
+                }
+                s.setVisualStage(s.foliaSettings.lyricMode)
+                // 手动选样式同时关掉「每首随机」，与上游 handleSetVisualizerMode 同一语义。
+                s.setFoliaSettings({ randomMode: false })
+              }}
             >
               <SelectTrigger className="w-36">
                 <SelectValue />
@@ -147,7 +151,7 @@ export function AppearanceSection() {
           </SettingRow>
 
           <SettingRow label="Folia 播放器" description="设置歌词样式、背景与悬浮播放栏">
-            <FoliaSettingsPopover open={foliaSettingsOpen} onOpenChange={setFoliaSettingsOpen}>
+            <FoliaSettingsPopover>
               <Button variant="outline" className="gap-2">
                 <Settings2 className="size-4" />
                 设置 Folia

@@ -39,6 +39,10 @@ export interface FoliaSettings {
   subtitleScale: number
   backgroundConfig: VisualizerBackgroundConfig
   tunings: Partial<Record<FoliaModeId, Record<string, unknown>>>
+  /** 每首随机歌词样式（上游 `randomVisualizerModePerSong`）：换歌时从池里换一种。 */
+  randomMode: boolean
+  /** 随机池：参与随机的样式，空表示全部内置样式。 */
+  randomModePool: FoliaModeId[]
 }
 
 export const FOLIA_DEFAULTS: Readonly<FoliaSettings> = {
@@ -60,6 +64,9 @@ export const FOLIA_DEFAULTS: Readonly<FoliaSettings> = {
   subtitleScale: 1,
   backgroundConfig: {},
   tunings: {},
+  randomMode: false,
+  // 上游 `normalizeRandomVisualizerModes` 的默认：整份内置样式都在池里。
+  randomModePool: FOLIA_MODES.map((mode) => mode.id),
 }
 
 /** Validate persisted settings, including malformed JSON and values from older versions. */
@@ -92,6 +99,13 @@ export function normalizeFoliaSettings(value: unknown): FoliaSettings {
     } else if (FOLIA_BACKGROUNDS.some(({ id }) => id === saved.background)) {
       result.background = saved.background as FoliaSettings['background']
     }
+  }
+  if (typeof saved.randomMode === 'boolean') result.randomMode = saved.randomMode
+  if (Array.isArray(saved.randomModePool)) {
+    // 上游 `normalizeRandomVisualizerModes`：按模式清单顺序过滤，空池回落到全部。
+    const selected = new Set(saved.randomModePool.filter((id): id is string => typeof id === 'string'))
+    const pool = FOLIA_MODES.map((mode) => mode.id).filter((id) => selected.has(id))
+    result.randomModePool = pool.length > 0 ? pool : FOLIA_MODES.map((mode) => mode.id)
   }
   const booleanKeys = [
     'backgroundMotion',

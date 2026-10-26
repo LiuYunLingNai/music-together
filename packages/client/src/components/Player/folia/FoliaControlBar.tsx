@@ -5,6 +5,7 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { VoteBanner } from '../../Vote/VoteBanner'
 import { Transport, type TransportProps } from '../stages/Transport'
 import { FoliaSettingsPopover } from './FoliaSettingsPopover'
+import { useFoliaStyleWindowStore } from './stage/foliaStyleWindowStore'
 import { Button } from '@/components/ui/button'
 import { Eye, EyeOff, Settings2 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -33,10 +34,11 @@ function useChromeIdle(enabled: boolean) {
         // Pointer clicks also leave focus on buttons after the popover closes.
         // Only keyboard focus or a currently open panel should extend the idle timer.
         const keyboardFocus = inputMode.current === 'keyboard' && active?.closest('.folia-console')
+        // 歌词样式窗口是自绘的工作窗口（`.st-window`），不在 radix 的 data-slot 里，单独判断。
         const openPanel = document.querySelector(
-          '[data-slot="popover-content"][data-state="open"], [data-slot="dialog-content"][data-state="open"]',
+          '[data-slot="popover-content"][data-state="open"], [data-slot="dialog-content"][data-state="open"], .st-window',
         )
-        if (keyboardFocus || openPanel) schedule()
+        if (keyboardFocus || openPanel || useFoliaStyleWindowStore.getState().open) schedule()
         else setState({ enabled, idle: true })
       }, 3000)
     }
@@ -105,7 +107,7 @@ export function FoliaControlBar({ activeVote, onCastVote, ...transport }: FoliaC
               variant="folia"
               showProgress={settings.showProgress}
               settingsButton={
-                <FoliaSettingsPopover open={settingsOpen} onOpenChange={setSettingsOpen} side="top">
+                <FoliaSettingsPopover>
                   <Button variant="ghost" size="icon" className="mt-mr-btn" aria-label="Folia 播放器设置">
                     <Settings2 className="size-4" />
                   </Button>

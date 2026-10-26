@@ -4,7 +4,7 @@ import type { FoliaModeId } from './registry'
 import type { VisualizerBackgroundConfig } from './upstream/components/visualizer/backgrounds/definition'
 import { DEFAULT_VISUALIZER_BACKGROUND_MODE } from './upstream/components/visualizer/backgrounds/registry'
 import './upstream/components/visualizer/backgrounds/entries'
-import VisualizerBackdrop from './upstream/components/visualizer/VisualizerBackdrop'
+import VisualizerBackdrop, { VisualizerBackdropContext } from './upstream/components/visualizer/VisualizerBackdrop'
 import VisualizerStyleTransition, {
   useStyleSwitch,
 } from './upstream/components/visualizer/styleTransition/VisualizerStyleTransition'
@@ -39,6 +39,9 @@ import VisualizerHarmonyOverlay from './upstream/components/visualizer/Visualize
  * 各模式调参在 `FoliaSharedProps` 上的字段名（`getFoliaTuningProps` 的产物）。
  * 切换模式时先把它们摘掉，再放上**那个**模式的调参。
  */
+/** 只画样式时给 shell 的占位 frame：没有指针区域，也表明「背景已由外层处理」。 */
+const STYLE_ONLY_FRAME = { pointerArea: null }
+
 const FOLIA_TUNING_PROP_KEYS = [
   'classicTuning',
   'cadenzaTuning',
@@ -53,6 +56,7 @@ const FOLIA_TUNING_PROP_KEYS = [
   'sonnetTuning',
   'temperaTuning',
   'lumiereTuning',
+  'hanabiTuning',
 ] as const satisfies readonly (keyof FoliaSharedProps)[]
 
 /** 模式自己指定的背景（上游各 `entry.tsx` 的 `background` 字段）。 */
@@ -90,6 +94,11 @@ interface FoliaRendererProps extends FoliaSharedProps {
   animateStyleSwitch?: boolean
   /** 背景上方、歌词下方的一层压暗（本项目的宿主扩展，上游没有）。 */
   backgroundDim?: number
+  /**
+   * 只画这一个样式，不画背景层（上游 `VisualizerRenderer` 的调用方在预览里传
+   * `background.transparent`，小图只该有样式）。给了它就不挂 `VisualizerBackdrop`。
+   */
+  renderStyleOnly?: ComponentType<FoliaSharedProps>
 }
 
 export function FoliaRenderer({
@@ -98,6 +107,7 @@ export function FoliaRenderer({
   tuningsFor,
   animateStyleSwitch = false,
   backgroundDim = 0,
+  renderStyleOnly,
   ...props
 }: FoliaRendererProps) {
   // 模式代码按需到达：屏幕上显示的模式要等它的 chunk 到了才换，
@@ -141,6 +151,44 @@ export function FoliaRenderer({
     () => (backgroundDim > 0 ? { opacity: backgroundDim } : null),
     [backgroundDim],
   )
+
+  // 只画样式（设置窗口的小图 / 样例舞台）：没有背景层，也没有背景过渡。
+  if (renderStyleOnly) {
+    const Style = renderStyleOnly
+    // 关键：`VisualizerShell` 在自己的 `VisualizerBackdropContext` 为 null 时会**自己再画一层背景**
+    // （上游永远把它放在 backdrop 里，所以那段代码在播放页不会执行）。预览只画样式时必须给出这个
+    // context，否则每个缩略图都会多起一套几何背景动画 —— 实测窗口内 15 张图各一套，帧率腰斩。
+    // 样式切换的过渡与和声叠层仍按上游挂上：预览里换样式同样要柔焦交叉。
+    return (
+      <VisualizerBackdropContext.Provider value={STYLE_ONLY_FRAME}>
+        <Suspense fallback={null}>
+          <VisualizerStyleTransition
+            styleSwitch={styleSwitch}
+            transition={transition}
+            renderStyle={(styleMode) => (
+              styleMode === shownMode || !tuningsFor
+                ? <Style {...sharedProps} />
+                : <Style {...withTuning(sharedProps, tuningsFor(styleMode as FoliaModeId))} />
+            )}
+          />
+        </Suspense>
+        <VisualizerHarmonyOverlay
+          currentTime={sharedProps.currentTime}
+          lines={sharedProps.lines}
+          showText={sharedProps.showText ?? true}
+          theme={sharedProps.theme}
+          subtitleTheme={sharedProps.subtitleTheme}
+          isPlayerChromeHidden={sharedProps.isPlayerChromeHidden}
+          hideTranslationSubtitle={sharedProps.hideTranslationSubtitle}
+          showSubtitleTranslation={sharedProps.showSubtitleTranslation}
+          subtitleContentMode={sharedProps.subtitleContentMode}
+          showHarmonySubtitle={sharedProps.showHarmonySubtitle}
+          harmonySubtitleBackground={sharedProps.harmonySubtitleBackground}
+          subtitleFontScale={sharedProps.subtitleFontScale}
+        />
+      </VisualizerBackdropContext.Provider>
+    )
+  }
 
   return (
     <>

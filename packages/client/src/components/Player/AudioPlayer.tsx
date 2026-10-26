@@ -31,6 +31,10 @@ const MineradioPlayerStage = lazy(() =>
 const FoliaPlayerStage = lazy(() =>
   import('./folia/FoliaPlayerStage').then((m) => ({ default: m.FoliaPlayerStage })),
 )
+// 歌词样式工作窗口：同样惰性加载，且只在打开时挂载（图标与套件不进首屏包）。
+const FoliaStyleWindowHost = lazy(() =>
+  import('./folia/FoliaStyleWindow').then((m) => ({ default: m.FoliaStyleWindowHost })),
+)
 
 /**
  * 视觉舞台的错误边界。
@@ -173,7 +177,9 @@ export function AudioPlayer(props: AudioPlayerProps) {
       //   让"不可用"的语义在所有入口一致。
       if (visualDisabled) return
       setVisualStage(next)
-      if (isFoliaModeId(next)) setFoliaSettings({ lyricMode: next })
+      // 手动选具体样式即关掉「每首随机」（上游 handleSetVisualizerMode 的语义），
+      // 否则下一次切歌会立刻把刚选的样式换掉。
+      if (isFoliaModeId(next)) setFoliaSettings({ lyricMode: next, randomMode: false })
       // ★ 视觉舞台只在 `view === 'player'` 时渲染（整页播放列表是经典舞台
       //   独有的概念）。若用户当前停在经典舞台的整页歌单里再选视觉模式，
       //   而这里不把视图切回来，渲染的仍是经典舞台 —— 菜单里视觉模式显示
@@ -203,6 +209,11 @@ export function AudioPlayer(props: AudioPlayerProps) {
 
   return (
     <div className="relative h-full">
+      {/* 歌词样式工作窗口挂在这里而不是舞台内部：舞台在 `visualStage` 变化时整棵重渲染，
+          窗口若挂在里面，切样式就会跟着闪退重进一次。窗口的开关在 store 里，未打开时不挂载。 */}
+      <Suspense fallback={null}>
+        <FoliaStyleWindowHost />
+      </Suspense>
       {/* 舞台切换器：三段胶囊（经典 | 3D | Folia），点已激活段展开该族模式列表。
           位于经典舞台歌单按钮的左侧，避免两个按钮重叠，保留相同的安全边距处理。
 

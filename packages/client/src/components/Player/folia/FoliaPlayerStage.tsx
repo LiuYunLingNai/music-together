@@ -9,14 +9,18 @@ import type { FoliaSharedProps } from './definition'
 import type { FoliaModeId } from './registry'
 import { FOLIA_MODE_RENDERERS } from './renderers'
 import { useFoliaClock } from './stage/foliaClock'
+import { useBeatFxTrack } from '@/hooks/useBeatFxTrack'
 import { findFoliaActiveLineIndex, useFoliaLines, useFoliaTheme } from './stage/lyricAdapter'
 import { FoliaControlBar } from './FoliaControlBar'
 import { FoliaRenderer } from './FoliaRenderer'
 import { useFoliaAudio } from './stage/foliaAudio'
+import { FoliaAudioProvider } from './stage/foliaAudioContext'
+import { useMirrorPreviewSignals } from './stage/foliaPreviewSignals'
+import { useRandomFoliaMode } from './stage/useRandomFoliaMode'
 import { useFoliaRenderState } from './stage/foliaRenderState'
+import { useFoliaStyleWindowStore } from './stage/foliaStyleWindowStore'
 import { getFoliaTuningProps } from './stage/foliaTunings'
-import { useCappellaCustomImages } from './stage/cappellaAssets'
-import { useMonetPortraitImage } from './stage/monetPortraitAssets'
+import { useFoliaAssetStore } from './stage/foliaAssetStore'
 
 // 播放列表浮岛：folia 舞台的队列外壳。惰性加载 —— 只在第一次打开时拉代码，
 // 且不进主 chunk（与模式的懒加载同红线）。
@@ -83,10 +87,22 @@ export function FoliaPlayerStage({
   const lyricFontSize = useSettingsStore((s) => s.lyricFontSize)
   const lyricTranslationFontSize = useSettingsStore((s) => s.lyricTranslationFontSize)
   const settings = useSettingsStore((s) => s.foliaSettings)
+  /**
+   * 歌词样式窗口开着时，舞台上的歌词与几何背景不再画。
+   *
+   * 上游同一处（`useVisualizerRendererModel`）：`showText` 在设置窗口打开时为 false，
+   * 几何背景也在子视图打开时禁用 —— 注释写明「子视图把这块整体盖住了，在这里画
+   * 是唯一一笔白花的开销」。窗口里的实时预览本来就与舞台同源同钟，两边同时画
+   * 同一份歌词既重复又互相看不见。
+   */
+  const styleWindowOpen = useFoliaStyleWindowStore((s) => s.open)
   const renderState = useFoliaRenderState()
   const audio = useFoliaAudio(renderState.paused || renderState.staticMode)
-  const cappellaAssets = useCappellaCustomImages()
-  const monetPortrait = useMonetPortraitImage()
+  // 自定义素材与歌词样式窗口共用一份 store：窗口里上传的头像/封面当场出现在舞台上。
+  const cappellaEmojiImages = useFoliaAssetStore((s) => s.cappellaCustomEmojiImages)
+  const cappellaAvatarImages = useFoliaAssetStore((s) => s.cappellaCustomAvatarImages)
+  const monetPortraitImage = useFoliaAssetStore((s) => s.monetPortraitImage)
+  const monetBackgroundImage = useFoliaAssetStore((s) => s.monetBackgroundImage)
 
   const sourceLines = useFoliaLines()
   const lines = useMemo(
@@ -107,6 +123,12 @@ export function FoliaPlayerStage({
   const lyricOffsetMs = isCalibrating ? lyricOffsetPreview.offsetMs : savedLyricOffsetMs
 
   const { currentTime } = useFoliaClock(lyricOffsetMs)
+  // 窗口的实时预览与视频层读同一组信号（上游 motionSignals 的宿主版本）。
+  useMirrorPreviewSignals(currentTime, audio)
+  // 每首随机样式：换歌时从池里换一种（上游 useRandomVisualizerMode）。
+  useRandomFoliaMode(currentTrack?.id ?? null)
+  // 智能动感模式：把当前歌曲的拍点表装进实时时钟（不改变任何画面，只是备好数据）。
+  useBeatFxTrack()
 
   /**
    * 当前激活行下标。
@@ -147,7 +169,8 @@ export function FoliaPlayerStage({
     theme,
     // Match the upstream player-page flag: the mode stays visible even without an
     // active lyric, retaining its instrumental scene, tails and held subtitles.
-    showText: true,
+    // 窗口打开时与上游一样停画歌词（窗口在后面把它整块盖住）。
+    showText: !styleWindowOpen,
     songTitle,
     songArtist,
     songAlbum: currentTrack?.album,
@@ -155,9 +178,9 @@ export function FoliaPlayerStage({
     // 同一首歌每次进入都得到同一份布局 / 同一批头像：种子优先用曲目身份，
     // 缺失时回退到标题（与 cappella 上游的 `seed ?? titleText` 一致）。
     seed: currentTrack?.lyricId ?? songTitle ?? 'folia',
-    cappellaCustomEmojiImages: cappellaAssets.emojiImages,
-    cappellaCustomAvatarImages: cappellaAssets.avatarImages,
-    monetPortraitImage: monetPortrait.monetPortraitImage,
+    cappellaCustomEmojiImages: cappellaEmojiImages,
+    cappellaCustomAvatarImages: cappellaAvatarImages,
+    monetPortraitImage,
     lyricsFontScale,
     subtitleFontScale,
     subtitleContentMode: settings.showTranslation
@@ -167,7 +190,17 @@ export function FoliaPlayerStage({
       : settings.showRomanization
         ? 'romanization'
         : 'none',
-    background: settings.background === 'solid' ? { transparent: true } : settings.backgroundConfig,
+    // 莫奈/漫游的全局覆盖图来自素材 store（IndexedDB → objectURL，不进持久化设置）。
+    // 窗口打开时与上游一样关掉几何背景那套常驻动画。
+    background: settings.background === 'solid'
+      ? { transparent: true }
+      : {
+          ...settings.backgroundConfig,
+          customImage: monetBackgroundImage ?? settings.backgroundConfig.customImage ?? null,
+          ...(styleWindowOpen
+            ? { common: { ...settings.backgroundConfig.common, disableGeometricBackground: true } }
+            : {}),
+        },
     // 上游 `useVisualizerRendererModel` 的 `backgroundStaticMode`：只暂停背景，不停模式层。
     // 上游还叠加了「latent 仅在播放页动态」与「非播放页且关掉首页动态背景」两条，
     // 本项目只有播放页，因此只剩用户自己的「背景动效」开关。
@@ -183,6 +216,7 @@ export function FoliaPlayerStage({
         backgroundColor: theme.backgroundColor,
       } as CSSProperties}
     >
+      <FoliaAudioProvider value={audio}>
       <MotionConfig reducedMotion="user">
         <div className="folia-lyrics-layer absolute inset-0">
           {/* 舞台画布：背景层与模式层都在里面，各自可过渡（上游 VisualizerRenderer 的树）。
@@ -199,6 +233,7 @@ export function FoliaPlayerStage({
           />
         </div>
       </MotionConfig>
+      </FoliaAudioProvider>
 
       {/* 独立 Folia 胶囊外壳；权限、投票、去重与 Seek 预览仍共用 Transport。 */}
       <FoliaControlBar

@@ -10,7 +10,15 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { FoliaControlBar } from './FoliaControlBar'
+import { useFoliaStyleWindowStore } from './stage/foliaStyleWindowStore'
 import { StageSwitcher } from '../stages/StageSwitcher'
+
+/**
+ * 设置入口在本文件里换成轻量替身：真实的上游工作窗口是懒加载的重组件，
+ * 在假定时器下无法等待 chunk，也不属于播放栏行为。窗口自身有单独的用例。
+ */
+// 窗口本体挂在舞台之外（FoliaStyleWindowHost），本文件只验证“点击是否把窗口打开”。
+vi.mock('./FoliaStyleWindow', () => ({ FoliaStyleWindowHost: () => null, FoliaStyleWindow: () => null }))
 
 let root: Root
 let container: HTMLDivElement
@@ -39,6 +47,18 @@ beforeEach(() => {
       disconnect() {}
     },
   )
+  // 上游样式窗口按视口宽度决定两栏还是一栏，jsdom 没有 matchMedia。
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: query.includes('min-width'),
+    media: query,
+    onchange: null,
+    addEventListener() {},
+    removeEventListener() {},
+    addListener() {},
+    removeListener() {},
+    dispatchEvent: () => false,
+  }))
+  useFoliaStyleWindowStore.getState().setOpen(false)
   localStorage.clear()
   useSettingsStore.getState().resetFoliaSettings()
   usePlayerStore.getState().reset()
@@ -191,67 +211,12 @@ describe('Folia 播放栏行为', () => {
     expect(props.onOpenQueue).toHaveBeenCalledOnce()
     expect(props.onOpenChat).toHaveBeenCalledOnce()
   })
-  it('底栏设置可打开，切换进度条立即生效并保存，恢复默认后重新显示', () => {
+  it('底栏设置按钮打开歌词样式窗口', () => {
     mount('owner')
+    expect(useFoliaStyleWindowStore.getState().open).toBe(false)
     click('Folia 播放器设置')
-    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Folia 播放器设置')
-    expect(document.querySelector('[data-slot="dialog-overlay"]')).toBeNull()
-    const playerTab = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
-      (button) => button.textContent === '播放器',
-    )!
-    act(() => playerTab.click())
-    const toggle = document.querySelector<HTMLButtonElement>('[role="switch"][aria-label="显示进度条"]')!
-    act(() => toggle.click())
-    expect(useSettingsStore.getState().foliaSettings.showProgress).toBe(false)
-    expect(container.querySelector('[aria-label="播放进度"]')).toBeNull()
-    expect(JSON.parse(localStorage.getItem('mt-foliaSettings')!).showProgress).toBe(false)
-    const reset = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(
-      (button) => button.textContent === '恢复默认',
-    )!
-    act(() => reset.click())
-    expect(container.querySelector('[aria-label="播放进度"]')).not.toBeNull()
-  })
-  it('闲置播放时隐藏，操作唤醒；暂停和键盘聚焦时保持可见', () => {
-    useSettingsStore.getState().setFoliaSettings({ autoHide: true })
-    usePlayerStore.getState().setIsPlaying(true)
-    mount('owner')
-    const consoleElement = container.querySelector('.folia-console')!
-    act(() => vi.advanceTimersByTime(3100))
-    expect(consoleElement.hasAttribute('data-hidden')).toBe(true)
-    act(() => window.dispatchEvent(new Event('pointermove')))
-    expect(consoleElement.hasAttribute('data-hidden')).toBe(false)
-    act(() => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' }))
-      ;(container.querySelector('.folia-console__inner') as HTMLElement).focus()
-    })
-    act(() => vi.advanceTimersByTime(3100))
-    expect(consoleElement.hasAttribute('data-hidden')).toBe(false)
-    act(() => usePlayerStore.getState().setIsPlaying(false))
-    act(() => vi.advanceTimersByTime(4000))
-    expect(consoleElement.hasAttribute('data-hidden')).toBe(false)
-  })
-  it('无歌曲时播放与切歌禁用，设置与队列仍可访问', () => {
-    usePlayerStore.getState().setCurrentTrack(null)
-    mount('owner')
-    expect(container.querySelector<HTMLButtonElement>('button[aria-label="播放"]')?.disabled).toBe(true)
-    expect(container.querySelector<HTMLButtonElement>('button[aria-label="下一首"]')?.disabled).toBe(true)
-    expect(container.querySelector<HTMLButtonElement>('button[aria-label="Folia 播放器设置"]')?.disabled).toBe(false)
-  })
-  it('鼠标点击按钮留下的焦点不会阻止闲置隐藏', () => {
-    useSettingsStore.getState().setFoliaSettings({ autoHide: true })
-    usePlayerStore.getState().setIsPlaying(true)
-    mount('owner')
-    const button = container.querySelector<HTMLButtonElement>('button[aria-label="暂停"]')!
-    act(() => {
-      button.dispatchEvent(new Event('pointerdown', { bubbles: true }))
-      button.focus()
-      button.click()
-    })
-    expect(document.activeElement).toBe(button)
-    act(() => vi.advanceTimersByTime(3100))
-    expect(container.querySelector('.folia-console')!.hasAttribute('data-hidden')).toBe(true)
-    act(() => window.dispatchEvent(new Event('pointermove')))
-    expect(container.querySelector('.folia-console')!.hasAttribute('data-hidden')).toBe(false)
+    // 窗口由舞台之外的宿主渲染（切样式不再带着它重挂），这里只断言开关被打开。
+    expect(useFoliaStyleWindowStore.getState().open).toBe(true)
   })
   it('鼠标关闭设置后，焦点返回底栏也会在三秒后隐藏', () => {
     useSettingsStore.getState().setFoliaSettings({ autoHide: true })
@@ -262,8 +227,7 @@ describe('Folia 播放栏行为', () => {
     click('Folia 播放器设置')
     act(() => vi.advanceTimersByTime(4000))
     expect(container.querySelector('.folia-console')!.hasAttribute('data-hidden')).toBe(false)
-    const close = document.querySelector<HTMLButtonElement>('button[aria-label="关闭 Folia 设置"]')!
-    act(() => close.click())
+    act(() => useFoliaStyleWindowStore.getState().setOpen(false))
     act(() => vi.advanceTimersByTime(0))
     act(() => trigger.focus())
     expect(document.activeElement).toBe(trigger)

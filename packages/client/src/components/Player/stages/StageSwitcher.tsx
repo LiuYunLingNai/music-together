@@ -142,7 +142,6 @@ function FoliaModeFlyout({
 }) {
   const stage = useSettingsStore((s) => s.visualStage)
   const settings = useSettingsStore((s) => s.foliaSettings)
-  const [settingsOpen, setSettingsOpen] = useState(false)
   // 高亮跟随持久化值（与 FoliaSettingsPanel 同源）：即便当前在别的舞台，
   // 浮层里也应显示"Folia 将进入哪个模式"。
   const mode = isFoliaModeId(stage) ? stage : settings.lyricMode
@@ -172,12 +171,11 @@ function FoliaModeFlyout({
       </div>
       {description && <p className="pt-2 text-xs text-muted-foreground">{description}</p>}
       <div className="mt-2 border-t pt-2">
-        <FoliaSettingsPopover open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <FoliaSettingsPopover>
           <Button
             variant="ghost"
             size="sm"
             className="h-8 w-full justify-start gap-2 text-xs"
-            onClick={() => setSettingsOpen(true)}
           >
             <Settings2 className="size-3.5" />
             播放器设置

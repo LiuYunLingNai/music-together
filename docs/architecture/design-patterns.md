@@ -102,24 +102,25 @@ const { socket, isConnected } = useSocketContext()
 关键约束：
 
 - **舞台切换只影响渲染子树。** 播放、暂停、切歌、跳转、权限、投票、房间同步和漂移校正全部位于 `usePlayer` / `useHowl` / `usePlayerSync`，舞台组件不参与，因此切换不会中断歌曲、重置进度或影响房间权威状态。
-- **按需加载。** 两个视觉族都通过 `React.lazy` + 动态 `import()` 加载：`three` / `@react-three/fiber` 只在切到 Mineradio 时请求，`motion/react` 与歌词布局代码只在切到 Folia 时请求，Folia 的十四个模式及背景各自 lazy（群唱带约 3.5 MB 头像/表情 PNG）。**不要在 `vite.config.ts` 的 `manualChunks` 里为 three 命名独立 chunk** —— 那会让 Rollup 把 three 提升为同步依赖，导致 `index.html` 直接 `modulepreload` 约 900 KB 的 three，经典播放器也要白白下载。
+- **按需加载。** 两个视觉族都通过 `React.lazy` + 动态 `import()` 加载：`three` / `@react-three/fiber` 只在切到 Mineradio 时请求，`motion/react` 与歌词布局代码只在切到 Folia 时请求，Folia 的十五个模式及背景各自 lazy（群唱带约 3.5 MB 头像/表情 PNG）。**不要在 `vite.config.ts` 的 `manualChunks` 里为 three 命名独立 chunk** —— 那会让 Rollup 把 three 提升为同步依赖，导致 `index.html` 直接 `modulepreload` 约 900 KB 的 three，经典播放器也要白白下载。
 - **两族注册表与持久化白名单必须对齐。** `lib/storage.ts` 的 `VISUAL_STAGES`、`mineradio/shared/VisualMode.ts` 的 `VISUAL_MODES`、`folia/registry.ts` 的 `FOLIA_MODES` 由纯数据 `lib/foliaModes.ts` 派生 Folia 类型和白名单，由 `folia/registry.test.ts` 与 `mineradio/shared/VisualMode.test.ts` 钉住一致；漏改一边会表现为"菜单能选、刷新后被静默丢弃"或"选了没反应"。
 - **单一 Canvas。** 同一时刻只存在一个 three Canvas；切回经典播放器即卸载场景并释放几何、材质与纹理。
 - **音频通过 SoundTouch 输出上的只读 tap 取样（masterGain 仅兜底）。** 见下节。`folia/stage/foliaAudio.ts` 在 Folia 活跃时单点推进既有只读分析缓存，并映射为上游 0–255 的 MotionValue 频段；与 Mineradio 互斥挂载，避免多点驱动。
 
 ### Folia 舞台（从 folia-major 移植的 DOM/CSS 歌词模式）
 
-Folia 通过独立 **Folia 按钮**进入，十四种歌词样式在播放器设置里选择。歌词、背景与悬浮控制栏分层组合；切入和切出均沿用现有播放、权限与服务端同步回调。原有 `still/luminous/partita/tilt/cappella` 持久化舞台值继续有效。
+Folia 通过独立 **Folia 按钮**进入，十五种歌词样式在播放器设置里选择。歌词、背景与悬浮控制栏分层组合；切入和切出均沿用现有播放、权限与服务端同步回调。原有 `still/luminous/partita/tilt/cappella` 持久化舞台值继续有效。
 
 ```
 FoliaPlayerStage（folia/FoliaPlayerStage.tsx）
 ├── 歌词适配层   stage/lyricAdapter.ts   AMLL LyricLine(ms) → Folia Line(s)
 ├── 逐帧时钟     stage/foliaClock.ts     lyricPlayerBridge/store → MotionValue
 ├── 主题          stage/lyricAdapter.ts   CSS 变量 → Folia Theme
-├── 模式         renderers.ts            十四个模式各自 React.lazy
+├── 模式         renderers.ts            十五个模式各自 React.lazy
 ├── 背景         backgrounds/FoliaBackground  六类上游背景 + 柔焦/几何/纯色快捷项
 ├── 控制栏       FoliaControlBar              独立胶囊样式、展开/自动隐藏/离底距离
-└── 设置         FoliaSettingsPopover          歌词、字幕、背景和控制栏
+└── 设置         FoliaSettingsPopover → FoliaStyleWindow（上游 VisPlayground 工作窗口）
+    └── 预览     upstream/.../window/         内置示例 / 实时当前歌曲、暂停快照与冻结帧
 ```
 
 移植带来的两处**适配层**，是本目录最需要理解的部分：
@@ -129,7 +130,11 @@ FoliaPlayerStage（folia/FoliaPlayerStage.tsx）
 
 `lib/lyricLrc.ts` 由 `LyricDisplay` 与 Folia 适配层**共用**：LRC 的解析与译文配对只有一份实现，避免两处漂移。
 
+样式页预览只读宿主歌曲、歌词、封面和播放时钟，默认跟随当前歌曲，也可切到上游内置示例；没有实时歌词时回退示例。实时预览使用校准后的歌词时钟和未校准的媒体进度。暂停时保存歌曲/歌词快照，并用上游 `frozenPicture` 的 DOM/Canvas 复制保留画面、卸载预览运行时和释放其 WebGL 上下文，恢复后重新挂载；时间脉冲帮助逐词动画在静止时钟上重新对齐。预览错误只在自身边界内降级，不把主舞台回写为 classic。预览不调用播放、暂停或 Seek，也不接入 `useBeatFxTrack`。
+
 `lib/foliaSettings.ts` 定义默认值和持久化校验；`settingsStore.foliaSettings` 合并局部修改并通过 `storage` 保存，首次升级记住原来的 Folia 歌词模式。恢复默认仅影响 Folia 设置。`FoliaControlBar` 复用 `MineradioTransport` 的权限、投票、去重和进度预览行为，通过可选 `variant/showProgress/settingsButton` 参数组合不同外观，避免两套播放实现漂移。
+
+**设置窗口按上游原样移植。** `upstream/components/` 下新增 `modal/settings/kit`（设置套件 30 个组件）、`shared/StudioWindow`（工作窗口框架）、`visualizer/window`（VisPlayground 与五页签面板）、`visualizer/preview` 与各模式/背景的参数面板。宿主侧只保留一层适配：`upstream/adapters/hostStores.ts` 把上游那套 store 映射到 `settingsStore.foliaSettings`/`smartBeat`，`hostRuntime.ts` 提供 mod 注册表与播放信号的空实现，`windowRegistry.ts` 用宿主模式清单替代上游的 `import.meta.glob` 注册表，`windowRenderer.tsx` 把窗口的画面请求转给宿主已有的 `FoliaRenderer`。窗口通过 `createPortal` 挂到 body —— Folia 控制栏上的 `backdrop-blur` 祖先会建立包含块，让窗口的 `fixed` 定位退化。
 
 背景完整包含 common/monet/nomand/latent/sora/url 六类，均按需加载原生实现；保留柔焦/几何/纯色快捷项。Pixi v8 用于商籁/凝彩/绘光，Sora 保留上游 twgl 星尘，隐现与漫游使用 Paper shaders；文字布局使用上游 pretext。暂停、隐藏页面、节能画质及系统减少动态效果通过宿主静态状态停止背景运动。控制栏保留聊天、队列、音量及设置入口，键盘焦点、弹出面板与投票阻止自动隐藏；字幕基线跟随离底距离。
 

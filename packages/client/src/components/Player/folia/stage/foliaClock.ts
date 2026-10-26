@@ -2,6 +2,7 @@ import { motionValue, type MotionValue } from 'motion/react'
 import { useEffect, useMemo, useRef } from 'react'
 import { usePlayerStore } from '@/stores/playerStore'
 import { lyricPlayerBridge } from '@/lib/lyricPlayerBridge'
+import { tickBeatFxAt } from '@/services/beatFx/beatFxLive'
 
 /**
  * Folia 舞台的逐帧时钟 —— 把本项目**已有的**两个时间源包成 MotionValue。
@@ -78,7 +79,13 @@ export function useFoliaClock(offsetMs: number): FoliaClock {
     let frame = 0
     const tick = () => {
       const frameTime = lyricPlayerBridge.getFrameTime()
-      write(frameTime === null ? usePlayerStore.getState().currentTime : frameTime)
+      const seconds = frameTime === null ? usePlayerStore.getState().currentTime : frameTime
+      write(seconds)
+      /**
+       * 拍点时钟与歌词时钟同源推进（智能动感模式）。`seconds` 是歌曲时间，
+       * 已扣掉我们自己的输出延迟 —— 与上游「听者真正听到的位置」同一口径。
+       */
+      tickBeatFxAt(seconds)
       frame = requestAnimationFrame(tick)
     }
     frame = requestAnimationFrame(tick)
@@ -90,7 +97,12 @@ export function useFoliaClock(offsetMs: number): FoliaClock {
   useEffect(() => {
     write(usePlayerStore.getState().currentTime)
     return usePlayerStore.subscribe((state, prev) => {
-      if (state.currentTime !== prev.currentTime) write(state.currentTime)
+      if (state.currentTime !== prev.currentTime) {
+        write(state.currentTime)
+        // 播放中拍点时钟只由 rAF 推进：store 的 10 Hz 时间落后于帧时间，混进来每次都是
+        // 「倒退」，会被当成 seek 重新对齐游标，拍点永远不触发。暂停 / 拖动时才由这里推进。
+        if (!state.isPlaying) tickBeatFxAt(null)
+      }
     })
   }, [write])
 
