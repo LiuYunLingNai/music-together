@@ -1441,7 +1441,7 @@ export function resetBeatCamera(currentTime = 0, preserveMomentum = false): void
 // 实时路径（上面的 `processRealtimeBeatEngine`）只能在能量越过阈值**之后**
 // 命中，相位系统性偏晚。这两条路径的仲裁见 `tickBeatMap` 的说明。
 //
-// 模块与状态：`./offlineBeatAnalysis/`。
+// 模块与状态：`@/services/beatFx/offlineBeatAnalysis`。
 
 import {
   BEAT_MAP_LOOKAHEAD,
@@ -1455,7 +1455,7 @@ import {
   tickBeatMap,
   type BeatAnalysisHandle,
   type BeatMap,
-} from './offlineBeatAnalysis'
+} from '@/services/beatFx/offlineBeatAnalysis'
 
 /**
  * 上游 `11-main-loop.js:414`：`beatMapReadyForCamera` 要 `cameraBeats.length >= 4`；

@@ -1,6 +1,8 @@
 import { NTP, type MusicSource } from '@music-together/shared'
 import { SYNC_PACKET_INTERVAL_MAX_SECONDS, SYNC_PACKET_INTERVAL_MIN_SECONDS } from '@/lib/constants'
 import { normalizeFoliaSettings, type FoliaSettings } from './foliaSettings'
+import { DEFAULT_SMART_BEAT_SETTINGS, type SmartBeatSettings } from '@/services/beatFx/beatFxTypes'
+import { resolveSmartBeatSettings, type SmartBeatPatch } from '@/services/beatFx/smartBeatSettings'
 import { FOLIA_MODES } from './foliaModes'
 
 const PREFIX = 'mt-'
@@ -225,6 +227,10 @@ export const storage = {
       : fallback)
   },
   setFoliaSettings: (value: FoliaSettings) => safeSetJSON('foliaSettings', normalizeFoliaSettings(value)),
+  /** 智能动感模式（拍点特效）—— 全局一项，管所有画拍点的视觉与背景。 */
+  getSmartBeatSettings: (): SmartBeatSettings =>
+    resolveSmartBeatSettings(safeGetJSON<SmartBeatPatch>('smartBeatSettings'), DEFAULT_SMART_BEAT_SETTINGS),
+  setSmartBeatSettings: (value: SmartBeatSettings) => safeSetJSON('smartBeatSettings', value),
   /** Persistent user identity — synced from server identity bootstrap */
   getUserId: (): string => {
     return safeGet('userId') ?? ''

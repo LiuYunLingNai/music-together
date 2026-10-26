@@ -7,7 +7,7 @@ import {
   stepBeatCameraAudio,
   stepBeatCameraFrame,
 } from './beatCamera'
-import type { BeatMap, BeatMapEvent, PulseBeat } from './offlineBeatAnalysis'
+import type { BeatMap, BeatMapEvent, PulseBeat } from '@/services/beatFx/offlineBeatAnalysis'
 import { readScheduledBeatPulse, resetScheduledBeatPulse } from '../shared/audioNormalize'
 
 /**

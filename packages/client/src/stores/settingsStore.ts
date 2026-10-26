@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import { FOLIA_DEFAULTS, normalizeFoliaSettings, type FoliaSettings } from '@/lib/foliaSettings'
+import { resolveSmartBeatSettings, type SmartBeatPatch } from '@/services/beatFx/smartBeatSettings'
+import { DEFAULT_SMART_BEAT_SETTINGS, type SmartBeatSettings } from '@/services/beatFx/beatFxTypes'
 import {
   storage,
   SETTING_DEFAULTS,
@@ -40,6 +42,9 @@ type SettingsStore = {
   foliaSettings: FoliaSettings
   setFoliaSettings: (patch: Partial<FoliaSettings>) => void
   resetFoliaSettings: () => void
+  smartBeat: SmartBeatSettings
+  setSmartBeat: (patch: SmartBeatPatch) => void
+  resetSmartBeat: () => void
 } & ResettableFields<'playbackTempoSyncEnabled', boolean> &
   ResettableFields<'playbackHardSeekSyncEnabled', boolean> &
   ResettableFields<'syncPacketIntervalSeconds', number> &
@@ -128,6 +133,19 @@ export const useSettingsStore = create<SettingsStore>((set) => {
         const foliaSettings = { ...FOLIA_DEFAULTS, manualHide: state.foliaSettings.manualHide }
         storage.setFoliaSettings(foliaSettings)
         return { foliaSettings }
+      }),
+    smartBeat: storage.getSmartBeatSettings(),
+    setSmartBeat: (patch) =>
+      set((state) => {
+        const smartBeat = resolveSmartBeatSettings(patch, state.smartBeat)
+        storage.setSmartBeatSettings(smartBeat)
+        return { smartBeat }
+      }),
+    resetSmartBeat: () =>
+      set(() => {
+        const smartBeat = DEFAULT_SMART_BEAT_SETTINGS
+        storage.setSmartBeatSettings(smartBeat)
+        return { smartBeat }
       }),
     ...resettable('playbackTempoSyncEnabled', storage.getPlaybackTempoSyncEnabled, storage.setPlaybackTempoSyncEnabled),
     ...resettable(
