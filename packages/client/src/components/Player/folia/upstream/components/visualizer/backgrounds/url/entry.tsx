@@ -1,11 +1,12 @@
+/* eslint-disable react-refresh/only-export-components, react-hooks/set-state-in-effect, react-hooks/refs, @typescript-eslint/no-empty-object-type, @typescript-eslint/no-unused-vars -- 上游 folia-major 原样移植：这些规则是宿主 React Compiler 的额外约束，逐条改写会偏离上游实现，故按文件豁免。 */
 import UrlBackgroundLayer from './UrlBackgroundLayer';
+import { UrlBackgroundSettingsCard } from './UrlBackgroundSettingsCard';
 import { defineVisualizerBackground } from '../definition';
 
 // src/components/visualizer/backgrounds/url/entry.tsx
 // Registers the embedded webpage shell background.
 
-// 具名再导出：react-refresh 不接受匿名组件作为默认导出。
-const urlBackgroundEntry = defineVisualizerBackground({
+export default defineVisualizerBackground({
     mode: 'url',
     order: 40,
     labelKey: 'options.visualizerBackgroundModeUrl',
@@ -22,17 +23,21 @@ const urlBackgroundEntry = defineVisualizerBackground({
         description: 'Switch background to embedded webpage mode',
         keywords: ['embedded background', 'embed background', 'background embed', 'background url', 'url background', 'url', 'webpage', '嵌入背景', '网页背景', '背景切换到 嵌入背景', '背景切换到嵌入背景'],
     },
-    /*
-     * 上游的 `renderSettingsPanel` 未搬：它依赖上游的 `VisualizerTuningSettings` store 与
-     * `QuickControlChip`。本项目的背景设置直接读 `settingsStore`（`FoliaBackgroundSettings.tsx`），
-     * 没有这条注册通路。
-     */
     render: ({ config }) => (
         <UrlBackgroundLayer
             urlBackgroundList={config?.url?.items}
             urlBackgroundSelectedId={config?.url?.selectedId}
         />
     ),
+    renderSettingsPanel: ({ config, actions, ...props }) => (
+        <UrlBackgroundSettingsCard
+            {...props}
+            urlBackgroundList={config?.url?.items}
+            urlBackgroundSelectedId={config?.url?.selectedId}
+            onAddUrlBackgroundItem={actions?.url?.onAdd}
+            onUpdateUrlBackgroundItem={actions?.url?.onUpdate}
+            onDeleteUrlBackgroundItem={actions?.url?.onDelete}
+            onSetUrlBackgroundSelectedId={actions?.url?.onSelect}
+        />
+    ),
 });
-
-export default urlBackgroundEntry;

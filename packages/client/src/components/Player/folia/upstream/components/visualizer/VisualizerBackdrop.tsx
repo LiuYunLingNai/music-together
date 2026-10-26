@@ -3,6 +3,7 @@ import type { MotionValue } from 'motion/react';
 import type { AudioBands, Theme } from '../../types';
 import type { VisualizerSharedProps } from './definition';
 import VisualizerBackgroundRenderer from './backgrounds/VisualizerBackgroundRenderer';
+import VideoLayer from './videoLayer/VideoLayer';
 import VisualizerBackgroundTransition from './styleTransition/VisualizerBackgroundTransition';
 import type { LayerTransition } from './styleTransition/layerTransition';
 import { getSizedCoverUrl } from '../../utils/coverUrl';
@@ -12,8 +13,8 @@ import { getSizedCoverUrl } from '../../utils/coverUrl';
 // whichever style is on screen, so a style switch keeps it. A change of background plays the
 // style switch's transition too (styleTransition/VisualizerBackgroundTransition).
 //
-// ★ 与上游的差异：上游这里还画 `VideoLayer` 与 folium 的 mod 舞台层
-//   （`FoliumStageLayerSlot`），两者都属于上游 Electron 的 mod 系统，本项目没有对应物。
+// 与上游的差异：上游这里还画 folium 的 mod 舞台层（`FoliumStageLayerSlot`），
+//   那属于上游 Electron 的 mod 系统，本项目没有对应物。`VideoLayer` 已按上游接上。
 
 /* eslint-disable react-refresh/only-export-components -- 上游把 Context 与组件放同一个文件，这里保留文件布局。 */
 
@@ -129,6 +130,9 @@ const VisualizerBackdrop: React.FC<VisualizerBackdropProps> = ({ background, pro
                 transition={transition}
                 waits={waits}
             />
+            {/* 上游同位置：歌词背后的本地视频层（设置里选的文件或链接，跟随播放）。
+                预览与静态模式下不画。 */}
+            {!props.isPreviewMode && !props.staticMode && <VideoLayer paused={props.paused ?? false} />}
             <VisualizerBackdropContext.Provider value={frame}>
                 {children}
             </VisualizerBackdropContext.Provider>

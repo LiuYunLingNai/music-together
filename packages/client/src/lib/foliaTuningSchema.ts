@@ -144,6 +144,26 @@ export const FOLIA_MODE_CONTROLS: Record<FoliaModeId, readonly FoliaControl[]> =
     range('postProcessVignette', '暗角', 0, 2),
     range('postProcessLensDistortion', '透镜扭曲', 0, 2),
   ],
+  hanabi: [
+    // 上游 HanabiSettingsPanel：烟花 / 画面 / 文字 / 装饰 / 配色 / 性能六组，滑块语义相同。
+    range('sparkAmount', '烟花数量'),
+    range('glow', '烟花辉光'),
+    range('chorusBloom', '副歌辉光'),
+    range('bloom', '全屏辉光'),
+    toggle('launches', '升空尾迹'),
+    range('sky', '夜空', 0, 1, 0.01),
+    range('riseSpeed', '上升速度'),
+    range('spin', '画面旋转'),
+    range('ambient', '环境粒子'),
+    toggle('overlayFrame', '画框'),
+    toggle('textOnly', '只显示文字'),
+    range('textMotion', '文字运动'),
+    range('blockOpacity', '色块不透明度', 0, 1, 0.01),
+    range('collage', '拼贴'),
+    range('ornamentAmount', '装饰件数量'),
+    select('colorMode', '配色', ['mixed', 'vivid', 'theme']),
+    select('renderQuality', '画质', ['full', 'balanced', 'low']),
+  ],
   lumiere: [
     // clamp 边界逐字对齐上游 LumiereSettingsPanel 的五组控件。
     range('lightIntensity', '光照强度', 0.3, 2),

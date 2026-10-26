@@ -5,6 +5,7 @@ import {
     type CappellaAvatarImage,
     type CappellaEmojiImage,
     type CappellaTuning,
+    type HanabiTuning,
     type CadenzaTuning,
     type ClassicTuning,
     type CladdaghTuning,
@@ -28,7 +29,7 @@ import type { VisualizerBackgroundConfig } from './backgrounds/definition';
 
 // src/components/visualizer/definition.ts
 // Shared contracts for discoverable visualizer modes.
-export type VisualizerTuningKind = 'none' | 'classic' | 'cadenza' | 'partita' | 'fume' | 'claddagh' | 'cappella' | 'tilt' | 'monet' | 'diorama' | 'pendolo' | 'sonnet' | 'tempera' | 'lumiere';
+export type VisualizerTuningKind = 'none' | 'classic' | 'cadenza' | 'partita' | 'fume' | 'claddagh' | 'cappella' | 'tilt' | 'monet' | 'diorama' | 'pendolo' | 'sonnet' | 'tempera' | 'lumiere' | 'hanabi';
 
 /** The command-palette line that switches to a lyric style or a background. The command list builds its id from the mode. */
 export interface VisualizerModeCommand {
@@ -112,6 +113,10 @@ export interface VisualizerSharedProps {
     onPlayerPanelGuideHotspotChange?: (isActive: boolean) => void;
     onLyricLineSeek?: (lyricTimeSec: number) => void;
     isPreviewMode?: boolean;
+    /** 上游窗口把整包调参挂在 props 上，各模式自己取自己那一份（宿主渲染器不读）。 */
+    visualizerTunings?: Record<string, unknown>;
+    /** 画面里直接拖动调参时由渲染器回传（宿主不实现拖拽调参，保留契约）。 */
+    onVisualizerTuningChange?: (patch: object) => void;
     classicTuning?: ClassicTuning;
     cadenzaTuning?: CadenzaTuning;
     partitaTuning?: PartitaTuning;
@@ -134,9 +139,12 @@ export interface VisualizerSharedProps {
     onTemperaTuningChange?: (patch: Partial<TemperaTuning>) => void;
     lumiereTuning?: LumiereTuning;
     onLumiereTuningChange?: (patch: Partial<LumiereTuning>) => void;
+    hanabiTuning?: HanabiTuning;
+    onHanabiTuningChange?: (patch: Partial<HanabiTuning>) => void;
 }
 
-export interface VisualizerSettingsPanelProps {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- 上游以泛型标注各模式调参，这里保留同一契约。
+export interface VisualizerSettingsPanelProps<T = any> {
     t: (key: string) => string;
     isDaylight: boolean;
     theme: Theme;
@@ -181,6 +189,14 @@ export interface VisualizerSettingsPanelProps {
     onTemperaTuningChange?: (patch: Partial<TemperaTuning>) => void;
     lumiereTuning?: LumiereTuning;
     onLumiereTuningChange?: (patch: Partial<LumiereTuning>) => void;
+    hanabiTuning?: HanabiTuning;
+    onHanabiTuningChange?: (patch: Partial<HanabiTuning>) => void;
+    /** The style's tuning as the window shows it. */
+    tuning?: T;
+    /** A change to the tuning. */
+    onTuningChange?: (patch: Partial<T>) => void;
+    /** 上游面板从 settings 里取这个模式的附加动作（上传的图、清空等）。 */
+    settings?: Record<string, unknown>;
     /** Mark slider drag start so onChange only updates draft. */
     onSliderPointerDown?: () => void;
     /** Commit draft values to persistent store on slider release. */

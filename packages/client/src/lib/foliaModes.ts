@@ -3,6 +3,7 @@ export const FOLIA_MODES = [
   { id: 'sonnet', upstreamId: 'sonnet', label: '商籁', description: '分镜排版、图形与文字的 Pixi 动画', order: 100 },
   { id: 'tempera', upstreamId: 'tempera', label: '凝彩', description: '色块拼贴、反色文字与场景转场', order: 110 },
   { id: 'lumiere', upstreamId: 'lumiere', label: '绘光', description: '光场、辉光与歌词的动态构图', order: 120 },
+  { id: 'hanabi', upstreamId: 'hanabi', label: '花火', description: '日式歌词 PV：色块字、烟花与持续上升的画面', order: 125 },
   { id: 'luminous', upstreamId: 'classic', label: '流光', description: '逐词辉光与漂浮排布', order: 130 },
   { id: 'cadenza', upstreamId: 'cadenza', label: '心象', description: '语义片段、镜像光束与文字层次', order: 140 },
   { id: 'partita', upstreamId: 'partita', label: '云阶', description: '分栏逐词歌词、错峰入场', order: 150 },

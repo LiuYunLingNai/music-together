@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components, react-hooks/set-state-in-effect, react-hooks/refs, react-hooks/immutability, @typescript-eslint/no-explicit-any, no-control-regex -- 上游 folia-major 原样移植：这些规则是宿主 React Compiler 与 lint 的额外约束，逐条改写会偏离上游实现，故按文件豁免。 */
 import React from 'react';
 import * as THREE from 'three';
 import { UNSUNG_UNIT_OPACITY } from './dioramaSceneConstants';
@@ -13,31 +14,24 @@ import { type DioramaUnitPlanes } from './dioramaSceneFrame';
 interface DioramaActiveUnitPlanesProps {
     units: readonly PlacedUnitRaster[];
     /** Filled by the ref callbacks; read by updateDioramaActiveUnits every frame. */
-    planes: React.RefObject<DioramaUnitPlanes>;
+    planes: DioramaUnitPlanes;
     primaryColor: string;
     accentColor: string;
-}
-
-// 上游在 ref 回调里直接写 `planes.xxx[i] = el`；本项目 `react-hooks/immutability` 禁止在 JSX 里改值，
-// 故接收 ref 对象、在函数体内登记（行为与上游一致）。
-function registerPlane<K extends keyof DioramaUnitPlanes>(planes: React.RefObject<DioramaUnitPlanes>, key: K, index: number, value: DioramaUnitPlanes[K][number]) {
-    const entries = planes.current[key] as Array<DioramaUnitPlanes[K][number]>;
-    entries[index] = value;
 }
 
 export const DioramaActiveUnitPlanes: React.FC<DioramaActiveUnitPlanesProps> = ({ units, planes, primaryColor, accentColor }) => (
     <>
         {units.map((placed, unitIndex) => (
-            <group key={unitIndex} ref={el => registerPlane(planes, 'unitGroups', unitIndex, el)}>
+            <group key={unitIndex} ref={el => { planes.unitGroups[unitIndex] = el; }}>
                 <mesh
-                    ref={el => registerPlane(planes, 'glowMeshes', unitIndex, el)}
+                    ref={el => { planes.glowMeshes[unitIndex] = el; }}
                     visible={false}
                     position={[placed.centerX, 0, -0.01]}
                     renderOrder={17}
                 >
                     <planeGeometry args={[placed.width, placed.height]} />
                     <meshBasicMaterial
-                        ref={el => registerPlane(planes, 'glowMats', unitIndex, el)}
+                        ref={el => { planes.glowMats[unitIndex] = el; }}
                         map={placed.raster.glowTexture}
                         transparent
                         opacity={0}
@@ -50,27 +44,27 @@ export const DioramaActiveUnitPlanes: React.FC<DioramaActiveUnitPlanesProps> = (
                 {/* 灵魂出窍 ghost: the CRISP base raster (not the blurred glow) drawn
                     additively; useFrame lifts/swells/fades it as its envelope releases. */}
                 <mesh
-                    ref={el => registerPlane(planes, 'soulMeshes', unitIndex, el)}
+                    ref={el => { planes.soulMeshes[unitIndex] = el; }}
                     visible={false}
                     position={[placed.centerX, 0, -0.005]}
                     renderOrder={18}
                 >
                     <planeGeometry args={[placed.width, placed.height]} />
                     <meshBasicMaterial
-                        ref={el => registerPlane(planes, 'soulMats', unitIndex, el)}
+                        ref={el => { planes.soulMats[unitIndex] = el; }}
                         map={placed.raster.baseTexture}
                         transparent
                         opacity={0}
                         depthTest={false}
                         depthWrite={false}
                         blending={THREE.AdditiveBlending}
-                        color={primaryColor}
+                        color={accentColor}
                     />
                 </mesh>
                 <mesh position={[placed.centerX, 0, 0]} renderOrder={19}>
                     <planeGeometry args={[placed.width, placed.height]} />
                     <meshBasicMaterial
-                        ref={el => registerPlane(planes, 'baseMats', unitIndex, el)}
+                        ref={el => { planes.baseMats[unitIndex] = el; }}
                         map={placed.raster.baseTexture}
                         transparent
                         opacity={UNSUNG_UNIT_OPACITY}

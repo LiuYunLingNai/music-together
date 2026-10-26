@@ -1,5 +1,4 @@
-/** 上游把这个类型放在 `pictureRule.ts`（那里还牵着设置面板的动效常量）；这里只需要类型本身。 */
-type TryEnd = 'shown' | 'empty' | 'failed';
+import type { TryEnd } from './pictureRule';
 
 // src/components/visualizer/preview/frozenPicture.ts
 // Turns a style that is drawn on a stage into an image, so that the style can be taken away: the

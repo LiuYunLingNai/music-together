@@ -21,6 +21,7 @@ export const FOLIA_MODE_RENDERERS: Record<FoliaModeId, ComponentType<FoliaShared
   diorama: lazy(() => import('./upstream/components/visualizer/diorama/VisualizerDiorama')),
   fume: lazy(() => import('./upstream/components/visualizer/fume/VisualizerFume')),
   lumiere: lazy(() => import('./upstream/components/visualizer/lumiere/VisualizerLumiere')),
+  hanabi: lazy(() => import('./upstream/components/visualizer/hanabi/VisualizerHanabi')),
   monet: lazy(() => import('./upstream/components/visualizer/monet/VisualizerMonet')),
   pendolo: lazy(() => import('./upstream/components/visualizer/pendolo/VisualizerPendolo')),
   sonnet: lazy(() => import('./upstream/components/visualizer/sonnet/VisualizerSonnet')),

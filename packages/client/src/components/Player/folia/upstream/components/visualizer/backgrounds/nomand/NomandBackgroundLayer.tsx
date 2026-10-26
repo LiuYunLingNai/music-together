@@ -1,4 +1,6 @@
+/* eslint-disable react-refresh/only-export-components, react-hooks/set-state-in-effect, react-hooks/refs, @typescript-eslint/no-empty-object-type, @typescript-eslint/no-unused-vars -- 上游 folia-major 原样移植：这些规则是宿主 React Compiler 的额外约束，逐条改写会偏离上游实现，故按文件豁免。 */
 import React, { useEffect, useRef } from 'react';
+import type { PaperShaderElement } from '@paper-design/shaders';
 import {
     FlutedGlass,
     HalftoneDots,
@@ -15,12 +17,10 @@ import {
     resolveDaylightInversion,
     resolveHalftoneInversion,
 } from './nomandShaderAdjustments';
-import { PAPER_SHADER_CONTEXT_ATTRIBUTES } from '../../../../utils/paperShaderContext';
-import type { PaperShaderElement } from '@paper-design/shaders';
 import { useFirstFrameDrawn } from '../../styleTransition/firstFrame';
+import { PAPER_SHADER_CONTEXT_ATTRIBUTES } from '../../../../utils/paperShaderContext';
 
 // src/components/visualizer/backgrounds/nomand/NomandBackgroundLayer.tsx
-/* eslint-disable react-refresh/only-export-components -- `resolveNomandSourceUrl` 供 entry 计算 song，上游同文件导出。 */
 // Renders the selected Paper image shader with the current theme palette.
 
 interface NomandBackgroundLayerProps {
@@ -31,6 +31,12 @@ interface NomandBackgroundLayerProps {
     isDaylight?: boolean;
 }
 
+
+/**
+ * For a copy mounted for a new song (or type): says it is ready once its shader has loaded the image,
+ * built itself and drawn a frame. The shader builds itself after the image has loaded and gives no
+ * sign, so its element is looked at once a frame until it holds its mount, and one frame more.
+ */
 const useShaderDrawn = (shaderRef: React.RefObject<PaperShaderElement | null>, shader: string | null) => {
     const drawn = useFirstFrameDrawn();
     useEffect(() => {
@@ -58,12 +64,6 @@ export const resolveNomandSourceUrl = (
         : coverUrl ?? monetBackgroundImage?.url
 );
 
-/**
- * For a copy mounted for a new song (or type): says it is ready once its shader has loaded the
- * image, built itself and drawn a frame. The shader builds itself after the image has loaded and
- * gives no sign, so its element is looked at once a frame until it holds its mount, and one frame
- * more.
- */
 const NomandBackgroundLayer: React.FC<NomandBackgroundLayerProps> = ({
     coverUrl,
     monetBackgroundImage,

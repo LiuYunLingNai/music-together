@@ -9,3 +9,6 @@ export function t(key: string, values?: Record<string, unknown>): string {
 }
 const translation = { t }
 export function useTranslation() { return translation }
+
+/** 上游从 i18next 取 `TFunction` 类型；本仓没有 i18next，给出同形类型。 */
+export type TFunction = (key: string, values?: Record<string, unknown>) => string;

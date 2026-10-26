@@ -1,11 +1,35 @@
+/* eslint-disable react-refresh/only-export-components, react-hooks/set-state-in-effect, react-hooks/refs, @typescript-eslint/no-empty-object-type, @typescript-eslint/no-unused-vars -- 上游 folia-major 原样移植：这些规则是宿主 React Compiler 的额外约束，逐条改写会偏离上游实现，故按文件豁免。 */
+import { Layers } from 'lucide-react';
+import {
+    DEFAULT_LATENT_BACKGROUND_TUNING,
+    type LatentBackgroundColorSource,
+    type LatentBackgroundDisplayMode,
+} from '../../../../types';
 import LatentBackground from './LatentBackground';
+import LatentBackgroundSettingsCard from './LatentBackgroundSettingsCard';
 import { defineVisualizerBackground } from '../definition';
+import { cycleValue, QuickControlChip, QuickControlToggle } from '../../../shared/QuickControlChip';
+import { BEAT_EFFECT_IDS } from '@/services/beatFx/beatEffects';
 
 // src/components/visualizer/backgrounds/latent/entry.tsx
 // Registers the cover-colored, audio-reactive Latent shell background.
 
-// 具名再导出：react-refresh 不接受匿名组件作为默认导出。
-const latentBackgroundEntry = defineVisualizerBackground({
+const LATENT_DISPLAY_MODES: LatentBackgroundDisplayMode[] = ['dithering', 'mesh', 'both'];
+
+const LATENT_DISPLAY_LABEL_KEYS: Record<LatentBackgroundDisplayMode, string> = {
+    dithering: 'options.latentDisplayDithering',
+    mesh: 'options.latentDisplayMesh',
+    both: 'options.latentDisplayBoth',
+};
+
+const LATENT_COLOR_SOURCES: LatentBackgroundColorSource[] = ['cover-theme', 'cover-only'];
+
+const LATENT_COLOR_SOURCE_LABEL_KEYS: Record<LatentBackgroundColorSource, string> = {
+    'cover-theme': 'options.latentColorSourceCoverTheme',
+    'cover-only': 'options.latentColorSourceCoverOnly',
+};
+
+export default defineVisualizerBackground({
     mode: 'latent',
     order: 35,
     labelKey: 'options.visualizerBackgroundModeLatent',
@@ -22,11 +46,15 @@ const latentBackgroundEntry = defineVisualizerBackground({
         description: 'Switch background to cover-colored audio-reactive shaders',
         keywords: ['latent', 'latent background', 'shader background', '隐现', '隐现背景', '音频响应背景'],
     },
-    /*
-     * 上游的 `renderSettingsPanel` / `renderQuickControls` / `resetSettings` 未搬：它们依赖上游的
-     * `VisualizerTuningSettings` store 与 `QuickControlChip`。本项目的背景设置直接读 `settingsStore`
-     * （`FoliaBackgroundSettings.tsx`），没有这条注册通路。
-     */
+    // 智能动感模式: the beats replace the band onset in the speed pulse (LatentBackground.tsx).
+    // Retired, its code kept: the user set it aside on 2026-10-17.
+    beatEffects: [{
+        id: BEAT_EFFECT_IDS.latentPulse,
+        nameKey: 'options.beatEffect_latentPulse',
+        descKey: 'options.beatEffect_latentPulseDesc',
+        source: 'beats',
+        retired: true,
+    }],
     // No `song`: a new song's cover colours blend in place (blendMs).
     render: ({ config, theme, coverUrl, audioPower, audioBands, staticMode, paused, blendMs }) => (
         <LatentBackground
@@ -38,8 +66,42 @@ const latentBackgroundEntry = defineVisualizerBackground({
             paused={paused}
             tuning={config?.latent?.tuning}
             blendMs={blendMs}
+            
         />
     ),
-});
+    renderSettingsPanel: ({ config, actions, ...props }) => (
+        <LatentBackgroundSettingsCard
+            {...props}
+            tuning={config?.latent?.tuning ?? DEFAULT_LATENT_BACKGROUND_TUNING}
+            onTuningChange={actions?.latent?.onTuningChange}
+        />
+    ),
+    renderQuickControls: ({ config, actions, t }) => {
+        const tuning = config?.latent?.tuning ?? DEFAULT_LATENT_BACKGROUND_TUNING;
+        const displayLabel = t(LATENT_DISPLAY_LABEL_KEYS[tuning.displayMode]);
+        const colorLabel = t(LATENT_COLOR_SOURCE_LABEL_KEYS[tuning.colorSource]);
 
-export default latentBackgroundEntry;
+        return (
+            <>
+                <QuickControlChip
+                    label={displayLabel}
+                    title={`${t('options.latentDisplayMode')}: ${displayLabel}`}
+                    onClick={() => actions?.latent?.onTuningChange?.({ displayMode: cycleValue(LATENT_DISPLAY_MODES, tuning.displayMode) })}
+                />
+                <QuickControlChip
+                    label={colorLabel}
+                    title={`${t('options.latentColorSource')}: ${colorLabel}`}
+                    onClick={() => actions?.latent?.onTuningChange?.({ colorSource: cycleValue(LATENT_COLOR_SOURCES, tuning.colorSource) })}
+                />
+                <QuickControlToggle
+                    active={tuning.overlayEnabled}
+                    label={t('options.nomandBackgroundOverlay')}
+                    onToggle={() => actions?.latent?.onTuningChange?.({ overlayEnabled: !tuning.overlayEnabled })}
+                >
+                    <Layers size={14} />
+                </QuickControlToggle>
+            </>
+        );
+    },
+    resetSettings: actions => actions?.latent?.onResetTuning?.(),
+});

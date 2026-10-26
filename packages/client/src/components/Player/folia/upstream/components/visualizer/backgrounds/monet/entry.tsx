@@ -1,12 +1,20 @@
-import { DEFAULT_MONET_BACKGROUND_TUNING } from '../../../../types';
+/* eslint-disable react-refresh/only-export-components, react-hooks/set-state-in-effect, react-hooks/refs, @typescript-eslint/no-empty-object-type, @typescript-eslint/no-unused-vars -- 上游 folia-major 原样移植：这些规则是宿主 React Compiler 的额外约束，逐条改写会偏离上游实现，故按文件豁免。 */
+import { Columns3, Wind } from 'lucide-react';
+import { DEFAULT_MONET_BACKGROUND_TUNING, type MonetBackgroundSource, type MonetBackgroundTuning } from '../../../../types';
+import { MonetBackgroundSettingsCard } from './MonetBackgroundSettingsCard';
 import MonetBackgroundLayer, { resolveMonetSourceUrl } from './MonetBackgroundLayer';
 import { defineVisualizerBackground } from '../definition';
+import { QuickControlChip, QuickControlToggle } from '../../../shared/QuickControlChip';
 
 // src/components/visualizer/backgrounds/monet/entry.tsx
 // Registers the Monet image-treatment shell background.
 
-// 具名再导出：react-refresh 不接受匿名组件作为默认导出。
-const monetBackgroundEntry = defineVisualizerBackground({
+const SOURCE_LABEL_KEYS: Record<MonetBackgroundSource, string> = {
+    'cover-derived': 'options.monetBackgroundSourceCover',
+    'uploaded-global': 'options.monetBackgroundSourceUploaded',
+};
+
+export default defineVisualizerBackground({
     mode: 'monet',
     order: 20,
     labelKey: 'options.visualizerBackgroundModeMonet',
@@ -18,11 +26,6 @@ const monetBackgroundEntry = defineVisualizerBackground({
             <path d="M20.5 8.5L8 19.5" opacity="0.55" />
         </>
     ),
-    /*
-     * 上游的 `renderSettingsPanel` / `renderQuickControls` / `resetSettings` 未搬：它们依赖上游的
-     * `VisualizerTuningSettings` store 与 `QuickControlChip`。本项目的背景设置直接读 `settingsStore`
-     * （`FoliaBackgroundSettings.tsx`），没有这条注册通路。
-     */
     // The picture is made from the cover, or from the uploaded image where that comes first. The theme
     // colours change in place, with the picture's own crossfade.
     song: ({ config, coverUrl }) => [
@@ -39,6 +42,66 @@ const monetBackgroundEntry = defineVisualizerBackground({
             staticMode={staticMode}
         />
     ),
-});
+    renderSettingsPanel: ({
+        config,
+        actions,
+        t,
+        onSliderPointerDown,
+        onSliderCommit,
+    }) => (
+        <MonetBackgroundSettingsCard
+            t={t}
+            tuning={config?.monet?.tuning ?? DEFAULT_MONET_BACKGROUND_TUNING}
+            onTuningChange={actions?.monet?.onTuningChange}
+            monetBackgroundImage={config?.customImage}
+            onUploadMonetBackgroundImage={actions?.customImage?.onUpload}
+            onClearMonetBackgroundImage={actions?.customImage?.onClear}
+            isLoadingMonetBackgroundImage={actions?.customImage?.isLoading}
+            onSliderPointerDown={onSliderPointerDown}
+            onSliderCommit={onSliderCommit}
+        />
+    ),
+    renderQuickControls: ({ config, actions, t }) => {
+        const tuning = config?.monet?.tuning ?? DEFAULT_MONET_BACKGROUND_TUNING;
+        const isFullOverlay = tuning.backgroundLayout === 'full-overlay';
+        const layoutLabel = t(isFullOverlay ? 'options.monetLayoutFullOverlay' : 'options.monetLayoutHalfPane');
+        const change = (patch: Partial<MonetBackgroundTuning>) => actions?.monet?.onTuningChange?.(patch);
+        const source = tuning.backgroundSource;
+        const sourceLabel = t(SOURCE_LABEL_KEYS[source]);
+        // The other source is the uploaded picture: without one the chip only says 封面 (the settings window uploads).
+        const hasImage = Boolean(config?.customImage);
 
-export default monetBackgroundEntry;
+        return (
+            <>
+                <QuickControlChip
+                    label={layoutLabel}
+                    title={`${t('options.monetBackgroundLayout')}: ${layoutLabel}`}
+                    onClick={() => change({
+                        backgroundLayout: isFullOverlay ? 'half-pane-gradient' : 'full-overlay',
+                    })}
+                />
+                <QuickControlChip
+                    label={sourceLabel}
+                    title={`${t('options.monetBackgroundSource')}: ${sourceLabel}`}
+                    disabled={!hasImage && source === 'cover-derived'}
+                    onClick={() => change({ backgroundSource: hasImage && source === 'cover-derived' ? 'uploaded-global' : 'cover-derived' })}
+                />
+                <QuickControlToggle
+                    active={tuning.backgroundStreaksEnabled}
+                    label={t('options.monetBackgroundStreaksEnabled')}
+                    onToggle={() => change({ backgroundStreaksEnabled: !tuning.backgroundStreaksEnabled })}
+                >
+                    <Columns3 size={14} />
+                </QuickControlToggle>
+                <QuickControlToggle
+                    active={tuning.backgroundDriftEnabled}
+                    label={t('options.monetBackgroundDriftEnabled')}
+                    onToggle={() => change({ backgroundDriftEnabled: !tuning.backgroundDriftEnabled })}
+                >
+                    <Wind size={14} />
+                </QuickControlToggle>
+            </>
+        );
+    },
+    resetSettings: actions => actions?.monet?.onResetTuning?.(),
+});

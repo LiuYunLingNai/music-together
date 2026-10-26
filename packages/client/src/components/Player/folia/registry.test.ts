@@ -13,8 +13,8 @@ import { VISUAL_MODES } from '../stages/VisualMode'
  * 「菜单能选、画面不变」或「刷新后被静默丢弃」。
  */
 describe('folia 舞台注册表', () => {
-  it('上游十四个模式完整注册，且 id 唯一', () => {
-    expect(FOLIA_MODES.map((mode) => mode.upstreamId).sort()).toEqual(['cadenza','cappella','claddagh','classic','diorama','fume','lumiere','monet','partita','pendolo','sonnet','still','tempera','tilt'])
+  it('上游十五个模式完整注册，且 id 唯一', () => {
+    expect(FOLIA_MODES.map((mode) => mode.upstreamId).sort()).toEqual(['cadenza','cappella','claddagh','classic','diorama','fume','hanabi','lumiere','monet','partita','pendolo','sonnet','still','tempera','tilt'])
     expect(FOLIA_MODES.find((mode) => mode.upstreamId === 'classic')?.id).toBe('luminous')
     const ids = FOLIA_MODES.map((mode) => mode.id)
     expect(new Set(ids).size).toBe(ids.length)

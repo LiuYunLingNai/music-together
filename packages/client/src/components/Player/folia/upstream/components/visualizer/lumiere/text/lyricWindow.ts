@@ -132,7 +132,7 @@ export const createLyricWindow = (pixi: PixiModule, options: LyricWindowOptions)
     const glyphLayer = new pixi.Container();
     const stars = new pixi.Container();
     const spots = new pixi.Container();
-    // 上游注释：径迹层几乎每帧重画。Pixi 8 里重画过的 Graphics 会让它所在的渲染组把绘制指令整组重排，原来就是整个舞台；
+    // 径迹层几乎每帧重画。Pixi 8 里重画过的 Graphics 会让它所在的渲染组把绘制指令整组重排，原来就是整个舞台；
     // 给它一个自己的渲染组，重排的只有这一层。画的先后不变（还在 spots 与 halos 之间）。
     const trackHolder = new pixi.Container({ isRenderGroup: true });
     trackHolder.addChild(trackLayer);
@@ -287,7 +287,7 @@ export const createLyricWindow = (pixi: PixiModule, options: LyricWindowOptions)
 
                 // bloom 已经很强，光晕与闪点只做「局部更亮」的那一点，不能叠成一团白。
                 const haloAlpha = glyphAlpha * lit * (0.03 + 0.14 * illumination + 0.08 * flash) * (tints ? KEYWORD_HALO_GAIN : 1);
-                // 上游注释：光晕与闪点在一行里此起彼伏地亮灭。用 visible 藏的话，每亮灭一次 Pixi 都要把整个渲染组的绘制指令重排一遍；
+                // 光晕与闪点在一行里此起彼伏地亮灭。用 visible 藏的话，每亮灭一次 Pixi 都要把整个渲染组的绘制指令重排一遍；
                 // 所以行可见时它们一直留在绘制指令里，不亮的缩成零大小：零面积的四边形不出任何像素，画面与藏起来一样。
                 glyph.halo.visible = true;
                 if (haloAlpha > 0.003) {

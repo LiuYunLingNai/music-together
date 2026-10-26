@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any -- 上游用 any 承接 pixi.js 动态挂载的字段/回调；逐处改写类型会偏离上游，故整文件放行。 */
+/* eslint-disable react-refresh/only-export-components, react-hooks/set-state-in-effect, react-hooks/refs, react-hooks/immutability, @typescript-eslint/no-explicit-any, no-control-regex -- 上游 folia-major 原样移植：这些规则是宿主 React Compiler 与 lint 的额外约束，逐条改写会偏离上游实现，故按文件豁免。 */
 import type { MotionValue } from 'motion/react';
 import type { AudioBands, SonnetTuning, Theme } from '../../../types';
 import {
@@ -18,6 +18,7 @@ import { hashSonnetSeed } from './sonnetRandom';
 import type { ShotView } from './sonnetSceneBuilder';
 import { isSonnetEmphasisRole } from './sonnetTypographyLayout';
 import { resolveSonnetSegmentCameraFocus } from './sonnetCameraTracking';
+import { applySonnetBeatFxLayers, restoreSonnetBeatFxLayers, type SonnetBeatFxFrame } from './sonnetBeatFx';
 
 // src/components/visualizer/sonnet/sonnetShotFrame.ts
 // 单个 shot 的逐帧姿态：镜头运动、间隙漂移与呼吸、逐段落焦点跟踪、MG / 引导线 / 开放画框时间，
@@ -26,11 +27,15 @@ import { resolveSonnetSegmentCameraFocus } from './sonnetCameraTracking';
 /** What a shot frame reads besides the view and the clock; all of it is read fresh every frame. */
 export interface SonnetShotFrameContext {
     tuning: SonnetTuning;
+    /** 智能动感模式 (`smartBeatActive`: on or cached), whether or not this track's beats are in yet. */
+    smartBeatEnabled: boolean;
     theme: Theme;
     audioBands?: AudioBands;
     audioPower?: MotionValue<number>;
     /** Mod multiplier lookup; 1 when the key is absent. */
     mod: (key: string) => number;
+    /** 智能动感模式 for this frame; null/absent unless it is on and the track's beats are installed. */
+    beatFx?: SonnetBeatFxFrame | null;
 }
 
 /** Reads a mod modulation key, falling back to 1 so the frame is unchanged when absent. */
@@ -74,7 +79,7 @@ export const updateSonnetShot = (
     width: number,
     height: number,
     shakeIntensity: number,
-    { tuning, theme, audioBands, audioPower: audioPowerValue, mod }: SonnetShotFrameContext,
+    { tuning, smartBeatEnabled, theme, audioBands, audioPower: audioPowerValue, mod, beatFx }: SonnetShotFrameContext,
 ) => {
     const progress = resolveShotProgress(view.shot, time);
     const motion = tuning.typographyMotion * resolveSonnetAnimationScale(theme) * mod('motionScale');
@@ -163,6 +168,18 @@ export const updateSonnetShot = (
     ) * camera;
     view.container.x = view.baseX + (cameraFrame.x * width + shake.x * width) * camera;
     view.container.y = view.baseY + (cameraFrame.y * height + shake.y * height) * camera;
+
+    if (beatFx) {
+        // Beat punch on top of the tracked camera: zooms about the focus pivot, tilt alternates.
+        // The frame overlay is a stage sibling of the scenes, so it never moves with this.
+        view.container.scale.set(view.container.scale.x * beatFx.zoom);
+        view.container.rotation += beatFx.rotation;
+        applySonnetBeatFxLayers(view, beatFx);
+    } else if (smartBeatEnabled) {
+        // On, but no beats for this track (yet): the original frame, including what an earlier
+        // beat FX frame - the previous track's - left on these layers.
+        restoreSonnetBeatFxLayers(view);
+    }
 
     if (view.mgParticleLayer) {
         // Create a slight time-difference/parallax effect for decorative elements

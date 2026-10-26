@@ -1,12 +1,15 @@
+/* eslint-disable react-refresh/only-export-components, react-hooks/set-state-in-effect, react-hooks/refs, @typescript-eslint/no-empty-object-type, @typescript-eslint/no-unused-vars -- 上游 folia-major 原样移植：这些规则是宿主 React Compiler 的额外约束，逐条改写会偏离上游实现，故按文件豁免。 */
+import { Aperture, Cone } from 'lucide-react';
 import { defineVisualizerBackground } from '../definition';
+import { QuickControlToggle } from '../../../shared/QuickControlChip';
+import CommonBackgroundSettingsCard from './CommonBackgroundSettingsCard';
 import FluidBackground from './FluidBackground';
 import GeometricBackground from './GeometricBackground';
 
 // src/components/visualizer/backgrounds/common/entry.tsx
 // Registers the built-in cover-color and geometric shell background.
 
-// 具名再导出：react-refresh 不接受匿名组件作为默认导出。
-const commonBackgroundEntry = defineVisualizerBackground({
+export default defineVisualizerBackground({
     mode: 'common',
     order: 10,
     labelKey: 'options.visualizerBackgroundModeCommon',
@@ -23,11 +26,6 @@ const commonBackgroundEntry = defineVisualizerBackground({
         description: 'Switch background to general layout',
         keywords: ['background general', 'common', 'general', '通用背景', 'ty', '背景切换到 通用', '背景切换到通用'],
     },
-    /*
-     * 上游的 `renderSettingsPanel` / `renderQuickControls` / `resetSettings` 未搬：它们依赖上游的
-     * `VisualizerTuningSettings` store 与 `QuickControlChip`。本项目的背景设置直接读 `settingsStore`
-     * （`FoliaBackgroundSettings.tsx`），没有这条注册通路。
-     */
     // The geometry is laid out from the seed, and the cover colour layer draws the cover. The theme
     // colours change in place: the base colour glides, as it did.
     song: ({ config, coverUrl, seed, staticMode }) => [
@@ -79,6 +77,35 @@ const commonBackgroundEntry = defineVisualizerBackground({
             </>
         );
     },
-});
+    renderSettingsPanel: props => <CommonBackgroundSettingsCard {...props} />,
+    renderQuickControls: ({ config, actions, t }) => {
+        const useCoverColorBg = config?.common?.useCoverColorBg ?? false;
+        // The vignette is stored as its opposite (disableVignette): the switch is lit while it is drawn.
+        const vignette = !(config?.common?.disableVignette ?? false);
 
-export default commonBackgroundEntry;
+        return (
+            <>
+                <QuickControlToggle
+                    active={useCoverColorBg}
+                    label={t(useCoverColorBg ? 'theme.addCoverColor' : 'theme.useDefaultColor')}
+                    onToggle={() => actions?.common?.onCoverColorChange?.(!useCoverColorBg)}
+                >
+                    <Cone size={14} />
+                </QuickControlToggle>
+                <QuickControlToggle
+                    active={vignette}
+                    label={t('options.visualizerVignette')}
+                    onToggle={() => actions?.common?.onDisableVignetteChange?.(vignette)}
+                >
+                    <Aperture size={14} />
+                </QuickControlToggle>
+            </>
+        );
+    },
+    resetSettings: actions => {
+        actions?.common?.onOpacityChange?.(0.75);
+        actions?.common?.onCoverColorChange?.(false);
+        actions?.common?.onDisableVignetteChange?.(false);
+        actions?.common?.onDisableGeometricChange?.(false);
+    },
+});

@@ -896,3 +896,72 @@ export interface AudioBands {
     treble: MotionValue<number>;  // 3500Hz+ (Crosses)
     spectrum?: MotionValue<Uint8Array<ArrayBuffer>>; // Raw analyser FFT magnitude bins for full-spectrum visualizers
   }
+
+// 花火（hanabi）的 tuning 类型：上游在 `components/visualizer/hanabi/types.ts`，本仓随模式目录一起放在 upstream 下。
+export type { HanabiTuning } from './components/visualizer/hanabi/types'
+export { DEFAULT_HANABI_TUNING } from './components/visualizer/hanabi/types'
+
+// ---- 上游 settingsPanels 用到的 diorama 常量（宿主此前只搬了密度三件套）----
+export const DIORAMA_MOTE_CIRCUMFERENCE_STEP = 2;
+export const DIORAMA_MOTE_RADIAL_STEP = 1;
+export const DIORAMA_PARTICLE_SIZE_MIN = 0.65;
+export const DIORAMA_PARTICLE_SIZE_MAX = 1.6;
+export const DIORAMA_PARTICLE_SIZE_STEP = 0.05;
+export const DIORAMA_PARTICLE_GLOW_INTENSITY_MIN = 0.1;
+export const DIORAMA_PARTICLE_GLOW_INTENSITY_MAX = 1.5;
+export const DIORAMA_PARTICLE_GLOW_INTENSITY_STEP = 0.05;
+
+/** 上游 `types.ts` 的 LyricData：预览层只读 `lines`。 */
+export interface LyricData {
+    lines: Line[];
+    hasTranslation?: boolean;
+}
+
+/** 上游 types 的智能动感三档（宿主同义类型在 services/beatFx/beatFxTypes）。 */
+export type SmartBeatMode = 'off' | 'cached' | 'on';
+
+/** 上游 types 的自定义歌词字体记录（宿主没有字体上传，字段保留）。 */
+export interface StoredCustomLyricsFont {
+    id: string;
+    label?: string;
+    name: string;
+    family?: string;
+    stack?: string[];
+    dataUrl?: string;
+    source?: 'system' | 'uploaded';
+}
+
+/** 上游 types：渲染画布图层的上限与默认摆放（设置窗口的图层编辑器读它）。 */
+export const TEMPERA_MAX_LAYER_IMAGES = 16;
+export const DEFAULT_TEMPERA_LAYER_IMAGE: Omit<TemperaLayerImage, 'id' | 'name'> = {
+    align: 'free',
+    // 保留原本的角色立绘构图：图片放在画面偏下。
+    verticalAlign: 'bottom',
+    scale: 0.7,
+    opacity: 1,
+};
+
+/** 上游 `types.ts` 的全局提示条消息（图层图导入等操作后弹一句）。 */
+export interface StatusMessage {
+    type: 'error' | 'success' | 'info';
+    text: string;
+    /** 文本下方的第二行：该怎么办。 */
+    note?: string;
+    quote?: { text: string; code?: string };
+    countdown?: { text: string; seconds: number; totalMs: number };
+}
+
+/** 上游 types：monet 全局背景覆盖图的存储记录（Blob 存 IndexedDB）。 */
+export interface StoredMonetBackgroundImage {
+    id: string;
+    name: string;
+    mimeType: string;
+    blob: Blob;
+}
+
+/** 上游 `types.ts` 的播放状态枚举（视频层据此跟随/暂停）。 */
+export enum PlayerState {
+    IDLE = 'IDLE',
+    PLAYING = 'PLAYING',
+    PAUSED = 'PAUSED',
+}

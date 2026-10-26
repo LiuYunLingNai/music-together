@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components, react-hooks/set-state-in-effect, react-hooks/refs, react-hooks/immutability, @typescript-eslint/no-explicit-any, no-control-regex -- 上游 folia-major 原样移植：这些规则是宿主 React Compiler 与 lint 的额外约束，逐条改写会偏离上游实现，故按文件豁免。 */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { PaperShaderElement } from '@paper-design/shaders';
 import { Dithering, MeshGradient } from '@paper-design/shaders-react';
@@ -14,10 +15,18 @@ import { updatePaperShaderUniforms } from '../../../../utils/paperShaderUniforms
 import { createPaperShaderReleaseRef, PAPER_SHADER_CONTEXT_ATTRIBUTES } from '../../../../utils/paperShaderContext';
 import { useFirstFrameDrawn } from '../../styleTransition/firstFrame';
 import { useBlendedColors } from '../useBlendedColors';
+import { beatImpact, downbeatImpact } from '@/services/beatFx/beatFxLive';;
+import { getBeatEffectStrength, isBeatFxReady } from '@/services/beatFx/beatFxLive';
+import { BEAT_EFFECT_IDS } from '@/services/beatFx/beatEffects';
 
 // src/components/visualizer/backgrounds/latent/LatentBackground.tsx
-/* eslint-disable react-refresh/only-export-components -- 上游把音频/配色 helper 与组件放在同一文件，这里保留文件布局。 */
 // Layers two cover-colored Paper shaders and drives their uniforms without React frame updates.
+//
+// 智能动感模式: once the playing track's beats are in (beatFxLive's `isBeatFxReady`, which is only
+// ever true while the switch is on), the speed pulse follows beat_this' beats instead of the band
+// onset guess - the larger of the beat and downbeat envelopes, already scaled by the 轻拍 / 重拍
+// strengths - on top of the same broadband energy. Until then, and with the switch off, the frame is
+// the original one.
 
 interface LatentBackgroundProps {
     theme: Theme;
@@ -29,6 +38,8 @@ interface LatentBackgroundProps {
     tuning?: LatentBackgroundTuning;
     /** How long new colours take to blend in (useBlendedColors); 0 or left out, at once. */
     blendMs?: number;
+    /** Where given, the blend plays along this instead (useBlendedColors). */
+    blendProgress?: MotionValue<number>;
 }
 
 const MAX_SHADER_PIXELS = 1280 * 720;
@@ -70,6 +81,8 @@ export const resolveLatentBeatSpeedTarget = (
     broadbandEnergy: number,
     onsetPulse: number,
 ) => clampAudioAmount(broadbandEnergy * 0.42 + onsetPulse * 0.85);
+/** The beat FX onset: the larger of the two envelopes the beat clock writes, each 0..2 once scaled. */
+export const resolveLatentBeatFxPulse = (beat: number, downbeat: number) => Math.max(beat, downbeat);
 export const resolveLatentAudioSpeedTarget = (
     broadbandEnergy: number,
     onsetPulse: number,
@@ -124,6 +137,7 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
     paused,
     tuning: tuningOverride,
     blendMs = 0,
+    blendProgress,
 }) => {
     const ditheringRef = useRef<PaperShaderElement | null>(null);
     const meshRef = useRef<PaperShaderElement | null>(null);
@@ -140,8 +154,6 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
     const tuning = tuningOverride ?? DEFAULT_LATENT_BACKGROUND_TUNING;
     const showDithering = tuning.displayMode !== 'mesh';
     const showMesh = tuning.displayMode !== 'dithering';
-    // 上游在渲染期同步写这个 ref：下面的 rAF 循环每帧读它，晚一帧就会在暂停后继续推进一步。
-    // eslint-disable-next-line react-hooks/refs -- 上游写法，见上
     pausedRef.current = paused;
     // A copy mounted for a change of type is ready once the cover's colours are read.
     const colorsDrawn = useFirstFrameDrawn();
@@ -178,6 +190,7 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
     const blendedColors = useBlendedColors(
         [theme.backgroundColor, resolvedColors.ditheringBack, resolvedColors.ditheringFront, ...resolvedColors.mesh],
         blendMs,
+        blendProgress,
     );
     const [backgroundColor, ditheringBack, ditheringFront] = blendedColors;
     const shaderColors = useMemo(
@@ -259,6 +272,8 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
                 targetMid,
                 0.13,
             );
+            // The band onset keeps tracking while the beats drive the pulse, so falling back (a track
+            // with no beats) picks up from the current state rather than from a stale one.
             latentOnsetPulse = tuning.enhancedBeatResponse
                 ? resolveLatentOnsetPulse(
                     targetBeatEnergy,
@@ -267,11 +282,20 @@ const LatentBackground: React.FC<LatentBackgroundProps> = ({
                 )
                 : 0;
             previousBeatEnergy = targetBeatEnergy;
-            const beatSpeedTarget = resolveLatentAudioSpeedTarget(
-                targetBeatEnergy,
-                latentOnsetPulse,
-                tuning.enhancedBeatResponse,
-            );
+            // The beats are the onset, whether or not the band onset was turned on: switching
+            // 智能动感模式 on is asking for the beat response.
+            // Only while 潮汐脉动 plays (retired 2026-10-17: the original pulse even under a mode whose
+            // own effect has the beats in).
+            const beatSpeedTarget = !isPaused && isBeatFxReady() && getBeatEffectStrength(BEAT_EFFECT_IDS.latentPulse) > 0
+                ? resolveLatentBeatSpeedTarget(
+                    targetBeatEnergy,
+                    resolveLatentBeatFxPulse(beatImpact.get(), downbeatImpact.get()),
+                )
+                : resolveLatentAudioSpeedTarget(
+                    targetBeatEnergy,
+                    latentOnsetPulse,
+                    tuning.enhancedBeatResponse,
+                );
             smoothedBeatSpeed = easeTowards(
                 smoothedBeatSpeed,
                 beatSpeedTarget,

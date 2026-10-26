@@ -1,4 +1,5 @@
 import React from 'react';
+import type { BeatEffectDef } from '@/services/beatFx/beatEffects';
 import type { MotionValue } from 'motion/react';
 import type {
     AudioBands,
@@ -55,6 +56,8 @@ export interface VisualizerBackgroundConfig {
     sora?: {
         tuning?: SoraBackgroundTuning;
     };
+    // A background's tuning lies here under the background's id, as a BackgroundTuningSlot: its
+    // tuning.ts adds that member (declare module), so this file lists no background's tuning.
     url?: {
         items?: UrlBackgroundItem[];
         selectedId?: string | null;
@@ -90,6 +93,8 @@ export interface VisualizerBackgroundActions {
         onTuningChange?: (patch: Partial<SoraBackgroundTuning>) => void;
         onResetTuning?: () => void;
     };
+    // The actions of a background's tuning lie here under the background's id, as a
+    // BackgroundTuningActionSlot: its tuning.ts adds that member.
     url?: {
         onAdd?: (item: UrlBackgroundItem) => void;
         onUpdate?: (id: string, patch: Partial<Omit<UrlBackgroundItem, 'id'>>) => void;
@@ -101,7 +106,6 @@ export interface VisualizerBackgroundActions {
 export interface VisualizerBackgroundRenderProps {
     config?: VisualizerBackgroundConfig;
     theme: Theme;
-    /** 见 `definition.ts` 的说明：本项目只有深色主题，恒为 `false`。 */
     isDaylight: boolean;
     coverUrl?: string | null;
     audioPower: MotionValue<number>;
@@ -109,9 +113,10 @@ export interface VisualizerBackgroundRenderProps {
     seed?: string | number;
     staticMode: boolean;
     paused: boolean;
-    /**
-     * 就地换色的背景（entry 没有 `song`）用多久过渡到新颜色（`useBlendedColors`）：
-     * 上游给的是柔焦过渡的长度（`transition.enter.delay + duration`），不播放过渡时为 0。
+    /*
+     * For a background that changes its colours in place (no `song` in its entry): how long it takes
+     * to blend to new ones (useBlendedColors), the soft focus's length where the host plays transitions,
+     * 0 or left out where it changes at once.
      */
     blendMs?: number;
     /** Where given, that blend plays along this (0..1, a blend's song hand-off) instead of over blendMs. */
@@ -152,15 +157,23 @@ export interface VisualizerBackgroundRegistryEntry {
     /** The command that switches to this background (id `background-<mode>`). A background without one has no plain switch command. */
     command?: VisualizerModeCommand;
     /*
-     * 这个背景随歌曲改变的输入（封面、布局种子）。这些值一变，整个背景就换一份：
-     * 新的副本挂上来（过渡层播放柔焦），旧副本留在下面画旧的歌。
-     * 不带这一个成员的背景不随歌换，就地重绘。
+     * What the background draws of the song playing (its cover, its seed). Where these change, the
+     * background changes as a whole: a new copy is mounted for the new song and, where the host plays
+     * transitions, comes in with the soft focus while the old copy leaves drawing the old song
+     * (styleTransition/VisualizerBackgroundTransition). A copy that loads something first (a cover to
+     * decode, a picture to make) says when it is ready with useFirstFrameDrawn (styleTransition/firstFrame.ts).
+     * Left out, the background does not change with the song, or changes what it draws in place.
      */
     song?: (props: VisualizerBackgroundRenderProps) => readonly unknown[];
     render: (props: VisualizerBackgroundRenderProps) => React.ReactNode;
     renderSettingsPanel?: (props: VisualizerBackgroundSettingsProps) => React.ReactNode;
     renderQuickControls?: (props: VisualizerBackgroundQuickControlsProps) => React.ReactNode;
     resetSettings?: (actions?: VisualizerBackgroundActions) => void;
+    /*
+     * The beat effects this background draws under 智能动感模式, like the visualizer entries' list of
+     * the same name (../definition.ts); Latent's onset pulse following the beats is one (retired).
+     */
+    beatEffects?: readonly BeatEffectDef[];
 }
 
 export interface VisualizerBackgroundEntryModule {

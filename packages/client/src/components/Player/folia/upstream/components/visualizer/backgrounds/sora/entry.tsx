@@ -1,11 +1,15 @@
+/* eslint-disable react-refresh/only-export-components, react-hooks/set-state-in-effect, react-hooks/refs, @typescript-eslint/no-empty-object-type, @typescript-eslint/no-unused-vars -- 上游 folia-major 原样移植：这些规则是宿主 React Compiler 的额外约束，逐条改写会偏离上游实现，故按文件豁免。 */
+import { Square } from 'lucide-react';
+import { DEFAULT_SORA_BACKGROUND_TUNING } from '../../../../types';
 import SoraBackground from './SoraBackground';
+import SoraBackgroundSettingsCard from './SoraBackgroundSettingsCard';
 import { defineVisualizerBackground } from '../definition';
+import { QuickControlToggle } from '../../../shared/QuickControlChip';
 
 // src/components/visualizer/backgrounds/sora/entry.tsx
 // Registers the shader-based Sora starfield shell background.
 
-// 具名再导出：react-refresh 不接受匿名组件作为默认导出。
-const soraBackgroundEntry = defineVisualizerBackground({
+export default defineVisualizerBackground({
     mode: 'sora',
     order: 50,
     labelKey: 'options.visualizerBackgroundModeSora',
@@ -22,11 +26,6 @@ const soraBackgroundEntry = defineVisualizerBackground({
         description: 'Switch background to Sora (starry sky) layout',
         keywords: ['sora', 'starry sky', 'star', '星空', '空', '背景切换到 空', '背景切换到空', '背景切换到Sora', '背景切换到星空'],
     },
-    /*
-     * 上游的 `renderSettingsPanel` / `renderQuickControls` / `resetSettings` 未搬：它们依赖上游的
-     * `VisualizerTuningSettings` store 与 `QuickControlChip`。本项目的背景设置直接读 `settingsStore`
-     * （`FoliaBackgroundSettings.tsx`），没有这条注册通路。
-     */
     // No `song`: the stars draw the theme colours only, and blend to new ones in place (blendMs).
     // Blank mode never mounts the WebGL canvas: just a static black (night) / white (daylight) frame.
     // Static mode intentionally freezes the starfield, matching the shared background contract.
@@ -37,6 +36,24 @@ const soraBackgroundEntry = defineVisualizerBackground({
             )}
         </div>
     ),
+    renderSettingsPanel: ({ config, actions, t }) => (
+        <SoraBackgroundSettingsCard
+            t={t}
+            tuning={config?.sora?.tuning ?? DEFAULT_SORA_BACKGROUND_TUNING}
+            onTuningChange={actions?.sora?.onTuningChange}
+        />
+    ),
+    renderQuickControls: ({ config, actions, t }) => {
+        const tuning = config?.sora?.tuning ?? DEFAULT_SORA_BACKGROUND_TUNING;
+        return (
+            <QuickControlToggle
+                active={tuning.blank}
+                label={t('options.soraBlank')}
+                onToggle={() => actions?.sora?.onTuningChange?.({ blank: !tuning.blank })}
+            >
+                <Square size={14} />
+            </QuickControlToggle>
+        );
+    },
+    resetSettings: actions => actions?.sora?.onResetTuning?.(),
 });
-
-export default soraBackgroundEntry;

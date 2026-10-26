@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any -- 上游用 any 承接 pixi.js 动态挂载的字段/回调；逐处改写类型会偏离上游，故整文件放行。 */
+/* eslint-disable react-refresh/only-export-components, react-hooks/set-state-in-effect, react-hooks/refs, react-hooks/immutability, @typescript-eslint/no-explicit-any, no-control-regex -- 上游 folia-major 原样移植：这些规则是宿主 React Compiler 与 lint 的额外约束，逐条改写会偏离上游实现，故按文件豁免。 */
 import type { SonnetTuning, Theme } from '../../../types';
 import { normalizeFontWeight, resolveThemeFontStack } from '../../../utils/fontStacks';
 import type { SonnetParagraph, SonnetShot } from './types';
@@ -42,6 +42,8 @@ export interface ShotView {
     basePivotX: number;
     basePivotY: number;
     haloLayer: import('pixi.js').Container;
+    /** The halo's alpha as built; 智能动感模式's downbeat flare lifts from it and returns to it. */
+    haloBaseAlpha: number;
     mgLayer: import('pixi.js').Container;
     mgBackgroundLayer?: import('pixi.js').Container;
     mgGeoLayer?: import('pixi.js').Container;
@@ -65,6 +67,8 @@ export interface SonnetSceneBuildOptions {
     host: HTMLDivElement;
     theme: Theme;
     tuning: SonnetTuning;
+    /** 智能动感模式 (`smartBeatActive`: on or cached): builds the MG onset pop and the downbeat tear's filter. */
+    smartBeatEnabled: boolean;
     lyricsFontScale: number;
     staticMode: boolean;
     transparentBackground: boolean;
@@ -82,6 +86,7 @@ export const buildSonnetScene = (
     iconTextures: Map<string, import('pixi.js').Texture>,
     paragraph: SonnetParagraph,
 ): SceneView => {
+    // 上游同样解构了 Sprite（其 tsconfig 未开 noUnusedLocals）；本仓开启，用 void 保持同形。
     const { Container, Graphics, Sprite } = pixi;
     void Sprite;
     const width = Math.max(options.host.clientWidth, 320);
@@ -202,7 +207,8 @@ export const buildSonnetScene = (
             width,
             height,
             shotSeed,
-            iconTextures
+            iconTextures,
+            options.smartBeatEnabled,
         );
         shotContainer.addChild(mgLayer);
         const mgBackgroundLayer = (mgLayer as any).bgLayer as import('pixi.js').Container | undefined;
@@ -234,7 +240,7 @@ export const buildSonnetScene = (
         // Virtual instrumental lines can share one shot; the complete staff belongs to the shot, not each line.
         let staffViewAdded = false;
         placements.forEach((placement, placementIndex) => {
-            void placementIndex;
+            void placementIndex; // 上游同样未使用此下标
             const segment = segments[placement.segmentIndex];
             if (segment.text === '♪') {
                 if (staffViewAdded) return;
@@ -313,6 +319,7 @@ export const buildSonnetScene = (
             basePivotX: focusX,
             basePivotY: focusY,
             haloLayer,
+            haloBaseAlpha: haloLayer.alpha,
             mgLayer,
             mgBackgroundLayer,
             mgGeoLayer,
@@ -349,7 +356,8 @@ export const buildSonnetScene = (
         container.filters = [...(container.filters ?? []), transitionBlurFilter];
         postProcessFilters.push(transitionBlurFilter);
     }
-    const transitionGlitchEffect = options.tuning.enableTransitions && !options.staticMode
+    // 智能动感模式 reuses this filter for the downbeat tear.
+    const transitionGlitchEffect = (options.tuning.enableTransitions || options.smartBeatEnabled) && !options.staticMode
         ? createSonnetGlitchEffect(pixi)
         : null;
     if (transitionGlitchEffect) {
