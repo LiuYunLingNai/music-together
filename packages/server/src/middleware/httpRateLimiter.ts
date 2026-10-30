@@ -36,6 +36,18 @@ export const musicMetadataRateLimit = createHttpRateLimit({
   suffix: 'music-metadata',
 })
 
+/**
+ * Audio proxies serve byte ranges, so seeking and visualiser analysis issue
+ * several requests per track. Native players often send no identity cookie and
+ * fall back to the IP key, which a same-host reverse proxy shares across users.
+ */
+export const audioProxyRateLimit = createHttpRateLimit({
+  points: 300,
+  durationSeconds: 60,
+  message: '音频代理请求过于频繁，请稍后再试',
+  suffix: 'audio-proxy',
+})
+
 /** Password hashing admission must not be bypassed by minting another identity. */
 export const passwordWorkRateLimit = createHttpRateLimit({
   points: 10,

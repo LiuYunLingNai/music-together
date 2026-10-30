@@ -160,6 +160,12 @@ httpServer.listen(config.port, () => {
       ? `仅允许以下来源连接：${config.explicitOrigins.join(', ')}`
       : '当前允许所有来源连接（自动模式）',
   )
+  if (config.isProd && config.identity.usesDefaultSecret) {
+    logger.warn(
+      '未设置 IDENTITY_SECRET，正在使用公开的默认值：任何人都能伪造身份（包括服务器管理员）。请参照部署文档设置独立密钥',
+      { event: 'server.default_identity_secret' },
+    )
+  }
 })
 
 // Graceful shutdown

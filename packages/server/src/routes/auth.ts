@@ -14,6 +14,8 @@ import { passwordWorkRateLimit } from '../middleware/httpRateLimiter.js'
 import type { TypedServer } from '../middleware/types.js'
 import { refreshAccountMembership } from '../services/roomService.js'
 
+const AVATAR_FILE_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/
+
 function publicProfile(user: PersistedUser) {
   return {
     id: user.id,
@@ -153,6 +155,12 @@ export function createAuthRoutes(io: TypedServer): RouterType {
   router.post('/me/avatar', async (req: Request, res: Response) => {
     if (!req.identityUserId) {
       res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+    // The user id becomes the file name. Generated ids and account ids never
+    // contain path separators, so anything else is a forged token.
+    if (!AVATAR_FILE_ID_PATTERN.test(req.identityUserId)) {
+      res.status(400).json({ error: 'Invalid account ID' })
       return
     }
     if (!userRepo.get(req.identityUserId)) {

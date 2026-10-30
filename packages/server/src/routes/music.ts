@@ -26,7 +26,7 @@ import {
   getKugouEncryptedAudio,
   kugouAudioContentType,
 } from '../services/kugouEncryptedAudio.js'
-import { isKugouProxyRequiredAudio } from '../services/kugouAudioProxy.js'
+import { isIssuedKugouAudio, isKugouProxyRequiredAudio } from '../services/kugouAudioProxy.js'
 import {
   canRedirectKugouAudioDirect,
   isKugouEncryptedAudioUrl,
@@ -34,7 +34,7 @@ import {
 } from '../services/kugouAudioUrl.js'
 import { BILIBILI_BVID_PATTERN, BILIBILI_STREAM_ID_PATTERN } from '../services/bilibiliInput.js'
 import { MusicDownloadError, resolveDownloadOptions, streamDownload } from '../services/musicDownloadService.js'
-import { musicMetadataRateLimit } from '../middleware/httpRateLimiter.js'
+import { audioProxyRateLimit, musicMetadataRateLimit } from '../middleware/httpRateLimiter.js'
 import { createHotSongsService, hotSongsPlaylistId } from '../services/hotSongsService.js'
 import { LyricSupplementService } from '../services/lyricSupplementService.js'
 
@@ -574,10 +574,17 @@ router.get('/bilibili-audio-proxy', async (req: Request, res: Response) => {
  * may be redirected to the CDN when policy allows; protected resources stay
  * proxied and preserve byte ranges so the HTML5 player can seek normally.
  */
-router.get('/kugou-audio-proxy', async (req: Request, res: Response) => {
+router.get('/kugou-audio-proxy', audioProxyRateLimit, async (req: Request, res: Response) => {
   const audioUrl = typeof req.query.url === 'string' ? req.query.url : ''
   if (!isAllowedKugouAudioUrl(audioUrl)) {
     res.status(400).json({ error: 'Invalid Kugou audio URL' })
+    return
+  }
+  // Only forward URLs this server resolved; any other kugou.com path would turn
+  // the endpoint into an open proxy serving third-party content from our origin.
+  const encryptedAudio = getKugouEncryptedAudio(audioUrl)
+  if (!isIssuedKugouAudio(audioUrl) && !encryptedAudio && !isKugouProxyRequiredAudio(audioUrl)) {
+    res.status(403).json({ error: 'Unknown Kugou audio URL' })
     return
   }
 
@@ -590,8 +597,6 @@ router.get('/kugou-audio-proxy', async (req: Request, res: Response) => {
   }, KUGOU_UPSTREAM_CONNECT_TIMEOUT_MS)
 
   try {
-    const encryptedAudio = getKugouEncryptedAudio(audioUrl)
-
     // The Web player still targets this endpoint for backwards compatibility.
     // When standard Kugou is allowed to go direct, redirect before fetching any
     // bytes so the server is not part of the audio data path. Concept Edition
@@ -646,10 +651,14 @@ router.get('/kugou-audio-proxy', async (req: Request, res: Response) => {
       const value = upstream.headers.get(header)
       if (value) res.setHeader(header, value)
     }
+    const upstreamType = upstream.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() ?? ''
     const contentType = encryptedAudio
       ? kugouAudioContentType(encryptedAudio.format)
-      : upstream.headers.get('content-type') || 'application/octet-stream'
+      : /^(?:audio|video)\/[\w.+-]+$/.test(upstreamType)
+        ? upstreamType
+        : 'application/octet-stream'
     res.setHeader('Content-Type', contentType)
+    res.setHeader('X-Content-Type-Options', 'nosniff')
     res.setHeader('Cache-Control', 'private, no-store')
     res.setHeader('Access-Control-Allow-Origin', '*')
     res.status(upstream.status)

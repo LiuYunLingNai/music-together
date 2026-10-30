@@ -27,7 +27,7 @@ import {
 } from './bilibiliInput.js'
 import { collectKugouV6Goods, kugouProviderQualityToAudioQuality, selectKugouV6Good } from './kugouAudioQuality.js'
 import { registerKugouEncryptedAudio, type KugouDecryptedFormat } from './kugouEncryptedAudio.js'
-import { registerKugouProxyRequiredAudio } from './kugouAudioProxy.js'
+import { registerIssuedKugouAudio, registerKugouProxyRequiredAudio } from './kugouAudioProxy.js'
 import { config } from '../config.js'
 import { parseCookieString } from '../utils/cookieUtils.js'
 import { logger } from '../utils/logger.js'
@@ -507,6 +507,22 @@ const MINUTE = 60 * 1000
 // TrackMeta — Track without per-instance fields (id, requestedBy)
 // ---------------------------------------------------------------------------
 type TrackMeta = Omit<Track, 'id' | 'requestedBy'>
+
+/**
+ * Playlist index key. Results fetched with a cookie can include private lists
+ * (and QQ's "我喜欢" shares one id across accounts), so they are scoped to that
+ * credential instead of being served to anonymous or other users.
+ */
+export function playlistIndexKey(
+  source: MusicSource,
+  type: 'playlist' | 'album',
+  playlistId: string,
+  cookie?: string | null,
+): string {
+  const base = `${source}:${type}:${playlistId}`
+  if (!cookie) return base
+  return `${base}:${crypto.createHash('sha256').update(cookie).digest('base64url').slice(0, 22)}`
+}
 
 class MusicProvider {
   // Shared instances with format(true) — used for url/lyric/cover operations (no cookie)
@@ -2498,6 +2514,8 @@ class MusicProvider {
           requestedBitrate: bitrate,
           actualBitrate: cached.actualBitrate,
         })
+        // The proxy allowlist can expire independently of this cache.
+        if (source === 'kugou' || source === 'kugou_concept') registerIssuedKugouAudio(cached.url)
         return { ...cached, fromCache: true }
       }
     }
@@ -2536,6 +2554,7 @@ class MusicProvider {
       if (source === 'kugou' || source === 'kugou_concept') {
         const result = await this.getKugouStreamUrl(urlId, quality, cookie, source === 'kugou_concept', vipType)
         if (result) {
+          registerIssuedKugouAudio(result.url)
           if (!cookie) {
             this.streamUrlCache.set(`${source}:${urlId}:${qualityCacheKey}`, result)
           }
@@ -2759,7 +2778,7 @@ class MusicProvider {
     cookie?: string | null,
     type: 'playlist' | 'album' = 'playlist',
   ): Promise<{ ids: string[]; total: number }> {
-    const cacheKey = `${source}:${type}:${playlistId}`
+    const cacheKey = playlistIndexKey(source, type, playlistId, cookie)
 
     // Check reference index — verify registry still has all tracks
     const indexed = this.playlistIndex.get(cacheKey)
@@ -3143,7 +3162,7 @@ class MusicProvider {
     if (!tracks) {
       // Registry eviction between fetchFullPlaylist and hydrate (very rare).
       // Clear index and retry once.
-      this.playlistIndex.delete(`${source}:${type}:${playlistId}`)
+      this.playlistIndex.delete(playlistIndexKey(source, type, playlistId, cookie))
       logger.warn(`Playlist page hydration failed, retrying: ${source}/${playlistId}`)
       const retry = await this.fetchFullPlaylist(source, playlistId, playlistTotal, cookie, type)
       if (retry.total === 0) return { tracks: [], total: 0, hasMore: false }

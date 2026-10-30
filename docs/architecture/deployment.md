@@ -35,6 +35,8 @@ Docker 容器 (:3001)
 
 ## Identity Cookie 策略
 
+- 新部署首次启动前必须设置独立的 `IDENTITY_SECRET`（不少于 32 个字符，例如 `openssl rand -base64 48` 的输出）。未设置时服务端仍会使用公开的默认值启动以兼容旧部署，但每次启动都会输出警告：知道默认值的人可以伪造任意身份，包括服务器管理员
+- 已在运行的部署更换 `IDENTITY_SECRET` 前要知道：现有身份 Cookie 全部失效，已保存的平台 Cookie 无法解密需要重新登录，设置了密码的永久房间因密码无法解密而不再加载（数据库行保留）。目前没有自动迁移
 - 未显式设置 `IDENTITY_COOKIE_SECURE` 时，服务端会根据当前请求协议自动决定是否添加 `Secure`
 - 局域网 HTTP 访问会下发非 Secure cookie
 - 公网 HTTPS / 反代 HTTPS 访问会下发 Secure cookie

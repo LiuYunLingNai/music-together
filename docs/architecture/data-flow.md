@@ -290,6 +290,7 @@ B站没有与房间 128K、320K 完全对应的普通 DASH 音轨，因此分别
 - `kugouForceProxy=false` 时，Web 端的酷狗标准版明文资源由兼容代理入口返回 `307` 到 CDN，音频字节不经过服务器；酷狗概念版和需要服务端处理的资源仍使用代理。Android 继续按自身能力先请求 CDN，失败时仅回退一次现有服务器代理。
 - 重新启用酷狗强制代理时，Android 将正在直连的对应曲目保留位置切回代理；关闭强制代理不打断当前播放，从下一次加载开始生效。
 - 酷狗策略同时覆盖 `kugou` 与 `kugou_concept`。服务端登记概念版 URL，并为已注册 QMC2 解密器的流设置 `Track.requiresServerProxy=true`；`.mflac`/`.mgg` 地址也按加密资源保守处理。Android 即使在关闭强制代理时也直接使用服务器代理解密，仅对明文资源尝试 CDN 直连。
+- `/api/music/kugou-audio-proxy` 只转发服务端 `getStreamInfo` 解析并下发过的酷狗地址（内存登记，最多 5000 条、6 小时；命中播放地址缓存时也会重新登记），其余 `*.kugou.com` 地址返回 `403`。登记按地址而不是房间进行，因为 Android 和 Windows 旧客户端调用时不带 `roomId`。该入口按身份（无身份时按 IP）每分钟限 300 次，响应带 `X-Content-Type-Options: nosniff`，上游的非 `audio/*`、`video/*` 类型一律改为 `application/octet-stream`。
 
 ## 队列清空
 

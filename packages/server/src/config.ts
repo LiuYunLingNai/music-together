@@ -8,11 +8,14 @@ import { fileURLToPath } from 'node:url'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const rootPkg = JSON.parse(readFileSync(resolve(__dirname, '../../../package.json'), 'utf-8'))
 
+/** Public development default. Anyone who knows it can forge identity tokens. */
+export const DEFAULT_IDENTITY_SECRET = 'dev-identity-secret-change-me'
+
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3001),
   CLIENT_URL: z.string().default(''),
   CORS_ORIGINS: z.string().default(''),
-  IDENTITY_SECRET: z.string().min(16).default('dev-identity-secret-change-me'),
+  IDENTITY_SECRET: z.string().min(16).default(DEFAULT_IDENTITY_SECRET),
   IDENTITY_TTL_DAYS: z.coerce.number().int().positive().default(30),
   REJOIN_TTL_MS: z.coerce.number().int().positive().default(TIMING.ROOM_GRACE_PERIOD_MS),
   IDENTITY_COOKIE_SECURE: z.enum(['true', 'false']).optional(),
@@ -45,6 +48,8 @@ export const config = {
   },
   identity: {
     secret: env.IDENTITY_SECRET,
+    // Kept startable for legacy deployments; index.ts warns on every boot instead.
+    usesDefaultSecret: env.IDENTITY_SECRET === DEFAULT_IDENTITY_SECRET,
     ttlDays: env.IDENTITY_TTL_DAYS,
     cookieSecure: env.IDENTITY_COOKIE_SECURE ? env.IDENTITY_COOKIE_SECURE === 'true' : null,
   },

@@ -27,6 +27,23 @@ describe('server identity configuration compatibility', () => {
     try {
       const { config } = await import('./config.js')
       expect(config.identity.secret).toBe('dev-identity-secret-change-me')
+      expect(config.identity.usesDefaultSecret).toBe(true)
+    } finally {
+      process.chdir(originalCwd)
+      rmSync(isolatedCwd, { recursive: true, force: true })
+    }
+  })
+
+  it('does not flag an explicitly configured identity secret', async () => {
+    const isolatedCwd = mkdtempSync(join(tmpdir(), 'music-together-config-'))
+    process.chdir(isolatedCwd)
+    process.env.NODE_ENV = 'production'
+    process.env.IDENTITY_SECRET = 'test-only-identity-secret-not-real'
+    vi.resetModules()
+
+    try {
+      const { config } = await import('./config.js')
+      expect(config.identity.usesDefaultSecret).toBe(false)
     } finally {
       process.chdir(originalCwd)
       rmSync(isolatedCwd, { recursive: true, force: true })

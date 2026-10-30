@@ -114,6 +114,7 @@ pnpm build
 NODE_ENV=production
 PORT=3001
 DATABASE_URL=file:db文件路径，默认根目录/data，不填写则默认
+IDENTITY_SECRET=至少32个字符的随机字符串
 SERVER_ADMIN_IDS=你的账号ID
 QQ_MUSIC_API_KEY=填入key
 QQ_MUSIC_API_URL=填入url
@@ -187,6 +188,7 @@ Docker 单镜像部署：
 ```bash
 docker run -d --name music-together --restart unless-stopped \
   -p 3001:3001 \
+  -e IDENTITY_SECRET='至少32个字符的随机字符串' \
   -e SERVER_ADMIN_IDS=服务器管理员ID(多个用英文逗号分隔) \
   -e QQ_MUSIC_API_KEY='你的 QQ_MUSIC_API_KEY' \
   -e QQ_MUSIC_API_URL='API url' \
@@ -200,6 +202,7 @@ docker run -d --name music-together --restart unless-stopped \
 ```bash
 docker run -d --name music-together --restart unless-stopped \
   -p 3001:3001 \
+  -e IDENTITY_SECRET='至少32个字符的随机字符串' \
   -e SERVER_ADMIN_IDS=服务器管理员ID(多个用英文逗号分隔) \
   -e QQ_MUSIC_API_KEY='你的 QQ_MUSIC_API_KEY' \
   -e QQ_MUSIC_API_URL='API url' \
@@ -207,6 +210,8 @@ docker run -d --name music-together --restart unless-stopped \
   -v 本地备份目录:/app/backups \
   ghcr.nju.edu.cn/liuyunlingnai/music-together:latest
 ```
+
+> `IDENTITY_SECRET` 用于签发身份令牌和加密已保存的平台登录，可用 `openssl rand -base64 48` 生成。不设置时会使用公开的默认值，任何人都能伪造管理员身份。已经在运行的部署更换这个值，会让现有身份、平台登录和带密码的永久房间失效，详见 [部署文档](docs/architecture/deployment.md)。
 
 > 将 `/srv/music-together` 替换为宿主机实际路径。`data/` 保存数据库、头像和背景图，`backups/` 保存自动备份；两个目录都需要挂载，否则容器替换后对应内容会丢失。
 
