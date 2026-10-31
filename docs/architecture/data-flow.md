@@ -43,13 +43,17 @@ graph TB
 
 - 平台主动退出保持历史范围：删除当前房间凭据及用户的持久授权，保留其他房间已经贡献的凭据；管理员撤销则清除所有房间的副本，包括离线成员的贡献。
 - 异步扫码、手动登录和会员刷新提交结果前检查运行时授权版本与原房间映射，防止退出、撤销或换房后的晚到响应重新保存凭据。版本仅存于内存，不改变数据库结构、`IDENTITY_SECRET` 默认值或既有密文解密方式。
+- 扫码状态查询区分"平台明确返回过期"和"这次查询自己失败"（网络、超时、响应格式异常）。后者由 provider 返回 `transient: true`，服务端不下发 `auth:qr_status`，客户端下一轮继续轮询；状态码集合保持 800/801/802/803 不变，不影响原生客户端。
+- 手动 Cookie 校验失败且该用户已有可用凭据时只回复失败，不写入。昵称"手动登录"、等级 0 的记录会按 userId 顶掉原有的有效凭据，而失败往往只是上游抖动或另一台设备重发的旧 Cookie。完全没有凭据时仍按原行为保存。
+- 登录有效但会员子请求失败时，provider 在 `UserInfoData` 上带 `membershipUnknown: true`，调用方保留已记录的会员等级，并且不写入刷新冷却，下次进房会重新核对。平台明确返回非会员时照实更新。
+- 后台删除账号会对全部音源调用 `revokeUserAuthorization` 并向受影响房间广播 `auth:status_update`。数据库里的 `platform_auth` 随外键级联删除，但房间内存池里的凭据不会，不撤销的话被删账号的会员 Cookie 会继续被用来播放和下载。
 - WebSocket 仍使用 `/ws` 的原生 JSON 事件协议。`player:play` 保留空载荷续播及完整 Track 直播放，显式歌曲载荷增加运行时校验；定向发送通过 socket ID 查询连接，不将 socket ID 当作房间名。
 - 网页房间设置以已有 `room:settings` 服务端广播确认保存结果，不新增 ACK 协议；失败、断线或超时不会提示保存成功。
 
 | 分类         | 客户端 → 服务端                                                                                                                     | 服务端 → 客户端                                                                                                                            |
 | ------------ | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Room**     | `room:create`, `room:join`, `room:leave`, `room:list`, `room:settings`, `room:set_role`                                             | `room:created`, `room:state`, `room:user_joined`, `room:user_left`, `room:settings`, `room:error`, `room:list_update`, `room:role_changed` |
-| **Player**   | `player:play`, `player:pause`, `player:seek`, `player:next`, `player:prev`, `player:sync`, `player:sync_request`, `player:set_mode` | `player:play`, `player:pause`, `player:resume`, `player:seek`, `player:sync_response`                                                      |
+| **Player**   | `player:play`, `player:pause`, `player:seek`, `player:next`（可选 `{ trackId }`）, `player:prev`, `player:sync`, `player:sync_request`, `player:set_mode` | `player:play`, `player:pause`, `player:resume`, `player:seek`, `player:sync_response`                                                      |
 | **Queue**    | `queue:add`, `queue:add_batch`, `queue:remove`, `queue:reorder`, `queue:clear`                                                      | `queue:updated`                                                                                                                            |
 | **Chat**     | `chat:message`                                                                                                                      | `chat:message`, `chat:history`                                                                                                             |
 | **Vote**     | `vote:start`, `vote:cast`                                                                                                           | `vote:started`, `vote:result`                                                                                                              |
@@ -311,12 +315,15 @@ B站没有与房间 128K、320K 完全对应的普通 DASH 音轨，因此分别
 9. **断线时钟重置**：`resetAllRoomState()` 除重置 Zustand stores 外，还调用 `resetClockSync()` 清空 NTP 采样，确保重连后使用全新的时钟校准数据
 10. **Socket 断开竞态防护**：页面刷新时新旧 socket 的 join/disconnect 到达顺序不确定，`leaveRoom` 通过 `roomRepo.hasOtherSocketForUser()` 检测同一用户是否有更新的 socket 连接，避免旧 socket disconnect 误删活跃用户
 11. **投票安全网**：`voteController` 接收 `VOTE_START` 时，若检测到用户已有直接操作权限（owner/admin），不再返回错误，而是直接执行该操作，防止客户端-服务端角色不同步时操作失效。部分 VoteAction 通过 `PERM_MAP` 映射到不同的 CASL action+subject（如 `'play-track'` → `('play', 'Player')`，`'remove-track'` → `('remove', 'Queue')`）
-12. **切歌防抖**：500ms (`PLAYER_NEXT_DEBOUNCE_MS`) 内不重复触发同方向切歌，但允许立即反向操作。`playNextTrackInRoom` / `playPrevTrackInRoom` 将 debounce 检查和队列导航封装在 per-room mutex 内部，确保同 tick 的多个事件不会同时通过。投票执行、删除当前曲目等场景可使用 `{ skipDebounce: true }`
-13. **停止播放统一处理**：`playerService.stopPlayback()` 统一处理"队列为空/清空"场景——清除 currentTrack、emit PLAYER_PAUSE、广播 ROOM_STATE、刷新大厅列表，避免 controller 中重复逻辑。`stopPlaybackSafe()` 提供 mutex 保护版本，`QUEUE_CLEAR` 使用此版本防止与并发 `autoPlayIfEmpty` 竞态
-14. **大厅重连刷新**：`useLobby` 监听 socket `connect` 事件，断线重连后自动重新拉取房间列表
-15. **投票执行**：决定产生后先按 vote ID 原子领取并移出活动表，再 `await` 执行动作，避免多个决定票或旧超时回调重复执行/取消新投票。成员加入、离开或主持人变化时会重算多数门槛、清理离线票并更新否决权；动作完成后才广播 `VOTE_RESULT`
-16. **密码安全隔离**：`toPublicRoomState()` 默认不含密码明文；`toPublicRoomStateForOwner()` 仅在发送给 owner 的 socket 时使用（创建房间、加入房间、设置变更、conductor/角色变更）。非 owner 成员仅能看到 `hasPassword` 布尔标记，无法获取密码明文。设置广播通过 `socket.emit`（owner） + `socket.to(roomId).emit`（其他成员）分别发送。owner 在线且 conductor/角色变更时，通过 `roomRepo.getSocketIdForUser()` 反查 owner 的 socketId 定向发送含密码版本；没有 owner 在线（仅临时管理员）时广播不含密码版本
-17. **访客与成员名册**：`userRepo.isGuest(id)`（`存在 && !passwordHash && !isServerAdmin`）判定访客。`joinRoom` / `leaveRoom` 通过 `shouldPersistMember(room, user)` 决定是否写入持久名册 `room.members`——房主（`creatorId`）、持久 admin（`adminUserIds`）、已在名册者、以及非访客账号始终写入；普通访客**只进 `room.users`（在线态、鉴权、投票、conductor 选举均正常），不进 `room.members`**，离线即从在线列表消失、不留痕。鉴权与角色协调只读 `room.users`，故访客移出名册不影响权限；`reconcileRoomRoles` 对不在名册的成员为 no-op。客户端 `MembersSection` 由"在 `room.users` 但不在 `room.members`"推导在线访客并加访客徽标，不新增协议字段
+12. **切歌防抖**：500ms (`PLAYER_NEXT_DEBOUNCE_MS`) 内不重复触发同方向切歌，但允许立即反向操作。`playNextTrackInRoom` / `playPrevTrackInRoom` 将 debounce 检查和队列导航封装在 per-room mutex 内部，确保同 tick 的多个事件不会同时通过。投票执行、删除当前曲目等场景可使用 `{ skipDebounce: true }`。`player:next` 还接受可选的 `{ trackId }`：在 mutex 内核对它是否仍是当前曲目，不一致就丢弃这次请求——否则歌曲自然播完后，排队中的切歌会把刚开始的新歌一起跳掉。旧版 Web、Android 和 Windows 客户端不带这个字段，退回原有防抖行为
+13. **恢复播放幂等**：`resumeTrack` 在房间已是播放态时直接返回 `false`，不改 `revision` 也不广播。重复恢复会把时间线退回上次暂停的位置，而客户端先静音再调用 `play()`，Howler 对已在播放的声音直接返回、不触发 `onplay`，音量就再也恢复不了。投票走这条路径时按动作失败处理
+14. **自动切歌上限**：解析失败的曲目会被移出队列，因此每次重试都取新的后继曲目，最多尝试 5 次；仍然失败就调用 `stopPlayback`，避免房间停在"播放中"却没有任何客户端在出声。`loop-one` 下当前曲失败时按顺序模式取下一首，否则会一直取回同一首已被移除的歌
+15. **队列 ID 唯一**：曲目 ID 由客户端提供，两个人同时添加同一首就会重复。`queueService` 的三个添加入口（单曲、批量、插到当前曲之后）在入队时检查队列和当前曲，重复的改用服务端新生成的 ID。队列导航按 ID `findIndex`、删除按 ID `filter`，重复 ID 会让顺序播放在两份之间来回跳、删除一次删掉两条、重排静默丢条目
+16. **停止播放统一处理**：`playerService.stopPlayback()` 统一处理"队列为空/清空"场景——清除 currentTrack、emit PLAYER_PAUSE、广播 ROOM_STATE、刷新大厅列表，避免 controller 中重复逻辑。`stopPlaybackSafe()` 提供 mutex 保护版本，`QUEUE_CLEAR` 使用此版本防止与并发 `autoPlayIfEmpty` 竞态
+17. **大厅重连刷新**：`useLobby` 监听 socket `connect` 事件，断线重连后自动重新拉取房间列表
+18. **投票执行**：决定产生后先按 vote ID 原子领取并移出活动表，再 `await` 执行动作，避免多个决定票或旧超时回调重复执行/取消新投票。成员加入、离开或主持人变化时会重算多数门槛、清理离线票并更新否决权；动作完成后才广播 `VOTE_RESULT`。发起投票时记录当时的 `currentTrack.id`，`next` 与 `prev` 执行前核对：投票期间歌曲自然切换过就按动作失败丢弃，避免跳掉的是另一首歌
+19. **密码安全隔离**：`toPublicRoomState()` 默认不含密码明文；`toPublicRoomStateForOwner()` 仅在发送给 owner 的 socket 时使用（创建房间、加入房间、设置变更、conductor/角色变更）。非 owner 成员仅能看到 `hasPassword` 布尔标记，无法获取密码明文。设置广播通过 `socket.emit`（owner） + `socket.to(roomId).emit`（其他成员）分别发送。owner 在线且 conductor/角色变更时，通过 `roomRepo.getSocketIdForUser()` 反查 owner 的 socketId 定向发送含密码版本；没有 owner 在线（仅临时管理员）时广播不含密码版本
+20. **访客与成员名册**：`userRepo.isGuest(id)`（`存在 && !passwordHash && !isServerAdmin`）判定访客。`joinRoom` / `leaveRoom` 通过 `shouldPersistMember(room, user)` 决定是否写入持久名册 `room.members`——房主（`creatorId`）、持久 admin（`adminUserIds`）、已在名册者、以及非访客账号始终写入；普通访客**只进 `room.users`（在线态、鉴权、投票、conductor 选举均正常），不进 `room.members`**，离线即从在线列表消失、不留痕。鉴权与角色协调只读 `room.users`，故访客移出名册不影响权限；`reconcileRoomRoles` 对不在名册的成员为 no-op。客户端 `MembersSection` 由"在 `room.users` 但不在 `room.members`"推导在线访客并加访客徽标，不新增协议字段
 
 ## REST API
 

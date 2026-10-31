@@ -695,6 +695,8 @@ export async function checkQrStatus(qrsig: string): Promise<{
   status: number
   message: string
   cookie?: string
+  /** 查询本身失败（网络/超时/格式异常），二维码未必过期：调用方应继续轮询。 */
+  transient?: boolean
 }> {
   try {
     // 如果该 qrsig 正在处理登录（check_sig 等耗时操作），直接返回成功状态
@@ -766,7 +768,7 @@ export async function checkQrStatus(qrsig: string): Promise<{
     const match = text.match(/ptuiCB\('(\d+)','([^']*)','([^']*)','([^']*)','([^']*)'(?:,'([^']*)')?/)
     if (!match) {
       logger.warn('QQ QR: unexpected ptqrlogin response format', { responseLength: text.length })
-      return { status: 800, message: '检查状态失败（响应格式异常）' }
+      return { status: 800, message: '检查状态失败（响应格式异常）', transient: true }
     }
 
     const [, code, , checkSigUrl, , msg, nickname] = match
@@ -855,7 +857,8 @@ export async function checkQrStatus(qrsig: string): Promise<{
     return mapped
   } catch (err) {
     logger.error('QQ QR check failed', err)
-    return { status: 800, message: '检查状态失败' }
+    // 查询本身失败，二维码可能仍然有效：交给调用方继续轮询
+    return { status: 800, message: '检查状态失败', transient: true }
   }
 }
 
@@ -911,6 +914,7 @@ export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
 
     // 检查 VIP 状态
     let membership = parseTencentMembership(undefined)
+    let membershipUnknown = false
     try {
       const vipData = await tencentApiRequest<VipLoginData>({
         module: 'VipLogin.VipLoginInter',
@@ -929,12 +933,16 @@ export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
       })
       membership = parseTencentMembership(vipData)
     } catch (err: unknown) {
+      // 登录本身有效，只是会员子请求失败。标记为“未知”，让调用方保留原有
+      // 等级，不要把用户存成非会员（否则音质上限被压到 320k）。
+      membershipUnknown = true
       logger.error('QQ VIP Check failed:', err instanceof Error ? err.message : String(err))
     }
 
     return {
       ok: true,
       data: {
+        membershipUnknown,
         nickname,
         avatarUrl: creator.headpic
           ? String(creator.headpic).replace(/^http:\/\//, 'https://')

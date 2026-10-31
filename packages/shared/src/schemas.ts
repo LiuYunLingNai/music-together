@@ -94,6 +94,11 @@ export const playerSetModeSchema = z.object({
   mode: z.enum(['sequential', 'loop-all', 'loop-one', 'shuffle']),
 })
 
+// 空载荷表示"切下一首"；带 trackId 时只在它仍在播放时才执行（旧客户端不带）。
+export const playerNextSchema = z.object({
+  trackId: z.string().max(200).optional(),
+})
+
 // ---------------------------------------------------------------------------
 // Queue
 // ---------------------------------------------------------------------------

@@ -506,6 +506,8 @@ async function checkQrStatusForEdition(
   status: number
   message: string
   cookie?: string
+  /** 查询本身失败（网络/超时），二维码未必过期：调用方应继续轮询。 */
+  transient?: boolean
 }> {
   try {
     const body = await kugouRequest({
@@ -536,11 +538,14 @@ async function checkQrStatusForEdition(
     return { status, message }
   } catch (err) {
     logger.error('Kugou QR check failed', err)
-    return { status: 800, message: '检查状态失败' }
+    // 查询本身失败，二维码可能仍然有效：交给调用方继续轮询
+    return { status: 800, message: '检查状态失败', transient: true }
   }
 }
 
-export async function checkQrStatus(key: string): Promise<{ status: number; message: string; cookie?: string }> {
+export async function checkQrStatus(
+  key: string,
+): Promise<{ status: number; message: string; cookie?: string; transient?: boolean }> {
   return checkQrStatusForEdition(key, 'standard')
 }
 

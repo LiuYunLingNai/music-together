@@ -2,10 +2,28 @@ import { ERROR_CODE, EVENTS, playerSetModeSchema } from '@music-together/shared'
 import type { VoteAction } from '@music-together/shared'
 import type { TypedServer } from '../middleware/types.js'
 import { roomRepo } from '../repositories/roomRepository.js'
+import type { RoomData } from '../repositories/types.js'
 import { toPublicRoomState } from '../utils/roomUtils.js'
 import { logger } from '../utils/logger.js'
 import * as playerService from './playerService.js'
 import * as queueService from './queueService.js'
+
+/**
+ * 投票期间歌曲自然播完时，这次「下一首/上一首」已经指向另一首歌。
+ * 没有记录曲目（例如旧流程）或房间当前没有曲目时不做拦截。
+ */
+function isStaleTrackVote(room: RoomData, expectedTrackId?: string): boolean {
+  if (!expectedTrackId) return false
+  const currentId = room.currentTrack?.id
+  if (!currentId || currentId === expectedTrackId) return false
+  logger.debug('投票期间曲目已切换，丢弃这次切歌投票', {
+    event: 'vote.stale_track_action',
+    roomId: room.id,
+    expectedTrackId,
+    currentTrackId: currentId,
+  })
+  return true
+}
 
 /** Execute one action after direct permission or an atomically claimed vote. */
 export async function executeVoteAction(
@@ -13,23 +31,33 @@ export async function executeVoteAction(
   roomId: string,
   action: VoteAction,
   payload?: Record<string, unknown>,
+  /** 发起投票时的当前曲目；切歌类动作借它判断投票期间是否已经换过歌。 */
+  expectedTrackId?: string,
 ): Promise<boolean> {
   switch (action) {
     case 'pause':
       playerService.pauseTrack(io, roomId)
       return true
     case 'resume':
-      playerService.resumeTrack(io, roomId)
-      return true
+      // 已经在播放时按无操作处理，避免整个房间的时间线退回暂停那一刻
+      return playerService.resumeTrack(io, roomId)
     case 'next': {
       const room = roomRepo.get(roomId)
       if (!room) return false
-      await playerService.playNextTrackInRoom(io, roomId, room.playMode, { skipDebounce: true })
+      if (isStaleTrackVote(room, expectedTrackId)) return false
+      await playerService.playNextTrackInRoom(io, roomId, room.playMode, {
+        skipDebounce: true,
+        expectedTrackId,
+      })
       return true
     }
-    case 'prev':
+    case 'prev': {
+      const room = roomRepo.get(roomId)
+      if (!room) return false
+      if (isStaleTrackVote(room, expectedTrackId)) return false
       await playerService.playPrevTrackInRoom(io, roomId, { skipDebounce: true })
       return true
+    }
     case 'set-mode': {
       const parsed = playerSetModeSchema.safeParse(payload)
       if (!parsed.success) {

@@ -30,7 +30,12 @@ export function usePlayer() {
   // syncPlaybackToSocket should be skipped to avoid a double-load.
   const recoveredTrackIdRef = useRef<string | null>(null)
 
-  const next = useCallback(() => socket.emit(EVENTS.PLAYER_NEXT), [socket])
+  // 带上当前曲目：请求在服务端排队期间歌曲自然播完的话，这次切歌会被丢弃，
+  // 否则刚开始的新歌会被一起跳掉。
+  const next = useCallback(() => {
+    const trackId = useRoomStore.getState().room?.currentTrack?.id
+    socket.emit(EVENTS.PLAYER_NEXT, trackId ? { trackId } : {})
+  }, [socket])
 
   // Auto-next on song end: only the current conductor (hostId) emits PLAYER_NEXT.
   // The conductor is auto-elected by the server (owner > admin > member).
@@ -39,7 +44,7 @@ export function usePlayer() {
     const { room } = useRoomStore.getState()
     const myId = storage.getUserId()
     if (room?.hostId === myId) {
-      socket.emit(EVENTS.PLAYER_NEXT)
+      socket.emit(EVENTS.PLAYER_NEXT, room.currentTrack?.id ? { trackId: room.currentTrack.id } : {})
     }
   }, [socket])
 

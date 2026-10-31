@@ -1,13 +1,29 @@
 import type { PlayMode, Track } from '@music-together/shared'
 import { LIMITS } from '@music-together/shared'
+import { nanoid } from 'nanoid'
 import { roomRepo } from '../repositories/roomRepository.js'
 import { getSuccessorAfterRemovalFromQueue } from './queueNavigation.js'
+
+/**
+ * Track ids come from the client, so two users adding the same song in the
+ * same moment would produce duplicate ids. Everything downstream addresses
+ * queue entries by id (`findIndex` for navigation, `filter` for removal), so a
+ * duplicate makes sequential playback bounce between the two copies, removal
+ * delete both, and reorder silently drop one. Give the later copy a fresh id
+ * instead of rejecting it: the user still gets the song they asked for.
+ */
+function withUniqueId(room: { queue: Track[]; currentTrack: Track | null }, track: Track): Track {
+  const taken = new Set(room.queue.map((entry) => entry.id))
+  if (room.currentTrack) taken.add(room.currentTrack.id)
+  if (!taken.has(track.id)) return track
+  return { ...track, id: nanoid() }
+}
 
 export function addTrack(roomId: string, track: Track): boolean {
   const room = roomRepo.get(roomId)
   if (!room) return false
   if (room.queue.length >= LIMITS.QUEUE_MAX_SIZE) return false
-  room.queue.push(track)
+  room.queue.push(withUniqueId(room, track))
   roomRepo.persist(roomId)
   return true
 }
@@ -23,7 +39,9 @@ export function addBatchTracks(roomId: string, tracks: Track[]): number {
   const available = LIMITS.QUEUE_MAX_SIZE - room.queue.length
   if (available <= 0) return 0
   const toAdd = tracks.slice(0, available)
-  room.queue.push(...toAdd)
+  // De-duplicates within the batch too: each pushed entry joins room.queue
+  // before the next one is checked.
+  for (const track of toAdd) room.queue.push(withUniqueId(room, track))
   roomRepo.persist(roomId)
   return toAdd.length
 }
@@ -40,7 +58,7 @@ export function insertAfterCurrent(roomId: string, track: Track): boolean {
   const currentId = room.currentTrack?.id
   const currentIndex = currentId ? room.queue.findIndex((t) => t.id === currentId) : -1
   const insertIndex = currentIndex >= 0 ? currentIndex + 1 : 0
-  room.queue.splice(insertIndex, 0, track)
+  room.queue.splice(insertIndex, 0, withUniqueId(room, track))
   roomRepo.persist(roomId)
   return true
 }

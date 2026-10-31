@@ -217,7 +217,28 @@ export function useHowl(onTrackEnd: () => void) {
         void (async () => {
           await stretchReadyRef.current
           if (scheduledStartRef.current?.howl !== howl || howlRef.current !== howl) return
-          if (soundIdRef.current !== undefined) howl.play(soundIdRef.current)
+          // ★ Howler 对已经在播放的声音会**直接返回**（howler.js:810），不触发
+          //   onplay。而 onplay 是恢复音量、清理 scheduledStartRef 的唯一入口，
+          //   所以这条路径会让播放器永久静音（服务端现在也会忽略重复的恢复
+          //   播放请求，但这里仍要兜住已经在播放的情况）。
+          const soundId = soundIdRef.current
+          if (soundId !== undefined && howl.playing(soundId)) {
+            const scheduledStart = scheduledStartRef.current
+            scheduledStartRef.current = null
+            if (scheduledStart) {
+              setHowlPosition(
+                howl,
+                getScheduledPlaybackPosition(scheduledStart.targetTime, scheduledStart.executeAt, getServerTime()),
+                soundId,
+              )
+              scheduledStart.onCommit?.()
+            }
+            const latestVolume = usePlayerStore.getState().volume
+            howl.volume(latestVolume, soundId)
+            syncReadyRef.current = true
+            return
+          }
+          if (soundId !== undefined) howl.play(soundId)
           else soundIdRef.current = howl.play()
         })()
       }

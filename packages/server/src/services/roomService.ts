@@ -484,7 +484,9 @@ export async function reconcileAndBroadcastVote(io: TypedServer, roomId: string,
 
   const claimedVote = voteService.claimVote(roomId, result.vote.id)
   if (!claimedVote) return
-  const executed = result.passed ? await executeVoteAction(io, roomId, claimedVote.action, claimedVote.payload) : false
+  const executed = result.passed
+    ? await executeVoteAction(io, roomId, claimedVote.action, claimedVote.payload, claimedVote.currentTrackId)
+    : false
   io.to(roomId).emit(EVENTS.VOTE_RESULT, {
     passed: result.passed && executed,
     action: claimedVote.action,

@@ -239,6 +239,23 @@ async function refreshMembershipEntry(
       // Refresh existing persistent metadata only; retained room contributions
       // must not recreate a deleted authorization or replace a newer account.
       const persist = platformAuthRepo.loadUser(userId).some((entry) => entry.platform === platform && entry.cookie === cookie)
+      // The membership sub-request failed: keep the level we already have
+      // rather than downgrading a VIP account over one upstream hiccup. Also
+      // skip the refresh cooldown so the next join re-checks.
+      if (userInfo.membershipUnknown) {
+        logger.warn('会员状态未知，保留原有会员等级', {
+          event: 'auth.membership_unknown',
+          roomId,
+          userId,
+          platform,
+          retainedVipType: current.vipType,
+        })
+        addCookie(roomId, platform, userId, cookie, userInfo.nickname, current.vipType, persist, {
+          vipLabel: current.vipLabel,
+          vipLevel: current.vipLevel,
+        })
+        return false
+      }
       addCookie(roomId, platform, userId, cookie, userInfo.nickname, userInfo.vipType, persist, {
         vipLabel: userInfo.vipLabel,
         vipLevel: userInfo.vipLevel,
@@ -400,6 +417,44 @@ export function getBestAuth(platform: MusicSource, roomId: string): BestPlatform
  * Get a specific user's cookie for a platform in a specific room.
  * Used for user-private operations like fetching personal playlists.
  */
+/**
+ * The membership already recorded for this user, from the room pool or the
+ * persisted record. Returns null when the user has no credential yet, so
+ * callers can tell "no record" from "recorded as not a member".
+ */
+export function getUserMembership(
+  userId: string,
+  platform: MusicSource,
+  roomId?: string,
+): { vipType: number; vipLabel?: string; vipLevel?: number } | null {
+  if (roomId) {
+    const entry = roomCookiePool
+      .get(roomId)
+      ?.get(platform)
+      ?.find((item) => item.userId === userId)
+    if (entry) return { vipType: entry.vipType, vipLabel: entry.vipLabel, vipLevel: entry.vipLevel }
+  }
+  const persisted = platformAuthRepo.loadUser(userId).find((entry) => entry.platform === platform)
+  if (!persisted) return null
+  return { vipType: persisted.vipType, vipLabel: persisted.vipLabel, vipLevel: persisted.vipLevel }
+}
+
+/**
+ * Whether this user already has a credential for the platform, in the room
+ * pool or persisted. Callers use it to avoid replacing a working credential
+ * with an unverified one.
+ */
+export function hasExistingCredential(userId: string, platform: MusicSource, roomId?: string): boolean {
+  if (roomId) {
+    const inRoom = roomCookiePool
+      .get(roomId)
+      ?.get(platform)
+      ?.some((entry) => entry.userId === userId)
+    if (inRoom) return true
+  }
+  return platformAuthRepo.loadUser(userId).some((entry) => entry.platform === platform)
+}
+
 export function getUserCookie(userId: string, platform: MusicSource, roomId: string): string | null {
   const pool = roomCookiePool.get(roomId)
   if (!pool) return null

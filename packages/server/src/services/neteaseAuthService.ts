@@ -111,9 +111,15 @@ export async function checkQrStatus(key: string): Promise<{
   status: number
   message: string
   cookie?: string
+  transient?: boolean
 }> {
   try {
     const res = await withTimeout(ncmApi.login_qr_check({ key, timestamp: Date.now() }))
+    // withTimeout 超时返回 null：这不是过期，交给调用方继续轮询
+    if (res === null || res === undefined) {
+      logger.warn('Netease QR check timed out')
+      return { status: 800, message: '检查状态失败', transient: true }
+    }
     const code = res?.body?.code ?? 800
     const cookie = res?.body?.cookie
 
@@ -131,7 +137,8 @@ export async function checkQrStatus(key: string): Promise<{
     }
   } catch (err) {
     logger.error('Netease QR check failed', err)
-    return { status: 800, message: '检查状态失败' }
+    // 查询本身失败，二维码可能仍然有效：交给调用方继续轮询
+    return { status: 800, message: '检查状态失败', transient: true }
   }
 }
 
@@ -159,14 +166,18 @@ export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
 
     const profileVipType = Number(profile.vipType ?? 0)
     let vipData: Record<string, unknown> | undefined
+    let membershipUnknown = false
     try {
       const vipInfoApi = ncmApi as unknown as NeteaseVipInfoApi
       const vipRes = await withTimeout(
         vipInfoApi.vip_info_v2({ uid: Number(profile.userId ?? 0), cookie, timestamp: Date.now() }),
       )
       vipData = vipRes?.body?.data
+      // withTimeout 超时返回 null：SVIP 会退化成 VIP，必须按“未知”处理
+      if (vipRes === null || vipRes === undefined) membershipUnknown = true
     } catch (err) {
       // Membership detail failure must not invalidate an otherwise valid login.
+      membershipUnknown = true
       logger.warn('Netease SVIP status check failed', { err })
     }
     const { vipType, vipLabel, vipLevel } = parseNeteaseMembership(profileVipType, vipData)
@@ -174,6 +185,8 @@ export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
     return {
       ok: true,
       data: {
+        // profile.vipType 本身可用，只有 SVIP 细节不确定：标记后由调用方保留原等级
+        membershipUnknown,
         nickname: profile.nickname || 'Unknown',
         vipType,
         vipLabel,

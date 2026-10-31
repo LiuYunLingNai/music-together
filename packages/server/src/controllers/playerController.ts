@@ -1,4 +1,11 @@
-import { EVENTS, ERROR_CODE, playerPlaySchema, playerSeekSchema, playerSetModeSchema } from '@music-together/shared'
+import {
+  EVENTS,
+  ERROR_CODE,
+  playerNextSchema,
+  playerPlaySchema,
+  playerSeekSchema,
+  playerSetModeSchema,
+} from '@music-together/shared'
 import type { TypedServer, TypedSocket } from '../middleware/types.js'
 import { createWithPermission, defineAbilityForRoomUser } from '../middleware/withControl.js'
 import { createWithRoom } from '../middleware/withRoom.js'
@@ -55,7 +62,7 @@ export function registerPlayerController(io: TypedServer, socket: TypedSocket) {
   const withRoom = createWithRoom(io)
   socket.on(
     EVENTS.PLAYER_NEXT,
-    withRoom(async (ctx) => {
+    withRoom(async (ctx, raw) => {
       if (ctx.user.id !== ctx.room.hostId) {
         const ability = defineAbilityForRoomUser(ctx.user.id, ctx.user.role)
         if (!ability.can('next', 'Player')) {
@@ -66,7 +73,11 @@ export function registerPlayerController(io: TypedServer, socket: TypedSocket) {
           return
         }
       }
-      await playerService.playNextTrackInRoom(ctx.io, ctx.roomId, ctx.room.playMode)
+      // 旧客户端不带载荷：解析失败时按不带 trackId 处理，保持原有行为
+      const parsed = playerNextSchema.safeParse(raw ?? {})
+      await playerService.playNextTrackInRoom(ctx.io, ctx.roomId, ctx.room.playMode, {
+        expectedTrackId: parsed.success ? parsed.data.trackId : undefined,
+      })
     }),
   )
 

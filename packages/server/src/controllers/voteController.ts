@@ -71,7 +71,15 @@ export function registerVoteController(io: TypedServer, socket: TypedSocket) {
         return
       }
 
-      const vote = voteService.createVote(ctx.roomId, ctx.room.hostId, ctx.user, action, ctx.room.users.length, payload)
+      const vote = voteService.createVote(
+        ctx.roomId,
+        ctx.room.hostId,
+        ctx.user,
+        action,
+        ctx.room.users.length,
+        payload,
+        ctx.room.currentTrack?.id,
+      )
 
       if (!vote) {
         ctx.socket.emit(EVENTS.ROOM_ERROR, { code: ERROR_CODE.VOTE_IN_PROGRESS, message: '已有投票正在进行中' })
@@ -83,7 +91,13 @@ export function registerVoteController(io: TypedServer, socket: TypedSocket) {
       if (approveCount >= vote.requiredVotes) {
         const claimedVote = voteService.claimVote(ctx.roomId, vote.id)
         if (!claimedVote) return
-        const executed = await executeVoteAction(io, ctx.roomId, claimedVote.action, claimedVote.payload)
+        const executed = await executeVoteAction(
+          io,
+          ctx.roomId,
+          claimedVote.action,
+          claimedVote.payload,
+          claimedVote.currentTrackId,
+        )
         io.to(ctx.roomId).emit(EVENTS.VOTE_RESULT, {
           passed: executed,
           action: claimedVote.action,
@@ -132,7 +146,13 @@ export function registerVoteController(io: TypedServer, socket: TypedSocket) {
         if (!claimedVote) return
 
         const executed = result.passed
-          ? await executeVoteAction(io, ctx.roomId, claimedVote.action, claimedVote.payload)
+          ? await executeVoteAction(
+              io,
+              ctx.roomId,
+              claimedVote.action,
+              claimedVote.payload,
+              claimedVote.currentTrackId,
+            )
           : false
 
         io.to(ctx.roomId).emit(EVENTS.VOTE_RESULT, {

@@ -502,6 +502,8 @@ const PLAYLIST_PATHS: Record<MusicSource, string> = {
 // ---------------------------------------------------------------------------
 const HOUR = 60 * 60 * 1000
 const MINUTE = 60 * 1000
+/** Empty lyrics are usually a transient failure — retry soon instead of after 24h. */
+const EMPTY_LYRIC_TTL = 5 * MINUTE
 
 // ---------------------------------------------------------------------------
 // TrackMeta — Track without per-instance fields (id, requestedBy)
@@ -572,6 +574,23 @@ class MusicProvider {
       this.instances.set(source, m)
     }
     return m
+  }
+
+  /**
+   * A per-request Meting instance for lyric and cover lookups.
+   *
+   * These used to share one instance per platform. Kugou's `pic()` saves
+   * `isFormat`, sets it to false, awaits the network call, then restores what
+   * it saved. Two concurrent cover requests make the second one save `false`,
+   * so `isFormat` stays false forever and every later Kugou lyric request
+   * returns unparsed data — an empty lyric that is then cached for 24h. QQ's
+   * `temp.br` has the same overwrite pattern and can pick the wrong bitrate.
+   * Cover requests need no login, so anyone could trigger it.
+   */
+  private createInstance(source: MusicSource): MetingInstance {
+    const meting = new Meting(source)
+    meting.format(true)
+    return meting
   }
 
   // ---------------------------------------------------------------------------
@@ -2663,7 +2682,7 @@ class MusicProvider {
         }
       } else if (source === 'kugou' || source === 'kugou_concept') {
         // 酷狗：Meting 获取 LRC + kugou-lrc 获取 KRC 逐字歌词
-        const meting = this.getInstance('kugou')
+        const meting = this.createInstance('kugou')
         const raw = await withTimeout(meting.lyric(lyricId))
         if (raw === null || raw === undefined) {
           logger.warn(`Lyric fetch timeout for ${source}: ${lyricId}`)
@@ -2692,7 +2711,7 @@ class MusicProvider {
         }
       } else {
         // QQ 音乐：保留 Meting 原词，仅在其未提供译文时补取 QQ 的翻译轨道
-        const meting = this.getInstance(source)
+        const meting = this.createInstance(source)
         const raw = await withTimeout(meting.lyric(lyricId))
         if (raw === null || raw === undefined) {
           logger.warn(`Lyric fetch timeout for ${source}: ${lyricId}`)
@@ -2718,7 +2737,11 @@ class MusicProvider {
         }
       }
 
-      this.lyricCache.set(cacheKey, result)
+      // An empty result is usually a transient upstream problem rather than a
+      // song without lyrics. Caching it for 24h would hide the lyrics until
+      // restart, so give it a short TTL and let the next request retry.
+      const hasLyric = Boolean(result.lyric || result.yrc || result.wordByWord?.length)
+      this.lyricCache.set(cacheKey, result, hasLyric ? undefined : { ttl: EMPTY_LYRIC_TTL })
       return result
     } catch (err) {
       logger.error(`Get lyric failed for ${source}:`, err)
@@ -2740,7 +2763,7 @@ class MusicProvider {
         const view = streamId ? await this.getBilibiliView(streamId.bvid) : null
         return view?.cover ?? ''
       }
-      const meting = this.getInstance(source === 'kugou_concept' ? 'kugou' : source)
+      const meting = this.createInstance(source === 'kugou_concept' ? 'kugou' : source)
       const raw = await withTimeout(meting.pic(picId, requestSize))
       if (raw === null || raw === undefined) {
         logger.warn(`Cover fetch timeout for ${source}: ${picId}`)

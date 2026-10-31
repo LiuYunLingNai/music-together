@@ -476,9 +476,25 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
   return true
 }
 
-export function resumeTrack(io: TypedServer, roomId: string, _initiatorSocket?: TypedSocket): void {
+/**
+ * Resume the current track. Returns false when there is nothing to resume.
+ *
+ * Resuming while already playing would rewind the timeline to the position
+ * recorded at the last pause. Clients mute before calling play(), and Howler
+ * ignores play() on an already-playing sound, so they would also stay silent
+ * until the next hard seek. Treat it as a no-op instead (vote reports failure).
+ */
+export function resumeTrack(io: TypedServer, roomId: string, _initiatorSocket?: TypedSocket): boolean {
   const room = roomRepo.get(roomId)
-  if (!room || !room.currentTrack) return
+  if (!room || !room.currentTrack) return false
+  if (room.playState.isPlaying) {
+    logger.debug('房间已在播放中，忽略恢复播放请求', {
+      event: 'player.resume_ignored',
+      roomId,
+      trackId: room.currentTrack.id,
+    })
+    return false
+  }
 
   const scheduleTime = getScheduleTime(roomId)
   room.playState = {
@@ -490,6 +506,7 @@ export function resumeTrack(io: TypedServer, roomId: string, _initiatorSocket?: 
   roomRepo.persist(roomId)
   // All clients (including initiator) must execute at the same scheduled moment
   io.to(roomId).emit(EVENTS.PLAYER_RESUME, { playState: scheduled(room.playState, roomId, scheduleTime) })
+  return true
 }
 
 export function pauseTrack(io: TypedServer, roomId: string, _initiatorSocket?: TypedSocket): void {
@@ -605,9 +622,24 @@ export function playNextTrackInRoom(
   io: TypedServer,
   roomId: string,
   playMode: PlayMode,
-  options?: { skipDebounce?: boolean },
+  options?: { skipDebounce?: boolean; expectedTrackId?: string },
 ): Promise<void> {
   return withPlayMutex(roomId, async () => {
+    // Checked inside the mutex: the track may have advanced naturally while
+    // this request waited, and skipping then would drop the new track too.
+    if (options?.expectedTrackId) {
+      const roomBefore = roomRepo.get(roomId)
+      const currentId = roomBefore?.currentTrack?.id
+      if (currentId && currentId !== options.expectedTrackId) {
+        logger.debug('切歌请求指向的曲目已不在播放，忽略', {
+          event: 'player.next_stale',
+          roomId,
+          expectedTrackId: options.expectedTrackId,
+          currentTrackId: currentId,
+        })
+        return
+      }
+    }
     if (options?.skipDebounce) {
       // Still update the timestamp so a normal NEXT right after is debounced
       lastSkipTimestamp.set(roomId, { action: 'next', timestamp: Date.now() })
@@ -663,12 +695,33 @@ export function playNextTrackInRoom(
       return
     }
 
+    // A failed track is removed from the queue, so each retry asks for a fresh
+    // successor. Without the attempt cap and the final stopPlayback, a queue of
+    // unplayable tracks (e.g. VIP-only with nobody logged in) would leave the
+    // room reporting isPlaying with a track that already finished everywhere.
+    // In loop-one, getNextTrack keeps returning the failed track itself, so
+    // fall back to sequential order once it has failed.
+    const MAX_ADVANCE_ATTEMPTS = 5
     let success = await _playTrackInRoom(io, roomId, nextTrack)
-    if (!success) {
-      const skipTrack = queueService.getNextTrack(roomId, playMode)
-      if (skipTrack) success = await _playTrackInRoom(io, roomId, skipTrack)
+    let attemptedTrackId = nextTrack.id
+    for (let attempt = 1; !success && attempt < MAX_ADVANCE_ATTEMPTS; attempt += 1) {
+      const retryMode = playMode === 'loop-one' ? 'sequential' : playMode
+      const skipTrack = queueService.getNextTrack(roomId, retryMode)
+      if (!skipTrack || skipTrack.id === attemptedTrackId) break
+      attemptedTrackId = skipTrack.id
+      success = await _playTrackInRoom(io, roomId, skipTrack)
     }
-    if (success && removePreviousTrackAfterAdvance(roomId, previousTrack)) {
+    if (!success) {
+      logger.warn('连续解析播放地址失败，已停止房间播放', {
+        event: 'player.advance_exhausted',
+        roomId,
+        playMode,
+        queueSize: roomRepo.get(roomId)?.queue.length ?? 0,
+      })
+      stopPlayback(io, roomId)
+      return
+    }
+    if (removePreviousTrackAfterAdvance(roomId, previousTrack)) {
       const roomAfterRemoval = roomRepo.get(roomId)
       if (roomAfterRemoval) io.to(roomId).emit(EVENTS.QUEUE_UPDATED, { queue: roomAfterRemoval.queue })
     }

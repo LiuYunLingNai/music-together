@@ -20,6 +20,12 @@ export interface UserInfoData {
   vipLevel?: number
   userId: number
   avatarUrl?: string
+  /**
+   * The login is valid but the membership sub-request failed, so `vipType` is a
+   * fallback rather than an observation. Callers must keep any membership level
+   * they already have instead of downgrading the account to "not a member".
+   */
+  membershipUnknown?: boolean
 }
 
 /**
@@ -37,11 +43,18 @@ export interface AuthProvider {
   /** 生成 QR 扫码登录二维码 */
   generateQrCode(): Promise<{ key: string; qrimg: string } | null>
 
-  /** 检查 QR 扫码状态 */
+  /**
+   * 检查 QR 扫码状态。
+   *
+   * `transient` 表示这次查询本身失败（网络、超时、响应格式异常），并不代表
+   * 二维码过期。控制器遇到它时不下发状态，客户端下一轮继续轮询。
+   * 状态码集合保持不变，避免影响原生客户端。
+   */
   checkQrStatus(key: string): Promise<{
     status: number
     message: string
     cookie?: string
+    transient?: boolean
   }>
 
   /** 验证 Cookie 并获取用户信息 */

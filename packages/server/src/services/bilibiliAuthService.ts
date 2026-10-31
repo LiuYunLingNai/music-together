@@ -156,7 +156,9 @@ export async function generateQrCode(): Promise<{ key: string; qrimg: string } |
   }
 }
 
-export async function checkQrStatus(key: string): Promise<{ status: number; message: string; cookie?: string }> {
+export async function checkQrStatus(
+  key: string,
+): Promise<{ status: number; message: string; cookie?: string; transient?: boolean }> {
   try {
     const response = await fetch(
       `https://passport.bilibili.com/x/passport-login/web/qrcode/poll?qrcode_key=${encodeURIComponent(key)}`,
@@ -165,7 +167,8 @@ export async function checkQrStatus(key: string): Promise<{ status: number; mess
     const body = (await response.json()) as BilibiliResponse<BilibiliQrData>
     const status = body.data?.code
 
-    if (!response.ok || typeof status !== 'number') return { status: 800, message: '检查扫码状态失败' }
+    if (!response.ok || typeof status !== 'number')
+      return { status: 800, message: '检查扫码状态失败', transient: true }
     if (status === 0) {
       const redirectCookiePairs = body.data?.url ? await collectLoginCookies(body.data.url) : []
       const cookie = mergeCookiePairs([...cookiePairsFromResponse(response), ...redirectCookiePairs])
@@ -187,7 +190,8 @@ export async function checkQrStatus(key: string): Promise<{ status: number; mess
     return { status: 800, message: body.data?.message || body.message || '二维码状态异常' }
   } catch (err) {
     logger.error('Bilibili QR status check failed', err)
-    return { status: 800, message: '检查扫码状态失败' }
+    // 查询本身失败，二维码可能仍然有效：交给调用方继续轮询
+    return { status: 800, message: '检查扫码状态失败', transient: true }
   }
 }
 

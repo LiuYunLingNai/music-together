@@ -16,6 +16,11 @@ interface Vote {
   timeoutHandle: ReturnType<typeof setTimeout>
   hostId: string
   payload?: Record<string, unknown>
+  /**
+   * 发起投票时正在播放的曲目。`next` 和 `prev` 执行时会核对它：投票期间歌曲
+   * 自然播完的话，这次投票跳掉的就是新歌，应当丢弃。
+   */
+  currentTrackId?: string
 }
 
 export interface VoteDecision {
@@ -39,6 +44,7 @@ export function createVote(
   action: VoteAction,
   totalUsers: number,
   payload?: Record<string, unknown>,
+  currentTrackId?: string,
 ): Vote | null {
   if (activeVotes.has(roomId)) return null
 
@@ -57,6 +63,7 @@ export function createVote(
     timeoutHandle: null as unknown as ReturnType<typeof setTimeout>, // set by controller
     hostId,
     payload,
+    currentTrackId,
   }
 
   activeVotes.set(roomId, vote)

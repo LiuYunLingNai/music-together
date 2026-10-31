@@ -162,6 +162,13 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
         return
       }
 
+      // 这次查询本身失败（网络、超时、格式异常），二维码可能还有效：不下发
+      // 状态，客户端下一轮继续轮询。收到 800 就会停止轮询，用户只能重新取码。
+      if (result.transient) {
+        qrCheckInFlight = false
+        logger.debug('扫码状态查询临时失败，等待下一轮轮询', { platform, message: result.message })
+        return
+      }
       if (result.status !== QR_STATUS.SUCCESS) {
         qrCheckInFlight = false
         socket.emit(EVENTS.AUTH_QR_STATUS, { status: result.status, message: result.message, key: data.key })
@@ -653,15 +660,21 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
       if (infoResult.ok) {
         const userInfo = infoResult.data
         if (mapping && mapping.roomId) {
+          // 会员子请求失败时沿用已保存的等级，避免一次上游抖动把会员存成普通用户
+          const retained = userInfo.membershipUnknown
+            ? authService.getUserMembership(mapping.userId, platform, mapping.roomId)
+            : null
           authService.addCookie(
             mapping.roomId,
             platform,
             mapping.userId,
             cookie,
             userInfo.nickname,
-            userInfo.vipType,
+            retained?.vipType ?? userInfo.vipType,
             data.persist !== false,
-            { vipLabel: userInfo.vipLabel, vipLevel: userInfo.vipLevel },
+            retained
+              ? { vipLabel: retained.vipLabel, vipLevel: retained.vipLevel }
+              : { vipLabel: userInfo.vipLabel, vipLevel: userInfo.vipLevel },
             userInfo.avatarUrl,
           )
         }
@@ -684,7 +697,29 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
         if (mapping) broadcastAuthStatus(io, socket, mapping)
         return
       } else {
-        // 酷狗/QQ 音乐：验证失败也保存（可能是 API 变动，播放时可能仍有效）
+        // 酷狗/QQ 音乐：验证失败也保存（可能是 API 变动，播放时可能仍有效）。
+        // 但已经有可用凭据时不能覆盖：昵称“手动登录”、等级 0 的记录会按
+        // userId 顶掉原有的有效凭据（含会员等级），而这次失败很可能只是
+        // 上游抖动，或者是另一台设备重发的旧 Cookie。
+        const hasExisting =
+          mapping && mapping.roomId
+            ? authService.hasExistingCredential(mapping.userId, platform, mapping.roomId)
+            : false
+        if (hasExisting) {
+          logger.info('Cookie 验证失败且已有可用凭据，保留原有凭据', {
+            event: 'auth.unverified_cookie_ignored',
+            platform,
+            reason: infoResult.reason,
+          })
+          socket.emit(EVENTS.AUTH_SET_COOKIE_RESULT, {
+            success: false,
+            message: '登录凭证校验未通过，已保留当前账号',
+            platform,
+            reason: infoResult.reason,
+          })
+          if (mapping) broadcastAuthStatus(io, socket, mapping)
+          return
+        }
         if (mapping && mapping.roomId) {
           authService.addCookie(mapping.roomId, platform, mapping.userId, cookie, '手动登录', 0, data.persist !== false)
         }

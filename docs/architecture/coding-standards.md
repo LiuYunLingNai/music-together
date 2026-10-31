@@ -53,6 +53,7 @@ updateRoom: (partial) =>
 - **投票阈值动态更新**：`voteService.updateVoteThreshold` 在用户离开房间时重新计算 `requiredVotes`，防止人数减少后投票永远无法通过
 - **外部 API 超时保护**：`musicProvider` 所有 `@meting/core` 调用使用 `Promise.race` 包裹 15s 超时
 - **3 层引用式 LRU 缓存**：`musicProvider` 采用三层缓存架构——Layer 1: `trackRegistry`（max 10000, TTL 2h）以 `source:sourceId` 为 key 存储去重的 TrackMeta，所有经过系统的歌曲注册于此，支持跨上下文数据富化（搜索的 duration/cover 自动回填到歌单）；Layer 2: `searchIndex`（max 200, TTL 10min）和 `playlistIndex`（max 50, TTL 30min）仅存 sourceId 数组引用（不存 Track 对象），2000 首歌单仅占 ~40KB 引用而非 ~1MB 对象；Layer 3: `streamUrlCache`（1h）、`coverCache`（24h）、`lyricCache`（24h）存标量值。内存预算 worst case ~8.3MB（vs 旧架构 ~104MB）。歌单分页通过 `getPlaylistPage(source, id, limit, offset)` 实现，仅对当前页解析封面后回写 registry；VIP cookie 请求的播放地址不走缓存，带 Cookie 的歌单索引按 Cookie 哈希单独缓存（`playlistIndexKey`），不会把私密歌单或 QQ“我喜欢”提供给匿名请求或其他账号。**所有平台歌单均使用原始 API 模式**（Netease 用 ncmApi 分块请求，Tencent/Kugou 用 Meting 无 format 模式），统一通过 `rawToTrack()` 解析（exhaustive switch + `never` 检查），保留 VIP/付费标记和歌曲时长
+- **Meting 实例隔离**：`musicProvider.getInstance()` 的共享实例只用于不带 Cookie 的播放地址解析；歌词和封面改用 `createInstance()` 每次新建。酷狗的 `pic()` 会在 `await` 前后保存并恢复实例上的 `isFormat`，两个并发封面请求会把它永久写成 `false`，之后所有酷狗歌词都返回未解析数据（封面请求无需登录即可触发）。空歌词只缓存 5 分钟，避免一次上游抖动把歌词藏到重启为止
 - **广播防抖**：`broadcastRoomList` 使用 100ms trailing debounce，多次快速操作（create+join、多人 leave）合并为一次广播
 - **反向索引优化**：`roomRepository` 维护 `roomToSockets` 反向索引（`Map<string, Set<string>>`），使 `getP90RTT` 从 O(全局 socket 数) 降为 O(房间内 socket 数)
 - **Timer 泄漏防护**：`usePlayer`/`useHowl`/`usePlayerSync`/`PlayerControls` 中所有 `setTimeout` 均存入 ref 并在组件卸载时清理

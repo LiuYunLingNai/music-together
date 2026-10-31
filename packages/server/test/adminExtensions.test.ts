@@ -162,6 +162,27 @@ test('platform auths expose metadata without cookies and support revocation', as
   assert.equal(unknownUser.status, 404)
 })
 
+test('deleting an account revokes its in-memory platform credentials', async () => {
+  userRepo.ensure('doomed-user', { nickname: '待删除用户' })
+  // 房间内存池里的凭据：删号后不能继续被房间用来播放和下载
+  authService.addCookie('doomed-room', 'tencent', 'doomed-user', 'qq-cookie', 'QQ 用户', 2, false)
+  authService.addCookie('doomed-room', 'kugou', 'doomed-user', 'kg-cookie', '酷狗用户', 1, false)
+  const version = authService.getAuthorizationVersion('doomed-user', 'tencent', 'doomed-room')
+  assert.equal(authService.getUserCookie('doomed-user', 'tencent', 'doomed-room'), 'qq-cookie')
+
+  try {
+    const response = await adminRequest('DELETE', '/api/admin/users/doomed-user')
+    assert.equal(response.status, 204)
+
+    assert.equal(authService.getUserCookie('doomed-user', 'tencent', 'doomed-room'), null)
+    assert.equal(authService.getUserCookie('doomed-user', 'kugou', 'doomed-room'), null)
+    assert.notEqual(authService.getAuthorizationVersion('doomed-user', 'tencent', 'doomed-room'), version)
+    assert.equal(userRepo.get('doomed-user'), null)
+  } finally {
+    authService.cleanupRoom('doomed-room')
+  }
+})
+
 test('websocket accepts the native path with an untrusted Host and unicasts by socket id', async () => {
   const { createServer } = await import('node:http')
   const { once } = await import('node:events')

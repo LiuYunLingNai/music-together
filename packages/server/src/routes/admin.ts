@@ -326,7 +326,19 @@ export function createAdminRoutes(io: TypedServer): Router {
       res.status(404).json({ error: 'User not found' })
       return
     }
+    // 数据库里的 platform_auth 会随外键级联删除，但房间内存池里的凭据不会。
+    // 不撤销的话，被删账号的会员 Cookie 会继续被房间用来播放和下载，
+    // 永久房间可以一直用下去。与「解除单个平台授权」保持同样的处理。
+    const affectedRooms = new Set<string>()
+    for (const platform of musicSourceSchema.options) {
+      for (const roomId of authService.revokeUserAuthorization(target.id, platform)) {
+        affectedRooms.add(roomId)
+      }
+    }
     userRepo.delete(target.id)
+    for (const roomId of affectedRooms) {
+      io.to(roomId).emit(EVENTS.AUTH_STATUS_UPDATE, authService.getAllPlatformStatus(roomId))
+    }
     logger.info(`服务器管理员删除了账号 ${target.id}`, {
       event: 'admin.user_deleted',
       ...auditContext(req),
