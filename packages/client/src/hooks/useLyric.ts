@@ -1,16 +1,22 @@
 import { SERVER_URL } from '@/lib/config'
 import {
   enrichLyricAuxiliary,
-  enrichLyricStructure,
-  evaluateLyricAnimationQuality,
-  measureTimelineAgreement,
   needsLyricAuxiliary,
   repairLyricTimeline,
-  type LyricAnimationQuality,
 } from '@/lib/lyricTimeline'
+import {
+  createLyricPresentationBuilder,
+  createTtmlPresentation,
+  hasUsablePlatformLyric,
+  isPresentationBetter,
+  preserveTtmlStructure,
+  toCoreLyricLines,
+  type LyricData,
+  type LyricPresentation,
+} from '@/lib/lyricPresentation'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
-import { parseTTML, parseYrc } from '@applemusic-like-lyrics/lyric'
+import { parseTTML } from '@applemusic-like-lyrics/lyric'
 import type { LyricLine as AMLLLyricLine } from '@applemusic-like-lyrics/core'
 import type { Track } from '@music-together/shared'
 import { useCallback, useEffect, useRef } from 'react'
@@ -26,18 +32,6 @@ const TTML_TIMEOUT_MS = 8_000
 const QUALITY_GRACE_MS = 200
 const LYRIC_CACHE_TTL_MS = 30 * 60 * 1_000
 const LYRIC_CACHE_MAX = 30
-/** 两轴偏移在此范围内且逐行一致，才认为它们已经对齐（毫秒）。 */
-const TIMELINE_ALIGNED_TOLERANCE_MS = 120
-/** 实测不一致时，换源所需的额外评分领先幅度。 */
-const UNALIGNED_SWITCH_MARGIN = 0.05
-
-interface LyricData {
-  lyric: string
-  tlyric: string
-  romalrc: string
-  yrc: string
-  wordByWord?: AMLLLyricLine[]
-}
 
 interface LyricSupplementCandidate extends LyricData {
   source: 'netease' | 'kugou' | 'tencent'
@@ -56,248 +50,12 @@ interface PreparedLyricRequest {
   lyricPromise: Promise<LyricData | null>
 }
 
-interface LyricPresentation {
-  source: 'none' | 'native' | 'ttml'
-  lines: AMLLLyricLine[] | null
-  lyric: string
-  tlyric: string
-  unresolvedCount: number
-  quality: LyricAnimationQuality
-}
-
 interface CachedLyricPresentation {
   expiresAt: number
   value: LyricPresentation
 }
 
 const lyricPresentationCache = new Map<string, CachedLyricPresentation>()
-
-/**
- * 将 @applemusic-like-lyrics/lyric 的 LyricLine 转为 @applemusic-like-lyrics/core 的 LyricLine
- * 两者接口略有差异（core 的 LyricWord 多 obscene 字段）
- */
-function toCoreLyricLines(lyricLines: ReturnType<typeof parseTTML>['lines']): AMLLLyricLine[] {
-  return lyricLines.map((line) => ({
-    words: line.words.map((w) => ({
-      word: w.word,
-      startTime: w.startTime,
-      endTime: w.endTime,
-      romanWord: w.romanWord ?? '',
-      obscene: false,
-    })),
-    translatedLyric: line.translatedLyric ?? '',
-    romanLyric: line.romanLyric ?? '',
-    startTime: line.startTime,
-    endTime: line.endTime,
-    isBG: line.isBG ?? false,
-    isDuet: line.isDuet ?? false,
-  }))
-}
-
-/**
- * parseYrc 返回的是裸 LyricLine[]（无 .lines 包装）
- * 直接转为 core 格式
- */
-function yrcToCoreLyricLines(lines: ReturnType<typeof parseYrc>): AMLLLyricLine[] {
-  return lines.map((line) => ({
-    words: line.words.map((w) => ({
-      word: w.word,
-      startTime: w.startTime,
-      endTime: w.endTime,
-      romanWord: w.romanWord ?? '',
-      obscene: false,
-    })),
-    translatedLyric: line.translatedLyric ?? '',
-    romanLyric: line.romanLyric ?? '',
-    startTime: line.startTime,
-    endTime: line.endTime,
-    isBG: line.isBG ?? false,
-    isDuet: line.isDuet ?? false,
-  }))
-}
-
-function hasUsablePlatformLyric(data: LyricData | null): data is LyricData {
-  return !!data && !!(data.lyric || data.yrc || data.wordByWord?.length)
-}
-
-function buildNativePresentation(
-  data: LyricData | null,
-  comparisonCharacterCount = 0,
-  referenceLrc = data?.lyric ?? '',
-): LyricPresentation {
-  let lines: AMLLLyricLine[] | null = null
-  let unresolvedCount = 0
-  // 原生源曾经传空源列表，于是坏行（零时长 / 缺时间）直接丢弃；TTML 路径却会用
-  // 同行 LRC 把它们找回来。同一首歌因此可能因为原生源无谓掉行而输给 TTML ——
-  // 这里把平台自己那条 LRC 也作为修复源，两条路径的处置一致。
-  const repairSources = data?.lyric ? [{ lrc: data.lyric }] : []
-  const normalize = (linesToFix: AMLLLyricLine[]) => {
-    const repaired = repairLyricTimeline(linesToFix, repairSources)
-    unresolvedCount = repaired.unresolvedCount
-    return enrichLyricAuxiliary(repaired.lines, [data!]).lines
-  }
-
-  if (data?.wordByWord?.length) {
-    const normalized = normalize(data.wordByWord)
-    if (normalized.length > 0) lines = normalized
-  } else if (data?.yrc) {
-    try {
-      const parsed = parseYrc(data.yrc)
-      if (parsed.length > 0) {
-        const normalized = normalize(yrcToCoreLyricLines(parsed))
-        if (normalized.length > 0) lines = normalized
-      }
-    } catch {
-      // Invalid word-by-word data still falls back to the provider's LRC.
-    }
-  }
-
-  return {
-    source: hasUsablePlatformLyric(data) ? 'native' : 'none',
-    lines,
-    lyric: data?.lyric ?? '',
-    tlyric: data?.tlyric ?? '',
-    unresolvedCount,
-    quality: evaluateLyricAnimationQuality(lines ?? [], referenceLrc, comparisonCharacterCount),
-  }
-}
-
-function createTtmlPresentation(
-  lines: AMLLLyricLine[],
-  unresolvedCount: number,
-  lyricData: LyricData | null,
-  comparisonCharacterCount = 0,
-): LyricPresentation {
-  const enrichedLines = lyricData ? enrichLyricAuxiliary(lines, [lyricData]).lines : lines
-  return {
-    source: 'ttml',
-    lines: enrichedLines.length > 0 ? enrichedLines : null,
-    lyric: lyricData?.lyric ?? '',
-    tlyric: lyricData?.tlyric ?? '',
-    unresolvedCount,
-    quality: evaluateLyricAnimationQuality(enrichedLines, lyricData?.lyric, comparisonCharacterCount),
-  }
-}
-
-function buildTtmlPresentation(
-  rawTtmlLines: AMLLLyricLine[] | null,
-  lyricData: LyricData | null,
-  comparisonCharacterCount = 0,
-): LyricPresentation | null {
-  if (!rawTtmlLines?.length) return null
-  const primarySources = lyricData?.lyric ? [{ lrc: lyricData.lyric }] : []
-  const repaired = repairLyricTimeline(rawTtmlLines, primarySources)
-  return createTtmlPresentation(repaired.lines, repaired.unresolvedCount, lyricData, comparisonCharacterCount)
-}
-
-/**
- * 两条时间轴是否**已经对齐**。
- *
- * 每次比较时现算，不缓存：偏移量是相对被比较者而言的，存到候选身上
- * 换个对手就失去意义。
- *
- * 返回值三态很重要：
- *   · `true`  —— 实测对齐，换源不会造成位移；
- *   · `false` —— 实测**明确不一致**，换源会让当前行跳一下；
- *   · `null`  —— 样本不足，没有证据。此时**不能**按不一致处理，
- *               否则绝大多数测不出来的歌都被无端收紧门槛。
- */
-function timelinesAligned(a: LyricPresentation, b: LyricPresentation): boolean | null {
-  if (!a.lines?.length || !b.lines?.length) return null
-  const measured = measureTimelineAgreement(a.lines, b.lines)
-  if (measured.agreement === null) return null
-  return Math.abs(measured.offset) <= TIMELINE_ALIGNED_TOLERANCE_MS && measured.agreement >= 0.8
-}
-
-function chooseBetweenPresentations(native: LyricPresentation, ttml: LyricPresentation): LyricPresentation {
-  const nativeStructure = native.quality.duetLineCount + native.quality.backgroundLineCount
-  const ttmlStructure = ttml.quality.duetLineCount + ttml.quality.backgroundLineCount
-  const nativeStructureUsable = native.quality.validTimingCoverage >= 0.85 && native.quality.textCoverage >= 0.8
-  const ttmlStructureUsable = ttml.quality.validTimingCoverage >= 0.85 && ttml.quality.textCoverage >= 0.8
-  if (nativeStructure !== ttmlStructure) {
-    if (ttmlStructure > nativeStructure && ttmlStructureUsable) return ttml
-    if (nativeStructure > ttmlStructure && nativeStructureUsable) return native
-  }
-  if (native.quality.hasWordAnimation !== ttml.quality.hasWordAnimation) {
-    return native.quality.hasWordAnimation ? native : ttml
-  }
-  if (native.quality.hasWordAnimation && native.quality.confidence > ttml.quality.confidence + 0.03) {
-    return native
-  }
-  return ttml
-}
-
-function selectPreferredPresentation(
-  rawTtmlLines: AMLLLyricLine[] | null,
-  lyricData: LyricData | null,
-): LyricPresentation {
-  const preliminaryNative = buildNativePresentation(lyricData)
-  const preliminaryTtml = buildTtmlPresentation(rawTtmlLines, lyricData)
-  if (!preliminaryTtml?.lines?.length) return preliminaryNative
-
-  const comparisonCharacterCount = Math.max(
-    preliminaryNative.quality.meaningfulCharacterCount,
-    preliminaryTtml.quality.meaningfulCharacterCount,
-  )
-  const native = buildNativePresentation(lyricData, comparisonCharacterCount)
-  const ttml = buildTtmlPresentation(rawTtmlLines, lyricData, comparisonCharacterCount)!
-  return chooseBetweenPresentations(native, ttml)
-}
-
-/**
- * 是否用 `next` 替换屏幕上的 `current`。
- *
- * ============================ 时间一致性闸门 ============================
- *
- * 纯评分比较只在"格式质量"上有意义：两套逐字时间轴可以得分相同而整体
- * 错开几百毫秒。中途换源会把当前行整体前跳/后跳 —— 用户看到的正是
- * "歌词对不上"。因此：
- *
- *   · 两者都没有实测一致度（样本不足）→ 保持原逻辑；
- *   · `next` 与 `current` **已经对齐** → 换源不会造成位移，可放心更换
- *     （通常是因为 `next` 结构更好）；
- *   · 两者**明显不一致** → 无第三方真值可判谁对，此时只有 `next` 在
- *     结构/动画上明显更强才换；分数接近就**留在当前源**上，避免无谓跳变。
- */
-function isPresentationBetter(next: LyricPresentation, current: LyricPresentation): boolean {
-  const nextStructure = next.quality.duetLineCount + next.quality.backgroundLineCount
-  const currentStructure = current.quality.duetLineCount + current.quality.backgroundLineCount
-  const currentStructureUsable = current.quality.validTimingCoverage >= 0.85 && current.quality.textCoverage >= 0.8
-  if (currentStructure > 0 && nextStructure === 0 && currentStructureUsable) return false
-  if (nextStructure > 0 && currentStructure === 0) {
-    return next.quality.validTimingCoverage >= 0.85 && next.quality.textCoverage >= 0.8
-  }
-  if (next.quality.hasWordAnimation !== current.quality.hasWordAnimation) {
-    return next.quality.hasWordAnimation
-  }
-  if (next.quality.hasWordAnimation) {
-    const aligned = timelinesAligned(next, current)
-    // 实测不一致才收紧（避免为微弱优势牺牲对齐）；对齐或无从判断时保持原判据。
-    const margin = aligned === false ? 0.03 + UNALIGNED_SWITCH_MARGIN : 0.03
-    return next.quality.confidence > current.quality.confidence + margin
-  }
-  if (!current.lines?.length && next.lines?.length) return true
-  return next.unresolvedCount < current.unresolvedCount
-}
-
-function preserveTtmlStructure(
-  presentation: LyricPresentation,
-  ttmlPresentation: LyricPresentation | null,
-): LyricPresentation {
-  if (!presentation.lines?.length || !ttmlPresentation?.lines?.length) return presentation
-  if (ttmlPresentation.quality.duetLineCount + ttmlPresentation.quality.backgroundLineCount === 0) return presentation
-  const result = enrichLyricStructure(presentation.lines, ttmlPresentation.lines)
-  if (!result.changed) return presentation
-  return {
-    ...presentation,
-    lines: result.lines,
-    quality: evaluateLyricAnimationQuality(
-      result.lines,
-      presentation.lyric,
-      presentation.quality.meaningfulCharacterCount,
-    ),
-  }
-}
 
 function getCachedPresentation(key: string): LyricPresentation | null {
   const cached = lyricPresentationCache.get(key)
@@ -412,6 +170,8 @@ export function useLyric() {
   const fetchLyric = useCallback(
     async (track: Track) => {
       const version = ++requestVersionRef.current
+      const { buildNativePresentation, buildTtmlPresentation, selectPreferredPresentation } =
+        createLyricPresentationBuilder()
       const { ttmlEnabled, ttmlDbUrl } = useSettingsStore.getState()
       const key = lyricRequestKey(track, ttmlEnabled, ttmlDbUrl)
 

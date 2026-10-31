@@ -1,14 +1,30 @@
 // @vitest-environment jsdom
-import { act, createElement } from 'react'
+import { act, createElement, useEffect, useMemo } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { motionValue } from 'motion/react'
 import { usePlayerStore } from '@/stores/playerStore'
 import { FoliaPlayerStage } from './FoliaPlayerStage'
+import { useSettingsStore } from '@/stores/settingsStore'
+import type { FoliaSharedProps } from './definition'
+import { useVisualizerRuntime } from './upstream/components/visualizer/runtime'
+import { getLineRenderEndTime } from './upstream/utils/lyrics/renderHints'
+
+const modeRendered = vi.hoisted(() => vi.fn())
 
 vi.mock('./stage/foliaAudio', () => ({ useFoliaAudio: () => ({}) }))
 vi.mock('./stage/foliaRenderState', () => ({ useFoliaRenderState: () => ({ paused: false, staticMode: false }) }))
-vi.mock('./stage/foliaClock', () => ({ useFoliaClock: () => ({ currentTime: motionValue(0) }) }))
+vi.mock('./stage/foliaClock', () => ({
+  useFoliaClock: (offsetMs: number) => {
+    const currentTime = useMemo(() => motionValue(0), [])
+    useEffect(() => {
+      const update = () => currentTime.set(Math.max(0, usePlayerStore.getState().currentTime - offsetMs / 1000))
+      update()
+      return usePlayerStore.subscribe(update)
+    }, [currentTime, offsetMs])
+    return { currentTime }
+  },
+}))
 vi.mock('./stage/lyricAdapter', async (importOriginal) => {
   const original = await importOriginal<typeof import('./stage/lyricAdapter')>()
   return {
@@ -27,26 +43,26 @@ vi.mock('./stage/lyricAdapter', async (importOriginal) => {
 vi.mock('./renderers', async () => ({
   FOLIA_MODE_RENDERERS: {
     still: (await import('./upstream/components/visualizer/still/VisualizerStill')).default,
-    luminous: ({
-      showText,
-      currentLineIndex,
-      lines,
-    }: {
-      showText: boolean
-      currentLineIndex: number
-      lines: { fullText: string }[]
-    }) =>
-      createElement(
+    luminous: function TestLyricMode(props: FoliaSharedProps) {
+      modeRendered(props)
+      const { showText, currentLineIndex, lines } = props
+      const { recentCompletedLine, upcomingLine } = useVisualizerRuntime({
+        currentTime: props.currentTime, currentLineIndex, lines, getLineEndTime: getLineRenderEndTime,
+      })
+      return createElement(
         'div',
         {
           'data-testid': 'lyric-mode',
           'data-text-enabled': String(showText),
           'data-line-index': currentLineIndex,
+          'data-recent-line': recentCompletedLine?.fullText ?? '',
+          'data-upcoming-line': upcomingLine?.fullText ?? '',
         },
         createElement('span', { 'data-testid': 'scene-effect' }),
         // 上游 `ui.waitingForMusic` 是空串，没有歌词时这一行什么都不渲染。
         showText && lines[currentLineIndex] ? '歌词画面' : '',
-      ),
+      )
+    },
   },
 }))
 // 背景层由上游 `VisualizerBackgroundRenderer` 绘制（默认 latent 背景会拉起 Paper shader，
@@ -67,6 +83,8 @@ beforeEach(() => {
       disconnect() {}
     },
   )
+  modeRendered.mockClear()
+  useSettingsStore.getState().resetFoliaSettings()
   usePlayerStore.getState().reset()
   usePlayerStore.getState().setCurrentTrack({
     id: 'track',
@@ -78,6 +96,7 @@ beforeEach(() => {
     source: 'netease',
     sourceId: '1',
     urlId: '1',
+    lyricId: '1',
   })
   container = document.createElement('div')
   document.body.appendChild(container)
@@ -110,6 +129,66 @@ function mount(mode: 'luminous' | 'still' = 'luminous') {
     ),
   )
 }
+describe('Folia 离散进度订阅', () => {
+  it('在激活下标同为 -1 的间隙之间 seek 时更新前后字幕', () => {
+    usePlayerStore.getState().setTtmlLines([1, 4, 7].map((start, index) => ({
+      words: [{ word: `第${index + 1}句`, startTime: start * 1000, endTime: (start + 1) * 1000, romanWord: '', obscene: false }],
+      startTime: start * 1000, endTime: (start + 1) * 1000,
+      translatedLyric: '', romanLyric: '', isBG: false, isDuet: false,
+    })))
+    usePlayerStore.getState().setCurrentTime(1.5)
+    mount()
+    const mode = () => container.querySelector('[data-testid="lyric-mode"]')!
+    act(() => usePlayerStore.getState().setCurrentTime(3))
+    expect(mode().getAttribute('data-line-index')).toBe('-1')
+    expect(mode().getAttribute('data-recent-line')).toBe('第1句')
+    expect(mode().getAttribute('data-upcoming-line')).toBe('第2句')
+    const renders = modeRendered.mock.calls.length
+    act(() => usePlayerStore.getState().setCurrentTime(3.1))
+    expect(modeRendered).toHaveBeenCalledTimes(renders)
+    act(() => usePlayerStore.getState().setCurrentTime(6))
+    expect(mode().getAttribute('data-line-index')).toBe('-1')
+    expect(mode().getAttribute('data-recent-line')).toBe('第2句')
+    expect(mode().getAttribute('data-upcoming-line')).toBe('第3句')
+    act(() => usePlayerStore.getState().setCurrentTime(3))
+    expect(mode().getAttribute('data-recent-line')).toBe('第1句')
+  })
+
+  it('进度不变时仍响应歌词校准预览与歌词替换', () => {
+    usePlayerStore.getState().setLyric('[00:01.00]第一句\n[00:05.00]第二句\n[00:09.00]第三句')
+    usePlayerStore.getState().setCurrentTime(6)
+    mount()
+    const props = () => modeRendered.mock.lastCall![0] as FoliaSharedProps
+    const secondIndex = props().currentLineIndex
+    act(() => usePlayerStore.getState().setLyricOffsetPreview({ key: 'netease:1', offsetMs: 4000 }))
+    expect(props().currentLineIndex).not.toBe(secondIndex)
+    act(() => usePlayerStore.getState().setLyricOffsetPreview(null))
+    expect(props().currentLineIndex).toBe(secondIndex)
+    act(() => usePlayerStore.getState().setLyric('[00:01.00]整首一行歌词'))
+    expect(props().lines[props().currentLineIndex]?.fullText).toBe('整首一行歌词')
+  })
+
+  it('同行进度不重渲染，切行和反向 seek 保留调参及背景引用', () => {
+    usePlayerStore.getState().setLyric('[00:01.00]第一句\n[00:05.00]第二句\n[00:09.00]第三句')
+    usePlayerStore.getState().setCurrentTime(2)
+    mount()
+    const props = () => modeRendered.mock.lastCall![0] as FoliaSharedProps
+    const initial = props()
+    const renders = modeRendered.mock.calls.length
+    for (const time of [2.1, 2.2, 2.3]) act(() => usePlayerStore.getState().setCurrentTime(time))
+    expect(modeRendered).toHaveBeenCalledTimes(renders)
+    act(() => usePlayerStore.getState().setCurrentTime(6))
+    expect(props().currentLineIndex).not.toBe(initial.currentLineIndex)
+    expect(props().classicTuning).toBe(initial.classicTuning)
+    expect(props().background).toBe(initial.background)
+    act(() => usePlayerStore.getState().setCurrentTime(2))
+    expect(props().currentLineIndex).toBe(initial.currentLineIndex)
+    act(() => useSettingsStore.getState().setFoliaSettings({ fontScale: 1.2 }))
+    expect(props().lyricsFontScale).not.toBe(initial.lyricsFontScale)
+    expect(props().classicTuning).not.toBe(initial.classicTuning)
+  })
+})
+
 describe('Folia 无歌词画面', () => {
   it('没有歌词或歌词加载中只保留背景和播放控制，不展示替代文案或封面', () => {
     usePlayerStore.getState().setLyricLoading(true)

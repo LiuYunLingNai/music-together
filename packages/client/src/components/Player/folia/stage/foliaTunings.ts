@@ -43,7 +43,22 @@ export function resolveFoliaTuning(mode: FoliaModeId, saved: FoliaSettings['tuni
   return result
 }
 
-export function getFoliaTuningProps(mode: FoliaModeId, settings: FoliaSettings): Partial<FoliaSharedProps> {
+type FoliaTuningSettings = Pick<FoliaSettings, 'tunings' | 'fontScale'>
+
+/** Each stage owns its resolver; unrelated progress updates reuse the same tuning objects. */
+export function createFoliaTuningResolver(settings: FoliaTuningSettings) {
+  const resolved = new Map<FoliaModeId, Partial<FoliaSharedProps>>()
+  return (mode: FoliaModeId): Partial<FoliaSharedProps> => {
+    let props = resolved.get(mode)
+    if (!props) {
+      props = getFoliaTuningProps(mode, settings)
+      resolved.set(mode, props)
+    }
+    return props
+  }
+}
+
+export function getFoliaTuningProps(mode: FoliaModeId, settings: FoliaTuningSettings): Partial<FoliaSharedProps> {
   if (mode === 'still') return {}
   const key = mode === 'luminous' ? 'classicTuning' : `${mode}Tuning`
   const tuning = resolveFoliaTuning(mode, settings.tunings)

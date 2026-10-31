@@ -114,13 +114,14 @@ export function FoliaRenderer({
   // 在此之前旧模式继续画（与上游 `useDeferredValue` 同一语义）。
   const shownMode = useDeferredValue(mode)
   const background = MODE_BACKGROUNDS[shownMode]
-  const sharedProps: FoliaSharedProps = {
-    ...props,
-    background: {
+  const resolvedBackground = useMemo(
+    () => ({
       ...props.background,
       mode: props.background?.mode ?? DEFAULT_VISUALIZER_BACKGROUND_MODE,
-    },
-  }
+    }),
+    [props.background],
+  )
+  const sharedProps: FoliaSharedProps = { ...props, background: resolvedBackground }
   // 静态模式（含系统的减弱动效偏好）下直接硬切，与上游一致。
   // 上游还看了自己的「界面微动效」设置（`useReducedMotionFor('uiMicroMotion')`）；
   // 本项目没有那份设置，宿主版 hook 只认系统偏好。

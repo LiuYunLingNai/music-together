@@ -527,7 +527,7 @@ export function playlistIndexKey(
 }
 
 class MusicProvider {
-  // Shared instances with format(true) — used for url/lyric/cover operations (no cookie)
+  // Shared instances with format(true) — used for URL operations without cookies
   private instances = new Map<MusicSource, MetingInstance>()
 
   // ---------------------------------------------------------------------------
@@ -561,6 +561,7 @@ class MusicProvider {
     ttl: 24 * HOUR,
   })
   private lyricInFlight = new Map<string, Promise<LyricResult>>()
+  private coverInFlight = new Map<string, Promise<string>>()
   private bilibiliViewCache = new LRUCache<string, BilibiliViewData>({ max: 500, ttl: 1 * HOUR })
   private bilibiliWbiMixinKey: { value: string; expiresAt: number } | null = null
   private bilibiliBuvid3: { value: string; expiresAt: number } | null = null
@@ -2756,7 +2757,17 @@ class MusicProvider {
     if (cached !== undefined) {
       return cached
     }
+    const existing = this.coverInFlight.get(cacheKey)
+    if (existing) return existing
 
+    const task = this.resolveCover(source, picId, requestSize, cacheKey).finally(() => {
+      this.coverInFlight.delete(cacheKey)
+    })
+    this.coverInFlight.set(cacheKey, task)
+    return task
+  }
+
+  private async resolveCover(source: MusicSource, picId: string, requestSize: number, cacheKey: string): Promise<string> {
     try {
       if (source === 'bilibili') {
         const streamId = parseBilibiliStreamId(picId)
@@ -3323,27 +3334,8 @@ class MusicProvider {
     await Promise.allSettled(
       toResolve.map((track) =>
         limit(async () => {
-          // Check cover cache first
-          const cacheKey = `${source}:${track.picId!}:${requestSize}`
-          const cached = this.coverCache.get(cacheKey)
-          if (cached !== undefined) {
-            track.cover = cached
-            return
-          }
-
-          try {
-            // Fresh instance per call to avoid shared state race conditions
-            const providerSource = source === 'kugou_concept' ? 'kugou' : source
-            const instance = new Meting(providerSource)
-            const raw = await instance.pic(track.picId!, requestSize)
-            const data = JSON.parse(raw)
-            if (data.url) {
-              Object.assign(track, getCoverArtwork(source, data.url))
-              this.coverCache.set(cacheKey, track.cover)
-            }
-          } catch {
-            // Leave cover empty — frontend shows placeholder
-          }
+          const cover = await this.getCover(source, track.picId!, requestSize)
+          if (cover) Object.assign(track, getCoverArtwork(source, cover))
         }),
       ),
     )

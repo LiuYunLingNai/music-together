@@ -130,6 +130,10 @@ FoliaPlayerStage（folia/FoliaPlayerStage.tsx）
 
 `lib/lyricLrc.ts` 由 `LyricDisplay` 与 Folia 适配层**共用**：LRC 的解析与译文配对只有一份实现，避免两处漂移。
 
+Folia 宿主只订阅由 10 Hz 进度推导的离散行上下文（激活行下标、间隙中的最近结束行与下一行），同行进度变化不重渲染整个舞台，间隙之间 Seek 仍更新字幕；逐字动画仍由 `foliaClock` 的 MotionValue 驱动。`createFoliaTuningResolver` 在每个宿主内按模式复用调参对象，依赖调参设置与字号倍率重新创建；主模式和退场模式各取自己的稳定配置，不使用跨宿主的可变全局缓存。背景配置在宿主与 `FoliaRenderer` 内保留稳定引用。
+
+`useLyric` 负责请求编排、提前发布、撤销和最终结果缓存；`lib/lyricPresentation.ts` 负责纯候选准备、评分和择优。每次请求创建独立准备器，同一原生候选只解析/修复一次，比较字符数或参考 LRC 改变时仅重新评分；TTML 按原始行数组和辅助歌词数据共同缓存，辅助数据变化时仍重新修复、补译。TTML/YRC 共用 core 类型转换，原有对齐门槛、对唱/和声优先级及补充源修复保持不变。
+
 样式页预览只读宿主歌曲、歌词、封面和播放时钟，默认跟随当前歌曲，也可切到上游内置示例；没有实时歌词时回退示例。实时预览使用校准后的歌词时钟和未校准的媒体进度。暂停时保存歌曲/歌词快照，并用上游 `frozenPicture` 的 DOM/Canvas 复制保留画面、卸载预览运行时和释放其 WebGL 上下文，恢复后重新挂载；时间脉冲帮助逐词动画在静止时钟上重新对齐。预览错误只在自身边界内降级，不把主舞台回写为 classic。预览不调用播放、暂停或 Seek，也不接入 `useBeatFxTrack`。
 
 `lib/foliaSettings.ts` 定义默认值和持久化校验；`settingsStore.foliaSettings` 合并局部修改并通过 `storage` 保存，首次升级记住原来的 Folia 歌词模式。恢复默认仅影响 Folia 设置。`FoliaControlBar` 复用 `MineradioTransport` 的权限、投票、去重和进度预览行为，通过可选 `variant/showProgress/settingsButton` 参数组合不同外观，避免两套播放实现漂移。

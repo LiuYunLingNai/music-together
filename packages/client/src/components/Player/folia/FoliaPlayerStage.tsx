@@ -1,5 +1,6 @@
 import { Suspense, lazy, useMemo, type CSSProperties } from 'react'
 import { MotionConfig } from 'motion/react'
+import { useShallow } from 'zustand/react/shallow'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { getProxiedCoverUrl } from '@/lib/cover'
@@ -19,8 +20,10 @@ import { useMirrorPreviewSignals } from './stage/foliaPreviewSignals'
 import { useRandomFoliaMode } from './stage/useRandomFoliaMode'
 import { useFoliaRenderState } from './stage/foliaRenderState'
 import { useFoliaStyleWindowStore } from './stage/foliaStyleWindowStore'
-import { getFoliaTuningProps } from './stage/foliaTunings'
+import { createFoliaTuningResolver } from './stage/foliaTunings'
 import { useFoliaAssetStore } from './stage/foliaAssetStore'
+import { getRecentCompletedLine, getUpcomingLine } from './upstream/components/visualizer/runtime'
+import { getLineRenderEndTime } from './upstream/utils/lyrics/renderHints'
 
 // 播放列表浮岛：folia 舞台的队列外壳。惰性加载 —— 只在第一次打开时拉代码，
 // 且不进主 chunk（与模式的懒加载同红线）。
@@ -87,6 +90,10 @@ export function FoliaPlayerStage({
   const lyricFontSize = useSettingsStore((s) => s.lyricFontSize)
   const lyricTranslationFontSize = useSettingsStore((s) => s.lyricTranslationFontSize)
   const settings = useSettingsStore((s) => s.foliaSettings)
+  const tuningsFor = useMemo(
+    () => createFoliaTuningResolver({ tunings: settings.tunings, fontScale: settings.fontScale }),
+    [settings.tunings, settings.fontScale],
+  )
   /**
    * 歌词样式窗口开着时，舞台上的歌词与几何背景不再画。
    *
@@ -133,17 +140,23 @@ export function FoliaPlayerStage({
   /**
    * 当前激活行下标。
    *
-   * ★ 订阅**节流后的 store 值**（10 Hz），而不是逐帧读时钟：激活行是离散
-   *   变化，10 Hz 判定足够（与 `LyricStage` 只在 store 更新时重算 `active`
-   *   的取舍一致），也避免每帧触发一次 React 渲染。
-   *   逐帧的连续性由模式内部的 `useMotionValueEvent` 消费 `currentTime`
-   *   承担 —— 那才是逐字填充真正需要帧级精度的地方。
+   * 只订阅 10 Hz store 时间推导出的离散行：同行内的时间更新不重渲染宿主。
+   * 两个间隙的激活下标都可能为 -1，所以也比较最近结束行和下一行，保留
+   * 间隙之间 seek 时的字幕更新。逐字动画仍由模式内部的 MotionValue 驱动。
    */
-  const storeTime = usePlayerStore((s) => s.currentTime)
-  const currentLineIndex = useMemo(
-    () => findFoliaActiveLineIndex(lines, Math.max(0, storeTime - lyricOffsetMs / 1000)),
-    [lines, storeTime, lyricOffsetMs],
+  const selectLineContext = useMemo(
+    () => (state: ReturnType<typeof usePlayerStore.getState>) => {
+      const time = Math.max(0, state.currentTime - lyricOffsetMs / 1000)
+      const index = findFoliaActiveLineIndex(lines, time)
+      return [
+        index,
+        index < 0 ? getRecentCompletedLine({ lines, currentLineIndex: index, currentTime: time, getLineEndTime: getLineRenderEndTime }) : null,
+        index < 0 ? getUpcomingLine(lines, index, time) : null,
+      ] as const
+    },
+    [lines, lyricOffsetMs],
   )
+  const [currentLineIndex] = usePlayerStore(useShallow(selectLineContext))
 
   /**
    * 歌词字号 → folia 的 `lyricsFontScale`。
@@ -158,10 +171,23 @@ export function FoliaPlayerStage({
   const songTitle = currentTrack?.title ?? null
   const songArtist = currentTrack?.artist?.filter(Boolean).join(' / ') ?? null
 
+  const background = useMemo(
+    () => settings.background === 'solid'
+      ? { transparent: true }
+      : {
+          ...settings.backgroundConfig,
+          customImage: monetBackgroundImage ?? settings.backgroundConfig.customImage ?? null,
+          ...(styleWindowOpen
+            ? { common: { ...settings.backgroundConfig.common, disableGeometricBackground: true } }
+            : {}),
+        },
+    [settings.background, settings.backgroundConfig, monetBackgroundImage, styleWindowOpen],
+  )
+
   const modeProps: FoliaSharedProps = {
     ...audio,
     ...renderState,
-    ...getFoliaTuningProps(mode, settings),
+    ...tuningsFor(mode),
     currentTime,
     duration: currentTrack?.duration ?? 0,
     currentLineIndex,
@@ -192,15 +218,7 @@ export function FoliaPlayerStage({
         : 'none',
     // 莫奈/漫游的全局覆盖图来自素材 store（IndexedDB → objectURL，不进持久化设置）。
     // 窗口打开时与上游一样关掉几何背景那套常驻动画。
-    background: settings.background === 'solid'
-      ? { transparent: true }
-      : {
-          ...settings.backgroundConfig,
-          customImage: monetBackgroundImage ?? settings.backgroundConfig.customImage ?? null,
-          ...(styleWindowOpen
-            ? { common: { ...settings.backgroundConfig.common, disableGeometricBackground: true } }
-            : {}),
-        },
+    background,
     // 上游 `useVisualizerRendererModel` 的 `backgroundStaticMode`：只暂停背景，不停模式层。
     // 上游还叠加了「latent 仅在播放页动态」与「非播放页且关掉首页动态背景」两条，
     // 本项目只有播放页，因此只剩用户自己的「背景动效」开关。
@@ -227,7 +245,7 @@ export function FoliaPlayerStage({
             mode={mode}
             renderers={FOLIA_MODE_RENDERERS}
             // 切换时还在退场的旧模式要用它自己的调参（上游 `applyVisualizerTuning` 的语义）。
-            tuningsFor={(styleMode) => getFoliaTuningProps(styleMode, settings)}
+            tuningsFor={tuningsFor}
             animateStyleSwitch
             backgroundDim={settings.backgroundDim}
           />
