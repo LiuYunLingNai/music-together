@@ -31,13 +31,9 @@
       "axios": "1.20.0",
       "proxy-addr": "2.0.8",
       "fast-copy": "4.1.0",
+      "node-forge": "1.4.1",
       "express@4.22.2>path-to-regexp": "0.1.13",
       "router>path-to-regexp": "8.4.0"
-    },
-    "auditConfig": {
-      "ignoreGhsas": [
-        "GHSA-86w9-cpqp-85rv"
-      ]
     }
   },
   "devDependencies": {

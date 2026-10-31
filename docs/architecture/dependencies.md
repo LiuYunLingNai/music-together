@@ -97,6 +97,6 @@
 
 ---
 
-生产依赖审计保持 `pnpm audit --prod --audit-level high`。安全覆盖版本固定为 axios 1.20.0、proxy-addr 2.0.8、basic-ftp 6.2.1、ip-address 10.7.1、qs 6.16.0、fast-copy 4.1.0；锁文件包含 sharp 0.35.5 及对应 libvips 修复。basic-ftp 的上游 get-uri 调用仍使用兼容的 `Client/access/lastMod/list/downloadTo/close` API。
+生产依赖审计保持 `pnpm audit --prod --audit-level high`。安全覆盖版本固定为 axios 1.20.0、proxy-addr 2.0.8、basic-ftp 6.2.1、ip-address 10.7.1、qs 6.16.0、fast-copy 4.1.0、node-forge 1.4.1；锁文件包含 sharp 0.35.5 及对应 libvips 修复。basic-ftp 的上游 get-uri 调用仍使用兼容的 `Client/access/lastMod/list/downloadTo/close` API。
 
-经用户确认，仅定向豁免 `GHSA-86w9-cpqp-85rv`：node-forge 暂无修复版本，锁定的网易云 API 4.40.0 仅用它解析内置公钥并进行 RSA 加密（`util/crypto.js`），未调用公告涉及的 PKCS#1 v1.5 签名验证。不豁免整个包、不忽略其它未修复公告；升级网易云 API 或增加验签用途时重新检查该豁免，修复版本发布后移除。公告：https://github.com/advisories/GHSA-86w9-cpqp-85rv 。
+网易云 API 4.40.0 间接依赖的 node-forge 通过根目录 `pnpm.overrides` 固定到 1.4.1，兼容其 `^1.4.0` 依赖约束，消除 1.4.0 的高危审计告警。原有 `GHSA-86w9-cpqp-85rv` 定向豁免已移除：该公告的受影响范围为 `<=1.4.0`，当前锁定版本不在其范围内；生产依赖审计不再配置该豁免。
