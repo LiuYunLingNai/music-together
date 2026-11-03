@@ -2,6 +2,19 @@ import { FOLIA_MODES, isFoliaModeId, type FoliaModeId } from './foliaModes'
 import { FOLIA_MODE_CONTROLS, getTuningPath, setTuningPath, validateControl } from './foliaTuningSchema'
 import { normalizeFoliaBackgroundConfig } from './foliaBackgroundConfig'
 import type { VisualizerBackgroundConfig } from '@/components/Player/folia/upstream/components/visualizer/backgrounds/definition'
+import {
+  DEFAULT_LYRIC_RENDER_QUALITY,
+  normalizeLyricRenderQuality,
+  normalizeLyricRenderOverride,
+} from '@/components/Player/folia/upstream/utils/lyricRenderQuality'
+import type { LyricRenderQuality, SubtitleOverlayLayout } from '@/components/Player/folia/upstream/types'
+import { normalizeMachiTuning } from '@/components/Player/folia/upstream/components/visualizer/machi/machiTuning'
+import { normalizeNebbiaTuning } from '@/components/Player/folia/upstream/components/visualizer/nebbia/nebbiaTuning'
+import { normalizeTemperaTuning } from '@/components/Player/folia/upstream/components/visualizer/tempera/temperaTuning'
+import {
+  parseSubtitleOverlayLayout,
+  subtitleOverlayLayoutFromContentMode,
+} from '@/components/Player/folia/upstream/utils/lyrics/subtitleOverlayLayout'
 
 export const FOLIA_BACKGROUNDS = [
   { id: 'common', label: '通用（封面 / 几何）' },
@@ -35,6 +48,15 @@ export interface FoliaSettings {
   barOffset: number
   showTranslation: boolean
   showRomanization: boolean
+  /** 底部共享字幕的行布局（上游 SubtitleOverlayLayout）：单行/双行/三行，每行可选当前/下一句/翻译/音译。 */
+  subtitleOverlayLayout: SubtitleOverlayLayout
+  /** 底部共享字幕的底衬与模糊（上游 subtitleOverlay*）。 */
+  subtitleOverlayOpacity: number
+  subtitleOverlayBackground: boolean
+  subtitleUpcomingLyricsBlur: boolean
+  /** 屏幕中部的和声字幕（上游 showHarmonySubtitle / harmonySubtitleBackground）。 */
+  showHarmonySubtitle: boolean
+  harmonySubtitleBackground: boolean
   fontScale: number
   subtitleScale: number
   backgroundConfig: VisualizerBackgroundConfig
@@ -43,6 +65,8 @@ export interface FoliaSettings {
   randomMode: boolean
   /** 随机池：参与随机的样式，空表示全部内置样式。 */
   randomModePool: FoliaModeId[]
+  /** 歌词画布分辨率与抗锯齿的全局挡位（上游 lyricRenderQuality）：各样式默认跟随它。 */
+  renderQuality: LyricRenderQuality
 }
 
 export const FOLIA_DEFAULTS: Readonly<FoliaSettings> = {
@@ -60,6 +84,12 @@ export const FOLIA_DEFAULTS: Readonly<FoliaSettings> = {
   barOffset: 32,
   showTranslation: true,
   showRomanization: false,
+  subtitleOverlayLayout: 'translation',
+  subtitleOverlayOpacity: 0.6,
+  subtitleOverlayBackground: true,
+  subtitleUpcomingLyricsBlur: true,
+  showHarmonySubtitle: true,
+  harmonySubtitleBackground: true,
   fontScale: 1,
   subtitleScale: 1,
   backgroundConfig: {},
@@ -67,6 +97,7 @@ export const FOLIA_DEFAULTS: Readonly<FoliaSettings> = {
   randomMode: false,
   // 上游 `normalizeRandomVisualizerModes` 的默认：整份内置样式都在池里。
   randomModePool: FOLIA_MODES.map((mode) => mode.id),
+  renderQuality: DEFAULT_LYRIC_RENDER_QUALITY,
 }
 
 /** Validate persisted settings, including malformed JSON and values from older versions. */
@@ -81,10 +112,23 @@ export function normalizeFoliaSettings(value: unknown): FoliaSettings {
     for (const mode of FOLIA_MODES) {
       const patch = (saved.tunings as Record<string, unknown>)[mode.id]
       if (!patch || typeof patch !== 'object' || Array.isArray(patch)) continue
+      if (mode.id === 'machi' || mode.id === 'nebbia' || mode.id === 'tempera') {
+        // 这几个模式的 tuning 含数组 / 嵌套对象，声明式控件表表达不了：按上游的归一化读一次。
+        result.tunings[mode.id] = (
+          mode.id === 'machi' ? normalizeMachiTuning(patch)
+            : mode.id === 'nebbia' ? normalizeNebbiaTuning(patch)
+              : normalizeTemperaTuning(patch)
+        ) as unknown as Record<string, unknown>
+        continue
+      }
       const clean: Record<string, unknown> = {}
       for (const control of FOLIA_MODE_CONTROLS[mode.id]) {
         const validated = validateControl(control, getTuningPath(patch as Record<string, unknown>, control.key))
         if (validated !== undefined) setTuningPath(clean, control.key, validated)
+      }
+      // 分辨率 / 抗锯齿覆盖（#929）是对象，不走声明式控件表，按上游的归一化读一次。
+      if ((patch as Record<string, unknown>).render !== undefined) {
+        clean.render = normalizeLyricRenderOverride((patch as Record<string, unknown>).render)
       }
       result.tunings[mode.id] = clean
     }
@@ -101,6 +145,19 @@ export function normalizeFoliaSettings(value: unknown): FoliaSettings {
     }
   }
   if (typeof saved.randomMode === 'boolean') result.randomMode = saved.randomMode
+  const savedLayout = parseSubtitleOverlayLayout(saved.subtitleOverlayLayout)
+  if (savedLayout) {
+    result.subtitleOverlayLayout = savedLayout
+  } else if (typeof saved.showTranslation === 'boolean' || typeof saved.showRomanization === 'boolean') {
+    // 旧版本只有「副字幕内容」两轨：迁移成等价的单/双行布局（上游同款迁移）。
+    const mode = saved.showTranslation
+      ? saved.showRomanization ? 'both' : 'translation'
+      : saved.showRomanization ? 'romanization' : 'none'
+    result.subtitleOverlayLayout = subtitleOverlayLayoutFromContentMode(mode)
+  }
+  if (saved.renderQuality !== undefined) {
+    result.renderQuality = normalizeLyricRenderQuality(saved.renderQuality)
+  }
   if (Array.isArray(saved.randomModePool)) {
     // 上游 `normalizeRandomVisualizerModes`：按模式清单顺序过滤，空池回落到全部。
     const selected = new Set(saved.randomModePool.filter((id): id is string => typeof id === 'string'))
@@ -115,6 +172,10 @@ export function normalizeFoliaSettings(value: unknown): FoliaSettings {
     'manualHide',
     'showTranslation',
     'showRomanization',
+    'subtitleOverlayBackground',
+    'subtitleUpcomingLyricsBlur',
+    'showHarmonySubtitle',
+    'harmonySubtitleBackground',
   ] as const
   for (const key of booleanKeys) {
     if (typeof saved[key] === 'boolean') result[key] = saved[key]
@@ -124,6 +185,7 @@ export function normalizeFoliaSettings(value: unknown): FoliaSettings {
     barOffset: [16, 160],
     fontScale: [0.6, 1.8],
     subtitleScale: [0.6, 1.8],
+    subtitleOverlayOpacity: [0, 1],
   } as const
   for (const key of Object.keys(ranges) as (keyof typeof ranges)[]) {
     const number = saved[key]

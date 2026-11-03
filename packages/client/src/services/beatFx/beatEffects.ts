@@ -14,7 +14,13 @@ import type { BeatEffectSetting, SmartBeatSettings } from './beatFxTypes';
 // set it aside (2026-10-17: 时计's 齿轮随拍 and the Latent background's 潮汐脉动) rather than deleting
 // it, so it can come back by dropping `retired`.
 
-export type BeatEffectSource = 'beats' | 'drums';
+export type BeatEffectSource = 'beats' | 'drums' | 'stems';
+
+/** 带分项的效果的一项：稳定键（存档用）与名字的 i18n 键。 */
+export interface BeatEffectPart {
+    key: string;
+    nameKey: string;
+}
 
 export interface BeatEffectDef {
     /** Stable, stored in settings and exported configs: `<mode>.<name>`. */
@@ -26,6 +32,8 @@ export interface BeatEffectDef {
     source: BeatEffectSource;
     /** Never plays and is not offered; see the header. */
     retired?: boolean;
+    /** 分项：每项一个强度滑条，替代总强度（雾笺的雨/颠簸）。 */
+    parts?: readonly BeatEffectPart[];
 }
 
 /** The strength range of every effect; 1 is the look it was tuned to, the middle of the slider. */
@@ -41,7 +49,19 @@ export const BEAT_EFFECT_IDS = {
     latentPulse: 'latent.pulse',
     hanabiBeatBursts: 'hanabi.beatBursts',
     hanabiBeatPulse: 'hanabi.beatPulse',
+    temperaInkFlash: 'tempera.inkFlash',
+    machiNeonPulse: 'machi.neonPulse',
+    machiDrumRipple: 'machi.drumRipple',
+    machiScreenFlash: 'machi.screenFlash',
+    nebbiaDrizzleRide: 'nebbia.drizzleRide',
+    nebbiaAquaBeat: 'nebbia.aquaBeat',
 } as const;
+
+/** 分项在实时强度里用的 id。 */
+export const beatEffectPartId = (id: string, part: string): string => `${id}:${part}`;
+
+/** 一项的强度，没动过是 1。 */
+export const resolveBeatEffectPartStrength = (setting: BeatEffectSetting, part: string): number => setting.parts?.[part] ?? 1;
 
 /**
  * The effects the old 轻拍 / 重拍 strengths scaled (one pair for every picture, before effects had

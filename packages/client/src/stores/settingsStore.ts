@@ -124,7 +124,26 @@ export const useSettingsStore = create<SettingsStore>((set) => {
     setFoliaSettings: (patch) =>
       set((state) => {
         const foliaSettings = normalizeFoliaSettings({ ...state.foliaSettings, ...patch })
-        storage.setFoliaSettings(foliaSettings)
+        // 归一化会重建整棵树；把没改动的那部分换回旧引用，下游的 memo / selector 才不会被无谓唤醒
+        // （拖动某个模式的调参时，其余 15 个模式的 tuning 与背景配置保持不变）。
+        if (!patch.tunings) {
+          foliaSettings.tunings = state.foliaSettings.tunings
+        } else {
+          for (const id of Object.keys(foliaSettings.tunings) as (keyof FoliaSettings['tunings'])[]) {
+            if (patch.tunings[id] === state.foliaSettings.tunings[id]) {
+              foliaSettings.tunings[id] = state.foliaSettings.tunings[id]
+            }
+          }
+        }
+        if (patch.backgroundConfig === undefined) {
+          foliaSettings.backgroundConfig = state.foliaSettings.backgroundConfig
+        }
+        // 调参 / 背景调参 / 字幕底衬透明度（拖动滑条时逐帧）合并落盘；其余设置量小，立即写。
+        if (patch.tunings || patch.backgroundConfig || patch.subtitleOverlayOpacity !== undefined) {
+          storage.persistFoliaSettings(foliaSettings)
+        } else {
+          storage.setFoliaSettings(foliaSettings, true)
+        }
         return { foliaSettings }
       }),
     resetFoliaSettings: () =>

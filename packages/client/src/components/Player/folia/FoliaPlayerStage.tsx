@@ -1,4 +1,4 @@
-import { Suspense, lazy, useMemo, type CSSProperties } from 'react'
+import { Suspense, lazy, useEffect, useMemo, type CSSProperties } from 'react'
 import { MotionConfig } from 'motion/react'
 import { useShallow } from 'zustand/react/shallow'
 import { usePlayerStore } from '@/stores/playerStore'
@@ -90,6 +90,32 @@ export function FoliaPlayerStage({
   const lyricFontSize = useSettingsStore((s) => s.lyricFontSize)
   const lyricTranslationFontSize = useSettingsStore((s) => s.lyricTranslationFontSize)
   const settings = useSettingsStore((s) => s.foliaSettings)
+  const setFoliaSettings = useSettingsStore((s) => s.setFoliaSettings)
+  // 画面里直接改的调参（町景的取景控制条、莫奈/回环/时计/商籁的拖动）：合并进当前模式的 tuning。
+  // 雾笺的着色器冷编约一秒：页面空闲时先在后台编好（上游 entry 的 prewarm）。
+  useEffect(() => {
+    const run = () => {
+      void import('./upstream/components/visualizer/nebbia/nebbiaShaderWarmup')
+        .then((module) => module.warmNebbiaShaders())
+        .catch((error) => console.warn('[Nebbia] shader warm-up did not load', error))
+    }
+    const idle = typeof window.requestIdleCallback === 'function'
+      ? window.requestIdleCallback(run, { timeout: 5000 })
+      : window.setTimeout(run, 2000)
+    return () => {
+      if (typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(idle)
+      else window.clearTimeout(idle)
+    }
+  }, [])
+
+  const onVisualizerTuningChange = useMemo(
+    () => (patch: object) => {
+      const latest = useSettingsStore.getState().foliaSettings
+      const held = latest.tunings[mode] ?? {}
+      setFoliaSettings({ tunings: { ...latest.tunings, [mode]: { ...held, ...patch } } })
+    },
+    [mode, setFoliaSettings],
+  )
   const tuningsFor = useMemo(
     () => createFoliaTuningResolver({ tunings: settings.tunings, fontScale: settings.fontScale }),
     [settings.tunings, settings.fontScale],
@@ -135,7 +161,7 @@ export function FoliaPlayerStage({
   // 每首随机样式：换歌时从池里换一种（上游 useRandomVisualizerMode）。
   useRandomFoliaMode(currentTrack?.id ?? null)
   // 智能动感模式：把当前歌曲的拍点表装进实时时钟（不改变任何画面，只是备好数据）。
-  useBeatFxTrack()
+  useBeatFxTrack(renderState.staticMode)
 
   /**
    * 当前激活行下标。
@@ -184,10 +210,22 @@ export function FoliaPlayerStage({
     [settings.background, settings.backgroundConfig, monetBackgroundImage, styleWindowOpen],
   )
 
+  // 上游各 tuning.ts 把拖动回传挂在模式自己的 onXxxTuningChange 上；宿主统一写回同一个 store。
+  const tuningChangeProps: Partial<FoliaSharedProps> =
+    mode === 'claddagh' ? { onCladdaghTuningChange: onVisualizerTuningChange }
+      : mode === 'monet' ? { onMonetTuningChange: onVisualizerTuningChange }
+        : mode === 'pendolo' ? { onPendoloTuningChange: onVisualizerTuningChange }
+          : mode === 'sonnet' ? { onSonnetTuningChange: onVisualizerTuningChange }
+            : mode === 'tempera' ? { onTemperaTuningChange: onVisualizerTuningChange }
+              : mode === 'lumiere' ? { onLumiereTuningChange: onVisualizerTuningChange }
+                : mode === 'hanabi' ? { onHanabiTuningChange: onVisualizerTuningChange }
+                  : {}
+
   const modeProps: FoliaSharedProps = {
     ...audio,
     ...renderState,
     ...tuningsFor(mode),
+    ...tuningChangeProps,
     currentTime,
     duration: currentTrack?.duration ?? 0,
     currentLineIndex,
@@ -216,6 +254,13 @@ export function FoliaPlayerStage({
       : settings.showRomanization
         ? 'romanization'
         : 'none',
+    // 底部共享字幕的行布局（上游 #990）：与「副字幕内容」分开；后者只给 Monet/Pendolo/Still 自排版用。
+    subtitleOverlayLayout: settings.subtitleOverlayLayout,
+    subtitleOverlayOpacity: settings.subtitleOverlayOpacity,
+    subtitleOverlayBackground: settings.subtitleOverlayBackground,
+    subtitleUpcomingLyricsBlur: settings.subtitleUpcomingLyricsBlur,
+    showHarmonySubtitle: settings.showHarmonySubtitle,
+    harmonySubtitleBackground: settings.harmonySubtitleBackground,
     // 莫奈/漫游的全局覆盖图来自素材 store（IndexedDB → objectURL，不进持久化设置）。
     // 窗口打开时与上游一样关掉几何背景那套常驻动画。
     background,
@@ -224,6 +269,7 @@ export function FoliaPlayerStage({
     // 本项目只有播放页，因此只剩用户自己的「背景动效」开关。
     backgroundStaticMode: !settings.backgroundMotion,
     onLyricLineSeek: onLyricSeek,
+    onVisualizerTuningChange,
   }
 
   return (

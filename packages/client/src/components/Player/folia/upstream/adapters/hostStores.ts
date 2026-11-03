@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { resolveFoliaTuning } from '../../stage/foliaTunings'
 import type { FoliaModeId } from '../../registry'
-import type { VisualizerBackgroundMode, VisualizerMode } from '../types'
+import type { LyricRenderQuality, VisualizerBackgroundMode, VisualizerMode } from '../types'
 import { resolveSmartBeatSettings, type SmartBeatPatch } from '@/services/beatFx/smartBeatSettings'
 import { DEFAULT_SMART_BEAT_SETTINGS } from '@/services/beatFx/beatFxTypes'
 import { ensureFoliaAssets, useFoliaAssetStore } from '../../stage/foliaAssetStore'
@@ -32,6 +32,8 @@ const HOST_MODE_BY_UPSTREAM: Record<string, FoliaModeId> = {
     hanabi: 'hanabi',
     diorama: 'diorama',
     still: 'still',
+    machi: 'machi',
+    nebbia: 'nebbia',
 }
 const UPSTREAM_BY_HOST = Object.fromEntries(
     Object.entries(HOST_MODE_BY_UPSTREAM).map(([upstream, host]) => [host, upstream]),
@@ -46,6 +48,7 @@ export const toUpstreamMode = (mode: FoliaModeId): VisualizerMode => UPSTREAM_BY
 const TUNING_MODES: FoliaModeId[] = [
     'luminous', 'cadenza', 'partita', 'fume', 'claddagh', 'cappella',
     'tilt', 'monet', 'pendolo', 'sonnet', 'tempera', 'lumiere', 'hanabi', 'diorama',
+    'machi', 'nebbia',
 ]
 
 const capitalize = (value: string) => value[0].toUpperCase() + value.slice(1)
@@ -82,6 +85,7 @@ const ownState = () => {
         // 每首随机样式（上游 randomVisualizerModePerSong / randomVisualizerModes）。
         randomVisualizerModePerSong: settings.foliaSettings.randomMode,
         randomVisualizerModes: settings.foliaSettings.randomModePool.map(toUpstreamMode) as VisualizerMode[],
+        lyricRenderQuality: settings.foliaSettings.renderQuality,
         smartBeat: resolveSmartBeatSettings(settings.smartBeat) ?? DEFAULT_SMART_BEAT_SETTINGS,
         // URL 背景：宿主把条目存在 foliaSettings.backgroundConfig.url 里。
         urlBackgroundList: settings.foliaSettings.backgroundConfig.url?.items ?? [],
@@ -109,6 +113,10 @@ const actions = () => ({
         useSettingsStore.getState().setFoliaSettings({ randomMode: enable })
     },
     handleSetSmartBeat: (patch: SmartBeatPatch) => useSettingsStore.getState().setSmartBeat(patch),
+    handleSetLyricRenderQuality: (patch: Partial<LyricRenderQuality>) => {
+        const current = useSettingsStore.getState().foliaSettings.renderQuality
+        useSettingsStore.getState().setFoliaSettings({ renderQuality: { ...current, ...patch } })
+    },
     handleSetUrlBackgroundList: () => {},
     handleSetUrlBackgroundSelectedId: () => {},
     handleAddUrlBackgroundItem: () => {},
@@ -148,7 +156,26 @@ let syncing = false
 const syncFromHost = () => {
     if (syncing) return
     syncing = true
-    useSettingsStore.subscribe(() => {
+    useSettingsStore.subscribe((state, previous) => {
+        // 只在这些字段真的变了时同步：窗口 store 的 build() 会把每个模式的 tuning 重新解析一遍，
+        // 音量、歌词偏移、字幕开关等无关设置变化不该触发它。
+        const before = previous.foliaSettings
+        const after = state.foliaSettings
+        const sharedChanged = state.visualStage !== previous.visualStage
+            || before.tunings !== after.tunings
+            || before.backgroundDim !== after.backgroundDim
+            || before.background !== after.background
+            || before.randomMode !== after.randomMode
+            || before.randomModePool !== after.randomModePool
+            || before.renderQuality !== after.renderQuality
+            || before.backgroundConfig !== after.backgroundConfig
+        const smartBeatChanged = state.smartBeat !== previous.smartBeat
+        if (!sharedChanged && !smartBeatChanged) return
+        // 拖动智能动感滑块只改 smartBeat：单字段写入，别顺带重建 16 个模式的调参。
+        if (!sharedChanged) {
+            useVisualizerSettingsStore.setState({ smartBeat: state.smartBeat })
+            return
+        }
         useVisualizerSettingsStore.setState(build())
     })
     syncing = false

@@ -73,6 +73,19 @@ export const getUpcomingLine = (
 };
 
 // Most modes only need 1-2 lines of lookahead for subtitles or preheat, so keep this cheap and explicit.
+// The lines after the one the bottom subtitle shows: the active line, or in a gap the line just sung
+// (the subtitle keeps that one up), so a "next" row does not drop out between two lines.
+export const getSubtitleNextLines = (
+    lines: Line[],
+    currentLineIndex: number,
+    recentCompletedLine: Line | null,
+    count = 2
+): Line[] => getUpcomingLines(
+    lines,
+    currentLineIndex >= 0 || !recentCompletedLine ? currentLineIndex : lines.indexOf(recentCompletedLine),
+    count
+);
+
 export const getUpcomingLines = (
     lines: Line[],
     currentLineIndex: number,
@@ -143,8 +156,8 @@ export const useVisualizerRuntime = ({
     );
 
     const nextLines = useMemo(
-        () => getUpcomingLines(lines, currentLineIndex, 2),
-        [currentLineIndex, lines]
+        () => getSubtitleNextLines(lines, currentLineIndex, recentCompletedLine),
+        [currentLineIndex, lines, recentCompletedLine]
     );
 
     return {

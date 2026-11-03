@@ -1,11 +1,14 @@
 import { Suspense, lazy, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useSettingsStore } from '@/stores/settingsStore'
-import { useFoliaTheme, useFoliaLines } from './stage/lyricAdapter'
+import { useFoliaTheme } from './stage/lyricAdapter'
 import { isFoliaModeId } from './registry'
 import { toUpstreamMode, useVisualizerSettingsStore } from './upstream/adapters/hostStores'
 import { useFoliaStyleWindowStore } from './stage/foliaStyleWindowStore'
 import { useFoliaAssetStore } from './stage/foliaAssetStore'
+import { sanitizeUrlBackgroundItem } from './upstream/utils/urlBackground'
+import type { UrlBackgroundItem } from './upstream/types'
+import type { VisualizerBackgroundConfig } from './upstream/components/visualizer/backgrounds/definition'
 
 /**
  * 上游歌词样式工作窗口（`visualizer/window/VisPlayground`）的宿主壳层。
@@ -16,7 +19,8 @@ import { useFoliaAssetStore } from './stage/foliaAssetStore'
  *   · 字号 → 宿主 `lyricFontSize`（百分数，以 90 为基准换算成倍率）；
  *   · 字幕 → `showTranslation` / `showRomanization` 与字幕字号；
  *   · 背景 → `foliaSettings.backgroundConfig`。
- * 宿主没有的能力（自定义字体上传、每首随机样式）给出显式空实现，窗口里对应的控件保持禁用态。
+ * 宿主没有的能力（自定义字体上传与字体族选择）给出显式空实现，窗口里对应的控件保持禁用态。
+ * 「每首随机样式」由窗口直接读宿主 store（`randomMode` / `randomModePool`），与播放页同一份。
  */
 const VisPlayground = lazy(() => import('./upstream/components/visualizer/window/VisPlayground'))
 
@@ -47,8 +51,6 @@ export function FoliaStyleWindow({ open, onClose }: FoliaStyleWindowProps) {
     const setLyricFontWeight = useSettingsStore((state) => state.setLyricFontWeight)
     const subtitleFontSize = useSettingsStore((state) => state.lyricTranslationFontSize)
     const setSubtitleFontSize = useSettingsStore((state) => state.setLyricTranslationFontSize)
-    const _lines = useFoliaLines()
-    void _lines
 
     const visualizerMode = isFoliaModeId(stage) ? toUpstreamMode(stage) : 'classic'
     // 背景配置：窗口按 config.mode 决定展示哪一个背景的参数卡片。
@@ -64,15 +66,34 @@ export function FoliaStyleWindow({ open, onClose }: FoliaStyleWindowProps) {
         [monetBackgroundImage, settings.backgroundConfig, settings.background],
     )
     const backgroundActions = useMemo(() => {
-        const common = settings.backgroundConfig.common
+        // 都从 store 现取：一次点击里可能连调两个动作（添加网页背景后立刻选中它），
+        // 闭包里捕获的旧配置会把前一步写掉。
+        const latestConfig = () => useSettingsStore.getState().foliaSettings.backgroundConfig
+        const patchConfig = (patch: (config: VisualizerBackgroundConfig) => VisualizerBackgroundConfig) =>
+            setSettings({ backgroundConfig: patch(latestConfig()) })
         const patchCommon = (patch: Record<string, unknown>) =>
-            setSettings({
-                backgroundConfig: {
-                    ...settings.backgroundConfig,
-                    common: { ...common, ...patch },
-                },
+            patchConfig((config) => ({ ...config, common: { ...config.common, ...patch } }))
+        // 各背景自己的调参（latent/monet/nomand/sora）：上游由各 tuning.ts 声明，宿主统一写回
+        // `backgroundConfig[id].tuning`，归一化交给 setFoliaSettings。
+        const patchBackgroundTuning = (id: 'latent' | 'monet' | 'nomand' | 'sora', patch: Record<string, unknown>) =>
+            patchConfig((config) => {
+                const slots = config as unknown as Record<string, { tuning?: Record<string, unknown> } | undefined>
+                return { ...config, [id]: { ...slots[id], tuning: { ...slots[id]?.tuning, ...patch } } } as never
             })
-        const assets = useFoliaAssetStore.getState()
+        // 「恢复默认」：丢掉这一背景保存的调参，卡片与渲染器回到各自的上游默认值。
+        const resetBackgroundTuning = (id: 'latent' | 'monet' | 'nomand' | 'sora') =>
+            patchConfig((config) => {
+                const next = { ...config } as Record<string, unknown>
+                delete next[id]
+                return next as never
+            })
+        // 嵌入网页背景的列表与选中项。
+        type UrlSlot = { items: UrlBackgroundItem[]; selectedId: string | null }
+        const setUrl = (patch: (url: UrlSlot) => UrlSlot) =>
+            patchConfig((config) => ({
+                ...config,
+                url: patch({ items: config.url?.items ?? [], selectedId: config.url?.selectedId ?? null }),
+            }) as never)
         return {
             onModeChange: (mode: string) => setSettings({ background: mode as never }),
             common: {
@@ -81,13 +102,49 @@ export function FoliaStyleWindow({ open, onClose }: FoliaStyleWindowProps) {
                 onDisableGeometricChange: (disableGeometricBackground: boolean) => patchCommon({ disableGeometricBackground }),
                 onDisableVignetteChange: (disableVignette: boolean) => patchCommon({ disableVignette }),
             },
+            latent: {
+                onTuningChange: (patch: Record<string, unknown>) => patchBackgroundTuning('latent', patch),
+                onResetTuning: () => resetBackgroundTuning('latent'),
+            },
+            monet: {
+                onTuningChange: (patch: Record<string, unknown>) => patchBackgroundTuning('monet', patch),
+                onResetTuning: () => resetBackgroundTuning('monet'),
+            },
+            nomand: {
+                onTuningChange: (patch: Record<string, unknown>) => patchBackgroundTuning('nomand', patch),
+                onResetTuning: () => resetBackgroundTuning('nomand'),
+            },
+            sora: {
+                onTuningChange: (patch: Record<string, unknown>) => patchBackgroundTuning('sora', patch),
+                onResetTuning: () => resetBackgroundTuning('sora'),
+            },
+            url: {
+                onAdd: (item: unknown) => {
+                    const sanitized = sanitizeUrlBackgroundItem(item)
+                    if (!sanitized) return
+                    setUrl((url) => ({ ...url, items: [...url.items, sanitized] }))
+                },
+                onUpdate: (id: string, patch: Record<string, unknown>) =>
+                    setUrl((url) => ({
+                        ...url,
+                        items: url.items.map((item) =>
+                            item.id === id ? sanitizeUrlBackgroundItem({ ...item, ...patch, id: item.id }) ?? item : item,
+                        ),
+                    })),
+                onDelete: (id: string) =>
+                    setUrl((url) => {
+                        const items = url.items.filter((item) => item.id !== id)
+                        return { items, selectedId: url.selectedId === id ? items[0]?.id ?? null : url.selectedId }
+                    }),
+                onSelect: (id: string | null) => setUrl((url) => ({ ...url, selectedId: id })),
+            },
             customImage: {
-                onUpload: assets.handleUploadMonetBackgroundImage,
-                onClear: assets.handleClearMonetBackgroundImage,
+                onUpload: (files: File[]) => useFoliaAssetStore.getState().handleUploadMonetBackgroundImage(files),
+                onClear: () => useFoliaAssetStore.getState().handleClearMonetBackgroundImage(),
                 isLoading: isLoadingMonetBackgroundImage,
             },
         } as never
-    }, [isLoadingMonetBackgroundImage, settings.backgroundConfig, setSettings])
+    }, [isLoadingMonetBackgroundImage, setSettings])
 
     if (!open) return null
 
@@ -100,7 +157,7 @@ export function FoliaStyleWindow({ open, onClose }: FoliaStyleWindowProps) {
                 isDaylight={false}
                 visualizerMode={visualizerMode}
                 initialEditSection="visualizer"
-                visualizerOpacity={1}
+                visualizerOpacity={1 - settings.backgroundDim}
                 backgroundConfig={backgroundConfig}
                 backgroundActions={backgroundActions}
                 hideTranslationSubtitle={false}
@@ -110,11 +167,18 @@ export function FoliaStyleWindow({ open, onClose }: FoliaStyleWindowProps) {
                         ? settings.showRomanization ? 'both' : 'translation'
                         : settings.showRomanization ? 'romanization' : 'none'
                 }
-                subtitleOverlayOpacity={1}
-                subtitleOverlayBackground={false}
-                subtitleUpcomingLyricsBlur={false}
-                showHarmonySubtitle
-                harmonySubtitleBackground={false}
+                subtitleOverlayLayout={settings.subtitleOverlayLayout}
+                onSubtitleOverlayLayoutChange={(layout) => setSettings({ subtitleOverlayLayout: layout })}
+                subtitleOverlayOpacity={settings.subtitleOverlayOpacity}
+                onSubtitleOverlayOpacityChange={(opacity) => setSettings({ subtitleOverlayOpacity: opacity })}
+                subtitleOverlayBackground={settings.subtitleOverlayBackground}
+                onToggleSubtitleOverlayBackground={(enabled) => setSettings({ subtitleOverlayBackground: enabled })}
+                subtitleUpcomingLyricsBlur={settings.subtitleUpcomingLyricsBlur}
+                onToggleSubtitleUpcomingLyricsBlur={(enabled) => setSettings({ subtitleUpcomingLyricsBlur: enabled })}
+                showHarmonySubtitle={settings.showHarmonySubtitle}
+                onToggleShowHarmonySubtitle={(enabled) => setSettings({ showHarmonySubtitle: enabled })}
+                harmonySubtitleBackground={settings.harmonySubtitleBackground}
+                onToggleHarmonySubtitleBackground={(enabled) => setSettings({ harmonySubtitleBackground: enabled })}
                 fontStyle={theme.fontStyle}
                 fontScale={lyricFontSize / 90}
                 subtitleFontScale={subtitleFontSize / 90}
@@ -131,8 +195,8 @@ export function FoliaStyleWindow({ open, onClose }: FoliaStyleWindowProps) {
                 onVisualizerOpacityChange={(opacity) => setSettings({ backgroundDim: 1 - opacity })}
                 onToggleShowSubtitleTranslation={(shown) => setSettings({ showTranslation: shown })}
                 onSubtitleContentModeChange={(mode) => setSettings({
-                    showTranslation: mode !== 'none',
-                    showRomanization: mode === 'both' || mode === 'romanization',
+                    showTranslation: mode === 'translation' || mode === 'both',
+                    showRomanization: mode === 'romanization' || mode === 'both',
                 })}
                 onClose={onClose}
             />

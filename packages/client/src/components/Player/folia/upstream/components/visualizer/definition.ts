@@ -19,6 +19,7 @@ import {
     type PendoloTuning,
     type SonnetTuning,
     type SubtitleContentMode,
+    type SubtitleOverlayLayout,
     type TemperaTuning,
     type Theme,
     type TiltTuning,
@@ -29,7 +30,7 @@ import type { VisualizerBackgroundConfig } from './backgrounds/definition';
 
 // src/components/visualizer/definition.ts
 // Shared contracts for discoverable visualizer modes.
-export type VisualizerTuningKind = 'none' | 'classic' | 'cadenza' | 'partita' | 'fume' | 'claddagh' | 'cappella' | 'tilt' | 'monet' | 'diorama' | 'pendolo' | 'sonnet' | 'tempera' | 'lumiere' | 'hanabi';
+export type VisualizerTuningKind = 'none' | 'classic' | 'cadenza' | 'partita' | 'fume' | 'claddagh' | 'cappella' | 'tilt' | 'monet' | 'diorama' | 'pendolo' | 'sonnet' | 'tempera' | 'lumiere' | 'hanabi' | 'machi' | 'nebbia';
 
 /** The command-palette line that switches to a lyric style or a background. The command list builds its id from the mode. */
 export interface VisualizerModeCommand {
@@ -106,6 +107,8 @@ export interface VisualizerSharedProps {
     hideTranslationSubtitle?: boolean;
     showSubtitleTranslation?: boolean;
     subtitleContentMode?: SubtitleContentMode;
+    /** The shared bottom subtitle's rows (VisualizerSubtitleOverlay); it does not read subtitleContentMode. */
+    subtitleOverlayLayout?: SubtitleOverlayLayout;
     paused?: boolean;
     onBack?: () => void;
     isPanelOpen?: boolean;
@@ -141,6 +144,10 @@ export interface VisualizerSharedProps {
     onLumiereTuningChange?: (patch: Partial<LumiereTuning>) => void;
     hanabiTuning?: HanabiTuning;
     onHanabiTuningChange?: (patch: Partial<HanabiTuning>) => void;
+    machiTuning?: import('./machi/types').MachiTuning;
+    onMachiTuningChange?: (patch: Partial<import('./machi/types').MachiTuning>) => void;
+    nebbiaTuning?: import('./nebbia/types').NebbiaTuning;
+    onNebbiaTuningChange?: (patch: Partial<import('./nebbia/types').NebbiaTuning>) => void;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 上游以泛型标注各模式调参，这里保留同一契约。

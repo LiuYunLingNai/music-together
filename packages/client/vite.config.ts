@@ -4,12 +4,14 @@ import tailwindcss from '@tailwindcss/vite'
 import wasm from 'vite-plugin-wasm'
 import path from 'path'
 import { readFileSync } from 'fs'
+// @ts-expect-error -- dev 插件是纯 JS，没有类型声明
+import { nebbiaStrokesPlugin } from './dev/nebbia/nebbiaStrokesPlugin.mjs'
 
 const rootPkg = JSON.parse(readFileSync(path.resolve(__dirname, '../../package.json'), 'utf-8'))
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss(), wasm()],
+  plugins: [nebbiaStrokesPlugin(), react(), tailwindcss(), wasm()],
   define: {
     __APP_VERSION__: JSON.stringify(rootPkg.version),
   },

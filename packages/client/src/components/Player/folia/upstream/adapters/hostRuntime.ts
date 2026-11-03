@@ -1,6 +1,7 @@
 import React from 'react'
 import { create } from 'zustand'
 import { usePlayerStore } from '@/stores/playerStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { buildAMLLLinesFromLrc } from '@/lib/lyricLrc'
 import { getProxiedCoverUrl } from '@/lib/cover'
 import { motionValue } from 'motion/react'
@@ -35,17 +36,28 @@ export interface DisplayPlaybackState {
     coverUrl: string | null
 }
 
-/** 歌词转换按源对象缓存：store 每 100ms 更新一次，长歌词不该每次重转。 */
-let lineCache: { ttml: unknown; lyric: string; tlyric: string; lines: Line[] } | null = null
+/** 歌词转换按源对象与字幕开关缓存：store 每 100ms 更新一次，长歌词不该每次重转。 */
+let lineCache: { ttml: unknown; lyric: string; tlyric: string; translation: boolean; romanization: boolean; lines: Line[] } | null = null
 const displayLines = (state: HostPlayerState): Line[] => {
-    if (lineCache && lineCache.ttml === state.ttmlLines && lineCache.lyric === state.lyric && lineCache.tlyric === state.tlyric) {
+    const { showTranslation, showRomanization } = useSettingsStore.getState().foliaSettings
+    if (lineCache
+        && lineCache.ttml === state.ttmlLines
+        && lineCache.lyric === state.lyric
+        && lineCache.tlyric === state.tlyric
+        && lineCache.translation === showTranslation
+        && lineCache.romanization === showRomanization) {
         return lineCache.lines
     }
     const source = state.ttmlLines && state.ttmlLines.length > 0
         ? state.ttmlLines
         : buildAMLLLinesFromLrc(state.lyric, state.tlyric)
-    const lines = attachFoliaInterludes(foldFoliaBackgroundVocals(source.map(toFoliaLine)))
-    lineCache = { ttml: state.ttmlLines, lyric: state.lyric, tlyric: state.tlyric, lines }
+    // 与舞台同判据：关掉的翻译 / 音译在窗口的实时预览里也不该出现。
+    const lines = attachFoliaInterludes(foldFoliaBackgroundVocals(source.map(toFoliaLine))).map((line) => ({
+        ...line,
+        translation: showTranslation ? line.translation : undefined,
+        romanization: showRomanization ? line.romanization : undefined,
+    }))
+    lineCache = { ttml: state.ttmlLines, lyric: state.lyric, tlyric: state.tlyric, translation: showTranslation, romanization: showRomanization, lines }
     return lines
 }
 

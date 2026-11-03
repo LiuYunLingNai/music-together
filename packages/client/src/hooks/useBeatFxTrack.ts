@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { isFoliaModeId } from '@/components/Player/folia/registry'
-import { BEAT_EFFECT_IDS, resolveBeatEffectSetting } from '@/services/beatFx/beatEffects'
+import { BEAT_EFFECT_IDS, beatEffectPartId, resolveBeatEffectPartStrength, resolveBeatEffectSetting } from '@/services/beatFx/beatEffects'
 import {
   beginBeatFxTrack,
   setBeatFxEvents,
@@ -26,7 +26,7 @@ import { smartBeatActive } from '@/services/beatFx/beatEffects'
 const RETRY_ATTEMPTS = 4
 const RETRY_DELAY_MS = 3000
 
-export function useBeatFxTrack(): boolean {
+export function useBeatFxTrack(staticMode = false): boolean {
   const smartBeat = useSettingsStore((s) => s.smartBeat)
   const stage = useSettingsStore((s) => s.visualStage)
   const track = usePlayerStore((s) => s.currentTrack)
@@ -41,11 +41,18 @@ export function useBeatFxTrack(): boolean {
         backgroundHasBeats: false,
       }
     : null
-  const wanted = targets ? visualizerWantsBeats(targets) : false
+  // 静止模式（省电 / 减弱动效 / 低配 / 后台）不跑拍点分析，也不下发效果强度（上游同判据）。
+  const wanted = targets && !staticMode ? visualizerWantsBeats(targets) : false
   const beatStrength = targets ? liveBeatEffectStrength(targets, 'beats', (id) => resolveBeatEffectSetting(smartBeat, id).strength) : 0
   // 效果与强度串成一个字符串，设置里别的地方变化不会触发重渲染。
-  const liveEffects = targets
-    ? liveBeatEffects(targets).map((effect) => `${effect.id}=${resolveBeatEffectSetting(smartBeat, effect.id).strength}`).join(',')
+  const liveEffects = targets && !staticMode
+    ? liveBeatEffects(targets).flatMap((effect) => {
+        const setting = resolveBeatEffectSetting(smartBeat, effect.id)
+        return [
+          `${effect.id}=${setting.strength}`,
+          ...(effect.parts ?? []).map((part) => `${beatEffectPartId(effect.id, part.key)}=${resolveBeatEffectPartStrength(setting, part.key)}`),
+        ]
+      }).join(',')
     : ''
   const identity = wanted && track ? currentBeatFxKey() : null
   /** 拍点表未就绪期间保持「就绪」的兜底；与上游 READY_HOLD_MS 同义，由 beatFxLive 内部管。 */

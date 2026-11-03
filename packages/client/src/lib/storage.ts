@@ -51,6 +51,39 @@ function safeSetJSON(key: string, value: unknown): void {
   safeSet(key, JSON.stringify(value))
 }
 
+/**
+ * 高频设置（调参、智能动感滑块的连续写入）的落盘合并。
+ *
+ * localStorage.setItem 是同步落盘：拖动滑条时 60 次/秒地写会把主线程拖住。
+ * 这里只延后「落盘」这一步，store 里的状态仍是即时的；读回时先把待写值落盘，
+ * 页面隐藏/卸载时也刷一次，所以不会丢设置。
+ */
+const pendingJSON = new Map<string, unknown>()
+let pendingTimer: ReturnType<typeof setTimeout> | null = null
+const flushPending = (): void => {
+  if (pendingTimer !== null) {
+    clearTimeout(pendingTimer)
+    pendingTimer = null
+  }
+  for (const [key, value] of pendingJSON) safeSetJSON(key, value)
+  pendingJSON.clear()
+}
+const setJSONDeferred = (key: string, value: unknown): void => {
+  pendingJSON.set(key, value)
+  if (pendingTimer === null) pendingTimer = setTimeout(flushPending, 200)
+}
+const flushPendingKey = (key: string): void => {
+  if (!pendingJSON.has(key)) return
+  safeSetJSON(key, pendingJSON.get(key))
+  pendingJSON.delete(key)
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', flushPending)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushPending()
+  })
+}
+
 /** Parse a float from storage, returning the fallback if invalid */
 function safeFloat(key: string, fallback: number): number {
   const raw = safeGet(key)
@@ -219,6 +252,7 @@ export const SETTING_DEFAULTS = {
 
 export const storage = {
   getFoliaSettings: () => {
+    flushPendingKey('foliaSettings')
     const saved = safeGetJSON<unknown>('foliaSettings')
     // Remember an existing Folia selection when upgrading from the lyric-only stage.
     const fallback = normalizeFoliaSettings({ lyricMode: safeGet('visualStage') })
@@ -226,11 +260,23 @@ export const storage = {
       ? { ...fallback, ...saved }
       : fallback)
   },
-  setFoliaSettings: (value: FoliaSettings) => safeSetJSON('foliaSettings', normalizeFoliaSettings(value)),
+  /** `normalized`：调用方（settingsStore）已归一化，省掉一次全树校验。 */
+  setFoliaSettings: (value: FoliaSettings, normalized = false) => {
+    // 立即写入（恢复默认等）不能被更早排队的调参拖回旧值。
+    pendingJSON.delete('foliaSettings')
+    safeSetJSON('foliaSettings', normalized ? value : normalizeFoliaSettings(value))
+  },
+  /**
+   * 调参拖动的高频写入（取景控制条、设置面板滑条）：落盘合并到一次，
+   * store 里的状态仍是逐帧的；读回 / 页面隐藏 / 卸载时刷盘。
+   */
+  persistFoliaSettings: (value: FoliaSettings) => setJSONDeferred('foliaSettings', value),
   /** 智能动感模式（拍点特效）—— 全局一项，管所有画拍点的视觉与背景。 */
-  getSmartBeatSettings: (): SmartBeatSettings =>
-    resolveSmartBeatSettings(safeGetJSON<SmartBeatPatch>('smartBeatSettings'), DEFAULT_SMART_BEAT_SETTINGS),
-  setSmartBeatSettings: (value: SmartBeatSettings) => safeSetJSON('smartBeatSettings', value),
+  getSmartBeatSettings: (): SmartBeatSettings => {
+    flushPendingKey('smartBeatSettings')
+    return resolveSmartBeatSettings(safeGetJSON<SmartBeatPatch>('smartBeatSettings'), DEFAULT_SMART_BEAT_SETTINGS)
+  },
+  setSmartBeatSettings: (value: SmartBeatSettings) => setJSONDeferred('smartBeatSettings', value),
   /** Persistent user identity — synced from server identity bootstrap */
   getUserId: (): string => {
     return safeGet('userId') ?? ''

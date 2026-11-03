@@ -14,6 +14,7 @@ import { holdTurns } from './upstream/components/visualizer/preview/pictureTurns
 import { useHandoffCover } from './upstream/components/visualizer/useHandoffCover'
 import { useReducedMotionFor } from './upstream/hooks/useReducedMotionFor'
 import { fumeBackgroundConfig } from './upstream/components/visualizer/fume/backgroundConfig'
+import { nebbiaBackgroundConfig } from './upstream/components/visualizer/nebbia/nebbiaBehind'
 import VisualizerHarmonyOverlay from './upstream/components/visualizer/VisualizerHarmonyOverlay'
 
 /**
@@ -57,6 +58,8 @@ const FOLIA_TUNING_PROP_KEYS = [
   'temperaTuning',
   'lumiereTuning',
   'hanabiTuning',
+  'machiTuning',
+  'nebbiaTuning',
 ] as const satisfies readonly (keyof FoliaSharedProps)[]
 
 /** 模式自己指定的背景（上游各 `entry.tsx` 的 `background` 字段）。 */
@@ -67,6 +70,8 @@ export type FoliaModeBackground =
 const MODE_BACKGROUNDS: Partial<Record<FoliaModeId, FoliaModeBackground>> = {
   fume: fumeBackgroundConfig,
   still: false,
+  machi: false,
+  nebbia: nebbiaBackgroundConfig,
 }
 
 /** 摘掉所有模式调参，再放上这一个模式的（上游按模式重新解析调参的等价物）。 */
@@ -95,10 +100,11 @@ interface FoliaRendererProps extends FoliaSharedProps {
   /** 背景上方、歌词下方的一层压暗（本项目的宿主扩展，上游没有）。 */
   backgroundDim?: number
   /**
-   * 只画这一个样式，不画背景层（上游 `VisualizerRenderer` 的调用方在预览里传
-   * `background.transparent`，小图只该有样式）。给了它就不挂 `VisualizerBackdrop`。
+   * 只画样式层，不画背景层（上游 `VisualizerRenderer` 的调用方在预览里传
+   * `background.transparent`，小图只该有样式）。打开后不挂 `VisualizerBackdrop`，
+   * 但换样式仍按上游那样交叉过渡（退场的旧样式由 `renderers[styleMode]` 画）。
    */
-  renderStyleOnly?: ComponentType<FoliaSharedProps>
+  renderStyleOnly?: boolean
 }
 
 export function FoliaRenderer({
@@ -122,24 +128,34 @@ export function FoliaRenderer({
     [props.background],
   )
   const sharedProps: FoliaSharedProps = { ...props, background: resolvedBackground }
+  /**
+   * 正在画的那个样式的 props。
+   *
+   * `useDeferredValue` 让新模式在代码到达前先继续画旧样式：这段时间里 `props` 上的调参是
+   * **新模式**的，旧样式拿到会按新模式的字号/布局画。上游 `applyVisualizerTuning(shownMode, …)`
+   * 总是按正在画的模式解析，这里补上同一步（只在两者不同时才有额外开销）。
+   */
+  const shownProps: FoliaSharedProps = shownMode !== mode && tuningsFor
+    ? withTuning(sharedProps, tuningsFor(shownMode))
+    : sharedProps
   // 静态模式（含系统的减弱动效偏好）下直接硬切，与上游一致。
   // 上游还看了自己的「界面微动效」设置（`useReducedMotionFor('uiMicroMotion')`）；
   // 本项目没有那份设置，宿主版 hook 只认系统偏好。
   const reducedMotion = useReducedMotionFor()
-  const transition = animateStyleSwitch && !sharedProps.staticMode && !reducedMotion ? softFocus : null
+  const transition = animateStyleSwitch && !shownProps.staticMode && !reducedMotion ? softFocus : null
   // A blend's song hand-off, for the style that draws one (VisualizerSongHandoff). The background takes
   // the incoming song (its cover, seed and theme) when the blend starts, and changes with the transition
   // of any song change, played along the hand-off: as long as the blend, in step with the song it hands
   // over to. At the settle its song is already that one, so nothing changes again. Where a switch cuts
   // there is no hand-off: the song changes at the settle, as everywhere else.
-  const songHandoff = transition ? sharedProps.songHandoff ?? null : null
+  const songHandoff = transition ? shownProps.songHandoff ?? null : null
   const handoffProgress = songHandoff?.progress ?? null
   const backgroundTransition = useMemo(
     () => (transition && handoffProgress ? alongProgress(transition, handoffProgress) : transition),
     [transition, handoffProgress],
   )
-  const styleProps: FoliaSharedProps = songHandoff || !sharedProps.songHandoff ? sharedProps : { ...sharedProps, songHandoff: null }
-  const backdropCover = useHandoffCover(songHandoff, sharedProps.seed, sharedProps.coverUrl)
+  const styleProps: FoliaSharedProps = songHandoff || !shownProps.songHandoff ? shownProps : { ...shownProps, songHandoff: null }
+  const backdropCover = useHandoffCover(songHandoff, shownProps.seed, shownProps.coverUrl)
   const backdropProps = songHandoff
     ? { ...styleProps, coverUrl: backdropCover, seed: songHandoff.seed, theme: songHandoff.theme }
     : backdropCover === styleProps.coverUrl ? styleProps : { ...styleProps, coverUrl: backdropCover }
@@ -155,7 +171,6 @@ export function FoliaRenderer({
 
   // 只画样式（设置窗口的小图 / 样例舞台）：没有背景层，也没有背景过渡。
   if (renderStyleOnly) {
-    const Style = renderStyleOnly
     // 关键：`VisualizerShell` 在自己的 `VisualizerBackdropContext` 为 null 时会**自己再画一层背景**
     // （上游永远把它放在 backdrop 里，所以那段代码在播放页不会执行）。预览只画样式时必须给出这个
     // context，否则每个缩略图都会多起一套几何背景动画 —— 实测窗口内 15 张图各一套，帧率腰斩。
@@ -163,15 +178,21 @@ export function FoliaRenderer({
     return (
       <VisualizerBackdropContext.Provider value={STYLE_ONLY_FRAME}>
         <Suspense fallback={null}>
-          <VisualizerStyleTransition
-            styleSwitch={styleSwitch}
-            transition={transition}
-            renderStyle={(styleMode) => (
-              styleMode === shownMode || !tuningsFor
-                ? <Style {...sharedProps} />
-                : <Style {...withTuning(sharedProps, tuningsFor(styleMode as FoliaModeId))} />
-            )}
-          />
+          {/* 样式不透明度：播放页由 `VisualizerBackdrop` 施加，预览没有背景层，在这里补上
+              （窗口的不透明度滑条才看得见效果）。和声叠层仍按上游留在外面。 */}
+          <div className="absolute inset-0" style={{ opacity: props.visualizerOpacity ?? 1 }}>
+            <VisualizerStyleTransition
+              styleSwitch={styleSwitch}
+              transition={transition}
+              renderStyle={(styleMode) => {
+                const Renderer = renderers[styleMode as FoliaModeId]
+                if (!Renderer) return null
+                return styleMode === shownMode || !tuningsFor
+                  ? <Renderer {...styleProps} />
+                  : <Renderer {...withTuning(styleProps, tuningsFor(styleMode as FoliaModeId))} />
+              }}
+            />
+          </div>
         </Suspense>
         <VisualizerHarmonyOverlay
           currentTime={sharedProps.currentTime}

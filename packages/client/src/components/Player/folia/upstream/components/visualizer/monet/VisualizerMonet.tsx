@@ -8,6 +8,7 @@ import { DEFAULT_MONET_TUNING } from '../../../types';
 import { colorWithAlpha } from '../colorMix';
 import { type VisualizerSharedProps } from '../definition';
 import { useVisualizerRuntime } from '../runtime';
+import { useLyricRenderQuality } from '../renderQuality/useLyricRenderQuality';
 import VisualizerShell from '../VisualizerShell';
 import { getLineRenderEndTime } from '../../../utils/lyrics/renderHints';
 import { resolveThemeFontStack, resolveThemeTranslationFontStack } from '../../../utils/fontStacks';
@@ -51,6 +52,9 @@ const VisualizerMonet: React.FC<VisualizerMonetProps> = (props) => {
         songHandoff = null,
     } = props;
     const { t } = useTranslation();
+    // 底部音频条的分辨率倍数（#929）：全局挡位叠上这个样式的覆盖；预览不跟。
+    const renderQuality = useLyricRenderQuality(monetTuning.render);
+    const audioRenderScale = isPreviewMode ? 1 : renderQuality.scale;
 
     // Through a blend the words stay on the song on screen until the audio crossover, then show the
     // incoming one (monetSongHandoff.ts). Held as state so the hand-off's every frame renders nothing.
@@ -227,8 +231,9 @@ const VisualizerMonet: React.FC<VisualizerMonetProps> = (props) => {
             )}
 
             <div ref={shellRef} className="relative z-10 flex h-full w-full items-center justify-center overflow-hidden">
+                {/* Not clipped: the cover's shadow reaches past the row's edge, and the shell above clips at the screen. */}
                 <div
-                    className="flex h-full w-full flex-row items-center overflow-hidden"
+                    className="flex h-full w-full flex-row items-center"
                     style={{ maxWidth: `${rowMaxWidthPx}px` }}
                 >
                     {showText && (
@@ -568,6 +573,7 @@ const VisualizerMonet: React.FC<VisualizerMonetProps> = (props) => {
                             mode={monetTuning.audioStyle}
                             staticMode={staticMode}
                             isPreviewMode={isPreviewMode}
+                            renderScale={audioRenderScale}
                         />
                     </div>
                 </motion.div>

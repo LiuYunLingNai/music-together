@@ -14,6 +14,8 @@ import type {
     TiltTuning,
     VisualizerMode,
 } from '../../types';
+import type { MachiTuning } from './machi/types';
+import type { NebbiaTuning } from './nebbia/types';
 import type { VisualizerSharedProps } from './definition';
 import type { BackgroundSettingsSlice, BackgroundTuningDefinition, StoredTuning, StoredTuningAdapter, VisualizerTuningAdapter } from './tuningDefinition';
 
@@ -36,6 +38,8 @@ export interface VisualizerTuningMap {
     sonnet: SonnetTuning;
     tempera: TemperaTuning;
     lumiere: LumiereTuning;
+    machi: MachiTuning;
+    nebbia: NebbiaTuning;
 }
 
 export type VisualizerTuningBundle = Partial<VisualizerTuningMap>;
@@ -46,7 +50,7 @@ export type VisualizerTuningBundle = Partial<VisualizerTuningMap>;
  * 这里给出同形状的适配器：`settingsKey` 等字段只为窗口的草稿机制服务，
  * `apply` 把调参挂到渲染器读的那个 prop 上（宿主 `FoliaModeId` 与上游 id 的映射同 windowRegistry）。
  */
-const TUNING_MODES = ['classic', 'cadenza', 'partita', 'fume', 'claddagh', 'cappella', 'tilt', 'monet', 'pendolo', 'sonnet', 'tempera', 'lumiere', 'hanabi', 'diorama'] as const;
+const TUNING_MODES = ['classic', 'cadenza', 'partita', 'fume', 'claddagh', 'cappella', 'tilt', 'monet', 'pendolo', 'sonnet', 'tempera', 'lumiere', 'hanabi', 'diorama', 'machi', 'nebbia'] as const;
 
 const propName = (mode: string) => (mode === 'classic' ? 'classicTuning' : `${mode}Tuning`);
 

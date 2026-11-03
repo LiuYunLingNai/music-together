@@ -10,6 +10,7 @@ import type { VisualModeId } from './stages/VisualMode'
 import type { FoliaModeId } from './folia/registry'
 import { resolveStageFamily } from './stages/registry'
 import { isFoliaModeId } from './folia/registry'
+import { useFoliaStyleWindowStore } from './folia/stage/foliaStyleWindowStore'
 
 /**
  * Mineradio 舞台按需加载。
@@ -122,6 +123,7 @@ export function AudioPlayer(props: AudioPlayerProps) {
   const setFoliaSettings = useSettingsStore((s) => s.setFoliaSettings)
   const { disabled: visualDisabled, effectiveVisualStage } = useVisualStageSupport()
   const visualQuality = useSettingsStore((s) => s.visualQuality)
+  const styleWindowOpen = useFoliaStyleWindowStore((s) => s.open)
 
   // WebGL 上下文丢失或不可用时，回退到经典播放器。
   // 直接改持久化的舞台设置，不额外维护本地标志位，避免多一份状态需要同步。
@@ -210,10 +212,14 @@ export function AudioPlayer(props: AudioPlayerProps) {
   return (
     <div className="relative h-full">
       {/* 歌词样式工作窗口挂在这里而不是舞台内部：舞台在 `visualStage` 变化时整棵重渲染，
-          窗口若挂在里面，切样式就会跟着闪退重进一次。窗口的开关在 store 里，未打开时不挂载。 */}
-      <Suspense fallback={null}>
-        <FoliaStyleWindowHost />
-      </Suspense>
+          窗口若挂在里面，切样式就会跟着闪退重进一次。窗口的开关在 store 里；**代码也只在
+          真正打开时才拉**（未打开就挂 lazy 组件会让整个窗口 chunk —— 连同各模式面板和
+          hostStores 的启动副作用 —— 在首屏就下载执行）。 */}
+      {styleWindowOpen && (
+        <Suspense fallback={null}>
+          <FoliaStyleWindowHost />
+        </Suspense>
+      )}
       {/* 舞台切换器：三段胶囊（经典 | 3D | Folia），点已激活段展开该族模式列表。
           位于经典舞台歌单按钮的左侧，避免两个按钮重叠，保留相同的安全边距处理。
 

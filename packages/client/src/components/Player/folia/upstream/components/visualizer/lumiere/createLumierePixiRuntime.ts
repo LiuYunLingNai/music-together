@@ -1,7 +1,7 @@
 // Copyright (c) 2026 chthollyphile
 import type { MotionValue } from 'motion/react';
 import type { Filter } from 'pixi.js';
-import type { AudioBands, LumiereTuning, Theme } from '../../../types';
+import type { AudioBands, LumiereTuning, LyricRenderScale, Theme } from '../../../types';
 import { loadPixi } from '../pixi/loadPixi';
 import { linkPixiPrograms } from '../pixi/pixiProgramLinks';
 import { makePixiContext } from '../pixi/pixiWebGLContext';
@@ -11,7 +11,7 @@ import { findLumiereParagraphIndexAtTime, type LumiereProgram } from './lumiereP
 import {
     resolveLumiereBloomLevelDrop,
     resolveLumiereGraphicsResolution,
-    resolveLumiereRenderResolution,
+    resolveLumiereScaledRenderResolution,
     requiresLumiereSceneRebuild,
     toLumiereSceneTuning,
 } from './lumiereRuntimeTuning';
@@ -63,6 +63,10 @@ export interface LumiereRuntimeOptions {
     showText: boolean;
     paused: boolean;
     metadata: LumiereSongMetadata;
+    /** 分辨率倍数（乘在 resolveLumiereRenderResolution 上，画质档再从乘过的分辨率降图形组）；预览传 1。 */
+    renderScale: LyricRenderScale;
+    /** MSAA：建上下文时定，原来写死关着。 */
+    antialias: boolean;
     signal?: AbortSignal;
 }
 
@@ -126,13 +130,13 @@ export class LumierePixiRuntime {
         const app = new pixi.Application();
         const width = Math.max(options.host.clientWidth, MIN_WIDTH);
         const height = Math.max(options.host.clientHeight, MIN_HEIGHT);
-        const resolution = resolveLumiereRenderResolution(window.devicePixelRatio);
+        const resolution = resolveLumiereScaledRenderResolution(window.devicePixelRatio, options.renderScale);
         // WebGL 上下文按这几项先建好，再交给 Pixi（makePixiContext）。
         const contextOptions = {
             // 画布透明：folia 的共享背景层要透出来，由运行时的暗场层按暗场强度压暗。
             backgroundAlpha: 0,
             // 大头（图形组）画进 filter 纹理，MSAA 管不到；只剩画框细线，不值得整屏多重采样的解析开销。
-            antialias: false,
+            antialias: options.antialias,
             powerPreference: 'high-performance',
         } as const;
         const context = await makePixiContext(pixi, contextOptions, options.signal);
@@ -204,7 +208,7 @@ export class LumierePixiRuntime {
         if (this.destroyed) return false;
         const width = Math.max(this.options.host.clientWidth, MIN_WIDTH);
         const height = Math.max(this.options.host.clientHeight, MIN_HEIGHT);
-        const resolution = resolveLumiereRenderResolution(window.devicePixelRatio);
+        const resolution = resolveLumiereScaledRenderResolution(window.devicePixelRatio, this.options.renderScale);
         if (width === this.width && height === this.height && resolution === this.renderResolution) return false;
         this.width = width;
         this.height = height;
@@ -419,6 +423,15 @@ export class LumierePixiRuntime {
             || previousTuning.themeColorMix !== tuning.themeColorMix
         ) this.drawOverlay();
         if (this.options.paused) this.renderOnce();
+    }
+
+    /** 就地换分辨率倍数：同窗口缩放，渲染器立刻跟上，图形组画质随之重算，场景（字按分辨率光栅化）防抖重建。 */
+    setRenderScale(scale: LyricRenderScale) {
+        if (this.destroyed || scale === this.options.renderScale) return;
+        this.options.renderScale = scale;
+        // 还没装好（第一帧前）时 install 里的 resizeToHost 会按新倍数来。
+        if (this.width === 0) return;
+        if (this.resizeToHost(false) && this.options.paused) this.renderOnce();
     }
 
     setShowText(showText: boolean) {

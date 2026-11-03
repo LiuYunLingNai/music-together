@@ -5,6 +5,7 @@ import { MODE_SETTINGS_PANELS } from './windowPanels'
 import { createElement } from 'react'
 import { FOLIA_MODE_RENDERERS } from '../../../renderers'
 import { getFoliaTuningProps } from '../../../stage/foliaTunings'
+import { FOLIA_MODE_BEAT_EFFECTS } from '@/services/beatFx/beatClockTargets'
 import type { Theme, VisualizerMode } from '../../types'
 
 /**
@@ -26,7 +27,14 @@ export interface WindowVisualizerEntry {
     /** 该模式自己的参数面板（上游 entry.tsx 的 renderSettingsPanel）。 */
     renderSettingsPanel?: (props: Record<string, unknown>) => React.ReactNode
     /** 该模式声明的拍点效果，窗口在「歌词动画」页顶部单列。 */
-    beatEffects?: readonly { id: string; nameKey: string; descKey: string; source: 'beats' | 'drums'; retired?: boolean }[]
+    beatEffects?: readonly {
+        id: string
+        nameKey: string
+        descKey: string
+        source: 'beats' | 'drums' | 'stems'
+        retired?: boolean
+        parts?: readonly { key: string; nameKey: string }[]
+    }[]
 }
 
 export type VisualizerRegistryEntry = WindowVisualizerEntry
@@ -36,7 +44,7 @@ const HOST_BY_UPSTREAM: Record<string, FoliaModeId> = {
     classic: 'luminous', cadenza: 'cadenza', partita: 'partita', fume: 'fume',
     claddagh: 'claddagh', cappella: 'cappella', tilt: 'tilt', monet: 'monet',
     pendolo: 'pendolo', sonnet: 'sonnet', tempera: 'tempera', lumiere: 'lumiere',
-    hanabi: 'hanabi', diorama: 'diorama', still: 'still',
+    hanabi: 'hanabi', diorama: 'diorama', still: 'still', machi: 'machi', nebbia: 'nebbia',
 }
 
 /** 只有 fume 在上游有预览起点偏移（见其 entry.tsx）；花火等其余都是 0。 */
@@ -50,7 +58,18 @@ export const WINDOW_VISUALIZER_ENTRIES: WindowVisualizerEntry[] = FOLIA_MODES.ma
         labelFallback: mode.label,
         previewSeed: upstream,
         previewStartOffset: PREVIEW_OFFSETS[mode.id] ?? 0,
-        ...(mode.id === 'hanabi' ? { ownFontSizeNoticeKey: 'options.hanabiFontSizeAutoNotice' } : {}),
+        ...(mode.id === 'hanabi'
+            ? { ownFontSizeNoticeKey: 'options.hanabiFontSizeAutoNotice' }
+            : mode.id === 'machi'
+                ? { ownFontSizeNoticeKey: 'options.machiFontSizeAutoNotice' }
+                : mode.id === 'lumiere'
+                    ? { ownFontSizeNoticeKey: 'options.lumiereFontSizeAutoNotice' }
+                    : mode.id === 'sonnet'
+                        ? { ownFontSizeNoticeKey: 'options.sonnetFontSizeAutoNotice' }
+                        : mode.id === 'tempera'
+                            ? { ownFontSizeNoticeKey: 'options.temperaFontSizeAutoNotice' }
+                            : {}),
+        ...(FOLIA_MODE_BEAT_EFFECTS[mode.id] ? { beatEffects: FOLIA_MODE_BEAT_EFFECTS[mode.id] } : {}),
         ...(MODE_SETTINGS_PANELS[upstream] ? { renderSettingsPanel: MODE_SETTINGS_PANELS[upstream] } : {}),
     }
 }).sort((left, right) => left.order - right.order)

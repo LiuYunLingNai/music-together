@@ -93,6 +93,18 @@ export function useFoliaClock(offsetMs: number): FoliaClock {
     return () => cancelAnimationFrame(frame)
   }, [isPlaying, write])
 
+  // 暂停后让拍点包络继续衰减一会儿（上游暂停时每帧 tick(null)）；衰减完就停，不长驻循环。
+  useEffect(() => {
+    if (isPlaying) return
+    let ticks = 8
+    const timer = window.setInterval(() => {
+      tickBeatFxAt(null)
+      ticks -= 1
+      if (ticks <= 0) window.clearInterval(timer)
+    }, 100)
+    return () => window.clearInterval(timer)
+  }, [isPlaying])
+
   // ② 暂停 / 拖动 / 切歌：store 一变就同步（也覆盖"起播前的首帧"）
   useEffect(() => {
     write(usePlayerStore.getState().currentTime)

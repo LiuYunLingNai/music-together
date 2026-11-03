@@ -9,6 +9,7 @@ import { DioramaBackgroundParticleSettings } from './diorama/DioramaBackgroundPa
 import { DioramaEffectSettings } from './diorama/DioramaEffectSettings';
 import { resolveDioramaMoteCircumference, resolveDioramaMoteRadial } from './diorama/dioramaMoteField';
 import { percent, SliderRow, times } from './panelRows';
+import LyricRenderQualityRows from './renderQuality/LyricRenderQualityRows';
 
 // src/components/visualizer/settingsPanels.tsx
 // Mode-owned preview settings panels used by discoverable visualizer entries. Each returns groups
@@ -16,9 +17,11 @@ import { percent, SliderRow, times } from './panelRows';
 const CLASSIC_GROUP: SettingsGroupDef = { id: 'vis-classic', titleKey: 'options.classicSettings' };
 const PARTITA_GROUP: SettingsGroupDef = { id: 'vis-partita', titleKey: 'options.partitaSettings' };
 const FUME_GROUP: SettingsGroupDef = { id: 'vis-fume', titleKey: 'options.fumeSettings' };
+const FUME_RENDER_GROUP: SettingsGroupDef = { id: 'vis-fume-render', titleKey: 'options.lyricRenderSection' };
 const CAPPELLA_GROUP: SettingsGroupDef = { id: 'vis-cappella', titleKey: 'options.cappellaSettings' };
 const TILT_GROUP: SettingsGroupDef = { id: 'vis-tilt', titleKey: 'options.tiltSettings' };
 const DIORAMA_GROUP: SettingsGroupDef = { id: 'vis-diorama', titleKey: 'options.dioramaSettings' };
+const DIORAMA_RENDER_GROUP: SettingsGroupDef = { id: 'vis-diorama-render', titleKey: 'options.lyricRenderSection' };
 const CLADDAGH_GROUP: SettingsGroupDef = { id: 'vis-claddagh', titleKey: 'options.claddaghSettings' };
 
 const clampPartitaStagger = (value: number) => Math.min(180, Math.max(0, value));
@@ -44,6 +47,7 @@ export const ClassicSettingsPanel: React.FC<VisualizerSettingsPanelProps<Classic
         wordSpacing: clampClassicWordSpacing(
             classicTuning.wordSpacing ?? DEFAULT_CLASSIC_TUNING.wordSpacing ?? 0.7
         ),
+        avoidOverlap: classicTuning.avoidOverlap ?? DEFAULT_CLASSIC_TUNING.avoidOverlap ?? false,
     };
     const drag = { onDragStart: onSliderPointerDown, onDragEnd: onSliderCommit };
 
@@ -87,6 +91,12 @@ export const ClassicSettingsPanel: React.FC<VisualizerSettingsPanelProps<Classic
                     onChange={(value) => onClassicTuningChange?.({ wordSpacing: value })}
                 />
             </Reveal>
+            <Row label={t('options.avoidOverlap')} hint={t('options.avoidOverlapHint')}>
+                <Toggle
+                    checked={resolvedClassicTuning.avoidOverlap}
+                    onChange={(enabled) => onClassicTuningChange?.({ avoidOverlap: enabled })}
+                />
+            </Row>
         </Group>
     );
 };
@@ -104,6 +114,7 @@ export const PartitaSettingsPanel: React.FC<VisualizerSettingsPanelProps<Partita
         useSemanticLayout: partitaTuning.useSemanticLayout ?? DEFAULT_PARTITA_TUNING.useSemanticLayout,
         staggerMin: Math.min(rawMin, rawMax),
         staggerMax: Math.max(rawMin, rawMax),
+        avoidOverlap: partitaTuning.avoidOverlap ?? DEFAULT_PARTITA_TUNING.avoidOverlap,
     };
     // A slider moved past the other end takes that end along: both ends are sent. Sent alone, the
     // moved end would be put in order by the tuning's merge (partita/tuning.ts), which swaps the
@@ -137,6 +148,12 @@ export const PartitaSettingsPanel: React.FC<VisualizerSettingsPanelProps<Partita
                 <Toggle
                     checked={resolvedPartitaTuning.useSemanticLayout}
                     onChange={(enabled) => onPartitaTuningChange?.({ useSemanticLayout: enabled })}
+                />
+            </Row>
+            <Row label={t('options.avoidOverlap')} hint={t('options.avoidOverlapHint')}>
+                <Toggle
+                    checked={Boolean(resolvedPartitaTuning.avoidOverlap)}
+                    onChange={(enabled) => onPartitaTuningChange?.({ avoidOverlap: enabled })}
                 />
             </Row>
             <SliderRow
@@ -176,6 +193,7 @@ export const FumeSettingsPanel: React.FC<VisualizerSettingsPanelProps<FumeTuning
     onTuningChange: onFumeTuningChange,
 }) => {
     const resolvedFumeTuning: FumeTuning = {
+        render: fumeTuning.render ?? DEFAULT_FUME_TUNING.render,
         hidePrintSymbols: fumeTuning.hidePrintSymbols,
         disableGeometricBackground: fumeTuning.disableGeometricBackground,
         backgroundObjectOpacity: Math.min(1, Math.max(0, fumeTuning.backgroundObjectOpacity ?? DEFAULT_FUME_TUNING.backgroundObjectOpacity)),
@@ -191,6 +209,7 @@ export const FumeSettingsPanel: React.FC<VisualizerSettingsPanelProps<FumeTuning
     const drag = { onDragStart: onSliderPointerDown, onDragEnd: onSliderCommit };
 
     return (
+        <>
         <Group def={FUME_GROUP}>
             <Row label={t('options.fumeHidePrintSymbols')}>
                 <Toggle
@@ -266,6 +285,15 @@ export const FumeSettingsPanel: React.FC<VisualizerSettingsPanelProps<FumeTuning
                 onChange={(value) => handleFumeTuningChange({ heroScale: value })}
             />
         </Group>
+
+        <Group def={FUME_RENDER_GROUP}>
+            <LyricRenderQualityRows
+                value={resolvedFumeTuning.render ?? DEFAULT_FUME_TUNING.render}
+                onChange={(patch) => onFumeTuningChange?.({ render: { ...(resolvedFumeTuning.render ?? DEFAULT_FUME_TUNING.render), ...patch } })}
+                antialias={false}
+            />
+        </Group>
+        </>
     );
 };
 const resolveCappellaTuning = (
@@ -604,6 +632,7 @@ export const DioramaSettingsPanel: React.FC<VisualizerSettingsPanelProps<Diorama
     onTuningChange: onDioramaTuningChange,
 }) => {
     const resolvedTuning: DioramaTuning = {
+        render: dioramaTuning.render ?? DEFAULT_DIORAMA_TUNING.render,
         cameraSpeed: clampDioramaCameraSpeed(dioramaTuning.cameraSpeed ?? DEFAULT_DIORAMA_TUNING.cameraSpeed),
         motionAmount: clampDioramaMotionAmount(dioramaTuning.motionAmount ?? DEFAULT_DIORAMA_TUNING.motionAmount),
         audioReactivity: clampDioramaAudioReactivity(dioramaTuning.audioReactivity ?? DEFAULT_DIORAMA_TUNING.audioReactivity),
@@ -650,6 +679,7 @@ export const DioramaSettingsPanel: React.FC<VisualizerSettingsPanelProps<Diorama
     const drag = { onDragStart: onSliderPointerDown, onDragEnd: onSliderCommit };
 
     return (
+        <>
         <Group def={DIORAMA_GROUP}>
             <SliderRow
                 {...drag}
@@ -762,6 +792,14 @@ export const DioramaSettingsPanel: React.FC<VisualizerSettingsPanelProps<Diorama
                 onSliderCommit={onSliderCommit}
             />
         </Group>
+
+        <Group def={DIORAMA_RENDER_GROUP}>
+            <LyricRenderQualityRows
+                value={resolvedTuning.render ?? DEFAULT_DIORAMA_TUNING.render}
+                onChange={(patch) => onDioramaTuningChange?.({ render: { ...(resolvedTuning.render ?? DEFAULT_DIORAMA_TUNING.render), ...patch } })}
+            />
+        </Group>
+        </>
     );
 };
 

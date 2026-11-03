@@ -1,6 +1,7 @@
 import type { LyricLine as AMLLLyricLine } from '@applemusic-like-lyrics/core'
 import { useEffect, useMemo, useState } from 'react'
 import { usePlayerStore } from '@/stores/playerStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { buildAMLLLinesFromLrc } from '@/lib/lyricLrc'
 import { buildLineRenderHints } from '../upstream/utils/lyrics/renderHints'
 import type { Line, Theme, Word } from '../types'
@@ -207,6 +208,8 @@ export function useFoliaTheme(): Theme {
   const background = useCssVarColor('--background', '#080b12')
   const foreground = useCssVarColor('--foreground', '#f7f1e8')
   const secondaryRgb = useCssVarColor('--theme-secondary-rgb', '116 184 165')
+  // 歌词字重（上游 `Theme.fontWeight`）：各模式读它决定字形的粗细分层。
+  const fontWeight = useSettingsStore((s) => s.lyricFontWeight)
 
   return useMemo<Theme>(
     () => ({
@@ -220,9 +223,10 @@ export function useFoliaTheme(): Theme {
       // 变白色（群唱左侧气泡看不清正是这个）。
       secondaryColor: `rgb(${secondaryRgb.split(/\s+/).join(', ')})`,
       fontStyle: 'sans',
+      fontWeight: fontWeight ?? undefined,
       animationIntensity: 'normal',
     }),
-    [accent, background, foreground, secondaryRgb],
+    [accent, background, foreground, secondaryRgb, fontWeight],
   )
 }
 

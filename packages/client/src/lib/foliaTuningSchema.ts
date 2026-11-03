@@ -28,6 +28,7 @@ export const FOLIA_MODE_CONTROLS: Record<FoliaModeId, readonly FoliaControl[]> =
     range('wordSpacing', '词间距', 0, 2),
     // 上游 settingsPanels 的经典排版切换：语义分块布局 ↔ 逐词原始排布。
     toggle('useLegacyLayout', '经典逐词排布'),
+    toggle('avoidOverlap', '防止文字重叠'),
   ],
   cadenza: [
     range('fontScale', '构图字号', 0.5, 2),
@@ -42,6 +43,7 @@ export const FOLIA_MODE_CONTROLS: Record<FoliaModeId, readonly FoliaControl[]> =
     // 上游 settingsPanels：stagger 两轴都 0-180 step 5（resolvePartitaTuning clamp 0-180）。
     range('staggerMin', '最小错峰', 0, 180, 5),
     range('staggerMax', '最大错峰', 0, 180, 5),
+    toggle('avoidOverlap', '防止文字重叠'),
   ],
   fume: [
     toggle('hidePrintSymbols', '隐藏印刷符号'),
@@ -85,6 +87,9 @@ export const FOLIA_MODE_CONTROLS: Record<FoliaModeId, readonly FoliaControl[]> =
     // 上游 MonetPortraitSource：cover | custom（custom = 用户上传的封面图）。
     select('portraitSource', '封面来源', ['cover', 'custom']),
     select('portraitStyle', '封面形状', ['square', 'rectangular']),
+    // 上游 monet/tuning.ts：画面里拖封面时写入，clamp -150..0。
+    range('portraitOffsetX', '封面横向位置', -150, 0, 1),
+    toggle('showPortraitDragHanger', '显示拖动把手'),
   ],
   pendolo: [
     // clamp 边界逐字对齐上游 PendoloSettingsPanel（-0.20-0.40 / 0.25-0.8 / 40-160 step 5 / 0.5-2 / 1-1.6）。
@@ -127,6 +132,9 @@ export const FOLIA_MODE_CONTROLS: Record<FoliaModeId, readonly FoliaControl[]> =
     range('glyphMotion', '字符运动'),
     toggle('wholeLineLyrics', '整行歌词'),
     range('glyphSettleStretch', '入场时序', 0, 1),
+    range('depthOfField', '景深'),
+    range('depthPan', '镜头平移'),
+    range('glyphDepth', '歌词远近'),
     select('colorMode', '配色', ['duo', 'mono', 'gradient']),
     toggle('showBlocks', '色块场景'),
     toggle('showDecor', '装饰元素'),
@@ -227,6 +235,9 @@ export const FOLIA_MODE_CONTROLS: Record<FoliaModeId, readonly FoliaControl[]> =
     toggle('keywordColoringEnabled', '关键词配色'),
   ],
   still: [],
+  // 町景 / 雾笺的调参含数组与嵌套视角，由各自的设置面板与 normalize* 读写，不走声明式控件表。
+  machi: [],
+  nebbia: [],
 }
 
 /** 嵌套路径（`geometryVisibility.mode` 形式）的读写与校验。 */

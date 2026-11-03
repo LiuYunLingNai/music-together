@@ -1,5 +1,6 @@
-import { useMemo } from 'react';
+import { useContext, useMemo } from 'react';
 import { motionValue, type MotionValue } from 'motion/react';
+import { PreviewBottomBarOffsetContext } from '../adapters/hostWindowBits';
 
 // 上游 `hooks/usePlayerBottomBarBottomPx.ts` 的 `usePlayerSubtitleBottomPx`：字幕层的 `bottom`
 // 从播放页底栏布局的全局信号（`playerBottomBarLiveOffset` + 底栏设置 store + 布局 Context）取，
@@ -11,5 +12,11 @@ import { motionValue, type MotionValue } from 'motion/react';
 // 不必在组件里写宿主特判。
 export const usePlayerSubtitleBottomPx = (isPlayerChromeHidden: boolean): MotionValue<string> => {
     void isPlayerChromeHidden;
-    return useMemo(() => motionValue('var(--folia-subtitle-bottom, 6.5rem)'), []);
+    // 窗口的样例舞台是整窗等比缩小画的：它给出缩到框里之后的底距（上游同一来源），
+    // 其余情况沿用宿主 CSS 变量。
+    const previewOffset = useContext(PreviewBottomBarOffsetContext);
+    return useMemo(
+        () => motionValue(previewOffset === null ? 'var(--folia-subtitle-bottom, 6.5rem)' : `${previewOffset}px`),
+        [previewOffset],
+    );
 };

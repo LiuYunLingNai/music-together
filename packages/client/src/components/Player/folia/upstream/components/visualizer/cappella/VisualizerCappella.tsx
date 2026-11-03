@@ -40,8 +40,7 @@ const VisualizerCappella: React.FC<VisualizerCappellaProps> = (props) => {
         subtitleUpcomingLyricsBlur,
         isPlayerChromeHidden = false,
         hideTranslationSubtitle = false,
-        showSubtitleTranslation = true,
-        subtitleContentMode,
+        subtitleOverlayLayout,
         cappellaTuning = DEFAULT_CAPPELLA_TUNING,
         cappellaCustomEmojiImages = [],
         cappellaCustomAvatarImages = [],
@@ -229,8 +228,7 @@ const VisualizerCappella: React.FC<VisualizerCappellaProps> = (props) => {
                 subtitleFontScale={subtitleFontScale}
                 isPlayerChromeHidden={isPlayerChromeHidden}
                 hideTranslationSubtitle={hideTranslationSubtitle}
-                showSubtitleTranslation={showSubtitleTranslation}
-                subtitleContentMode={subtitleContentMode}
+                subtitleOverlayLayout={subtitleOverlayLayout}
             />
         </VisualizerShell>
     );

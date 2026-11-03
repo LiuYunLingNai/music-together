@@ -5,6 +5,8 @@ import { DEFAULT_PENDOLO_TUNING } from '../../../types';
 import { colorWithAlpha } from '../colorMix';
 import { useLucideIcons } from '../../../hooks/useLucideIcons';
 import { resolveLucideIcon } from '../../../services/lucideIconResolver';
+import { resolveLyricAntialias } from '../../../utils/lyricRenderQuality';
+import { useLyricRenderQuality } from '../renderQuality/useLyricRenderQuality';
 import { type VisualizerSharedProps } from '../definition';
 import VisualizerShell from '../VisualizerShell';
 import PendoloClockworkCanvas from './PendoloClockworkCanvas';
@@ -70,11 +72,17 @@ const VisualizerPendolo: React.FC<VisualizerSharedProps> = (props) => {
         subtitleFontScale,
         isPlayerChromeHidden = false,
         hideTranslationSubtitle = false,
+        isPreviewMode = false,
     } = props;
     // 上游同样解构了这三项（其 tsconfig 未开 noUnusedLocals）；本仓开启，用 void 保持源码同形。
     void subtitleOverlayOpacity;
     void subtitleOverlayBackground;
     void isPlayerChromeHidden;
+
+    // 分辨率与抗锯齿（#929）：齿轮画布原来按 devicePixelRatio、WebGL 开 MSAA；预览的小图保持原样
+    const renderQuality = useLyricRenderQuality(pendoloTuning.render);
+    const clockworkRenderScale = isPreviewMode ? 1 : renderQuality.scale;
+    const clockworkAntialias = isPreviewMode ? true : resolveLyricAntialias(renderQuality.antialias, true);
 
     const [viewportSize, setViewportSize] = useState({
         width: typeof window !== 'undefined' ? window.innerWidth : 1920,
@@ -543,6 +551,8 @@ const VisualizerPendolo: React.FC<VisualizerSharedProps> = (props) => {
                     paused={props.paused}
                     motionProfile={motionProfile}
                     beatFxRef={beatFx.shared}
+                    renderScale={clockworkRenderScale}
+                    antialias={clockworkAntialias}
                 />
                 {pendoloTuning.showGearDecor !== 'none' && (
                     <div

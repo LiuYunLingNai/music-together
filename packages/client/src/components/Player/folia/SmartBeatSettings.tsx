@@ -3,9 +3,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { useSettingsStore } from '@/stores/settingsStore'
-import { resolveBeatEffectSetting } from '@/services/beatFx/beatEffects'
+import { resolveBeatEffectPartStrength, resolveBeatEffectSetting } from '@/services/beatFx/beatEffects'
 import type { SmartBeatMode } from '@/services/beatFx/beatFxTypes'
 import { FOLIA_MODE_BEAT_EFFECTS } from '@/services/beatFx/beatClockTargets'
+import { t } from './upstream/adapters/i18n'
 import { isFoliaModeId } from './registry'
 
 /**
@@ -56,33 +57,47 @@ export function SmartBeatSettings({ mode }: { mode: string }) {
         )}
         {effects.map((effect) => {
           const setting = resolveBeatEffectSetting(smartBeat, effect.id)
+          const rows = effect.parts?.length
+            ? effect.parts.map((part) => ({
+                key: `${effect.id}.${part.key}`,
+                label: t(part.nameKey),
+                value: resolveBeatEffectPartStrength(setting, part.key),
+                patched: (strength: number) => ({ effects: { [effect.id]: { parts: { [part.key]: strength } } } }),
+              }))
+            : [{
+                key: effect.id,
+                label: t('options.beatEffectStrength'),
+                value: setting.strength,
+                patched: (strength: number) => ({ effects: { [effect.id]: { on: setting.on, strength } } }),
+              }]
           return (
             <div key={effect.id} className="space-y-2 text-xs">
               <div className="flex items-center justify-between gap-3">
-                <span>{effect.nameKey}</span>
+                <span>{t(effect.nameKey)}</span>
                 <Switch
-                  aria-label={effect.nameKey}
+                  aria-label={t(effect.nameKey)}
                   checked={setting.on}
                   disabled={!active}
                   onCheckedChange={(on) => setSmartBeat({ effects: { [effect.id]: { on } } })}
                 />
               </div>
-              <div className="flex items-center gap-3">
-                <Slider
-                  aria-label={`${effect.nameKey}强度`}
-                  value={[setting.strength]}
-                  min={0}
-                  max={2}
-                  step={0.05}
-                  disabled={!active || !setting.on}
-                  onValueChange={([strength]) =>
-                    setSmartBeat({ effects: { [effect.id]: { on: setting.on, strength } } })
-                  }
-                />
-                <span className="w-10 shrink-0 text-right tabular-nums text-muted-foreground">
-                  {setting.strength.toFixed(2)}
-                </span>
-              </div>
+              {rows.map((row) => (
+                <div key={row.key} className="flex items-center gap-3">
+                  <span className="w-16 shrink-0 text-muted-foreground">{row.label}</span>
+                  <Slider
+                    aria-label={row.label}
+                    value={[row.value]}
+                    min={0}
+                    max={2}
+                    step={0.05}
+                    disabled={!active || !setting.on}
+                    onValueChange={([strength]) => setSmartBeat(row.patched(strength))}
+                  />
+                  <span className="w-10 shrink-0 text-right tabular-nums text-muted-foreground">
+                    {row.value.toFixed(2)}
+                  </span>
+                </div>
+              ))}
             </div>
           )
         })}

@@ -159,6 +159,49 @@ export function AppearanceSection() {
             </FoliaSettingsPopover>
           </SettingRow>
 
+          {/* 上游 lyricRenderQuality（#929）：canvas / WebGL 歌词样式的全局分辨率与抗锯齿，样式默认跟随。 */}
+          <SettingRow label="歌词画布分辨率" description="1× 是各样式原来的清晰度；高于 1× 是超采样，更清晰也更吃显卡">
+            <Select
+              value={String(s.foliaSettings.renderQuality.scale)}
+              onValueChange={(value) =>
+                s.setFoliaSettings({
+                  renderQuality: { ...s.foliaSettings.renderQuality, scale: parseFloat(value) as 0.5 | 0.75 | 1 | 1.5 | 2 },
+                })
+              }
+            >
+              <SelectTrigger className="w-24">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="0.5">0.5×</SelectItem>
+                <SelectItem value="0.75">0.75×</SelectItem>
+                <SelectItem value="1">1×</SelectItem>
+                <SelectItem value="1.5">1.5×</SelectItem>
+                <SelectItem value="2">2×</SelectItem>
+              </SelectContent>
+            </Select>
+          </SettingRow>
+
+          <SettingRow label="歌词画布抗锯齿" description="自动是各样式自己的默认；打开时几何边缘更平滑">
+            <Select
+              value={s.foliaSettings.renderQuality.antialias}
+              onValueChange={(value) =>
+                s.setFoliaSettings({
+                  renderQuality: { ...s.foliaSettings.renderQuality, antialias: value as 'auto' | 'on' | 'off' },
+                })
+              }
+            >
+              <SelectTrigger className="w-24">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">自动</SelectItem>
+                <SelectItem value="on">开</SelectItem>
+                <SelectItem value="off">关</SelectItem>
+              </SelectContent>
+            </Select>
+          </SettingRow>
+
           {!foliaActive && (
             <>
               <SettingRow
