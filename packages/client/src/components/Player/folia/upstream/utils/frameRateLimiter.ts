@@ -137,6 +137,12 @@ export const createFrameRateLimitedRaf = (
 
 let installedLimiter: FrameRateLimitedRaf | null = null;
 
+export const getGlobalVisualizerFrameRate = (): VisualizerFrameRate => {
+    if (typeof window === 'undefined') return 'off';
+    return installedLimiter?.getFrameRate()
+        ?? parseVisualizerFrameRate(window.localStorage.getItem(VISUALIZER_FRAME_RATE_STORAGE_KEY));
+};
+
 export const setGlobalVisualizerFrameRate = (frameRate: VisualizerFrameRate) => {
     if (typeof window === 'undefined') {
         return;

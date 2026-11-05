@@ -2,10 +2,15 @@ import { create } from 'zustand'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { resolveFoliaTuning } from '../../stage/foliaTunings'
 import type { FoliaModeId } from '../../registry'
-import type { LyricRenderQuality, VisualizerBackgroundMode, VisualizerMode } from '../types'
+import type { LyricRenderQuality, VisualizerBackgroundMode, VisualizerFrameRate, VisualizerMode } from '../types'
 import { resolveSmartBeatSettings, type SmartBeatPatch } from '@/services/beatFx/smartBeatSettings'
 import { DEFAULT_SMART_BEAT_SETTINGS } from '@/services/beatFx/beatFxTypes'
 import { ensureFoliaAssets, useFoliaAssetStore } from '../../stage/foliaAssetStore'
+import {
+    VISUALIZER_FRAME_RATE_STORAGE_KEY,
+    getGlobalVisualizerFrameRate,
+    setGlobalVisualizerFrameRate,
+} from '../utils/frameRateLimiter'
 
 /**
  * 上游设置窗口读写的三个 store 的宿主版本。
@@ -86,6 +91,7 @@ const ownState = () => {
         randomVisualizerModePerSong: settings.foliaSettings.randomMode,
         randomVisualizerModes: settings.foliaSettings.randomModePool.map(toUpstreamMode) as VisualizerMode[],
         lyricRenderQuality: settings.foliaSettings.renderQuality,
+        visualizerFrameRate: getGlobalVisualizerFrameRate(),
         smartBeat: resolveSmartBeatSettings(settings.smartBeat) ?? DEFAULT_SMART_BEAT_SETTINGS,
         // URL 背景：宿主把条目存在 foliaSettings.backgroundConfig.url 里。
         urlBackgroundList: settings.foliaSettings.backgroundConfig.url?.items ?? [],
@@ -117,6 +123,13 @@ const actions = () => ({
         const current = useSettingsStore.getState().foliaSettings.renderQuality
         useSettingsStore.getState().setFoliaSettings({ renderQuality: { ...current, ...patch } })
     },
+    handleSetVisualizerFrameRate: (frameRate: VisualizerFrameRate) => {
+        if (typeof window !== 'undefined') {
+            window.localStorage.setItem(VISUALIZER_FRAME_RATE_STORAGE_KEY, String(frameRate))
+        }
+        setGlobalVisualizerFrameRate(frameRate)
+        useVisualizerSettingsStore.setState({ visualizerFrameRate: frameRate })
+    },
     handleSetUrlBackgroundList: () => {},
     handleSetUrlBackgroundSelectedId: () => {},
     handleAddUrlBackgroundItem: () => {},
@@ -145,6 +158,16 @@ const actions = () => ({
     },
 })
 
+/** 上游的播放器外壳设置：宿主没有原生模糊；「纯色背景」等价于透出后面。 */
+export interface HostPlayerChromeSettings {
+    transparentPlayerBackground: boolean
+    enablePlayerPageNativeBlur: boolean
+}
+export const usePlayerChromeSettingsStore = create<HostPlayerChromeSettings>(() => ({
+    transparentPlayerBackground: useSettingsStore.getState().foliaSettings.background === 'solid',
+    enablePlayerPageNativeBlur: false,
+}))
+
 export type HostVisualizerSettings = ReturnType<typeof ownState> & ReturnType<typeof actions> & ReturnType<typeof tuningState>
 
 const build = (): HostVisualizerSettings => ({ ...ownState(), ...tuningState(), ...actions() }) as HostVisualizerSettings
@@ -170,6 +193,11 @@ const syncFromHost = () => {
             || before.renderQuality !== after.renderQuality
             || before.backgroundConfig !== after.backgroundConfig
         const smartBeatChanged = state.smartBeat !== previous.smartBeat
+        // 宿主的「纯色背景」用 transparent 标成透出后面，窗口提示与上游透明播放页同语义。
+        const chromeChanged = (before.background === 'solid') !== (after.background === 'solid')
+        if (chromeChanged) {
+            usePlayerChromeSettingsStore.setState({ transparentPlayerBackground: after.background === 'solid' })
+        }
         if (!sharedChanged && !smartBeatChanged) return
         // 拖动智能动感滑块只改 smartBeat：单字段写入，别顺带重建 16 个模式的调参。
         if (!sharedChanged) {
@@ -181,14 +209,6 @@ const syncFromHost = () => {
     syncing = false
 }
 if (typeof window !== 'undefined') syncFromHost()
-
-/** 上游的播放器外壳设置：宿主没有原生模糊背景这一项，恒为 false。 */
-export interface HostPlayerChromeSettings {
-    enablePlayerPageNativeBlur: boolean
-}
-export const usePlayerChromeSettingsStore = create<HostPlayerChromeSettings>(() => ({
-    enablePlayerPageNativeBlur: false,
-}))
 
 export interface HostAssetState {
     cappellaCustomEmojiImages: unknown[]

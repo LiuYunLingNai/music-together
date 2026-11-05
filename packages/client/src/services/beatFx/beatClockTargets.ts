@@ -1,6 +1,10 @@
 import type { FoliaModeId } from '@/lib/foliaModes'
 import type { SmartBeatSettings } from './beatFxTypes'
 import { isBeatEffectLive, type BeatEffectDef } from './beatEffects'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { normalizeNebbiaTuning } from '@/components/Player/folia/upstream/components/visualizer/nebbia/nebbiaTuning'
+import type { VisualizerTuningBundle } from '@/components/Player/folia/upstream/components/visualizer/tuningRegistry'
+import { nebbiaBeatEffectOnScreen, nebbiaShowsBackground } from '@/components/Player/folia/upstream/components/visualizer/nebbia/nebbiaBehind'
 
 /**
  * 画面上有哪些拍点效果 —— 上游 `components/visualizer/beatClockTargets.ts` 的宿主版本。
@@ -50,23 +54,35 @@ export const FOLIA_BACKGROUND_BEAT_EFFECTS: readonly BeatEffectDef[] = []
 export interface BeatClockSettings {
   smartBeat: SmartBeatSettings
   mode: FoliaModeId
-  /** 该模式是否自己画背景（`still` 不画，此时背景的效果不参与）。 */
+  /** 该模式的调参包（上游 `collectVisualizerTunings` 的同形数据）。 */
+  tunings?: VisualizerTuningBundle
+  /** 该模式是否自己画背景（`still` / `machi` 不画，此时背景的效果不参与）。 */
   modeHasOwnBackground: boolean
   backgroundHasBeats: boolean
   /** 播放页透明时不画任何背景；本仓暂无该设置，留作上游同形的接口。 */
   pageTransparent?: boolean
 }
 
+const currentTunings = (settings: BeatClockSettings): VisualizerTuningBundle =>
+  settings.tunings ?? { nebbia: normalizeNebbiaTuning(useSettingsStore.getState().foliaSettings.tunings.nebbia) }
+
 /**
- * 背景层是否真的画在模式下面：模式自己画背景（`still`）、或播放页透明时都不画，
- * 此时背景的拍点效果不应参与时钟。
+ * 背景层是否真的画在模式下面：模式自己画背景（`still` / `machi`）、或播放页透明时都不画；
+ * 雾笺选了共用背景时也不叠背景层。
  */
-export const backgroundOnScreen = (settings: BeatClockSettings): boolean =>
-  !settings.modeHasOwnBackground && !settings.pageTransparent
+export const backgroundOnScreen = (settings: BeatClockSettings): boolean => {
+  if (settings.modeHasOwnBackground || settings.pageTransparent) return false
+  if (settings.mode !== 'nebbia') return true
+  return nebbiaShowsBackground(currentTunings(settings))
+}
 
 /** 画面上（模式 + 背景）声明的全部效果。 */
 const effectsOnScreen = (settings: BeatClockSettings): readonly BeatEffectDef[] => {
-  const own = FOLIA_MODE_BEAT_EFFECTS[settings.mode] ?? []
+  let own = FOLIA_MODE_BEAT_EFFECTS[settings.mode] ?? []
+  if (settings.mode === 'nebbia') {
+    const tunings = currentTunings(settings)
+    own = own.filter(effect => nebbiaBeatEffectOnScreen(effect.id, tunings))
+  }
   if (!backgroundOnScreen(settings) || !settings.backgroundHasBeats) return own
   return [...own, ...FOLIA_BACKGROUND_BEAT_EFFECTS]
 }

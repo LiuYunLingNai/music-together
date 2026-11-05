@@ -50,12 +50,14 @@ interface VisualizerShellProps {
 }
 
 const PLAYER_CHROME_HOTSPOT_SIZE = 120;
+const PLAYER_PANEL_HOTSPOT_WIDTH = 240;
+const PLAYER_PANEL_HOTSPOT_HEIGHT = 200;
 const TOUCH_GUIDE_DISPLAY_MS = 1400;
 
 const isNearPlayerPanelHotspot = (clientX: number, clientY: number) => (
     typeof window !== 'undefined'
-    && clientX >= window.innerWidth - PLAYER_CHROME_HOTSPOT_SIZE
-    && clientY >= window.innerHeight - PLAYER_CHROME_HOTSPOT_SIZE
+    && clientX >= window.innerWidth - PLAYER_PANEL_HOTSPOT_WIDTH
+    && clientY >= window.innerHeight - PLAYER_PANEL_HOTSPOT_HEIGHT
 );
 
 const VisualizerShell = forwardRef<HTMLDivElement, VisualizerShellProps>(({

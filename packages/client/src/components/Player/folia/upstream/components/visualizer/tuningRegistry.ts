@@ -18,6 +18,7 @@ import type { MachiTuning } from './machi/types';
 import type { NebbiaTuning } from './nebbia/types';
 import type { VisualizerSharedProps } from './definition';
 import type { BackgroundSettingsSlice, BackgroundTuningDefinition, StoredTuning, StoredTuningAdapter, VisualizerTuningAdapter } from './tuningDefinition';
+import { normalizeNebbiaTuning } from './nebbia/nebbiaTuning';
 
 // src/components/visualizer/tuningRegistry.ts
 // Pure-data registry for transporting heterogeneous visualizer tuning without importing renderers.
@@ -72,7 +73,16 @@ const adapters: VisualizerTuningAdapter[] = TUNING_MODES.map(mode => ({
     storage: {
         key: `folia.tuning.${mode}`,
         read: (stored: unknown) => (stored && typeof stored === 'object' ? stored : {}) as never,
-        merge: (held: unknown, patch: unknown) => ({ ...(held as object), ...(patch as object) }) as never,
+        merge: (held: unknown, patch: unknown) => {
+            // 导入/同步来的旧雾笺配置只有 resolution：先迁成 render，否则 held.render 会把它盖掉。
+            const values = patch as Record<string, unknown>;
+            const migrated = mode === 'nebbia' && values.render === undefined && values.resolution !== undefined
+                ? { ...values, render: normalizeNebbiaTuning({ resolution: values.resolution }).render }
+                : values;
+            return mode === 'nebbia'
+                ? normalizeNebbiaTuning({ ...(held as object), ...migrated }) as never
+                : { ...(held as object), ...migrated } as never;
+        },
     },
 }));
 const adaptersByMode = new Map<string, VisualizerTuningAdapter>(adapters.map(adapter => [adapter.mode, adapter]));

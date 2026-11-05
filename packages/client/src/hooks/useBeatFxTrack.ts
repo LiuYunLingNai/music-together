@@ -32,12 +32,12 @@ export function useBeatFxTrack(staticMode = false): boolean {
   const track = usePlayerStore((s) => s.currentTrack)
 
   const mode = isFoliaModeId(stage) ? stage : null
-  // `still` 自己画背景（不叠背景层），其余模式叠背景层；目前背景类没有在播的效果。
+  // `still` / `machi` 自己画背景（不叠背景层）；其余模式叠背景层；目前背景类没有在播的效果。
   const targets = mode
     ? {
         smartBeat,
         mode,
-        modeHasOwnBackground: mode === 'still',
+        modeHasOwnBackground: mode === 'still' || mode === 'machi',
         backgroundHasBeats: false,
       }
     : null
