@@ -34,6 +34,10 @@
 import type { BeatMap, BeatMapEvent, BeatTone, PulseBeat } from './beatAnalysisTypes'
 import { cinemaAnalysisProfileForSong, estimateTempoPhaseOffset, medianGap } from './beatTempoGrid'
 import { analyzeMusicTempoInWorker } from './beatTempoWorker'
+import { beginAnalysisActivity, endAnalysisActivity } from '../analysisActivity'
+import { analyzeModelBeatMap } from '../../analysis/beatThisTrackMap'
+import { measureLoudness } from './loudness'
+import { computeTrackFeatures } from './trackFeatures'
 
 /** 分析选项 —— 上游 `options`（`prefetch` 已剔除，本项目无预取）。 */
 export interface AnalyzeOptions {
@@ -42,6 +46,14 @@ export interface AnalyzeOptions {
   /** 跳过 music-tempo（上游 `skipMusicTempoWhilePlaying`，出厂 false）。 */
   skipMusicTempo?: boolean
   song?: { name?: string; title?: string; artist?: string } | null
+  /** 顺带测量整曲响度（ReplayGain 开启时）。 */
+  wantLoudness?: boolean
+  /** 顺带计算 Folia 的混音特征（鼓点 / 人声包络）。 */
+  wantFeatures?: boolean
+  /** 优先用 beat_this（WebGPU）出拍点与重音；不可用或失败时回退本地分析。 */
+  highPrecisionBeats?: boolean
+  /** 用 htdemucs 真分轨计算鼓点 / 人声特征；不可用或失败时回退混音近似。 */
+  highPrecisionStems?: boolean
 }
 
 /** 上游 `beatAnalysisYieldMs`（`01-scene/02-beat-camera-runtime.js:358-363`），预取项已剔除。 */
@@ -96,6 +108,7 @@ export async function analyzeAudioBeats(
   options: AnalyzeOptions = {},
 ): Promise<BeatMap | null> {
   const analysisProfile = cinemaAnalysisProfileForSong(options.song)
+  beginAnalysisActivity()
   try {
     await yieldToIdle(yieldMs(options, 140))
     if (!isCurrent(token)) return null
@@ -128,6 +141,22 @@ export async function analyzeAudioBeats(
     if (dc.close) await dc.close()
     if (!buffer) return null
     if (!isCurrent(token)) return null
+
+    if (options.highPrecisionBeats) {
+      const modelMap = await analyzeModelBeatMap(
+        ab,
+        buffer,
+        analysisProfile.id,
+        () => isCurrent(token),
+        {
+          wantLoudness: options.wantLoudness,
+          wantFeatures: options.wantFeatures,
+          wantStems: options.highPrecisionStems,
+        },
+      )
+      if (modelMap) return modelMap
+      if (!isCurrent(token)) return null
+    }
 
     // ★ music-tempo 与频段渲染**并行**跑（上游 `:31` 先起任务，`:560` 才 await）。
     //   Worker 在另一个线程，主线程这边同时做 OfflineAudioContext 渲染。
@@ -576,6 +605,17 @@ export async function analyzeAudioBeats(
     await yieldToPaint()
     if (!isCurrent(token)) return null
 
+    const loudness = options.wantLoudness
+      ? await measureLoudness(buffer, () => isCurrent(token))
+      : undefined
+    if (!isCurrent(token)) return null
+    const features = options.wantFeatures
+      ? await computeTrackFeatures(buffer, () => isCurrent(token), {
+          stems: options.highPrecisionStems === true,
+        })
+      : undefined
+    if (!isCurrent(token)) return null
+
     return {
       kicks,
       beats,
@@ -587,9 +627,13 @@ export async function analyzeAudioBeats(
       duration: buffer.duration,
       visualBeatCount,
       analyzedAt: Date.now(),
+      loudness,
+      features: features ?? undefined,
     }
   } catch (e) {
     console.warn('beat analysis failed:', e)
     return null
+  } finally {
+    endAnalysisActivity()
   }
 }

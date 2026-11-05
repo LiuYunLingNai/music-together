@@ -15,11 +15,10 @@
  *      空闲才跑，不与渲染抢帧；
  *   ⑤ 失败重排，最多 3 次，退避 `1200 + n×600` ms。
  *
- * ## 移植时剔除的部分
+ * ## 与上游的差异
  *
- * · `readBeatDiskCache`（磁盘缓存）—— 本项目无 `/api/beatmap/cache` 后端。
- * · `beatMapCache[songId]` 的命中分支 —— 同上，没有缓存可命中。
- *   （代次判据 `token !== beatMapToken` 保留，那是**正确性**的一部分。）
+ * · 磁盘缓存落在 IndexedDB（`beatMapStore`），键为曲目身份 + 附加产物标记；
+ *   上游走 `/api/beatmap/cache` 后端，本仓没有该服务。
  * · `hideBeatChip` / toast —— 上游的"节奏缓冲中…"气泡 UI，本项目无此控件。
  * · `beatMapBusy` 的等 420ms 重排 —— 上游用它避免两次分析并发。本项目
  *   的分析入口只有这一处（无队列预取），用 `busy` 布尔量等价保证。
@@ -28,6 +27,8 @@
  */
 
 import { analyzeAudioBeats } from './analyzeAudioBeats'
+import { publishTrackLoudness } from '@/lib/replayGain'
+import { readBeatMapFromDisk, writeBeatMapToDisk } from './beatMapStore'
 import type { BeatMap } from './beatAnalysisTypes'
 
 /** 共享缓存：切舞台 / 两个消费方同时要同一首时不重复分析。 */
@@ -105,6 +106,16 @@ export interface BeatAnalysisEnv {
   isCurrent: (token: number) => boolean
   /** 分析完成 ⇒ 交接拍点图。 */
   onMap: (map: BeatMap, token: number) => void
+  /** 顺带测量响度（ReplayGain 开启时由调用方置 true）。 */
+  wantLoudness?: boolean
+  /** 顺带计算 Folia 的混音特征（鼓点 / 人声包络）。 */
+  wantFeatures?: boolean
+  /** 优先用 beat_this（WebGPU）出拍点；不可用时自动回退。 */
+  highPrecisionBeats?: boolean
+  /** 用 htdemucs 真分轨计算鼓点 / 人声特征。 */
+  highPrecisionStems?: boolean
+  /** 曲目声明时长（秒）。音频明显短于它时按试听片段处理，不落盘缓存分析结果。 */
+  expectedDuration?: number
 }
 
 /**
@@ -137,8 +148,13 @@ function scheduleBeatAnalysisUncached(
   audioUrl: string,
   env: BeatAnalysisEnv,
   song?: { name?: string; title?: string; artist?: string } | null,
+  cacheKey?: string,
 ): BeatAnalysisHandle {
   const { token } = env
+  const diskKey = cacheKey ?? audioUrl
+  // 只有浏览器有 IndexedDB；单测环境保持原来的同步路径。
+  const diskTask = typeof indexedDB === 'undefined' ? null : readBeatMapFromDisk(diskKey)
+  let diskChecked = false
   let timer: ReturnType<typeof setTimeout> | null = null
   let attempts = 0
   let busy = false
@@ -172,10 +188,12 @@ function scheduleBeatAnalysisUncached(
       queue(Math.max(500, (BEAT_ANALYSIS_CONFIG.minPlaybackSec - current) * 1000))
       return
     }
-    scheduleAnalysisTask(startAnalysis, BEAT_ANALYSIS_CONFIG.idleTimeout)
+    scheduleAnalysisTask(() => {
+      void startAnalysis()
+    }, BEAT_ANALYSIS_CONFIG.idleTimeout)
   }
 
-  function startAnalysis(): void {
+  async function startAnalysis(): Promise<void> {
     if (cancelled || !env.isCurrent(token)) return
     if (!env.isPlaying()) {
       queue(620)
@@ -186,6 +204,18 @@ function scheduleBeatAnalysisUncached(
       queue(420)
       return
     }
+    if (diskTask && !diskChecked) {
+      diskChecked = true
+      busy = true
+      const disk = await diskTask
+      busy = false
+      if (cancelled || !env.isCurrent(token)) return
+      if (disk) {
+        cacheBeatMap(diskKey, disk)
+        env.onMap(disk, token)
+        return
+      }
+    }
     attempts++
     busy = true
     analyzeAudioBeats(audioUrl, token, env.isCurrent, {
@@ -193,6 +223,10 @@ function scheduleBeatAnalysisUncached(
       skipMusicTempo: BEAT_ANALYSIS_CONFIG.skipMusicTempoWhilePlaying && !env.isPlaying(),
       background: true,
       song: song || null,
+      wantLoudness: env.wantLoudness === true,
+      wantFeatures: env.wantFeatures === true,
+      highPrecisionBeats: env.highPrecisionBeats === true,
+      highPrecisionStems: env.highPrecisionStems === true,
     })
       .then((map) => {
         busy = false
@@ -233,13 +267,22 @@ export function scheduleBeatAnalysis(
   audioUrl: string,
   env: BeatAnalysisEnv,
   song?: { name?: string; title?: string; artist?: string } | null,
+  cacheKey?: string,
 ): BeatAnalysisHandle {
-  const key = audioUrl
+  // 响度 / 特征 / beat_this 都是可选的附加产物：带不同附加产物的分析结果分开缓存，
+  // 否则 Mineradio 先分析出的「无特征」结果会被 Folia 直接命中，本地拍点也会被
+  // 高精度模式误当成模型结果。
+  const flags = `${env.wantLoudness ? 'l' : ''}${env.wantFeatures ? 'f' : ''}${env.highPrecisionBeats ? 'h' : ''}${env.highPrecisionStems ? 's' : ''}`
+  const key = `${cacheKey ?? audioUrl}|${flags}`
   const cached = getCachedBeatMap(key)
   if (cached) {
     let cancelled = false
     const timer = setTimeout(() => {
-      if (!cancelled && env.isCurrent(env.token)) env.onMap(cached, env.token)
+      if (cancelled || !env.isCurrent(env.token)) return
+      // 命中缓存时不会经过 finish（只有新分析才走那里），响度必须在这里补发；
+      // 否则同一会话里重播同一首歌时 ReplayGain 会退回 0 dB。
+      publishTrackLoudness(cached.loudness)
+      env.onMap(cached, env.token)
     }, 0)
     return {
       cancel: () => {
@@ -284,7 +327,16 @@ export function scheduleBeatAnalysis(
 
   let settleTimer: ReturnType<typeof setTimeout> | null = null
   const finish = (map: BeatMap): void => {
-    cacheBeatMap(key, map)
+    // 试听片段（明显短于曲目声明时长）不缓存：等能播整首时同一 key 会命中这份残图。
+    const expected = env.expectedDuration ?? 0
+    const wholeSong = !(expected > 0 && map.duration > 0 && map.duration < expected * 0.5)
+    if (wholeSong) {
+      cacheBeatMap(key, map)
+      void writeBeatMapToDisk(key, map)
+    } else {
+      console.info('[BeatAnalysis] 音频短于曲目声明时长，按试听片段处理，不缓存分析结果')
+    }
+    publishTrackLoudness(map.loudness)
     if (settleTimer) {
       clearTimeout(settleTimer)
       settleTimer = null
@@ -307,13 +359,28 @@ export function scheduleBeatAnalysis(
       onMap: (map) => finish(map),
     },
     song,
+    key,
   )
   pending.cancelOwner = owner.cancel
-  settleTimer = setTimeout(() => {
-    if (beatMapPending.get(key) !== pending) return
-    beatMapPending.delete(key)
-    owner.cancel()
-  }, BEAT_MAP_PENDING_TIMEOUT_MS)
+  /**
+   * 观察窗口：只是「迟迟没有结果」的兜底，不是进度超时。
+   *
+   * 暂停等待播放、以及分析本身仍在跑（首次 htdemucs 要下载 + 逐段推理，
+   * 慢网很容易超过 120s）都不算卡死 —— 取消后消费方不会自动重排
+   * （`useBeatFxTrack` 的依赖里没有播放状态），这一整首就再没有拍点。
+   */
+  const armSettleTimer = (): void => {
+    settleTimer = setTimeout(() => {
+      if (beatMapPending.get(key) !== pending) return
+      if (!env.isPlaying() || owner.isBusy()) {
+        armSettleTimer()
+        return
+      }
+      beatMapPending.delete(key)
+      owner.cancel()
+    }, BEAT_MAP_PENDING_TIMEOUT_MS)
+  }
+  armSettleTimer()
 
   return {
     cancel: () => {

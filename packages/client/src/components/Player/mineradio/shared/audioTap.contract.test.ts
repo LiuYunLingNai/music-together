@@ -74,7 +74,9 @@ describe('音频分析接线契约', () => {
     //   destination —— 静音丢节拍的修复要求两条路径（成功/失败）同语义。
     expect(fallback).toMatch(/fallbackGain\s*=\s*context\.createGain\(\)/)
     expect(fallback).toMatch(/source\.connect\(fallbackGain\)/)
-    expect(fallback).toMatch(/fallbackGain\.connect\(context\.destination\)/)
+    // 直通路径同样过 ReplayGain 增益（成功路径也有这个节点）。
+    expect(fallback).toMatch(/fallbackGain\.connect\(fallbackReplayGain\)/)
+    expect(fallback).toMatch(/fallbackReplayGain\.connect\(context\.destination\)/)
     expect(fallback).toMatch(/fallbackAnalyser\s*=\s*context\.createAnalyser\(\)/)
     expect(fallback).toMatch(/source\.connect\(fallbackAnalyser\)/)
     expect(fallback).toMatch(/publishStretchAnalyser\(fallbackAnalyser\)/)
@@ -102,10 +104,14 @@ describe('音频分析接线契约', () => {
     expect(src).toMatch(/export function isPlaybackVolumeAtFloor/)
   })
 
-  it('分析节点在启用/旁路两条路径上都保持连接（否则切变速会丢频谱）', () => {
+  it('分析节点挂在效果链出口，旁路切换不摘掉它', () => {
     const src = stripComments(read('timeStretch.ts'))
-    // disableGraph 与 enableGraph 都应重新连接 analyser
-    const matches = src.match(/graph\.analyser\)/g) ?? []
+    // 链路：source → soundtouch → EQ → chainInput → 效果链 → chainOutput → analyser
+    expect(src).toMatch(/createAudioEffectChain\s*\(/)
+    expect(src).toMatch(/chainOutput\.connect\(analyser\)/)
+    // 旁路/恢复只改均衡器接法，效果链出口必须保持连接
+    expect(src).not.toMatch(/chainOutput\.disconnect/)
+    const matches = src.match(/graph\.chainInput/g) ?? []
     expect(matches.length).toBeGreaterThanOrEqual(2)
   })
 

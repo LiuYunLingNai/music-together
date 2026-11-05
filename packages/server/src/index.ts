@@ -48,6 +48,12 @@ app.use(express.json({ limit: '9mb' }))
 app.use('/api', identityHttpMiddleware)
 app.use('/uploads/avatars', express.static(path.join(path.dirname(databasePath), 'avatars'), { maxAge: '1h' }))
 app.use('/uploads/backgrounds', express.static(path.join(path.dirname(databasePath), 'backgrounds'), { maxAge: '1h' }))
+// 客户端按需下载的分析模型（beat_this-wgsl.bin，约 41 MB）。运维把文件放进数据目录的
+// models/ 即可；文件名固定，长缓存且不可变。
+app.use(
+  '/models',
+  express.static(path.join(path.dirname(databasePath), 'models'), { maxAge: '30d', immutable: true, fallthrough: false }),
+)
 
 // REST API routes
 app.use('/api/auth', createAuthRoutes(io))

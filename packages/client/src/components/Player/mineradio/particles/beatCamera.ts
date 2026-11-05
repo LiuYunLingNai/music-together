@@ -35,6 +35,7 @@
  */
 
 import { getAudioTapRevision } from '@/lib/audioTap'
+import { useAudioSettingsStore } from '@/stores/audioSettingsStore'
 import { pushScheduledBeatPulse, resetScheduledBeatPulse, setBeatMapWaiting } from '../shared/audioNormalize'
 import { getSonicAudioFrame } from '../../stages/SonicAudioMonitor'
 
@@ -1624,6 +1625,7 @@ export { BEAT_MAP_LOOKAHEAD }
 export function startBeatMapAnalysis(
   audioUrl: string,
   song?: { name?: string; title?: string; artist?: string } | null,
+  cacheKey?: string,
 ): () => void {
   // 上一次未完成的分析必须作废：它的 `token` 已过期，`.then` 里会自行
   // 早退，但 1600ms 的定时器与 Worker 仍在跑，白占 CPU。
@@ -1636,6 +1638,8 @@ export function startBeatMapAnalysis(
       currentTime: () => lastBeatMapAudioTime,
       isPlaying: () => lastBeatMapPlaying,
       isCurrent: (t) => t === getAudioTapRevision(),
+      wantLoudness: useAudioSettingsStore.getState().replayGainMode !== 'off',
+      highPrecisionBeats: useAudioSettingsStore.getState().highPrecisionBeats,
       onMap: (map, t) => {
         // ★ 代次再确认一次：分析要几秒，期间完全可能已经切歌。
         if (t !== getAudioTapRevision()) return
@@ -1643,6 +1647,7 @@ export function startBeatMapAnalysis(
       },
     },
     song,
+    cacheKey,
   )
   return beatAnalysis ? beatAnalysis.cancel : () => {}
 }

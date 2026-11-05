@@ -215,7 +215,11 @@ function BeatMapAnalysisDriver() {
           : track.source === 'kugou' || track.source === 'kugou_concept'
             ? `${SERVER_URL}/api/music/kugou-audio-proxy?url=${encodeURIComponent(track.streamUrl)}`
             : track.streamUrl
-      cancel = startBeatMapAnalysis(playbackUrl, { name: track.title, artist: track.artist?.[0] })
+      cancel = startBeatMapAnalysis(
+        playbackUrl,
+        { name: track.title, artist: track.artist?.[0] },
+        `${track.source}:${track.lyricId ?? track.urlId ?? track.title}`,
+      )
     }
     run()
     // tap 代次只在 `publishStretchAnalyser` 时变，没有订阅机制 ⇒ 轮询。

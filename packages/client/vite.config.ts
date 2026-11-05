@@ -6,12 +6,14 @@ import path from 'path'
 import { readFileSync } from 'fs'
 // @ts-expect-error -- dev 插件是纯 JS，没有类型声明
 import { nebbiaStrokesPlugin } from './dev/nebbia/nebbiaStrokesPlugin.mjs'
+// @ts-expect-error -- dev 插件是纯 JS，没有类型声明
+import { icuFoliaDataPlugin } from './dev/icuFolia/icuFoliaDataPlugin.mjs'
 
 const rootPkg = JSON.parse(readFileSync(path.resolve(__dirname, '../../package.json'), 'utf-8'))
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [nebbiaStrokesPlugin(), react(), tailwindcss(), wasm()],
+  plugins: [nebbiaStrokesPlugin(), icuFoliaDataPlugin(), react(), tailwindcss(), wasm()],
   define: {
     __APP_VERSION__: JSON.stringify(rootPkg.version),
   },

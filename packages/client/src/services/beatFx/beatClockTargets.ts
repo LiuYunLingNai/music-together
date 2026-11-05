@@ -13,8 +13,8 @@ import { nebbiaBeatEffectOnScreen, nebbiaShowsBackground } from '@/components/Pl
  * （`lib/foliaModes` / `foliaTunings`），所以效果声明集中在这里。
  *
  * 只声明**本仓真能提供数据源**的效果：
- *   · 读 htdemucs 鼓组/分轨的效果（时计鼓面、町景鼓点、凝彩墨渍）浏览器端没有数据源，
- *     与上游一样列出，面板按同一判据提示「缺少模型」，拍点部分照常生效；
+ *   · 读鼓点 / 分轨的效果由宿主的混音特征（或可选的 htdemucs 分轨）供给，
+ *     与拍点效果一样需要先跑一次离线分析；
  *   · 隐现的「潮汐脉动」与「齿轮随拍」上游已退役，同样不声明。
  */
 export const FOLIA_MODE_BEAT_EFFECTS: Partial<Record<FoliaModeId, readonly BeatEffectDef[]>> = {
@@ -23,8 +23,8 @@ export const FOLIA_MODE_BEAT_EFFECTS: Partial<Record<FoliaModeId, readonly BeatE
     { id: 'hanabi.beatPulse', nameKey: 'options.beatEffect_hanabiBeatPulse', descKey: 'options.beatEffect_hanabiBeatPulseDesc', source: 'beats' },
   ],
   sonnet: [{ id: 'sonnet.lensTear', nameKey: 'options.beatEffect_sonnetLensTear', descKey: 'options.beatEffect_sonnetLensTearDesc', source: 'beats' }],
-  // 凝彩的墨染奥行：景深/运镜/字号远近随开关生效；鼓点墨渍需要 htdemucs，浏览器端没有鼓点（drumHits 恒为 null），
-  // 墨层只在有鼓点时出现，其余部分与上游一致。
+  // 凝彩的墨染奥行：景深/运镜/字号远近随开关生效；鼓点墨渍读宿主提供的鼓点特征，
+  // 没开特征分析时没有鼓点，墨层不出现，其余部分与上游一致。
   tempera: [{ id: 'tempera.inkFlash', nameKey: 'options.beatEffect_temperaInkFlash', descKey: 'options.beatEffect_temperaInkFlashDesc', source: 'drums' }],
   machi: [
     { id: 'machi.neonPulse', nameKey: 'options.beatEffect_machiNeonPulse', descKey: 'options.beatEffect_machiNeonPulseDesc', source: 'beats' },
@@ -94,6 +94,13 @@ export const liveBeatEffects = (settings: BeatClockSettings): BeatEffectDef[] =>
 /** 画面上是否效果要读拍点表（决定要不要跑离线拍点分析）。 */
 export const visualizerWantsBeats = (settings: BeatClockSettings): boolean =>
   liveBeatEffects(settings).some((effect) => effect.source === 'beats')
+
+/**
+ * 画面上是否效果要读鼓点 / 分轨特征。只开这类效果（例如凝彩墨渍、时计鼓面）时
+ * 同样要跑一次分析，否则特征永远不会产出，效果会一直是空的。
+ */
+export const visualizerWantsFeatures = (settings: BeatClockSettings): boolean =>
+  liveBeatEffects(settings).some((effect) => effect.source === 'drums' || effect.source === 'stems')
 
 /**
  * 按来源取强度（0..2）：拍点表的强度同时作为时钟包络的缩放，

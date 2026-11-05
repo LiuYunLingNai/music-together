@@ -3,8 +3,12 @@ import processorUrl from '@soundtouchjs/audio-worklet/processor?url'
 import { Howler } from 'howler'
 import type { Howl } from 'howler'
 import { getAudioTapAnalyser, publishStretchAnalyser } from './audioTap'
+import { clearTrackLoudness, getReplayGainLinear, subscribeReplayGain } from './replayGain'
+import { AUDIO_EQUALIZER_BANDS, audioEqualizerBandShape } from './audioEqualizer'
+import { DEFAULT_AUDIO_EFFECT_SETTINGS } from './audioEffects/model'
+import { createAudioEffectChain, type AudioEffectChain } from './audioEffects/chain'
 import { SERVER_URL } from './config'
-import { AUDIO_EQ_BANDS, useAudioSettingsStore } from '@/stores/audioSettingsStore'
+import { useAudioSettingsStore } from '@/stores/audioSettingsStore'
 
 const MIN_TEMPO = 0.99
 const MAX_TEMPO = 1.01
@@ -46,8 +50,16 @@ interface StretchGraph {
    *   **不会改变声音**（不接回 destination 的另一路），也不碰 SoundTouch。
    */
   analyser: AnalyserNode | null
-  /** 五段均衡器；未启用时增益为 0，节点仍在链上，切开关不会重建音频图。 */
+  /** 十段均衡器；未启用时增益为 0，节点仍在链上，切开关不会重建音频图。 */
   equalizer: BiquadFilterNode[]
+  /** 均衡器之后的效果链（饱和 / 降位 / 抖晃 / 底噪 / 宽度 / 动态 / 混响）。 */
+  effectChain: AudioEffectChain | null
+  /** 效果链入口；旁路切换只改均衡器接法，链内节点保持连接。 */
+  chainInput: GainNode | null
+  /** 效果链出口；分析节点与音量节点都挂这里。 */
+  chainOutput: GainNode | null
+  /** ReplayGain 响度归一化；未开启时恒为 1。 */
+  replayGainNode: GainNode | null
   /**
    * 用户音量的图内一半（`installVolumeRouting` 的 √v 分支）。
    *
@@ -74,11 +86,11 @@ const activeGraphs = new Set<StretchGraph>()
 const registrationByContext = new WeakMap<BaseAudioContext, Promise<void>>()
 
 const createEqualizer = (context: AudioContext): BiquadFilterNode[] =>
-  AUDIO_EQ_BANDS.map((frequency) => {
+  AUDIO_EQUALIZER_BANDS.map((band, index) => {
     const filter = context.createBiquadFilter()
-    filter.type = 'peaking'
-    filter.frequency.value = frequency
-    filter.Q.value = 1
+    filter.type = audioEqualizerBandShape(index)
+    filter.frequency.value = Math.min(band.frequency, context.sampleRate * 0.475)
+    filter.Q.value = 1.4
     filter.gain.value = 0
     return filter
   })
@@ -94,10 +106,11 @@ const connectEqualizer = (input: AudioNode, equalizer: BiquadFilterNode[], outpu
 }
 
 const applyEqualizer = (graph: StretchGraph): void => {
-  const { equalizerEnabled, equalizerGains } = useAudioSettingsStore.getState()
+  const { equalizer } = useAudioSettingsStore.getState()
   graph.equalizer.forEach((filter, index) => {
-    filter.gain.setTargetAtTime(equalizerEnabled ? equalizerGains[index] ?? 0 : 0, graph.context.currentTime, 0.01)
+    filter.gain.setTargetAtTime(equalizer.enabled ? equalizer.gains[index] ?? 0 : 0, graph.context.currentTime, 0.015)
   })
+  graph.effectChain?.apply(equalizer.effects, equalizer.enabled)
 }
 
 type SinkCapableAudio = HTMLMediaElement & { setSinkId?: (deviceId: string) => Promise<void> }
@@ -113,13 +126,23 @@ const applyOutputDevice = (audio: HTMLMediaElement): void => {
 
 const applyAudioSettings = (graph: StretchGraph): void => {
   applyEqualizer(graph)
+  applyReplayGain(graph)
   applyOutputDevice(graph.audio)
 }
 
+const applyReplayGain = (graph: StretchGraph): void => {
+  if (!graph.replayGainNode) return
+  graph.replayGainNode.gain.setTargetAtTime(getReplayGainLinear(), graph.context.currentTime, 0.05)
+}
+
+subscribeReplayGain((linear) => {
+  for (const graph of activeGraphs) {
+    graph.replayGainNode?.gain.setTargetAtTime(linear, graph.context.currentTime, 0.05)
+  }
+})
+
 useAudioSettingsStore.subscribe((state, previous) => {
-  if (state.equalizerEnabled === previous.equalizerEnabled
-    && state.equalizerGains === previous.equalizerGains
-    && state.outputDeviceId === previous.outputDeviceId) return
+  if (state.equalizer === previous.equalizer && state.outputDeviceId === previous.outputDeviceId) return
   for (const graph of activeGraphs) applyAudioSettings(graph)
 })
 let nextAudioUsesCors = false
@@ -180,6 +203,10 @@ function createDisabledGraph(context: AudioContext, audio: HTMLMediaElement): St
     lastUnderrunCount: 0,
     analyser: null,
     equalizer: [],
+    effectChain: null,
+    chainInput: null,
+    chainOutput: null,
+    replayGainNode: null,
     volumeGain: null,
   }
 }
@@ -257,9 +284,14 @@ export function releaseTimeStretch(howl: Howl): (() => void) | null {
   const audio = getAudioElement(howl)
   if (!audio) return null
   const graph = graphByAudio.get(audio)
-  if (graph) activeGraphs.delete(graph)
+  if (graph) {
+    activeGraphs.delete(graph)
+    // 底噪与混响是独立声源：换歌后若继续以旧设置运行，会在静音的元素上继续出声。
+    graph.effectChain?.apply(DEFAULT_AUDIO_EFFECT_SETTINGS, false)
+  }
   if (graph?.analyser && getAudioTapAnalyser() === graph.analyser) {
     publishStretchAnalyser(null)
+    clearTrackLoudness()
   }
   // 撤回 volume 转发，把原生 volume 属性还给元素（回池复用后可能走
   // 不建图的直通路径，需要原生语义）。把当前分支值反解回用户音量再写回，
@@ -371,14 +403,12 @@ function disableGraph(graph: StretchGraph, failed = false): void {
   //   元素 volume 属性已被转发到 gain（installVolumeRouting），不能把
   //   元素直接接回 destination 而绕过它 —— 否则"元素 volume=1 全幅直出"
   //   会让用户音量失控（变成最大音量）。
-  const tail = connectEqualizer(
+  connectEqualizer(
     graph.source,
     graph.equalizer,
-    graph.volumeGain ?? graph.context.destination,
+    graph.chainInput ?? graph.volumeGain ?? graph.context.destination,
   )
   if (graph.volumeGain) graph.volumeGain.connect(graph.context.destination)
-  // 旁路时 worklet 被摘掉，分析节点要改从音源直接取，否则视觉会静音
-  if (graph.analyser) tail.connect(graph.analyser)
   graph.audio.playbackRate = 1
 }
 
@@ -396,15 +426,13 @@ function enableGraph(graph: StretchGraph): void {
   for (const filter of graph.equalizer) filter.disconnect()
   if (graph.volumeGain) graph.volumeGain.disconnect()
   graph.source.connect(graph.node)
-  // 与正常建图保持同一条链：worklet → EQ → volumeGain → destination。
-  const tail = connectEqualizer(
+  // 与正常建图保持同一条链：worklet → EQ → 效果链 → volumeGain → destination。
+  connectEqualizer(
     graph.node,
     graph.equalizer,
-    graph.volumeGain ?? graph.context.destination,
+    graph.chainInput ?? graph.volumeGain ?? graph.context.destination,
   )
   if (graph.volumeGain) graph.volumeGain.connect(graph.context.destination)
-  // 分析节点重新挂到 EQ 输出
-  if (graph.analyser) tail.connect(graph.analyser)
   graph.bypassed = false
   graph.metricsSnapshots = 0
   graph.lastBlockCount = graph.node.metrics?.blockCount ?? 0
@@ -446,6 +474,9 @@ export async function attachTimeStretch(howl: Howl): Promise<TimeStretchControll
       installVolumeRouting(audio, existing.volumeGain)
       descriptorRestoreRef.set(audio, existing.volumeGain)
     }
+    // 复用分支同样要回到 activeGraphs：releaseTimeStretch 在上一首 unload 时删掉了它，
+    // 不补回来，本曲之后拖动 EQ / 分析完成发布 ReplayGain 都更新不到这张图。
+    activeGraphs.add(existing)
     applyAudioSettings(existing)
     return createController(existing)
   }
@@ -512,9 +543,23 @@ export async function attachTimeStretch(howl: Howl): Promise<TimeStretchControll
       analyser = null
     }
 
-    const tail = connectEqualizer(stretchNode, equalizer, volumeGain)
+    const audioEqualizer = useAudioSettingsStore.getState().equalizer
+    const chainInput = context.createGain()
+    const chainOutput = context.createGain()
+    const effectChain = createAudioEffectChain({
+      context,
+      input: chainInput,
+      output: chainOutput,
+      effects: audioEqualizer.effects,
+      enabled: audioEqualizer.enabled,
+    })
+    connectEqualizer(stretchNode, equalizer, chainInput)
+    const replayGainNode = context.createGain()
+    replayGainNode.gain.value = getReplayGainLinear()
+    chainOutput.connect(replayGainNode)
+    replayGainNode.connect(volumeGain)
     volumeGain.connect(context.destination)
-    if (analyser) tail.connect(analyser)
+    if (analyser) chainOutput.connect(analyser)
 
     const graph: StretchGraph = {
       audio,
@@ -530,6 +575,10 @@ export async function attachTimeStretch(howl: Howl): Promise<TimeStretchControll
       lastUnderrunCount: 0,
       analyser,
       equalizer,
+      effectChain,
+      chainInput,
+      chainOutput,
+      replayGainNode,
       volumeGain,
     }
     applyAudioSettings(graph)
@@ -586,7 +635,12 @@ export async function attachTimeStretch(howl: Howl): Promise<TimeStretchControll
       installVolumeRouting(audio, fallbackGain)
       descriptorRestoreRef.set(audio, fallbackGain)
       source.connect(fallbackGain)
-      fallbackGain.connect(context.destination)
+      // 直通图没有均衡器/效果链，但响度补偿仍应生效（与成功图同一目标增益）。
+      const fallbackReplayGain = context.createGain()
+      fallbackReplayGain.gain.value = getReplayGainLinear()
+      fallbackGain.connect(fallbackReplayGain)
+      fallbackReplayGain.connect(context.destination)
+      pendingGraph.replayGainNode = fallbackReplayGain
       let fallbackAnalyser: AnalyserNode | null = null
       try {
         fallbackAnalyser = context.createAnalyser()

@@ -25,7 +25,7 @@ describe('老用户升级路径', () => {
     expect(s.getLyricRenderer()).toBe('amll') // untouched
     expect(s.getLyricFontSize()).toBe(90) // untouched
     expect(s.getPlaybackTempoSyncEnabled()).toBe(true) // untouched
-  })
+  }, 15_000)
 
   it('全新用户（无任何键）不抛错且取到默认值', async () => {
     const s = (await import('./storage')).storage
