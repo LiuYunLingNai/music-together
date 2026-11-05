@@ -1,9 +1,18 @@
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
+import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { SYNC_PACKET_INTERVAL_MAX_SECONDS, SYNC_PACKET_INTERVAL_MIN_SECONDS } from '@/lib/constants'
+import {
+  AUDIO_CROSSFADE_MAX_MS,
+  AUDIO_EQ_BANDS,
+  AUDIO_EQ_GAIN_MAX,
+  AUDIO_EQ_GAIN_MIN,
+  useAudioSettingsStore,
+} from '@/stores/audioSettingsStore'
 import { useSettingsStore } from '@/stores/settingsStore'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { SettingRow } from './SettingRow'
 
 function SyncIntervalInput({ value, onChange }: { value: number; onChange: (value: number) => void }) {
@@ -100,6 +109,128 @@ export function PlaybackSection() {
           />
         </SettingRow>
       </div>
+
+      <div>
+        <h3 className="text-base font-semibold">音频输出</h3>
+        <Separator className="mt-2 mb-4" />
+        <OutputDeviceSetting />
+        <CrossfadeSetting />
+      </div>
+
+      <div>
+        <h3 className="text-base font-semibold">均衡器</h3>
+        <Separator className="mt-2 mb-4" />
+        <EqualizerSettings />
+      </div>
     </div>
+  )
+}
+
+function OutputDeviceSetting() {
+  const outputDeviceId = useAudioSettingsStore((state) => state.outputDeviceId)
+  const setOutputDeviceId = useAudioSettingsStore((state) => state.setOutputDeviceId)
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
+
+  useEffect(() => {
+    const mediaDevices = navigator.mediaDevices
+    if (!mediaDevices?.enumerateDevices) return
+    const refresh = () => {
+      void mediaDevices.enumerateDevices()
+        .then((all) => setDevices(all.filter((device) => device.kind === 'audiooutput')))
+        .catch(() => setDevices([]))
+    }
+    refresh()
+    mediaDevices.addEventListener?.('devicechange', refresh)
+    return () => mediaDevices.removeEventListener?.('devicechange', refresh)
+  }, [])
+
+  return (
+    <SettingRow
+      label="输出设备"
+      description="浏览器支持时，把播放音频切到指定的系统输出设备；不支持或未授权时保持系统默认。"
+    >
+      <Select value={outputDeviceId} onValueChange={setOutputDeviceId}>
+        <SelectTrigger size="sm" aria-label="音频输出设备">
+          <SelectValue placeholder="系统默认" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="default">系统默认</SelectItem>
+          {devices.map((device, index) => (
+            <SelectItem key={device.deviceId} value={device.deviceId}>
+              {device.label || `音频输出 ${index + 1}`}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </SettingRow>
+  )
+}
+
+function CrossfadeSetting() {
+  const crossfadeMs = useAudioSettingsStore((state) => state.crossfadeMs)
+  const setCrossfadeMs = useAudioSettingsStore((state) => state.setCrossfadeMs)
+  const options = [
+    [0, '关闭'],
+    [80, '短淡化（80ms）'],
+    [500, '0.5 秒'],
+    [1000, '1 秒'],
+    [2000, '2 秒'],
+    [4000, '4 秒'],
+    [AUDIO_CROSSFADE_MAX_MS, '8 秒'],
+  ] as const
+  return (
+    <SettingRow
+      label="切歌交叉淡化"
+      description="服务端切换歌曲时，旧曲渐弱、新曲渐强。所有房间成员使用同一段过渡，不会各自提前切歌。"
+    >
+      <Select value={String(crossfadeMs)} onValueChange={(value) => setCrossfadeMs(Number(value))}>
+        <SelectTrigger size="sm" aria-label="切歌交叉淡化时长">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map(([value, label]) => (
+            <SelectItem key={value} value={String(value)}>{label}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </SettingRow>
+  )
+}
+
+function EqualizerSettings() {
+  const enabled = useAudioSettingsStore((state) => state.equalizerEnabled)
+  const gains = useAudioSettingsStore((state) => state.equalizerGains)
+  const setEnabled = useAudioSettingsStore((state) => state.setEqualizerEnabled)
+  const setGain = useAudioSettingsStore((state) => state.setEqualizerGain)
+  const reset = useAudioSettingsStore((state) => state.resetEqualizer)
+
+  return (
+    <>
+      <SettingRow
+        label="启用均衡器"
+        description="五段峰值均衡器，作用于实际输出音频；视觉频谱跟随处理后的声音。"
+        onReset={enabled || gains.some((gain) => gain !== 0) ? reset : undefined}
+      >
+        <Switch aria-label="启用均衡器" checked={enabled} onCheckedChange={setEnabled} />
+      </SettingRow>
+      {AUDIO_EQ_BANDS.map((frequency, index) => (
+        <SettingRow key={frequency} label={`${frequency >= 1000 ? `${frequency / 1000}k` : frequency} Hz`}>
+          <div className="flex w-52 items-center gap-3">
+            <Slider
+              aria-label={`${frequency} Hz 增益`}
+              min={AUDIO_EQ_GAIN_MIN}
+              max={AUDIO_EQ_GAIN_MAX}
+              step={1}
+              value={[gains[index] ?? 0]}
+              disabled={!enabled}
+              onValueChange={([gain]) => setGain(index, gain)}
+            />
+            <span className="w-12 text-right text-xs tabular-nums text-muted-foreground">
+              {gains[index] > 0 ? '+' : ''}{gains[index] ?? 0} dB
+            </span>
+          </div>
+        </SettingRow>
+      ))}
+    </>
   )
 }

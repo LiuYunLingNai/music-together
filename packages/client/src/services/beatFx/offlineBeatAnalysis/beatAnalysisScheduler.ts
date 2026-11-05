@@ -30,6 +30,41 @@
 import { analyzeAudioBeats } from './analyzeAudioBeats'
 import type { BeatMap } from './beatAnalysisTypes'
 
+/** 共享缓存：切舞台 / 两个消费方同时要同一首时不重复分析。 */
+const BEAT_MAP_CACHE_LIMIT = 8
+const BEAT_MAP_PENDING_TIMEOUT_MS = 120_000
+const beatMapCache = new Map<string, BeatMap>()
+interface PendingBeatMapListener {
+  token: number
+  isCurrent: (token: number) => boolean
+  onMap: (map: BeatMap, token: number) => void
+}
+interface PendingBeatMap {
+  listeners: Set<PendingBeatMapListener>
+  cancelOwner: () => void
+}
+const beatMapPending = new Map<string, PendingBeatMap>()
+
+const cacheBeatMap = (key: string, map: BeatMap): void => {
+  beatMapCache.delete(key)
+  beatMapCache.set(key, map)
+  while (beatMapCache.size > BEAT_MAP_CACHE_LIMIT) {
+    const oldest = beatMapCache.keys().next().value
+    if (oldest === undefined) break
+    beatMapCache.delete(oldest)
+  }
+}
+
+/** 已完成的拍点图；供舞台切换时直接复用。 */
+export const getCachedBeatMap = (key: string): BeatMap | null => beatMapCache.get(key) ?? null
+
+/** 单测/退出登录时清空共享缓存。 */
+export const clearBeatMapCache = (): void => {
+  beatMapCache.clear()
+  for (const pending of beatMapPending.values()) pending.cancelOwner()
+  beatMapPending.clear()
+}
+
 /** 上游 `beatAnalysisConfig`（`00-state/03-beat-dj-state.js:29-34`）。 */
 export const BEAT_ANALYSIS_CONFIG = {
   /** 切歌后先等这么久再开始（ms）。 */
@@ -98,7 +133,7 @@ export interface BeatAnalysisHandle {
  * @param env 见 `BeatAnalysisEnv`
  * @param song 歌名信息，仅用于 `cinemaAnalysisProfileForSong` 的歌名判断
  */
-export function scheduleBeatAnalysis(
+function scheduleBeatAnalysisUncached(
   audioUrl: string,
   env: BeatAnalysisEnv,
   song?: { name?: string; title?: string; artist?: string } | null,
@@ -183,5 +218,115 @@ export function scheduleBeatAnalysis(
     },
     isBusy: () => busy,
     isPending: () => timer !== null,
+  }
+}
+
+/**
+ * 共享入口：同一份音频 URL 只分析一次。
+ *
+ * Mineradio 的 `beatCamera` 与 Folia 的 `beatFxSource` 原本各自调度；
+ * 切舞台时第一方取消、第二方从头分析，既慢又浪费。这里按音频 URL
+ * 缓存结果，并把并发请求挂到同一次分析上。取消只解除自己的订阅，
+ * 最后一个订阅者退出时才取消底层分析。
+ */
+export function scheduleBeatAnalysis(
+  audioUrl: string,
+  env: BeatAnalysisEnv,
+  song?: { name?: string; title?: string; artist?: string } | null,
+): BeatAnalysisHandle {
+  const key = audioUrl
+  const cached = getCachedBeatMap(key)
+  if (cached) {
+    let cancelled = false
+    const timer = setTimeout(() => {
+      if (!cancelled && env.isCurrent(env.token)) env.onMap(cached, env.token)
+    }, 0)
+    return {
+      cancel: () => {
+        cancelled = true
+        clearTimeout(timer)
+      },
+      isBusy: () => false,
+      isPending: () => false,
+    }
+  }
+
+  const existing = beatMapPending.get(key)
+  if (existing) {
+    const listener: PendingBeatMapListener = {
+      token: env.token,
+      isCurrent: env.isCurrent,
+      onMap: env.onMap,
+    }
+    existing.listeners.add(listener)
+    return {
+      cancel: () => {
+        existing.listeners.delete(listener)
+        if (existing.listeners.size === 0) {
+          existing.cancelOwner()
+          if (beatMapPending.get(key) === existing) beatMapPending.delete(key)
+        }
+      },
+      isBusy: () => false,
+      isPending: () => true,
+    }
+  }
+
+  const listeners = new Set<PendingBeatMapListener>()
+  const listener: PendingBeatMapListener = {
+    token: env.token,
+    isCurrent: env.isCurrent,
+    onMap: env.onMap,
+  }
+  listeners.add(listener)
+  const pending: PendingBeatMap = { listeners, cancelOwner: () => {} }
+  beatMapPending.set(key, pending)
+
+  let settleTimer: ReturnType<typeof setTimeout> | null = null
+  const finish = (map: BeatMap): void => {
+    cacheBeatMap(key, map)
+    if (settleTimer) {
+      clearTimeout(settleTimer)
+      settleTimer = null
+    }
+    if (beatMapPending.get(key) === pending) beatMapPending.delete(key)
+    for (const current of [...listeners]) {
+      if (!current.isCurrent(current.token)) continue
+      try {
+        current.onMap(map, current.token)
+      } catch (err) {
+        console.warn('shared beat analysis listener failed:', err)
+      }
+    }
+  }
+
+  const owner = scheduleBeatAnalysisUncached(
+    audioUrl,
+    {
+      ...env,
+      onMap: (map) => finish(map),
+    },
+    song,
+  )
+  pending.cancelOwner = owner.cancel
+  settleTimer = setTimeout(() => {
+    if (beatMapPending.get(key) !== pending) return
+    beatMapPending.delete(key)
+    owner.cancel()
+  }, BEAT_MAP_PENDING_TIMEOUT_MS)
+
+  return {
+    cancel: () => {
+      listeners.delete(listener)
+      if (listeners.size > 0) return
+      if (settleTimer) {
+        clearTimeout(settleTimer)
+        settleTimer = null
+      }
+      if (beatMapPending.get(key) === pending) beatMapPending.delete(key)
+      owner.cancel()
+    },
+    isBusy: owner.isBusy,
+    isPending: owner.isPending,
   }
 }

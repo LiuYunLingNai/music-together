@@ -19,6 +19,7 @@ import { registerActivePlaybackStop } from '@/lib/audioPlaybackLifecycle'
 import { lyricPlayerBridge } from '@/lib/lyricPlayerBridge'
 import { getScheduledPlaybackPosition } from '@/lib/playbackSync'
 import { hideLoading, showLoading } from '@/components/Player/mineradio/particles/loadingState'
+import { useAudioSettingsStore } from '@/stores/audioSettingsStore'
 
 /** Max wait (ms) for Howler `unlock` event before giving up and skipping */
 const PLAY_ERROR_TIMEOUT_MS = 3000
@@ -42,7 +43,8 @@ const STALLED_TIMEOUT_MS = 8000
 
 /** Short fade after a scheduled start masks the decoder's final seek. */
 const SCHEDULED_START_FADE_MS = 120
-const TRACK_CROSSFADE_MS = 80
+const DEFAULT_TRACK_CROSSFADE_MS = 80
+const trackCrossfadeMs = (): number => useAudioSettingsStore.getState().crossfadeMs ?? DEFAULT_TRACK_CROSSFADE_MS
 
 interface ScheduledStart {
   howl: Howl
@@ -369,14 +371,15 @@ export function useHowl(onTrackEnd: () => void) {
               outgoingHowlRef.current = null
               // outgoing 音量为 0 时 fade(0→0) 会让 Howler 的 fade tween 永久
               // 空转（同下方 unmute 处的注释）；直接 dispose 前不必渐弱。
-              if (outgoing.volume() > 0) {
-                outgoing.fade(outgoing.volume(), 0, TRACK_CROSSFADE_MS)
+              const crossfadeMs = trackCrossfadeMs()
+              if (outgoing.volume() > 0 && crossfadeMs > 0) {
+                outgoing.fade(outgoing.volume(), 0, crossfadeMs)
               }
               if (outgoingCleanupTimerRef.current) clearTimeout(outgoingCleanupTimerRef.current)
               outgoingCleanupTimerRef.current = setTimeout(() => {
                 outgoingCleanupTimerRef.current = null
                 disposeHowl(outgoing)
-              }, TRACK_CROSSFADE_MS)
+              }, crossfadeMs)
             }
             if (unmuteTimerRef.current) clearTimeout(unmuteTimerRef.current)
             unmuteTimerRef.current = setTimeout(() => {
@@ -388,7 +391,8 @@ export function useHowl(onTrackEnd: () => void) {
               //   （实测：设置 0.8 后 100ms 内被写回）。latestVolume=0（静音用户）
               //   精确命中这个边界。直接定位到终值即可，无需 tween。
               if (latestVolume > 0) {
-                howl.fade(0, latestVolume, SCHEDULED_START_FADE_MS, soundId)
+                const fadeMs = trackCrossfadeMs() || SCHEDULED_START_FADE_MS
+                howl.fade(0, latestVolume, fadeMs, soundId)
               } else {
                 howl.volume(0, soundId)
               }

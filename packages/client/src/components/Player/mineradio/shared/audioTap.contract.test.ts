@@ -82,9 +82,9 @@ describe('音频分析接线契约', () => {
 
   it('用户音量 √v 拆分 + 静音地板（上游 Mineradio writeAudioOutputGain 同款）', () => {
     const src = stripComments(read('timeStretch.ts'))
-    // 1. 成功图：soundtouch → volumeGain → destination，分析线在 gain 之前
-    //    （analyser 卡在元素 √v 与图内 √v 之间 —— 上游拓扑）
-    expect(src).toMatch(/stretchNode\.connect\(volumeGain\)/)
+    // 1. 成功图：soundtouch → EQ → volumeGain → destination，分析线在 gain 之前
+    //    （analyser 卡在元素 √v 与图内 √v 之间 —— 上游拓扑；EQ 在 analyser 上游）
+    expect(src).toMatch(/connectEqualizer\(\s*stretchNode/)
     expect(src).toMatch(/volumeGain\.connect\(context\.destination\)/)
     // 2. 音量分支走感知平方根 + 地板（跟随音量 + 静音不丢节拍）
     expect(src).toMatch(/function splitVolumeGain/)

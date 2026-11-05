@@ -4,6 +4,7 @@ import { Howler } from 'howler'
 import type { Howl } from 'howler'
 import { getAudioTapAnalyser, publishStretchAnalyser } from './audioTap'
 import { SERVER_URL } from './config'
+import { AUDIO_EQ_BANDS, useAudioSettingsStore } from '@/stores/audioSettingsStore'
 
 const MIN_TEMPO = 0.99
 const MAX_TEMPO = 1.01
@@ -45,6 +46,8 @@ interface StretchGraph {
    *   **不会改变声音**（不接回 destination 的另一路），也不碰 SoundTouch。
    */
   analyser: AnalyserNode | null
+  /** 五段均衡器；未启用时增益为 0，节点仍在链上，切开关不会重建音频图。 */
+  equalizer: BiquadFilterNode[]
   /**
    * 用户音量的图内一半（`installVolumeRouting` 的 √v 分支）。
    *
@@ -67,7 +70,58 @@ export interface TimeStretchController {
 }
 
 const graphByAudio = new WeakMap<HTMLMediaElement, StretchGraph>()
+const activeGraphs = new Set<StretchGraph>()
 const registrationByContext = new WeakMap<BaseAudioContext, Promise<void>>()
+
+const createEqualizer = (context: AudioContext): BiquadFilterNode[] =>
+  AUDIO_EQ_BANDS.map((frequency) => {
+    const filter = context.createBiquadFilter()
+    filter.type = 'peaking'
+    filter.frequency.value = frequency
+    filter.Q.value = 1
+    filter.gain.value = 0
+    return filter
+  })
+
+const connectEqualizer = (input: AudioNode, equalizer: BiquadFilterNode[], output: AudioNode): AudioNode => {
+  let tail: AudioNode = input
+  for (const filter of equalizer) {
+    tail.connect(filter)
+    tail = filter
+  }
+  tail.connect(output)
+  return tail
+}
+
+const applyEqualizer = (graph: StretchGraph): void => {
+  const { equalizerEnabled, equalizerGains } = useAudioSettingsStore.getState()
+  graph.equalizer.forEach((filter, index) => {
+    filter.gain.setTargetAtTime(equalizerEnabled ? equalizerGains[index] ?? 0 : 0, graph.context.currentTime, 0.01)
+  })
+}
+
+type SinkCapableAudio = HTMLMediaElement & { setSinkId?: (deviceId: string) => Promise<void> }
+
+const applyOutputDevice = (audio: HTMLMediaElement): void => {
+  const { outputDeviceId } = useAudioSettingsStore.getState()
+  const sink = audio as SinkCapableAudio
+  if (!sink.setSinkId) return
+  void sink.setSinkId(outputDeviceId).catch((error) => {
+    console.warn('Unable to switch audio output device', error)
+  })
+}
+
+const applyAudioSettings = (graph: StretchGraph): void => {
+  applyEqualizer(graph)
+  applyOutputDevice(graph.audio)
+}
+
+useAudioSettingsStore.subscribe((state, previous) => {
+  if (state.equalizerEnabled === previous.equalizerEnabled
+    && state.equalizerGains === previous.equalizerGains
+    && state.outputDeviceId === previous.outputDeviceId) return
+  for (const graph of activeGraphs) applyAudioSettings(graph)
+})
 let nextAudioUsesCors = false
 let obtainAudioPatched = false
 
@@ -125,6 +179,7 @@ function createDisabledGraph(context: AudioContext, audio: HTMLMediaElement): St
     lastBlockCount: 0,
     lastUnderrunCount: 0,
     analyser: null,
+    equalizer: [],
     volumeGain: null,
   }
 }
@@ -172,6 +227,7 @@ export function prepareDirectStreamForTimeStretch(streamUrl: string): boolean {
       if (nextAudioUsesCors) audio.crossOrigin = 'anonymous'
       else audio.removeAttribute('crossorigin')
       nextAudioUsesCors = false
+      applyOutputDevice(audio)
       return audio
     }
     obtainAudioPatched = true
@@ -201,6 +257,7 @@ export function releaseTimeStretch(howl: Howl): (() => void) | null {
   const audio = getAudioElement(howl)
   if (!audio) return null
   const graph = graphByAudio.get(audio)
+  if (graph) activeGraphs.delete(graph)
   if (graph?.analyser && getAudioTapAnalyser() === graph.analyser) {
     publishStretchAnalyser(null)
   }
@@ -308,18 +365,20 @@ function disableGraph(graph: StretchGraph, failed = false): void {
   graph.node.playbackRate.setValueAtTime(1, graph.context.currentTime)
   graph.node.disconnect()
   graph.source.disconnect()
-  // ★ bypass 时音量节点仍在链上：source → volumeGain → destination。
+  for (const filter of graph.equalizer) filter.disconnect()
+  if (graph.volumeGain) graph.volumeGain.disconnect()
+  // ★ bypass 时音量节点仍在链上：source → EQ → volumeGain → destination。
   //   元素 volume 属性已被转发到 gain（installVolumeRouting），不能把
   //   元素直接接回 destination 而绕过它 —— 否则"元素 volume=1 全幅直出"
   //   会让用户音量失控（变成最大音量）。
-  if (graph.volumeGain) {
-    graph.source.connect(graph.volumeGain)
-    graph.volumeGain.connect(graph.context.destination)
-  } else {
-    graph.source.connect(graph.context.destination)
-  }
+  const tail = connectEqualizer(
+    graph.source,
+    graph.equalizer,
+    graph.volumeGain ?? graph.context.destination,
+  )
+  if (graph.volumeGain) graph.volumeGain.connect(graph.context.destination)
   // 旁路时 worklet 被摘掉，分析节点要改从音源直接取，否则视觉会静音
-  if (graph.analyser) graph.source.connect(graph.analyser)
+  if (graph.analyser) tail.connect(graph.analyser)
   graph.audio.playbackRate = 1
 }
 
@@ -334,10 +393,18 @@ function enableGraph(graph: StretchGraph): void {
   if (!graph.bypassed || graph.failed || !graph.source) return
   resumeContext(graph)
   graph.source.disconnect()
+  for (const filter of graph.equalizer) filter.disconnect()
+  if (graph.volumeGain) graph.volumeGain.disconnect()
   graph.source.connect(graph.node)
-  graph.node.connect(graph.context.destination)
-  // 分析节点重新挂到 worklet 输出
-  if (graph.analyser) graph.node.connect(graph.analyser)
+  // 与正常建图保持同一条链：worklet → EQ → volumeGain → destination。
+  const tail = connectEqualizer(
+    graph.node,
+    graph.equalizer,
+    graph.volumeGain ?? graph.context.destination,
+  )
+  if (graph.volumeGain) graph.volumeGain.connect(graph.context.destination)
+  // 分析节点重新挂到 EQ 输出
+  if (graph.analyser) tail.connect(graph.analyser)
   graph.bypassed = false
   graph.metricsSnapshots = 0
   graph.lastBlockCount = graph.node.metrics?.blockCount ?? 0
@@ -379,6 +446,7 @@ export async function attachTimeStretch(howl: Howl): Promise<TimeStretchControll
       installVolumeRouting(audio, existing.volumeGain)
       descriptorRestoreRef.set(audio, existing.volumeGain)
     }
+    applyAudioSettings(existing)
     return createController(existing)
   }
 
@@ -403,6 +471,7 @@ export async function attachTimeStretch(howl: Howl): Promise<TimeStretchControll
   // 杜绝"孤儿 source 元素"再次分配。
   const pendingGraph = createDisabledGraph(context, audio)
   graphByAudio.set(audio, pendingGraph)
+  activeGraphs.add(pendingGraph)
   let source: MediaElementAudioSourceNode | null = null
   let stretchNode: SoundTouchNode | null = null
 
@@ -433,18 +502,19 @@ export async function attachTimeStretch(howl: Howl): Promise<TimeStretchControll
     //   仍有 ~25/255 —— 节拍引擎在静音时有足够分辨率继续打点（上游同款
     //   语义）。此前项目里自设的 -82/-8 收窄把地板信号压到字节读数 2~7，
     //   近似量化归零 —— 表现为"音量 0 就又没节拍"。
+    const equalizer = createEqualizer(context)
     let analyser: AnalyserNode | null = null
     try {
       analyser = context.createAnalyser()
       analyser.fftSize = 2048
       analyser.smoothingTimeConstant = 0.58
-      stretchNode.connect(analyser)
     } catch {
       analyser = null
     }
 
-    stretchNode.connect(volumeGain)
+    const tail = connectEqualizer(stretchNode, equalizer, volumeGain)
     volumeGain.connect(context.destination)
+    if (analyser) tail.connect(analyser)
 
     const graph: StretchGraph = {
       audio,
@@ -459,10 +529,14 @@ export async function attachTimeStretch(howl: Howl): Promise<TimeStretchControll
       lastBlockCount: 0,
       lastUnderrunCount: 0,
       analyser,
+      equalizer,
       volumeGain,
     }
+    applyAudioSettings(graph)
     if (analyser) publishStretchAnalyser(analyser)
     graphByAudio.set(audio, graph)
+    activeGraphs.delete(pendingGraph)
+    activeGraphs.add(graph)
     // These Howls use HTML5 Audio, so Howler's auto-suspend scan does not
     // count them as active WebAudio sounds. The media element is nevertheless
     // routed through this context; allowing Howler to suspend it would leave
