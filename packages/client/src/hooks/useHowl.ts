@@ -20,6 +20,8 @@ import { lyricPlayerBridge } from '@/lib/lyricPlayerBridge'
 import { getScheduledPlaybackPosition } from '@/lib/playbackSync'
 import { hideLoading, showLoading } from '@/components/Player/mineradio/particles/loadingState'
 import { useAudioSettingsStore } from '@/stores/audioSettingsStore'
+import { useSleepTimerStore } from '@/stores/sleepTimerStore'
+import { classifyMediaElementFailure, isRecoverableStreamFailure, type MediaFailureKind } from '@/lib/mediaFailure'
 
 /** Max wait (ms) for Howler `unlock` event before giving up and skipping */
 const PLAY_ERROR_TIMEOUT_MS = 3000
@@ -58,7 +60,11 @@ interface ScheduledStart {
  * Phase 1: Create Howl with volume=0 (silent)
  * Phase 2: onload → seek to target → delay → fade-in unmute
  */
-export function useHowl(onTrackEnd: () => void) {
+export function useHowl(
+  onTrackEnd: () => void,
+  /** 返回 true 表示已接手恢复（重新解析音源），本次不再跳歌。 */
+  onPlaybackFailure?: (kind: MediaFailureKind) => boolean,
+) {
   const howlRef = useRef<Howl | null>(null)
   const soundIdRef = useRef<number | undefined>(undefined)
   const animFrameRef = useRef<number>(0)
@@ -151,6 +157,11 @@ export function useHowl(onTrackEnd: () => void) {
 
   const pausePlayback = useCallback(
     (position: number) => {
+      // 用户暂停后，未完成的 unlock 超时不应再自动跳下一首。
+      if (playErrorTimerRef.current) {
+        clearTimeout(playErrorTimerRef.current)
+        playErrorTimerRef.current = null
+      }
       const pendingStart = scheduledStartRef.current
       cancelScheduledPlayback()
       const howl = howlRef.current
@@ -206,6 +217,8 @@ export function useHowl(onTrackEnd: () => void) {
   const schedulePlayback = useCallback(
     (targetTime: number, executeAt: number, onCommit?: () => void) => {
       cancelScheduledPlayback()
+      // 睡眠定时器到期后，服务端随后下发的恢复播放不得把本机叫醒。
+      if (useSleepTimerStore.getState().localHold) return
       const howl = howlRef.current
       if (!howl) return
 
@@ -439,6 +452,11 @@ export function useHowl(onTrackEnd: () => void) {
             clearTimeout(loadTimerRef.current)
             loadTimerRef.current = null
           }
+          const { kind } = classifyMediaElementFailure(typeof msg === 'number' ? msg : null)
+          if (isRecoverableStreamFailure(kind) && onPlaybackFailure?.(kind)) {
+            console.warn('Howl load error, refreshing stream URL:', msg)
+            return
+          }
           // 上游 `13-playback-start-audio.js:1516,1541` 的 catch 里也有
           // `hideLoading()` —— 加载失败同样要撤掉加载态，否则雾环会一直飘。
           // （重试分支不撤：那次 `howl.load()` 仍有机会成功。）
@@ -452,12 +470,15 @@ export function useHowl(onTrackEnd: () => void) {
           if (playErrorTimerRef.current) clearTimeout(playErrorTimerRef.current)
           playErrorTimerRef.current = setTimeout(() => {
             playErrorTimerRef.current = null
+            // 停播/切歌后 howlRef 已换或已空：这次 unlock 失败与当前播放无关。
+            if (howlRef.current !== howl) return
             console.warn('Howl unlock timeout, skipping track')
             toast.error('播放失败，已跳到下一首')
             onTrackEnd()
           }, PLAY_ERROR_TIMEOUT_MS)
           howl.once('unlock', () => {
             if (howlRef.current !== howl) return // Already switched or unmounted
+            if (useSleepTimerStore.getState().localHold) return
             if (playErrorTimerRef.current) {
               clearTimeout(playErrorTimerRef.current)
               playErrorTimerRef.current = null
@@ -489,7 +510,7 @@ export function useHowl(onTrackEnd: () => void) {
       )
       if (!deferCommit) usePlayerStore.getState().setCurrentTrack(track)
     },
-    [cancelScheduledPlayback, disposeHowl, onTrackEnd, startTimeUpdate, stopTimeUpdate],
+    [cancelScheduledPlayback, disposeHowl, onPlaybackFailure, onTrackEnd, startTimeUpdate, stopTimeUpdate],
   )
 
   // Volume sync

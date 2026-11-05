@@ -198,6 +198,27 @@ async function resolveStreamUrl(
 }
 
 /**
+ * 预热下一首的播放地址：只填 provider 的 URL 缓存，不下载音频、不改房间状态。
+ *
+ * 切歌时 `_playTrackInRoom` 仍会重新解析，但命中缓存后省掉一次上游往返。
+ * Bilibili 的 DASH 地址每次都要新解析，带 cookie 的 VIP 地址也不会进缓存，
+ * 这两类直接跳过。
+ */
+async function preResolveNextStream(roomId: string): Promise<void> {
+  try {
+    const room = roomRepo.get(roomId)
+    if (!room) return
+    const next = queueService.getNextTrack(roomId, room.playMode)
+    if (!next || next.id === room.currentTrack?.id || next.source === 'bilibili') return
+    const auth = authService.getBestAuth(next.source, roomId)
+    if (auth?.cookie) return
+    await resolveStreamUrl(next.source, next.urlId, room.audioQuality, undefined, false, 0)
+  } catch (error) {
+    logger.debug('下一首播放地址预解析失败', { roomId, error })
+  }
+}
+
+/**
  * Resolve stream URL / cover, set current track, and broadcast PLAYER_PLAY.
  * Returns true on success, false on failure.
  * Serialized per room via mutex to prevent concurrent state corruption.
@@ -219,8 +240,7 @@ export function autoPlayIfEmpty(io: TypedServer, roomId: string, track: Track): 
   })
 }
 
-async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): Promise<boolean> {
-  const room = roomRepo.get(roomId)
+async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): Promise<boolean> {  const room = roomRepo.get(roomId)
   if (!room) return false
 
   // Never trust/reuse a client-provided URL here. Resolving on the server is
@@ -437,6 +457,10 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
     track: resolved,
     playState: scheduled(room.playState, roomId, scheduleTime),
   })
+
+  // 预解析下一首的播放地址（只填 provider 的 URL 缓存，不下载音频）：
+  // 切歌时省掉一次上游 URL 解析往返，过渡更接近无缝。异步执行，失败静默。
+  void preResolveNextStream(roomId)
 
   // 通知大厅用户当前播放曲目变化
   broadcastRoomList(io)
@@ -835,6 +859,73 @@ export function refreshStreamUrlForJoin(roomId: string): Promise<boolean> {
       return false
     }
   })
+}
+
+/**
+ * A client's media element failed (expired CDN URL). Re-resolve the current
+ * track's stream URL and hand it to the room. Throttled per room so a roomful
+ * of clients hitting the same dead URL only causes one upstream request.
+ */
+const MANUAL_STREAM_REFRESH_MIN_INTERVAL_MS = 10_000
+const lastManualStreamRefreshAt = new Map<string, number>()
+const lastManualStreamRefreshOkAt = new Map<string, number>()
+const manualStreamRefreshInFlight = new Map<string, Promise<Track | null>>()
+
+export function refreshCurrentStreamUrl(roomId: string, requestedTrackId?: string): Promise<Track | null> {
+  const inFlight = manualStreamRefreshInFlight.get(roomId)
+  if (inFlight) return inFlight
+
+  const room = roomRepo.get(roomId)
+  const track = room?.currentTrack
+  if (!room || !track) return Promise.resolve(null)
+  if (requestedTrackId && requestedTrackId !== track.id) return Promise.resolve(null)
+
+  const now = Date.now()
+  const lastRefreshAt = lastManualStreamRefreshAt.get(roomId) ?? 0
+  if (now - lastRefreshAt < MANUAL_STREAM_REFRESH_MIN_INTERVAL_MS) {
+    // A refresh just ran: hand the already-refreshed URL to the next failing
+    // client instead of leaving it to skip the track. Only if that refresh
+    // succeeded (failing refreshes leave the old, dead URL in place).
+    const refreshedRecently = (lastManualStreamRefreshOkAt.get(roomId) ?? 0) >= lastRefreshAt
+    return Promise.resolve(refreshedRecently ? (room.currentTrack ?? null) : null)
+  }
+  lastManualStreamRefreshAt.set(roomId, now)
+
+  const task = (async (): Promise<Track | null> => {
+    try {
+      const auth = authService.getBestAuth(track.source, roomId)
+      const refreshed = await resolveStreamUrl(
+        track.source,
+        track.urlId,
+        room.audioQuality,
+        auth?.cookie,
+        true,
+        auth?.vipType ?? 0,
+      )
+      if (!refreshed || room.currentTrack?.id !== track.id) return null
+      room.currentTrack = {
+        ...room.currentTrack,
+        streamUrl: refreshed.url,
+        streamFormat: refreshed.streamFormat,
+        requiresServerProxy: refreshed.requiresServerProxy,
+      }
+      lastManualStreamRefreshOkAt.set(roomId, Date.now())
+      logger.info('Refreshed stream URL after playback failure', {
+        event: 'player.stream_url_refreshed',
+        roomId,
+        trackId: track.id,
+      })
+      return room.currentTrack
+    } catch (err) {
+      logger.warn('Failed to refresh stream URL after playback failure', { roomId, trackId: track.id, err })
+      return null
+    } finally {
+      manualStreamRefreshInFlight.delete(roomId)
+    }
+  })()
+
+  manualStreamRefreshInFlight.set(roomId, task)
+  return task
 }
 
 /**

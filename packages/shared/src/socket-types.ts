@@ -59,6 +59,7 @@ export interface ServerToClientEvents {
   [EVENTS.PLAYER_RESUME]: (data: { playState: ScheduledPlayState }) => void
   [EVENTS.PLAYER_SEEK]: (data: { playState: ScheduledPlayState }) => void
   [EVENTS.PLAYER_TRACK_METADATA_UPDATED]: (data: { track: Track }) => void
+  [EVENTS.PLAYER_STREAM_REFRESHED]: (data: { track: Track }) => void
   [EVENTS.PLAYER_SYNC_RESPONSE]: (data: {
     currentTime: number
     isPlaying: boolean
@@ -160,6 +161,7 @@ export interface ClientToServerEvents {
   [EVENTS.PLAYER_SYNC]: (data: { currentTime: number; hostServerTime?: number }) => void
   [EVENTS.PLAYER_SYNC_REQUEST]: () => void
   [EVENTS.PLAYER_SET_MODE]: (data: { mode: PlayMode }) => void
+  [EVENTS.PLAYER_REFRESH_STREAM]: (data?: { trackId?: string }) => void
 
   [EVENTS.QUEUE_ADD]: (data: { track: Track }) => void
   [EVENTS.QUEUE_INSERT_AFTER_CURRENT]: (data: { track: Track }) => void

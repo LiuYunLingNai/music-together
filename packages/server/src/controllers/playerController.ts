@@ -89,6 +89,18 @@ export function registerPlayerController(io: TypedServer, socket: TypedSocket) {
   )
 
   socket.on(
+    EVENTS.PLAYER_REFRESH_STREAM,
+    withRoom(async (ctx, raw) => {
+      if (!(await checkSocketRateLimit(ctx.socket))) return
+      const trackId = typeof raw?.trackId === 'string' ? raw.trackId : undefined
+      const track = await playerService.refreshCurrentStreamUrl(ctx.roomId, trackId)
+      if (track && (!trackId || track.id === trackId)) {
+        ctx.io.to(ctx.roomId).emit(EVENTS.PLAYER_STREAM_REFRESHED, { track })
+      }
+    }),
+  )
+
+  socket.on(
     EVENTS.PLAYER_SET_MODE,
     withPermission('set-mode', 'Player', (ctx, data) => {
       const parsed = playerSetModeSchema.safeParse(data)

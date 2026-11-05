@@ -32,6 +32,8 @@ export const EVENTS = {
   PLAYER_SYNC_RESPONSE: 'player:sync_response',
   PLAYER_SET_MODE: 'player:set_mode',
   PLAYER_TRACK_METADATA_UPDATED: 'player:track_metadata_updated',
+  PLAYER_REFRESH_STREAM: 'player:refresh_stream',
+  PLAYER_STREAM_REFRESHED: 'player:stream_refreshed',
 
   // Queue management
   QUEUE_ADD: 'queue:add',
