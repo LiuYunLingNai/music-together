@@ -1,3 +1,7 @@
-// 本仓没有 beat_this / htdemucs 的 GPU 分析调度，町景的自动降级把它当恒不活跃。
-/* eslint-disable @typescript-eslint/no-unused-vars -- 与上游同签名：宿主没有 GPU 分析调度，参数恒不读。 */
-export const isGpuAnalysisActive = (_now?: number): boolean => false
+// 宿主没有 GPU 分离；町景的自动降级改为跟随本机的分析活动（混音特征 / 响度测量）。
+import { isAnalysisActivity } from '@/services/beatFx/analysisActivity'
+
+export const isGpuAnalysisActive = (now?: number): boolean => {
+  void now
+  return isAnalysisActivity()
+}

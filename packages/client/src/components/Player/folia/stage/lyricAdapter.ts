@@ -6,6 +6,8 @@ import { buildAMLLLinesFromLrc } from '@/lib/lyricLrc'
 import { buildLineRenderHints } from '../upstream/utils/lyrics/renderHints'
 import type { Line, Theme, Word } from '../types'
 import { attachFoliaInterludes } from './lyricPresentation'
+import { HAN_OR_KANA } from '@/lib/lyrics/hanKanaText'
+import { isIcuFoliaReady, loadIcuFolia, segmentIcuFolia } from '@/lib/lyrics/icuFolia'
 
 /**
  * 歌词适配层：AMLL `LyricLine[]` → Folia `Line[]`。
@@ -107,7 +109,32 @@ export function useFoliaLines(): Line[] {
     [ttmlLines, lyric, tlyric],
   )
 
-  return useMemo(() => attachFoliaInterludes(foldFoliaBackgroundVocals(source.map(toFoliaLine))), [source])
+  // 上游 icu-folia：中文/日文歌词用 jieba / BudouX 切词，按节奏排版的模式
+  // （classic / hanabi / lumiere / nebbia / partita / sonnet / tempera）读它。
+  const [icuReady, setIcuReady] = useState(isIcuFoliaReady())
+  useEffect(() => {
+    if (icuReady) return
+    if (!source.some((line) => HAN_OR_KANA.test(line.words.map((word) => word.word ?? '').join('')))) return
+    let alive = true
+    void loadIcuFolia().then((ok) => {
+      if (alive && ok) setIcuReady(true)
+    })
+    return () => {
+      alive = false
+    }
+  }, [source, icuReady])
+
+  return useMemo(() => {
+    const lines = source.map(toFoliaLine)
+    if (icuReady) {
+      for (const line of lines) {
+        if (!line.fullText) continue
+        const segments = segmentIcuFolia(line.fullText)
+        if (segments) line.autoWordSegments = segments
+      }
+    }
+    return attachFoliaInterludes(foldFoliaBackgroundVocals(lines))
+  }, [source, icuReady])
 }
 
 /**

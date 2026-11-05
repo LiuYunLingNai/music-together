@@ -116,9 +116,18 @@ export function FoliaPlayerStage({
     },
     [mode, setFoliaSettings],
   )
+  /**
+   * 歌词字号 → folia 的 `lyricsFontScale`。
+   *
+   * 本项目用 `lyricFontSize`（百分数，出厂 90）表达字号，而 folia 用倍率。
+   * 以 90 为基准换算，因此出厂设置下倍率为 1（与上游默认观感一致）。
+   */
+  const lyricsFontScale = (lyricFontSize / 90) * settings.fontScale
+  // cadenza 的调参字号同样乘 `lyricsFontScale`（上游 `cadenza/entry.tsx`），
+  // 所以这里传最终倍率，只传 `settings.fontScale` 会漏掉歌词字号这一档。
   const tuningsFor = useMemo(
-    () => createFoliaTuningResolver({ tunings: settings.tunings, fontScale: settings.fontScale }),
-    [settings.tunings, settings.fontScale],
+    () => createFoliaTuningResolver({ tunings: settings.tunings, fontScale: lyricsFontScale }),
+    [settings.tunings, lyricsFontScale],
   )
   /**
    * 歌词样式窗口开着时，舞台上的歌词与几何背景不再画。
@@ -155,9 +164,9 @@ export function FoliaPlayerStage({
   const isCalibrating = lyricOffsetPreview?.key === lyricOffsetKey
   const lyricOffsetMs = isCalibrating ? lyricOffsetPreview.offsetMs : savedLyricOffsetMs
 
-  const { currentTime } = useFoliaClock(lyricOffsetMs)
+  const { currentTime, mediaTime } = useFoliaClock(lyricOffsetMs)
   // 窗口的实时预览与视频层读同一组信号（上游 motionSignals 的宿主版本）。
-  useMirrorPreviewSignals(currentTime, audio)
+  useMirrorPreviewSignals(currentTime, mediaTime, audio)
   // 每首随机样式：换歌时从池里换一种（上游 useRandomVisualizerMode）。
   useRandomFoliaMode(currentTrack?.id ?? null)
   // 智能动感模式：把当前歌曲的拍点表装进实时时钟（不改变任何画面，只是备好数据）。
@@ -184,13 +193,6 @@ export function FoliaPlayerStage({
   )
   const [currentLineIndex] = usePlayerStore(useShallow(selectLineContext))
 
-  /**
-   * 歌词字号 → folia 的 `lyricsFontScale`。
-   *
-   * 本项目用 `lyricFontSize`（百分数，出厂 90）表达字号，而 folia 用倍率。
-   * 以 90 为基准换算，因此出厂设置下倍率为 1（与上游默认观感一致）。
-   */
-  const lyricsFontScale = (lyricFontSize / 90) * settings.fontScale
   const subtitleFontScale = (lyricTranslationFontSize / 90) * settings.subtitleScale
 
   const coverUrl = currentTrack?.cover ? getProxiedCoverUrl(currentTrack.cover) : null
@@ -202,6 +204,9 @@ export function FoliaPlayerStage({
       ? { transparent: true }
       : {
           ...settings.backgroundConfig,
+          // `settings.background` 是宿主的独立设置；上游把所选背景写在 `config.mode`。
+          // 不补这一步，舞台永远画默认的 latent，样式窗口里换背景只在窗口内生效。
+          mode: settings.background,
           customImage: monetBackgroundImage ?? settings.backgroundConfig.customImage ?? null,
           ...(styleWindowOpen
             ? { common: { ...settings.backgroundConfig.common, disableGeometricBackground: true } }

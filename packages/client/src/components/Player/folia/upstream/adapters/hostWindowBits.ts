@@ -52,4 +52,4 @@ export const pickRandomVisualizerMode = (pool: readonly string[], exclude?: stri
 
 /** 上游 windowRegistry 的预览起点偏移（fume 18.4s，其余 0），由 PreviewPlaceholder 读取。 */
 export const getVisualizerPreviewStartOffset = (mode: string, loop: number): number =>
-    (mode === 'fume' ? 18.4 : 0) % loop
+    loop <= 0 ? 0 : (mode === 'fume' ? 18.4 : 0) % loop

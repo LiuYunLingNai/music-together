@@ -95,6 +95,12 @@ export const getCoverIdentity = (url: string | null | undefined): string => {
 
     try {
         const urlObj = new URL(trimmedUrl);
+        // 宿主把跨域封面包在服务端代理里：身份要看被代理的原始地址，
+        // 否则所有代理封面都会退化成同一个 `/api/music/cover-proxy`。
+        if (urlObj.pathname.endsWith(COVER_PROXY_PATH)) {
+            const inner = urlObj.searchParams.get('url');
+            return inner ? getCoverIdentity(inner) : trimmedUrl;
+        }
         if (NON_RESIZABLE_COVER_PROTOCOLS.has(urlObj.protocol)) return trimmedUrl;
         if (NETEASE_COVER_HOST_PATTERN.test(urlObj.hostname)) return `netease:${urlObj.pathname}`;
         if (isKugouCoverUrl(urlObj)) return `kugou:${urlObj.pathname.replace(KUGOU_COVER_PATH_PATTERN, '$1*$3')}`;

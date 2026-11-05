@@ -15,12 +15,13 @@ import { isFoliaModeId } from './registry'
  * 上与上游同一语义：
  *   · 全局一档：关闭 / 只用已分析 / 开启；开与关决定画面是不是拍点帧。
  *   · 每个效果自己的开关与强度（0..2，1 是调好的样子），只列当前样式声明过的。
- * 差异：上游的拍点来自 beat_this 模型，本仓来自离线拍点分析，因此「只用已分析」
- * 与「开启」在当前实现里等价 —— 分析本来就不落盘缓存。文案里如实说明。
+ * 差异：上游的拍点来自 beat_this 模型，本仓来自离线拍点分析；分析结果会落盘缓存，
+ * 但两种「开」的模式目前都允许新开分析（缓存命中时不重复跑）。
  */
+
 const MODE_OPTIONS: ReadonlyArray<{ value: SmartBeatMode; label: string; note: string }> = [
   { value: 'off', label: '关闭', note: '画面完全按原来的音频响应走。' },
-  { value: 'cached', label: '只用已分析', note: '不新开分析；有拍点表时按拍点画。' },
+  { value: 'cached', label: '只用已分析', note: '优先用缓存的拍点表；没有缓存时同样会分析一次。' },
   { value: 'on', label: '开启', note: '切歌后在后台分析整首歌，拍点到达即生效。' },
 ]
 

@@ -78,6 +78,8 @@ export function getFoliaTuningProps(mode: FoliaModeId, settings: FoliaTuningSett
   if (mode === 'still') return {}
   const key = mode === 'luminous' ? 'classicTuning' : `${mode}Tuning`
   const tuning = resolveFoliaTuning(mode, settings.tunings)
-  if (mode === 'cadenza') tuning.fontScale = Number(tuning.fontScale) * settings.fontScale
+  // 预览缩略图只传 `tunings`，缺 `fontScale` 时按 1 处理，否则 cadenza 会算出 NaN。
+  const fontScale = Number.isFinite(settings.fontScale) ? settings.fontScale : 1
+  if (mode === 'cadenza') tuning.fontScale = Number(tuning.fontScale) * fontScale
   return { [key]: tuning }
 }

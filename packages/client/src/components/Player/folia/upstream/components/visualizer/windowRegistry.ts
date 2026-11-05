@@ -121,7 +121,7 @@ export const applyVisualizerTuning = (
 ): Record<string, unknown> => {
     const host = HOST_BY_UPSTREAM[mode]
     if (!host || !props.theme) return props
-    return { ...props, ...getFoliaTuningProps(host, { tunings: {} } as never) }
+    return { ...props, ...getFoliaTuningProps(host, { fontScale: 1, tunings: {} } as never) }
 }
 
 export type { FoliaModeId }

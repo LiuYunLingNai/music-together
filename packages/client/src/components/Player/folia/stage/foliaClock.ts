@@ -38,6 +38,8 @@ import { tickBeatFxAt } from '@/services/beatFx/beatFxLive'
 export interface FoliaClock {
   /** 播放位置（秒），已应用歌词偏移。 */
   currentTime: MotionValue<number>
+  /** 原始媒体位置（秒），未扣歌词偏移：视频层等按播放器时间对齐的消费者读它。 */
+  mediaTime: MotionValue<number>
   /** 舞台是否处于播放中（供模式做节流判断）。 */
   isPlaying: boolean
 }
@@ -47,6 +49,7 @@ const TIME_EPSILON = 0.001
 
 export function useFoliaClock(offsetMs: number): FoliaClock {
   const currentTime = useMemo(() => motionValue(0), [])
+  const mediaTime = useMemo(() => motionValue(0), [])
   const isPlaying = usePlayerStore((s) => s.isPlaying)
   const offsetSeconds = offsetMs / 1000
 
@@ -56,21 +59,33 @@ export function useFoliaClock(offsetMs: number): FoliaClock {
   //   偏移只在换歌或拖动校准条时变，一帧的延迟不可感知；而 rAF 循环不必
   //   因校准拖动而反复重建，反而是更重要的收益。
   const offsetRef = useRef(offsetSeconds)
-  useEffect(() => {
-    offsetRef.current = offsetSeconds
-  }, [offsetSeconds])
   const lastWrittenRef = useRef(Number.NaN)
+  /** 最近一次写入的**未扣偏移**时间：偏移变化时据此立刻重算，暂停中也能跟上校准条。 */
+  const rawTimeRef = useRef(0)
 
   const write = useMemo(
     () => (seconds: number) => {
+      rawTimeRef.current = seconds
+      if (mediaTime.get() !== seconds) mediaTime.set(seconds)
       const next = Math.max(0, seconds - offsetRef.current)
       const last = lastWrittenRef.current
       if (Number.isFinite(last) && Math.abs(next - last) < TIME_EPSILON) return
       lastWrittenRef.current = next
       currentTime.set(next)
     },
-    [currentTime],
+    [currentTime, mediaTime],
   )
+
+  /**
+   * 偏移变化时立刻用最近一次原始时间重算。
+   *
+   * 暂停中没有 rAF，下面的 store 订阅又只在 `currentTime` 变化时写入，单靠
+   * 更新 ref 会让校准条（暂停中拖动 / 重置偏移）不动画面。
+   */
+  useEffect(() => {
+    offsetRef.current = offsetSeconds
+    write(rawTimeRef.current)
+  }, [offsetSeconds, write])
 
   // ① 播放中：rAF 逐帧读逐帧桥，取不到时回退 store
   useEffect(() => {
@@ -118,5 +133,5 @@ export function useFoliaClock(offsetMs: number): FoliaClock {
     })
   }, [write])
 
-  return { currentTime, isPlaying }
+  return { currentTime, mediaTime, isPlaying }
 }

@@ -180,8 +180,10 @@ export function FoliaStyleWindow({ open, onClose }: FoliaStyleWindowProps) {
                 harmonySubtitleBackground={settings.harmonySubtitleBackground}
                 onToggleHarmonySubtitleBackground={(enabled) => setSettings({ harmonySubtitleBackground: enabled })}
                 fontStyle={theme.fontStyle}
-                fontScale={lyricFontSize / 90}
-                subtitleFontScale={subtitleFontSize / 90}
+                // 与舞台同一套换算（含 folia 自己的 fontScale/subtitleScale），
+                // 否则实时预览与舞台的字号在非默认倍率下对不上。
+                fontScale={(lyricFontSize / 90) * settings.fontScale}
+                subtitleFontScale={(subtitleFontSize / 90) * settings.subtitleScale}
                 fontWeight={lyricFontWeight ?? null}
                 customFontFamily={null}
                 customFontLabel={null}

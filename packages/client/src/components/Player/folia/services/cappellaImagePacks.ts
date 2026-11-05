@@ -18,7 +18,7 @@ const AVATAR_PACK_KEY = 'cappella_custom_avatar_pack'
 
 const SUPPORTED_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg']
 
-function withDatabase<T>(run: (store: IDBObjectStore) => T | undefined): Promise<T | null> {
+function withDatabase<T>(run: (store: IDBObjectStore) => IDBRequest<T> | void): Promise<T | null> {
   return new Promise((resolve) => {
     if (typeof indexedDB === 'undefined') {
       resolve(null)
@@ -41,10 +41,17 @@ function withDatabase<T>(run: (store: IDBObjectStore) => T | undefined): Promise
       const database = request.result
       try {
         const transaction = database.transaction('assets', 'readwrite')
-        const outcome = run(transaction.objectStore('assets'))
+        let outcome: T | null = null
+        const query = run(transaction.objectStore('assets'))
+        // resolve 的是请求的 result（get 的值 / put 的键），不是 IDBRequest 本身。
+        if (query) {
+          query.onsuccess = () => {
+            outcome = query.result ?? null
+          }
+        }
         transaction.oncomplete = () => {
           database.close()
-          resolve(outcome ?? null)
+          resolve(outcome)
         }
         transaction.onerror = () => {
           database.close()

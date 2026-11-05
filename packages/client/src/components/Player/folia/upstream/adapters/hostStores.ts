@@ -2,7 +2,14 @@ import { create } from 'zustand'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { resolveFoliaTuning } from '../../stage/foliaTunings'
 import type { FoliaModeId } from '../../registry'
-import type { LyricRenderQuality, VisualizerBackgroundMode, VisualizerFrameRate, VisualizerMode } from '../types'
+import type {
+    LyricRenderQuality,
+    UrlBackgroundItem,
+    VisualizerBackgroundMode,
+    VisualizerFrameRate,
+    VisualizerMode,
+} from '../types'
+import { sanitizeUrlBackgroundItem, sanitizeUrlBackgroundList } from '../utils/urlBackground'
 import { resolveSmartBeatSettings, type SmartBeatPatch } from '@/services/beatFx/smartBeatSettings'
 import { DEFAULT_SMART_BEAT_SETTINGS } from '@/services/beatFx/beatFxTypes'
 import { ensureFoliaAssets, useFoliaAssetStore } from '../../stage/foliaAssetStore'
@@ -99,6 +106,26 @@ const ownState = () => {
     }
 }
 
+/** 嵌入网页背景的条目（宿主存在 `foliaSettings.backgroundConfig.url`）。 */
+const urlBackgroundItems = (): UrlBackgroundItem[] =>
+    useSettingsStore.getState().foliaSettings.backgroundConfig.url?.items ?? []
+
+/** 上游写 `url_background_list` / `url_background_selected_id` 的宿主版本。 */
+const writeUrlBackground = (patch: { items?: UrlBackgroundItem[]; selectedId?: string | null }): void => {
+    const store = useSettingsStore.getState()
+    const config = store.foliaSettings.backgroundConfig
+    const current = config.url
+    store.setFoliaSettings({
+        backgroundConfig: {
+            ...config,
+            url: {
+                items: patch.items ?? current?.items ?? [],
+                selectedId: patch.selectedId !== undefined ? patch.selectedId : current?.selectedId ?? null,
+            },
+        },
+    })
+}
+
 const actions = () => ({
     handleSetVisualizerOpacity: (opacity: number) => {
         useSettingsStore.getState().setFoliaSettings({ backgroundDim: 1 - opacity })
@@ -130,12 +157,28 @@ const actions = () => ({
         setGlobalVisualizerFrameRate(frameRate)
         useVisualizerSettingsStore.setState({ visualizerFrameRate: frameRate })
     },
-    handleSetUrlBackgroundList: () => {},
-    handleSetUrlBackgroundSelectedId: () => {},
-    handleAddUrlBackgroundItem: () => {},
-    handleUpdateUrlBackgroundItem: () => {},
-    handleDeleteUrlBackgroundItem: () => {},
-    handleSelectUrlBackgroundItem: () => {},
+    handleSetUrlBackgroundList: (items: UrlBackgroundItem[]) => writeUrlBackground({ items: sanitizeUrlBackgroundList(items) }),
+    handleSetUrlBackgroundSelectedId: (id: string | null) => writeUrlBackground({ selectedId: id }),
+    handleAddUrlBackgroundItem: (item: UrlBackgroundItem) => {
+        const sanitized = sanitizeUrlBackgroundItem(item)
+        if (!sanitized) return
+        writeUrlBackground({ items: [...urlBackgroundItems(), sanitized] })
+    },
+    handleUpdateUrlBackgroundItem: (id: string, patch: Partial<Omit<UrlBackgroundItem, 'id'>>) => {
+        const next = urlBackgroundItems().map((item) =>
+            item.id === id ? sanitizeUrlBackgroundItem({ ...item, ...patch, id: item.id }) ?? item : item,
+        )
+        writeUrlBackground({ items: next })
+    },
+    handleDeleteUrlBackgroundItem: (id: string) => {
+        const next = urlBackgroundItems().filter((item) => item.id !== id)
+        const selectedId = useSettingsStore.getState().foliaSettings.backgroundConfig.url?.selectedId
+        writeUrlBackground({
+            items: next,
+            selectedId: selectedId === id ? next[0]?.id ?? null : selectedId ?? null,
+        })
+    },
+    handleSelectUrlBackgroundItem: (id: string | null) => writeUrlBackground({ selectedId: id }),
     // 上游各样式面板从 settings 里取的素材动作（群唱表情/头像、莫奈人像）：写宿主素材 store。
     handleImportCustomCappellaEmojiPack: (files: File[]) => useFoliaAssetStore.getState().handleImportCustomCappellaEmojiPack(files),
     handleClearCustomCappellaEmojiPack: () => useFoliaAssetStore.getState().handleClearCustomCappellaEmojiPack(),

@@ -3,7 +3,8 @@ import { getLineRenderEndTime } from '../../utils/lyrics/renderHints';
 import placeholderCoverUrl from '../../assets/placeholder_cover.jpg';
 import placeholderCover2Url from '../../assets/placeholder_cover-2.jpg';
 import { getVisualizerRegistryEntry } from './windowRegistry';
-const getVisualizerPreviewStartOffset = (mode: string, loop: number) => getVisualizerRegistryEntry(mode as never).previewStartOffset % loop;
+const getVisualizerPreviewStartOffset = (mode: string, loop: number) =>
+    loop <= 0 ? 0 : getVisualizerRegistryEntry(mode as never).previewStartOffset % loop;
 
 const createCharacterWords = (text: string, startTime: number, endTime: number) => {
     const chars = Array.from(text);

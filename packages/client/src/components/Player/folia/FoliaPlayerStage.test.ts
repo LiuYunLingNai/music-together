@@ -17,12 +17,17 @@ vi.mock('./stage/foliaRenderState', () => ({ useFoliaRenderState: () => ({ pause
 vi.mock('./stage/foliaClock', () => ({
   useFoliaClock: (offsetMs: number) => {
     const currentTime = useMemo(() => motionValue(0), [])
+    const mediaTime = useMemo(() => motionValue(0), [])
     useEffect(() => {
-      const update = () => currentTime.set(Math.max(0, usePlayerStore.getState().currentTime - offsetMs / 1000))
+      const update = () => {
+        const seconds = usePlayerStore.getState().currentTime
+        mediaTime.set(seconds)
+        currentTime.set(Math.max(0, seconds - offsetMs / 1000))
+      }
       update()
       return usePlayerStore.subscribe(update)
-    }, [currentTime, offsetMs])
-    return { currentTime }
+    }, [currentTime, mediaTime, offsetMs])
+    return { currentTime, mediaTime }
   },
 }))
 vi.mock('./stage/lyricAdapter', async (importOriginal) => {

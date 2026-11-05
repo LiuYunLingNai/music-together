@@ -9,6 +9,9 @@ import type { AudioBands, Line } from '../types'
 import { PlayerState } from '../types'
 import { findFoliaActiveLineIndex, foldFoliaBackgroundVocals, toFoliaLine } from '../../stage/lyricAdapter'
 import { attachFoliaInterludes } from '../../stage/lyricPresentation'
+import { getLyricOffsetKey } from '@/lib/lyricOffset'
+import { isIcuFoliaReady, loadIcuFolia, segmentIcuFolia } from '@/lib/lyrics/icuFolia'
+import { HAN_OR_KANA } from '@/lib/lyrics/hanKanaText'
 
 /**
  * 上游设置窗口与预览读的宿主运行时模块的替身合集。
@@ -36,8 +39,20 @@ export interface DisplayPlaybackState {
     coverUrl: string | null
 }
 
-/** 歌词转换按源对象与字幕开关缓存：store 每 100ms 更新一次，长歌词不该每次重转。 */
-let lineCache: { ttml: unknown; lyric: string; tlyric: string; translation: boolean; romanization: boolean; lines: Line[] } | null = null
+/** 歌词转换按源对象、字幕开关与 icu 就绪状态缓存：store 每 100ms 更新一次，长歌词不该每次重转。 */
+let lineCache: { ttml: unknown; lyric: string; tlyric: string; translation: boolean; romanization: boolean; icuReady: boolean; lines: Line[] } | null = null
+let icuLoadStarted = false
+
+/** 与舞台同源的 CJK 切词：窗口的实时预览也要拿到 `autoWordSegments`。 */
+const bakeAutoWordSegments = (lines: Line[]): void => {
+    if (!isIcuFoliaReady()) return
+    for (const line of lines) {
+        if (!line.fullText) continue
+        const segments = segmentIcuFolia(line.fullText)
+        if (segments) line.autoWordSegments = segments
+    }
+}
+
 const displayLines = (state: HostPlayerState): Line[] => {
     const { showTranslation, showRomanization } = useSettingsStore.getState().foliaSettings
     if (lineCache
@@ -45,19 +60,39 @@ const displayLines = (state: HostPlayerState): Line[] => {
         && lineCache.lyric === state.lyric
         && lineCache.tlyric === state.tlyric
         && lineCache.translation === showTranslation
-        && lineCache.romanization === showRomanization) {
+        && lineCache.romanization === showRomanization
+        && lineCache.icuReady === isIcuFoliaReady()) {
         return lineCache.lines
     }
     const source = state.ttmlLines && state.ttmlLines.length > 0
         ? state.ttmlLines
         : buildAMLLLinesFromLrc(state.lyric, state.tlyric)
+    if (!isIcuFoliaReady() && !icuLoadStarted
+        && source.some((line) => HAN_OR_KANA.test((line.words ?? []).map((word) => word.word ?? '').join('')))) {
+        icuLoadStarted = true
+        void loadIcuFolia().then((ok) => {
+            if (!ok) return
+            lineCache = null
+            usePlaybackStore.setState(snapshot())
+        })
+    }
     // 与舞台同判据：关掉的翻译 / 音译在窗口的实时预览里也不该出现。
-    const lines = attachFoliaInterludes(foldFoliaBackgroundVocals(source.map(toFoliaLine))).map((line) => ({
+    const built = attachFoliaInterludes(foldFoliaBackgroundVocals(source.map(toFoliaLine)))
+    bakeAutoWordSegments(built)
+    const lines = built.map((line) => ({
         ...line,
         translation: showTranslation ? line.translation : undefined,
         romanization: showRomanization ? line.romanization : undefined,
     }))
-    lineCache = { ttml: state.ttmlLines, lyric: state.lyric, tlyric: state.tlyric, translation: showTranslation, romanization: showRomanization, lines }
+    lineCache = {
+        ttml: state.ttmlLines,
+        lyric: state.lyric,
+        tlyric: state.tlyric,
+        translation: showTranslation,
+        romanization: showRomanization,
+        icuReady: isIcuFoliaReady(),
+        lines,
+    }
     return lines
 }
 
@@ -73,11 +108,17 @@ const displaySong = (track: HostPlayerState['currentTrack']): DisplaySong | null
 const snapshot = (): DisplayPlaybackState => {
     const state = usePlayerStore.getState()
     const lines = displayLines(state)
+    // 与舞台同一口径：歌词偏移从时钟里减掉，窗口预览的当前行才不会和舞台差一行。
+    const offsetKey = getLyricOffsetKey(state.currentTrack)
+    const preview = state.lyricOffsetPreview
+    const offsetMs = preview?.key === offsetKey
+        ? preview.offsetMs
+        : useSettingsStore.getState().lyricOffsets[offsetKey ?? ''] ?? 0
     return {
         currentTrack: displaySong(state.currentTrack),
         lines: lines.length > 0 ? { lines } : null,
         duration: state.duration,
-        currentLineIndex: findFoliaActiveLineIndex(lines, state.currentTime),
+        currentLineIndex: findFoliaActiveLineIndex(lines, Math.max(0, state.currentTime - offsetMs / 1000)),
         isPlaying: state.isPlaying,
         coverUrl: state.currentTrack?.cover ? getProxiedCoverUrl(state.currentTrack.cover) : null,
     }
@@ -92,6 +133,12 @@ const snapshot = (): DisplayPlaybackState => {
  */
 export const usePlaybackStore = create<DisplayPlaybackState>(() => snapshot())
 usePlayerStore.subscribe(() => usePlaybackStore.setState(snapshot()))
+// 字幕开关与已保存的歌词偏移住在设置 store：暂停时玩家 store 不再刷新，
+// 窗口里的实时预览会一直停在旧内容，所以这两处变化也要重出版快照。
+useSettingsStore.subscribe((state, previous) => {
+    if (state.foliaSettings === previous.foliaSettings && state.lyricOffsets === previous.lyricOffsets) return
+    usePlaybackStore.setState(snapshot())
+})
 
 export const selectDisplayPlayerState = (state: DisplayPlaybackState) =>
     (state.isPlaying ? PlayerState.PLAYING : PlayerState.PAUSED)

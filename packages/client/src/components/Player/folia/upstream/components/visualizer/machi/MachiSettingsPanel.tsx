@@ -4,7 +4,8 @@ import { useTranslation } from '../../../adapters/i18n';
 import { useVisualizerSettingsStore } from '../../../adapters/hostStores';
 import { formatLyricRenderScale } from '../../../utils/lyricRenderQuality';
 import { Button, Group, PictureGrid, Row, Segmented, Select, type SettingsGroupDef } from '../../modal/settings/kit';
-import { toggleMachiCameraBar } from './cameraBar';
+import { toggleMachiCameraBar, isMachiCameraBarOpen, subscribeMachiCameraBar } from './cameraBar';
+import { useFoliaStyleWindowStore } from '../../../../stage/foliaStyleWindowStore';
 import { LYRIC_ANTIALIAS_LABEL_KEYS } from '../renderQuality/LyricRenderQualityRows';
 import type { VisualizerSettingsPanelProps } from '../definition';
 import { percent, SliderRow, times, ToggleRow } from '../panelRows';
@@ -175,6 +176,7 @@ const MachiSettingsPanel: React.FC<VisualizerSettingsPanelProps<MachiTuning>> = 
     const levels = MACHI_DETAIL_LEVELS.map(level => ({ value: level, label: t(LEVEL_LABEL_KEYS[level]) }));
     const globalQuality = useVisualizerSettingsStore(state => state.lyricRenderQuality);
     const degraded = React.useSyncExternalStore(subscribeMachiDegrade, getMachiDegrade, getMachiDegrade);
+    const cameraBarOpen = React.useSyncExternalStore(subscribeMachiCameraBar, isMachiCameraBarOpen, isMachiCameraBarOpen);
     const follow = t('options.lyricRenderFollowGlobal');
     // 面板拿到的 t 不带插值参数：带全局挡位当前值的说明用 i18next 自己的。
     const { t: format } = useTranslation();
@@ -229,9 +231,19 @@ const MachiSettingsPanel: React.FC<VisualizerSettingsPanelProps<MachiTuning>> = 
                         onChange={camera => onTuningChange?.({ camera })}
                     />
                 </Row>
-                {/* 宿主没有上游的快捷控件条：在这里给取景控制条一个入口。 */}
+                {/* 宿主没有上游的快捷控件条：在这里给取景控制条一个入口。
+                    上游打开取景条时会把设置面板收起来，否则全屏窗口盖住画面，按钮像没反应。 */}
                 <Row label={t('options.machiCameraBar')}>
-                    <Button variant="quiet" onClick={() => toggleMachiCameraBar()}>{t('options.machiCameraBar')}</Button>
+                    <Button
+                        variant={cameraBarOpen ? 'primary' : 'quiet'}
+                        onClick={() => {
+                            const opening = !isMachiCameraBarOpen();
+                            toggleMachiCameraBar();
+                            if (opening) useFoliaStyleWindowStore.getState().setOpen(false);
+                        }}
+                    >
+                        {t('options.machiCameraBar')}
+                    </Button>
                 </Row>
                 {custom && tuning.scene === 'auto' && (
                     <Row label={t('options.machiViewScene')} note={t('options.machiViewSceneHint')}>
