@@ -14,7 +14,21 @@ import { useAddToPlaylist } from '@/hooks/useAddToPlaylist'
 import { useCallback, useContext, useEffect, useRef, useState, type MouseEvent } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { AbilityContext } from '@/providers/ability-context'
-import { ArrowUpToLine, ChevronDown, ChevronUp, ListEnd, ListPlus, ListX, Music, Play, RefreshCw, Trash2, User, X } from 'lucide-react'
+import {
+  ArrowUpToLine,
+  ChevronDown,
+  ChevronUp,
+  ListEnd,
+  ListPlus,
+  ListX,
+  Music,
+  Play,
+  Radio,
+  RefreshCw,
+  Trash2,
+  User,
+  X,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { MarqueeText } from '@/components/ui/marquee-text'
 import { BilibiliMetadataDialog } from './BilibiliMetadataDialog'
@@ -80,6 +94,8 @@ export function QueueDrawer({
   const canReorder = ability.can('reorder', 'Queue')
   const canPlay = ability.can('play', 'Player')
   const canVote = ability.can('vote', 'Player')
+  const canRoam = ability.can('next', 'Player')
+  const roamingEnabled = room?.roamingEnabled ?? false
   const { addToPlaylist, canUse: canAddToPlaylist } = useAddToPlaylist()
   const [confirmClear, setConfirmClear] = useState(false)
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -162,6 +178,16 @@ export function QueueDrawer({
       scrollElement.removeEventListener('touchmove', markUserScroll)
     }
   }, [open, scrollElementRef])
+
+  const handleRoam = useCallback(() => {
+    if (!roamingEnabled) {
+      toast.info('请先在房间设置中开启私人漫游')
+      return
+    }
+    const trackId = currentTrack?.id
+    socket.emit(EVENTS.PLAYER_NEXT, { ...(trackId ? { trackId } : {}), forceRoaming: true })
+    toast('正在获取漫游推荐…')
+  }, [roamingEnabled, currentTrack?.id, socket])
 
   const handleClear = useCallback(() => {
     if (!confirmClear) {
@@ -277,8 +303,34 @@ export function QueueDrawer({
       <div className="flex items-center gap-2 text-sm font-medium text-white/90">
         <Music className="h-4 w-4" />
         播放列表 ({queue.length})
+        {roamingEnabled && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-normal text-white/70">
+            <Radio className="h-3 w-3" />
+            私人漫游
+          </span>
+        )}
       </div>
       <div className="flex items-center gap-1">
+        <Tooltip delayDuration={300}>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn(
+                'h-7 w-7 hover:bg-white/10 hover:text-white',
+                roamingEnabled ? 'text-emerald-300' : 'text-white/70',
+              )}
+              onClick={handleRoam}
+              disabled={!canRoam}
+              aria-label="私人漫游：播放一首推荐"
+            >
+              <Radio className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {roamingEnabled ? '私人漫游：立即播放一首推荐' : '请先在房间设置中开启私人漫游'}
+          </TooltipContent>
+        </Tooltip>
         {canAddToPlaylist && queue.length > 0 && (
           <Tooltip delayDuration={300}>
             <TooltipTrigger asChild>
@@ -301,7 +353,10 @@ export function QueueDrawer({
               <Button
                 variant="ghost"
                 size="icon"
-                className={cn('h-7 w-7 text-white/70 hover:bg-white/10 hover:text-white', confirmClear && 'text-destructive hover:text-destructive')}
+                className={cn(
+                  'h-7 w-7 text-white/70 hover:bg-white/10 hover:text-white',
+                  confirmClear && 'text-destructive hover:text-destructive',
+                )}
                 onClick={handleClear}
                 aria-label="清空播放列表"
               >
@@ -338,227 +393,223 @@ export function QueueDrawer({
               <div
                 key={track.id}
                 style={{
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      width: '100%',
-                      height: `${virtualRow.size}px`,
-                      transform: `translateY(${virtualRow.start}px)`,
-                      paddingTop: '8px', // To simulate the top padding/gap
-                    }}
-                  >
-                    <div
-                      className={cn(
-                        'group relative flex h-full items-center gap-2 rounded-lg px-2 transition-colors hover:bg-accent/50',
-                        currentTrack?.id === track.id && 'bg-primary/10',
-                      )}
-                      onClick={() => {
-                        if (isTouch) {
-                          setActiveTrackId((prev) => (prev === track.id ? null : track.id))
-                        }
-                      }}
-                      onMouseLeave={() => {
-                        if (!isTouch && dismissedHoverTrackId === track.id) setDismissedHoverTrackId(null)
-                      }}
-                    >
-                      {/* Index */}
-                      <span className="w-5 shrink-0 text-center text-xs tabular-nums text-muted-foreground">
-                        {i + 1}
-                      </span>
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: `${virtualRow.size}px`,
+                  transform: `translateY(${virtualRow.start}px)`,
+                  paddingTop: '8px', // To simulate the top padding/gap
+                }}
+              >
+                <div
+                  className={cn(
+                    'group relative flex h-full items-center gap-2 rounded-lg px-2 transition-colors hover:bg-accent/50',
+                    currentTrack?.id === track.id && 'bg-primary/10',
+                  )}
+                  onClick={() => {
+                    if (isTouch) {
+                      setActiveTrackId((prev) => (prev === track.id ? null : track.id))
+                    }
+                  }}
+                  onMouseLeave={() => {
+                    if (!isTouch && dismissedHoverTrackId === track.id) setDismissedHoverTrackId(null)
+                  }}
+                >
+                  {/* Index */}
+                  <span className="w-5 shrink-0 text-center text-xs tabular-nums text-muted-foreground">{i + 1}</span>
 
-                      {/* Cover + source badge */}
-                      <div className="relative shrink-0">
-                        <QueueTrackCover track={track} className="h-9 w-9" />
-                        {track.source && SOURCE_STYLE[track.source] && (
-                          <span
-                            className={cn(
-                              'absolute -bottom-1 -right-1 rounded px-0.5 text-[8px] font-bold leading-tight ring-1',
-                              SOURCE_STYLE[track.source].className,
-                            )}
-                          >
-                            {SOURCE_STYLE[track.source].label}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Track info */}
-                      <div className="min-w-0 flex-1">
-                        <MarqueeText
-                          className={cn('text-sm', currentTrack?.id === track.id && 'font-medium text-primary')}
-                        >
-                          {track.title}
-                        </MarqueeText>
-                        <div className="flex min-w-0 items-center gap-1">
-                          <MarqueeText className="min-w-0 flex-1 text-xs text-muted-foreground">
-                            {track.artist.join(' / ')}
-                          </MarqueeText>
-                          {track.requestedBy && (
-                            <Badge
-                              variant="outline"
-                              className="h-4 max-w-28 shrink-0 gap-0.5 truncate border-primary/30 bg-primary/10 px-1.5 py-0 text-[10px] font-normal text-primary"
-                            >
-                              <User className="h-2.5 w-2.5 shrink-0" />
-                              <span className="truncate">{track.requestedBy}</span>
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Actions — visible on hover (desktop) or tap (mobile) */}
-                      <div
+                  {/* Cover + source badge */}
+                  <div className="relative shrink-0">
+                    <QueueTrackCover track={track} className="h-9 w-9" />
+                    {track.source && SOURCE_STYLE[track.source] && (
+                      <span
                         className={cn(
-                          'absolute right-1 top-1/2 z-20 flex -translate-y-1/2 items-center gap-0.5',
-                          'rounded-md border border-border/50 bg-popover px-1 py-0.5 shadow-md backdrop-blur-md',
-                          'opacity-0 pointer-events-none transition-opacity',
-                          'group-hover:opacity-100 group-hover:pointer-events-auto',
-                          'group-focus-within:opacity-100 group-focus-within:pointer-events-auto',
-                          isTouch && activeTrackId === track.id && 'opacity-100 pointer-events-auto',
-                          !isTouch && dismissedHoverTrackId === track.id && 'opacity-0 pointer-events-none',
+                          'absolute -bottom-1 -right-1 rounded px-0.5 text-[8px] font-bold leading-tight ring-1',
+                          SOURCE_STYLE[track.source].className,
                         )}
-                        onClick={(e) => e.stopPropagation()}
                       >
-                        {/* Play button — hidden for currently playing track */}
-                        {currentTrack?.id !== track.id && (canPlay || canVote) && (
-                          <Tooltip delayDuration={400}>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-6 w-6 min-h-9 min-w-9 sm:min-h-0 sm:min-w-0"
-                                onClick={() => handlePlayTrack(track)}
-                                aria-label={canPlay ? `播放 ${track.title}` : `投票播放 ${track.title}`}
-                              >
-                                <Play className="h-3 w-3" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent side="bottom">{canPlay ? '播放' : '投票播放'}</TooltipContent>
-                          </Tooltip>
-                        )}
+                        {SOURCE_STYLE[track.source].label}
+                      </span>
+                    )}
+                  </div>
 
-                        {track.source === 'bilibili' && canAdd && (
-                          <Tooltip delayDuration={400}>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-6 w-6 min-h-9 min-w-9 sm:min-h-0 sm:min-w-0"
-                                onClick={() => setMetadataTrack(track)}
-                                aria-label={`重选 ${track.title} 的歌词和封面`}
-                              >
-                                <RefreshCw className="h-3 w-3" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent side="bottom">重选歌词和封面</TooltipContent>
-                          </Tooltip>
-                        )}
-
-                        {canReorder && (
-                          <>
-                            <Tooltip delayDuration={400}>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 min-h-9 min-w-9 sm:min-h-0 sm:min-w-0"
-                                  disabled={i === 0}
-                                  onClick={() => handleMoveUp(i)}
-                                  aria-label={`上移 ${track.title}`}
-                                >
-                                  <ChevronUp className="h-3 w-3" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent side="bottom">上移</TooltipContent>
-                            </Tooltip>
-
-                            <Tooltip delayDuration={400}>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 min-h-9 min-w-9 sm:min-h-0 sm:min-w-0"
-                                  disabled={i === queue.length - 1}
-                                  onClick={() => handleMoveDown(i)}
-                                  aria-label={`下移 ${track.title}`}
-                                >
-                                  <ChevronDown className="h-3 w-3" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent side="bottom">下移</TooltipContent>
-                            </Tooltip>
-
-                            <Tooltip delayDuration={400}>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 min-h-9 min-w-9 sm:min-h-0 sm:min-w-0"
-                                  onClick={(e) => handleInsertAfterCurrent(track, e)}
-                                  aria-label={`置顶 ${track.title}`}
-                                >
-                                  <ArrowUpToLine className="h-3 w-3" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent side="bottom">置顶到当前播放下方</TooltipContent>
-                            </Tooltip>
-
-                            <Tooltip delayDuration={400}>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 min-h-9 min-w-9 sm:min-h-0 sm:min-w-0"
-                                  disabled={i === queue.length - 1}
-                                  onClick={() => handleMoveToEnd(track)}
-                                  aria-label={`移到末尾 ${track.title}`}
-                                >
-                                  <ListEnd className="h-3 w-3" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent side="bottom">移到末尾</TooltipContent>
-                            </Tooltip>
-                          </>
-                        )}
-
-                        {canAddToPlaylist && (
-                          <Tooltip delayDuration={400}>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-6 w-6 min-h-9 min-w-9 sm:min-h-0 sm:min-w-0"
-                                onClick={() => addToPlaylist(track, track.title)}
-                                aria-label={`将 ${track.title} 加入我的歌单`}
-                              >
-                                <ListPlus className="h-3 w-3" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent side="bottom">加入我的歌单</TooltipContent>
-                          </Tooltip>
-                        )}
-
-                        {(canRemoveTrack || canVote) && (
-                          <Tooltip delayDuration={400}>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-6 w-6 min-h-9 min-w-9 sm:min-h-0 sm:min-w-0 text-destructive hover:text-destructive"
-                                onClick={() => handleRemoveTrack(track)}
-                                aria-label={canRemoveTrack ? `移除 ${track.title}` : `投票移除 ${track.title}`}
-                              >
-                                <Trash2 className="h-3 w-3" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent side="bottom">{canRemoveTrack ? '移除' : '投票移除'}</TooltipContent>
-                          </Tooltip>
-                        )}
-                      </div>
+                  {/* Track info */}
+                  <div className="min-w-0 flex-1">
+                    <MarqueeText className={cn('text-sm', currentTrack?.id === track.id && 'font-medium text-primary')}>
+                      {track.title}
+                    </MarqueeText>
+                    <div className="flex min-w-0 items-center gap-1">
+                      <MarqueeText className="min-w-0 flex-1 text-xs text-muted-foreground">
+                        {track.artist.join(' / ')}
+                      </MarqueeText>
+                      {track.requestedBy && (
+                        <Badge
+                          variant="outline"
+                          className="h-4 max-w-28 shrink-0 gap-0.5 truncate border-primary/30 bg-primary/10 px-1.5 py-0 text-[10px] font-normal text-primary"
+                        >
+                          <User className="h-2.5 w-2.5 shrink-0" />
+                          <span className="truncate">{track.requestedBy}</span>
+                        </Badge>
+                      )}
                     </div>
                   </div>
-                )
-              })}
-          </div>
-        )}
+
+                  {/* Actions — visible on hover (desktop) or tap (mobile) */}
+                  <div
+                    className={cn(
+                      'absolute right-1 top-1/2 z-20 flex -translate-y-1/2 items-center gap-0.5',
+                      'rounded-md border border-border/50 bg-popover px-1 py-0.5 shadow-md backdrop-blur-md',
+                      'opacity-0 pointer-events-none transition-opacity',
+                      'group-hover:opacity-100 group-hover:pointer-events-auto',
+                      'group-focus-within:opacity-100 group-focus-within:pointer-events-auto',
+                      isTouch && activeTrackId === track.id && 'opacity-100 pointer-events-auto',
+                      !isTouch && dismissedHoverTrackId === track.id && 'opacity-0 pointer-events-none',
+                    )}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {/* Play button — hidden for currently playing track */}
+                    {currentTrack?.id !== track.id && (canPlay || canVote) && (
+                      <Tooltip delayDuration={400}>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 min-h-9 min-w-9 sm:min-h-0 sm:min-w-0"
+                            onClick={() => handlePlayTrack(track)}
+                            aria-label={canPlay ? `播放 ${track.title}` : `投票播放 ${track.title}`}
+                          >
+                            <Play className="h-3 w-3" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">{canPlay ? '播放' : '投票播放'}</TooltipContent>
+                      </Tooltip>
+                    )}
+
+                    {track.source === 'bilibili' && canAdd && (
+                      <Tooltip delayDuration={400}>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 min-h-9 min-w-9 sm:min-h-0 sm:min-w-0"
+                            onClick={() => setMetadataTrack(track)}
+                            aria-label={`重选 ${track.title} 的歌词和封面`}
+                          >
+                            <RefreshCw className="h-3 w-3" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">重选歌词和封面</TooltipContent>
+                      </Tooltip>
+                    )}
+
+                    {canReorder && (
+                      <>
+                        <Tooltip delayDuration={400}>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 min-h-9 min-w-9 sm:min-h-0 sm:min-w-0"
+                              disabled={i === 0}
+                              onClick={() => handleMoveUp(i)}
+                              aria-label={`上移 ${track.title}`}
+                            >
+                              <ChevronUp className="h-3 w-3" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">上移</TooltipContent>
+                        </Tooltip>
+
+                        <Tooltip delayDuration={400}>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 min-h-9 min-w-9 sm:min-h-0 sm:min-w-0"
+                              disabled={i === queue.length - 1}
+                              onClick={() => handleMoveDown(i)}
+                              aria-label={`下移 ${track.title}`}
+                            >
+                              <ChevronDown className="h-3 w-3" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">下移</TooltipContent>
+                        </Tooltip>
+
+                        <Tooltip delayDuration={400}>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 min-h-9 min-w-9 sm:min-h-0 sm:min-w-0"
+                              onClick={(e) => handleInsertAfterCurrent(track, e)}
+                              aria-label={`置顶 ${track.title}`}
+                            >
+                              <ArrowUpToLine className="h-3 w-3" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">置顶到当前播放下方</TooltipContent>
+                        </Tooltip>
+
+                        <Tooltip delayDuration={400}>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 min-h-9 min-w-9 sm:min-h-0 sm:min-w-0"
+                              disabled={i === queue.length - 1}
+                              onClick={() => handleMoveToEnd(track)}
+                              aria-label={`移到末尾 ${track.title}`}
+                            >
+                              <ListEnd className="h-3 w-3" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">移到末尾</TooltipContent>
+                        </Tooltip>
+                      </>
+                    )}
+
+                    {canAddToPlaylist && (
+                      <Tooltip delayDuration={400}>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 min-h-9 min-w-9 sm:min-h-0 sm:min-w-0"
+                            onClick={() => addToPlaylist(track, track.title)}
+                            aria-label={`将 ${track.title} 加入我的歌单`}
+                          >
+                            <ListPlus className="h-3 w-3" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">加入我的歌单</TooltipContent>
+                      </Tooltip>
+                    )}
+
+                    {(canRemoveTrack || canVote) && (
+                      <Tooltip delayDuration={400}>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 min-h-9 min-w-9 sm:min-h-0 sm:min-w-0 text-destructive hover:text-destructive"
+                            onClick={() => handleRemoveTrack(track)}
+                            aria-label={canRemoveTrack ? `移除 ${track.title}` : `投票移除 ${track.title}`}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">{canRemoveTrack ? '移除' : '投票移除'}</TooltipContent>
+                      </Tooltip>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 

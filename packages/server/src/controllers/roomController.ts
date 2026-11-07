@@ -245,10 +245,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
       const nextRoamingSource = parsed.data.roamingSource ?? ctx.room.roamingSource
       const nextRoamingMode =
         nextRoamingSource === 'netease' ? (parsed.data.roamingMode ?? ctx.room.roamingMode) : 'DEFAULT'
-      if (
-        nextRoamingEnabled &&
-        !authService.getUserCookie(ctx.room.creatorId, nextRoamingSource, ctx.roomId)
-      ) {
+      if (nextRoamingEnabled && !authService.getUserCookie(ctx.room.creatorId, nextRoamingSource, ctx.roomId)) {
         ctx.socket.emit(EVENTS.ROOM_ERROR, {
           code: ERROR_CODE.INVALID_INPUT,
           message: '房主需先登录所选音乐平台，才能开启私人漫游',
@@ -298,6 +295,15 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         ctx.socket.to(ctx.roomId).emit(EVENTS.ROOM_SETTINGS, baseSettings)
       } else {
         io.to(ctx.roomId).emit(EVENTS.ROOM_SETTINGS, baseSettings)
+      }
+
+      // 开启漫游时房间还没有任何可播内容：立刻取一首推荐开始，避免“打开了
+      // 却没有任何反应”。有队列/正在播放时保持现状，只在队尾自动续播。
+      if (nextRoamingEnabled && !updatedRoom.currentTrack && updatedRoom.queue.length === 0) {
+        void playerService.playNextTrackInRoom(io, ctx.roomId, updatedRoom.playMode, {
+          skipDebounce: true,
+          forceRoaming: true,
+        })
       }
 
       logger.info(`房间 ${ctx.roomId} 的设置已更新`, {

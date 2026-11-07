@@ -37,6 +37,8 @@ export const EVENTS = {
   PLAYER_SOURCE_SWITCH: 'player:source_switch',
   PLAYER_SOURCE_SWITCHED: 'player:source_switched',
   PLAYER_REQUEST_SOURCE_FALLBACK: 'player:request_source_fallback',
+  PLAYER_PLAYBACK_FAILURE: 'player:playback_failure',
+  PLAYER_RETRY_TRACK: 'player:retry_track',
 
   // Queue management
   QUEUE_ADD: 'queue:add',

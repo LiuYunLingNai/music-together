@@ -16,6 +16,7 @@ import { QueueDrawer } from '@/components/Overlays/QueueDrawer'
 import { SettingsDialog, type SettingsTab } from '@/components/Overlays/SettingsDialog'
 import { AddToPlaylistDialog } from '@/components/Overlays/AddToPlaylistDialog'
 import { ManualFallbackDialog } from '@/components/Overlays/ManualFallbackDialog'
+import { PlaybackFailureDialog } from '@/components/Overlays/PlaybackFailureDialog'
 import { PasswordDialog } from '@/components/Lobby/PasswordDialog'
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from '@/components/ui/drawer'
 import { cn } from '@/lib/utils'
@@ -753,6 +754,12 @@ export default function RoomPage() {
           />
           <AddToPlaylistDialog />
           <ManualFallbackDialog />
+          <PlaybackFailureDialog
+            onOpenSettings={(tab) => {
+              setSettingsInitialTab(tab)
+              setSettingsOpen(true)
+            }}
+          />
         </div>
 
         {/* Fallback password dialog for edge cases (password changed after pre-check) */}

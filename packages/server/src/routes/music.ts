@@ -1,5 +1,6 @@
 import {
   searchQuerySchema,
+  unifiedSearchQuerySchema,
   urlQuerySchema,
   lyricQuerySchema,
   lyricSupplementQuerySchema,
@@ -14,6 +15,7 @@ import {
   recommendationsQuerySchema,
   hotSongsQuerySchema,
   type Track,
+  type MusicSource,
   type PlatformRecommendation,
 } from '@music-together/shared'
 import { Router, type Router as RouterType, type Request, type Response } from 'express'
@@ -23,7 +25,9 @@ import type { ZodSchema } from 'zod'
 import { musicProvider } from '../services/musicProvider.js'
 import { resolveStream } from '../services/streamResolutionService.js'
 import * as trackFallbackService from '../services/trackFallbackService.js'
+import { searchAllSources } from '../services/unifiedSearchService.js'
 import * as authService from '../services/authService.js'
+import { getEffectiveQuality } from '../services/audioQualityPolicy.js'
 import { roomRepo } from '../repositories/roomRepository.js'
 import { audioProxyPolicyRepo } from '../repositories/audioProxyPolicyRepository.js'
 import { logger } from '../utils/logger.js'
@@ -115,6 +119,20 @@ router.get(
       const tracks = await musicProvider.search(source, keyword, pageSize, pageNum, cookie)
       res.json({ tracks, page: pageNum, hasMore: tracks.length >= pageSize })
     }
+  }),
+)
+
+router.get(
+  '/search-all',
+  musicMetadataRateLimit,
+  validated(unifiedSearchQuerySchema, 'Unified search', async (data, _req, res) => {
+    const { keyword, limit, roomId } = data
+    const identityUserId = _req.identityUserId
+    const room = roomId ? roomRepo.get(roomId) : undefined
+    const canUseRoomAuth = Boolean(roomId && identityUserId && room?.users.some((user) => user.id === identityUserId))
+    const cookieFor = (source: MusicSource): string | null =>
+      canUseRoomAuth && identityUserId && roomId ? authService.getUserCookie(identityUserId, source, roomId) : null
+    res.json(await searchAllSources(keyword, limit, cookieFor))
   }),
 )
 
@@ -224,8 +242,28 @@ router.get(
   '/url',
   musicMetadataRateLimit,
   validated(urlQuerySchema, 'Get stream URL', async (data, _req, res) => {
-    const { source, urlId, bitrate } = data
-    const stream = await resolveStream(source, urlId, bitrate)
+    const { source, urlId, bitrate, roomId } = data
+    let cookie: string | undefined
+    let vipType: 0 | 1 | 2 = 0
+    let quality = bitrate
+    if (roomId) {
+      const identityUserId = _req.identityUserId
+      const room = roomRepo.get(roomId)
+      const trackInRoom = Boolean(
+        room &&
+        ((room.currentTrack?.source === source && room.currentTrack.urlId === urlId) ||
+          room.queue.some((item) => item.source === source && item.urlId === urlId)),
+      )
+      if (identityUserId && trackInRoom && room?.users.some((user) => user.id === identityUserId)) {
+        const auth = authService.getBestAuth(source, roomId)
+        if (auth) {
+          cookie = auth.cookie
+          vipType = auth.vipType
+        }
+        quality = getEffectiveQuality(source, bitrate, vipType)
+      }
+    }
+    const stream = await resolveStream(source, urlId, quality, { cookie, vipType })
     res.json({ url: stream?.url ?? null })
   }),
 )

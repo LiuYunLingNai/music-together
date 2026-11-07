@@ -7,6 +7,7 @@ import {
   type LyricWordFormat,
   type MusicSource,
   type NeteaseRoamingMode,
+  type PlaybackFailureReason,
   type Playlist,
   type RecommendationPagination,
   type RoamingSource,
@@ -152,6 +153,29 @@ export interface StreamUrlResult {
 
 type CachedStreamUrl = Omit<StreamUrlResult, 'fromCache'>
 
+/** Provider-level failure facts, mapped to the shared user-facing reason downstream. */
+export interface ProviderStreamFailure {
+  reason: PlaybackFailureReason
+  providerCode?: string
+  providerMessage?: string
+  httpStatus?: number
+  retryAfterMs?: number
+}
+
+export interface StreamResolutionOutcome {
+  result: StreamUrlResult | null
+  failure: ProviderStreamFailure | null
+}
+
+interface StreamFailureSink {
+  value: ProviderStreamFailure | null
+}
+
+function markStreamFailure(sink: StreamFailureSink | undefined, failure: ProviderStreamFailure): void {
+  if (!sink || sink.value) return
+  sink.value = failure
+}
+
 /** Loosely typed ncmApi response (the library has no TS declarations). */
 interface NcmApiResponse {
   body?: {
@@ -217,6 +241,11 @@ interface TencentTrackInfo {
   type?: number
   interval?: number
   vs?: unknown[]
+  pay?: {
+    pay_month?: number
+    pay_down?: number
+    price_track?: number
+  }
   file?: {
     media_mid?: string
     size_128mp3?: number
@@ -1030,12 +1059,19 @@ class MusicProvider {
     urlId: string,
     quality: AudioQuality,
     cookie?: string,
+    sink?: StreamFailureSink,
   ): Promise<CachedStreamUrl | null> {
     const streamId = parseBilibiliStreamId(urlId)
-    if (!streamId) return null
+    if (!streamId) {
+      markStreamFailure(sink, { reason: 'not-playable', providerMessage: 'invalid bilibili video id' })
+      return null
+    }
     const { bvid } = streamId
     const view = await this.getBilibiliView(bvid)
-    if (!view) return null
+    if (!view) {
+      markStreamFailure(sink, { reason: 'taken-down', providerMessage: 'video info unavailable' })
+      return null
+    }
     const cid = streamId.cid ?? view.cid
     const requestCookie = await this.withBilibiliDeviceCookie(cookie)
     const query = await this.signBilibiliWbiParams(
@@ -1053,7 +1089,10 @@ class MusicProvider {
       },
       requestCookie,
     )
-    if (!query) return null
+    if (!query) {
+      markStreamFailure(sink, { reason: 'upstream-unreachable', providerMessage: 'bilibili signing failed' })
+      return null
+    }
     let response = await this.fetchBilibiliJson(
       `https://api.bilibili.com/x/player/wbi/playurl?${query}`,
       `https://www.bilibili.com/video/${bvid}/`,
@@ -1132,7 +1171,23 @@ class MusicProvider {
 
     const audio = selectBilibiliAudioCandidate(candidates, quality)
     const url = audio ? findUsableUrl(audio.raw) : null
-    if (!audio || !url) return null
+    if (!audio || !url) {
+      const code = Number(response?.code)
+      const reason: PlaybackFailureReason =
+        code === -404
+          ? 'taken-down'
+          : code === -403 || code === -10403
+            ? 'region-restricted'
+            : code === 87007 || code === 87008
+              ? 'subscription-required'
+              : 'no-audio'
+      markStreamFailure(sink, {
+        reason,
+        providerCode: Number.isFinite(code) ? String(code) : undefined,
+        providerMessage: typeof response?.message === 'string' ? response.message.slice(0, 200) : undefined,
+      })
+      return null
+    }
 
     const actualBitrate = normalizeBitrate(audio.bandwidth)
     logger.info('Bilibili audio stream resolved', {
@@ -2019,6 +2074,7 @@ class MusicProvider {
     cookie?: string,
     concept = false,
     vipType = 0,
+    sink?: StreamFailureSink,
   ): Promise<CachedStreamUrl | null> {
     const bitrate = qualityToBitrate(quality)
     const cookieObj = cookie ? parseCookieString(cookie) : {}
@@ -2028,6 +2084,10 @@ class MusicProvider {
     if (!token || !userid) {
       logger.warn('酷狗音源解析未找到有效会员凭证，会员歌曲可能无法播放')
     }
+    let lastFailure: ProviderStreamFailure =
+      token && userid
+        ? { reason: 'no-audio', providerMessage: 'no playable address' }
+        : { reason: 'sign-in-needed', providerMessage: 'no kugou credential' }
 
     try {
       // KuGouMusicApi resolves album_audio_id and the quality-specific hash
@@ -2291,6 +2351,21 @@ class MusicProvider {
             error: response.error ?? response.message,
             quality: selected.quality,
           })
+          lastFailure = {
+            reason: !token || !userid ? 'sign-in-needed' : 'no-audio',
+            providerCode:
+              response.error_code != null
+                ? String(response.error_code)
+                : response.errcode != null
+                  ? String(response.errcode)
+                  : undefined,
+            providerMessage:
+              typeof response.error === 'string'
+                ? response.error.slice(0, 200)
+                : typeof response.message === 'string'
+                  ? response.message.slice(0, 200)
+                  : undefined,
+          }
           continue
         }
 
@@ -2306,10 +2381,15 @@ class MusicProvider {
         return { url: playUrl, actualBitrate, actualQuality: selected.actualQuality }
       }
 
-      return this.getKugouStreamUrlLegacy(hash, bitrate, concept)
+      markStreamFailure(sink, lastFailure)
+      return this.getKugouStreamUrlLegacy(hash, bitrate, concept, sink)
     } catch (err) {
       logger.error('酷狗音源地址解析失败', err)
-      return this.getKugouStreamUrlLegacy(hash, bitrate, concept)
+      markStreamFailure(sink, {
+        reason: 'upstream-unreachable',
+        providerMessage: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200),
+      })
+      return this.getKugouStreamUrlLegacy(hash, bitrate, concept, sink)
     }
   }
 
@@ -2317,6 +2397,7 @@ class MusicProvider {
     hash: string,
     bitrate: number,
     proxyRequired = false,
+    sink?: StreamFailureSink,
   ): Promise<CachedStreamUrl | null> {
     try {
       const body = {
@@ -2357,7 +2438,10 @@ class MusicProvider {
         }
       }
 
-      if (!bestItem) return null
+      if (!bestItem) {
+        markStreamFailure(sink, { reason: 'no-audio', providerMessage: 'no matching kugou resource' })
+        return null
+      }
 
       // Get play URL from trackercdn
       const key = crypto
@@ -2372,11 +2456,18 @@ class MusicProvider {
       )
       if (!cdnRes || cdnRes.status !== 2) {
         logger.warn('酷狗旧版音源接口未返回地址', { status: cdnRes?.status })
+        markStreamFailure(sink, {
+          reason: 'no-audio',
+          providerMessage: cdnRes ? `trackercdn status ${String(cdnRes.status)}` : 'trackercdn unavailable',
+        })
         return null
       }
 
       const url = Array.isArray(cdnRes.url) ? cdnRes.url[0] : cdnRes.url
-      if (!url) return null
+      if (!url) {
+        markStreamFailure(sink, { reason: 'no-audio', providerMessage: 'trackercdn returned no url' })
+        return null
+      }
 
       // See the native tracker path above: preserve the upstream protocol for
       // the server-side Kugou audio proxy.
@@ -2387,6 +2478,10 @@ class MusicProvider {
       return { url: urlStr, actualBitrate }
     } catch (err) {
       logger.error('酷狗旧版音源地址解析失败', err)
+      markStreamFailure(sink, {
+        reason: 'upstream-unreachable',
+        providerMessage: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200),
+      })
       return null
     }
   }
@@ -2401,19 +2496,46 @@ class MusicProvider {
     quality: AudioQuality,
     cookie?: string,
     retried = false,
+    sink?: StreamFailureSink,
   ): Promise<CachedStreamUrl | null> {
     const level = neteaseQualityToLevel(quality)
-    if (!level) return null
+    if (!level) {
+      markStreamFailure(sink, { reason: 'unsupported-quality', providerMessage: 'quality not supported by netease' })
+      return null
+    }
 
     try {
       await ensureNeteaseEnhancedConfig()
       const res = await withTimeout(
         ncmApi.song_url_v1({ id: urlId, level, timestamp: Date.now(), ...(cookie ? { cookie } : {}) }),
       )
+      const bodyCode = Number(res?.body?.code)
       const data = res?.body?.data?.[0] as MetingJson | undefined
-      if (!data) return null
+      if (!data) {
+        markStreamFailure(sink, {
+          reason: bodyCode === 301 || bodyCode === 401 || bodyCode === 403 ? 'sign-in-needed' : 'not-playable',
+          providerCode: Number.isFinite(bodyCode) ? String(bodyCode) : undefined,
+        })
+        return null
+      }
       const url = String(data.url ?? '').replace(/^http:\/\//, 'https://')
-      if (!url) return null
+      if (!url) {
+        const fee = Number(data.fee)
+        const reason: PlaybackFailureReason =
+          bodyCode === 301 || bodyCode === 401 || bodyCode === 403
+            ? 'sign-in-needed'
+            : fee === 1 || fee === 8
+              ? 'subscription-required'
+              : fee === 4
+                ? 'purchase-required'
+                : 'not-playable'
+        markStreamFailure(sink, {
+          reason,
+          providerCode: Number.isFinite(bodyCode) ? String(bodyCode) : undefined,
+          providerMessage: typeof data.message === 'string' ? data.message.slice(0, 200) : undefined,
+        })
+        return null
+      }
       return {
         url,
         actualBitrate: normalizeBitrate(data.br) ?? qualityToBitrate(quality),
@@ -2421,9 +2543,13 @@ class MusicProvider {
       }
     } catch (err) {
       if (!retried && isXeapiPublicKeyMissing(err) && (await ensureNeteaseEnhancedConfig(true))) {
-        return this.getNeteaseStreamUrlV1(urlId, quality, cookie, true)
+        return this.getNeteaseStreamUrlV1(urlId, quality, cookie, true, sink)
       }
       logger.warn('Netease song_url_v1 failed', { urlId, level, err })
+      markStreamFailure(sink, {
+        reason: 'upstream-unreachable',
+        providerMessage: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200),
+      })
       return null
     }
   }
@@ -2459,16 +2585,24 @@ class MusicProvider {
     urlId: string,
     quality: AudioQuality,
     cookie?: string,
+    sink?: StreamFailureSink,
   ): Promise<CachedStreamUrl | null> {
-    if (typeof quality === 'string' && !cookie) return null
+    if (typeof quality === 'string' && !cookie) {
+      markStreamFailure(sink, { reason: 'sign-in-needed', providerMessage: 'lossless quality requires login' })
+      return null
+    }
 
     try {
       const track = await this.getTencentTrackInfo(urlId, cookie)
-      if (!track) return null
+      if (!track) {
+        markStreamFailure(sink, { reason: 'not-playable', providerMessage: 'track info unavailable' })
+        return null
+      }
 
       const spec = getTencentStreamSpec(track, quality)
       if (!spec) {
         logger.debug('QQ 音乐歌曲不提供请求的音质规格', { source: 'tencent', urlId, requestedQuality: quality })
+        markStreamFailure(sink, { reason: 'unsupported-quality', providerMessage: 'requested quality unavailable' })
         return null
       }
 
@@ -2529,6 +2663,24 @@ class MusicProvider {
           providerFormat: spec.prefix,
           result: urlInfo?.result ?? null,
         })
+        const reason: PlaybackFailureReason =
+          track.pay?.pay_month === 1
+            ? 'subscription-required'
+            : track.pay?.pay_down === 1
+              ? 'purchase-required'
+              : !cookie
+                ? 'sign-in-needed'
+                : 'not-playable'
+        markStreamFailure(sink, {
+          reason,
+          providerCode:
+            typeof urlInfo?.result === 'number'
+              ? String(urlInfo.result)
+              : typeof response?.req_0?.code === 'number'
+                ? String(response.req_0.code)
+                : undefined,
+          providerMessage: !purl ? 'no playable url' : undefined,
+        })
         return null
       }
 
@@ -2557,6 +2709,10 @@ class MusicProvider {
       }
     } catch (err) {
       logger.warn('QQ 音乐原生播放地址解析失败', { source: 'tencent', urlId, requestedQuality: quality, err })
+      markStreamFailure(sink, {
+        reason: 'upstream-unreachable',
+        providerMessage: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200),
+      })
       return null
     }
   }
@@ -2568,6 +2724,35 @@ class MusicProvider {
     cookie?: string,
     forceRefresh = false,
     vipType = 0,
+  ): Promise<StreamUrlResult | null> {
+    return (await this.getStreamInfoDetailed(source, urlId, quality, cookie, forceRefresh, vipType)).result
+  }
+
+  /** Same resolution as {@link getStreamInfo}, plus a structured failure reason when it returns null. */
+  async getStreamInfoDetailed(
+    source: MusicSource,
+    urlId: string,
+    quality: AudioQuality = 320,
+    cookie?: string,
+    forceRefresh = false,
+    vipType = 0,
+  ): Promise<StreamResolutionOutcome> {
+    const sink: StreamFailureSink = { value: null }
+    const result = await this.getStreamInfoInternal(source, urlId, quality, cookie, forceRefresh, vipType, sink)
+    return {
+      result,
+      failure: result ? null : (sink.value ?? { reason: 'unknown' }),
+    }
+  }
+
+  private async getStreamInfoInternal(
+    source: MusicSource,
+    urlId: string,
+    quality: AudioQuality = 320,
+    cookie?: string,
+    forceRefresh = false,
+    vipType = 0,
+    sink?: StreamFailureSink,
   ): Promise<StreamUrlResult | null> {
     const bitrate = qualityToBitrate(quality)
     const qualityCacheKey = String(quality)
@@ -2593,7 +2778,7 @@ class MusicProvider {
 
     try {
       if (source === 'bilibili') {
-        const result = await this.getBilibiliStreamUrl(urlId, quality, cookie)
+        const result = await this.getBilibiliStreamUrl(urlId, quality, cookie, sink)
         if (result) {
           return { ...result, fromCache: false }
         }
@@ -2601,7 +2786,7 @@ class MusicProvider {
       }
 
       if (source === 'tencent') {
-        const result = await this.getTencentStreamUrl(urlId, quality, cookie)
+        const result = await this.getTencentStreamUrl(urlId, quality, cookie, sink)
         if (result) {
           if (!cookie) this.streamUrlCache.set(`${source}:${urlId}:${qualityCacheKey}`, result)
           return { ...result, fromCache: false }
@@ -2612,7 +2797,7 @@ class MusicProvider {
       }
 
       if (source === 'netease') {
-        const result = await this.getNeteaseStreamUrlV1(urlId, quality, cookie)
+        const result = await this.getNeteaseStreamUrlV1(urlId, quality, cookie, false, sink)
         if (result) {
           if (!cookie) this.streamUrlCache.set(`${source}:${urlId}:${qualityCacheKey}`, result)
           return { ...result, fromCache: false }
@@ -2623,7 +2808,7 @@ class MusicProvider {
       // Kugou: use native API that properly handles VIP authentication.
       // Concept Edition has its own app ID, signature salt and tracker params.
       if (source === 'kugou' || source === 'kugou_concept') {
-        const result = await this.getKugouStreamUrl(urlId, quality, cookie, source === 'kugou_concept', vipType)
+        const result = await this.getKugouStreamUrl(urlId, quality, cookie, source === 'kugou_concept', vipType, sink)
         if (result) {
           registerIssuedKugouAudio(result.url)
           if (!cookie) {
@@ -2646,12 +2831,14 @@ class MusicProvider {
       const raw = await withTimeout(meting.url(urlId, bitrate))
       if (raw === null || raw === undefined) {
         logger.warn(`URL fetch timeout for ${source}: ${urlId}`)
+        markStreamFailure(sink, { reason: 'upstream-unreachable', providerMessage: 'upstream timeout' })
         return null
       }
       let data: MetingJson
       try {
         data = JSON.parse(raw as string) as MetingJson
       } catch {
+        markStreamFailure(sink, { reason: 'not-playable', providerMessage: 'invalid upstream response' })
         return null
       }
       let url = (data.url as string) || null
@@ -2660,7 +2847,10 @@ class MusicProvider {
         url = url.replace(/^http:\/\//, 'https://')
       }
 
-      if (!url) return null
+      if (!url) {
+        markStreamFailure(sink, { reason: 'no-audio', providerMessage: 'upstream returned no URL' })
+        return null
+      }
 
       const result: CachedStreamUrl = {
         url,
@@ -2673,6 +2863,10 @@ class MusicProvider {
       return { ...result, fromCache: false }
     } catch (err) {
       logger.error('获取播放地址失败', err, { source, urlId, requestedBitrate: bitrate })
+      markStreamFailure(sink, {
+        reason: 'upstream-unreachable',
+        providerMessage: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200),
+      })
       return null
     }
   }

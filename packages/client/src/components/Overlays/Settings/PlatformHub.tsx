@@ -1,4 +1,5 @@
 import { Separator } from '@/components/ui/separator'
+import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAuth } from '@/hooks/useAuth'
 import { usePlaylist } from '@/hooks/usePlaylist'
@@ -6,11 +7,13 @@ import { PLATFORM_SHORT_LABELS, PLATFORM_COLORS, getPlatformStatus, getMyPlatfor
 import { storage } from '@/lib/storage'
 import type { MusicSource, Playlist } from '@music-together/shared'
 import { useState, useCallback, useMemo } from 'react'
+import { Activity } from 'lucide-react'
 import { LoginSection } from './LoginSection'
 import { ManualCookieDialog } from './ManualCookieDialog'
 import { QrLoginDialog } from './QrLoginDialog'
 import { PlaylistDetail } from './PlaylistDetail'
 import { PlaylistSection } from './PlaylistSection'
+import { PlatformDiagnosticsDialog } from './PlatformDiagnosticsDialog'
 
 type ViewState = { type: 'list' } | { type: 'detail'; playlist: Playlist; source: MusicSource }
 
@@ -22,6 +25,7 @@ export function PlatformHub() {
   const [qrDialogOpen, setQrDialogOpen] = useState(false)
   const [cookieDialogOpen, setCookieDialogOpen] = useState(false)
   const [cookieDialogPlatform, setCookieDialogPlatform] = useState<MusicSource>('netease')
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
   const [viewState, setViewState] = useState<ViewState>({ type: 'list' })
 
   // 概念版账户入口放在“酷狗”标签内，避免额外增加一个平台板块。
@@ -103,8 +107,16 @@ export function PlatformHub() {
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
       <div className="shrink-0">
-        <h3 className="pr-8 text-base font-semibold">平台账号 & 歌单</h3>
-        <p className="text-muted-foreground mb-3 text-xs">登录后可浏览和管理您的所有平台个人歌单。</p>
+        <div className="mb-3 flex items-start justify-between gap-3 pr-8">
+          <div>
+            <h3 className="text-base font-semibold">平台账号 & 歌单</h3>
+            <p className="text-muted-foreground text-xs">登录后可浏览和管理您的所有平台个人歌单。</p>
+          </div>
+          <Button size="sm" variant="outline" className="shrink-0" onClick={() => setDiagnosticsOpen(true)}>
+            <Activity className="mr-1.5 h-3.5 w-3.5" />
+            连接诊断
+          </Button>
+        </div>
       </div>
 
       <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
@@ -215,6 +227,8 @@ export function PlatformHub() {
         platform={cookieDialogPlatform}
         onSubmit={handleCookieSubmit}
       />
+
+      <PlatformDiagnosticsDialog open={diagnosticsOpen} onOpenChange={setDiagnosticsOpen} />
     </div>
   )
 }

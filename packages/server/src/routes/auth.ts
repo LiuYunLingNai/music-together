@@ -13,6 +13,7 @@ import bcrypt from 'bcryptjs'
 import { passwordWorkRateLimit } from '../middleware/httpRateLimiter.js'
 import type { TypedServer } from '../middleware/types.js'
 import { refreshAccountMembership } from '../services/roomService.js'
+import { buildPlatformDiagnostics } from '../services/diagnosticsService.js'
 
 const AVATAR_FILE_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/
 
@@ -201,6 +202,35 @@ export function createAuthRoutes(io: TypedServer): RouterType {
     } catch (err) {
       logger.warn('Avatar processing failed', { err, userId: req.identityUserId })
       res.status(400).json({ error: 'Invalid image data' })
+    }
+  })
+
+  const diagnosticsCooldown = new Map<string, number>()
+  router.get('/platform-diagnostics', async (req: Request, res: Response) => {
+    const identityUserId = req.identityUserId
+    const roomId = typeof req.query.roomId === 'string' ? req.query.roomId.trim() : ''
+    if (!identityUserId) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+    const room = roomId ? roomRepo.get(roomId) : undefined
+    if (!room || !room.users.some((user) => user.id === identityUserId)) {
+      res.status(403).json({ error: 'Forbidden' })
+      return
+    }
+    const cooldownKey = `${identityUserId}:${roomId}`
+    const now = Date.now()
+    const last = diagnosticsCooldown.get(cooldownKey) ?? 0
+    if (now - last < 5_000) {
+      res.status(429).json({ error: '诊断请求过于频繁，请稍后再试', retryAfterMs: 5_000 - (now - last) })
+      return
+    }
+    diagnosticsCooldown.set(cooldownKey, now)
+    try {
+      res.json(await buildPlatformDiagnostics(identityUserId, roomId))
+    } catch (error) {
+      logger.warn('Platform diagnostics failed', { error })
+      res.status(500).json({ error: '诊断失败，请稍后重试' })
     }
   })
 

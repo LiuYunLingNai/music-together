@@ -380,6 +380,78 @@ export interface Playlist {
 }
 
 /**
+ * 跨源统一搜索结果：同一首歌在各平台的不同版本。
+ * `candidates` 按来源优先级排列，客户端可让用户挑一个可用的版本加进队列。
+ */
+export interface UnifiedSearchGroup {
+  key: string
+  title: string
+  artist: string[]
+  duration: number
+  /** 版本标签（live/remix/…），用于在结果里提示同名不同版本。 */
+  version?: import('./trackMatch.js').TrackVersionTag
+  candidates: Track[]
+}
+
+/** 在线音源解析失败的结构化原因，客户端据此决定提示与可执行动作。 */
+export type PlaybackFailureReason =
+  | 'sign-in-needed'
+  | 'subscription-required'
+  | 'purchase-required'
+  | 'region-restricted'
+  | 'taken-down'
+  | 'no-audio'
+  | 'not-playable'
+  | 'unsupported-quality'
+  | 'upstream-unreachable'
+  | 'rate-limited'
+  | 'unknown'
+
+export interface PlaybackFailure {
+  source: MusicSource
+  reason: PlaybackFailureReason
+  /** 稍后重试可能成功。 */
+  retryable: boolean
+  /** 登录、购买或换源等用户动作可以解决。 */
+  actionable: boolean
+  /** 平台自己的状态码/原话，已脱敏，不含 cookie/token。 */
+  providerCode?: string
+  providerMessage?: string
+  httpStatus?: number
+  retryAfterMs?: number
+}
+
+/** 服务端在某首歌无法播放时广播给房间的事件。 */
+export interface PlaybackFailureEvent {
+  trackId: string
+  track: Track
+  failure: PlaybackFailure
+  /** 房间接下来会做什么；`stop` 等用户处理，`skip` 会在倒计时后自动跳过。 */
+  nextAction: 'stop' | 'skip'
+  autoActionInMs?: number
+}
+
+/** 平台连接自检的一行；报告里绝不包含凭据。 */
+export interface PlatformDiagnostic {
+  platform: MusicSource
+  loggedIn: boolean
+  reachable: boolean
+  latencyMs: number | null
+  vipType?: number
+  vipLabel?: string
+  code?: string
+  message?: string
+  advice: string
+}
+
+export interface PlatformDiagnosticsReport {
+  generatedAt: number
+  platforms: PlatformDiagnostic[]
+  /** 可原样复制给他人排查的纯文本，不含 cookie/token。 */
+  report: string
+}
+
+/**
  * 账户本地歌单元数据。与平台 {@link Playlist} 不同：本地歌单跨音源、归属账号、
  * 由服务端持久化，因此没有 `source` 字段，封面按首曲派生（可为空）。
  */

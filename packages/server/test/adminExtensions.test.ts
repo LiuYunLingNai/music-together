@@ -57,7 +57,9 @@ after(() => {
 function adminRequest(method: string, urlPath: string, body?: unknown, identity = 'admin-test') {
   return fetch(`${baseUrl}${urlPath}`, {
     method,
-    headers: identity ? { 'x-test-user': identity, 'content-type': 'application/json' } : { 'content-type': 'application/json' },
+    headers: identity
+      ? { 'x-test-user': identity, 'content-type': 'application/json' }
+      : { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
 }
@@ -65,7 +67,12 @@ function adminRequest(method: string, urlPath: string, body?: unknown, identity 
 test('overview aggregates version, users and rooms in one response', async () => {
   const response = await adminRequest('GET', '/api/admin/overview')
   assert.equal(response.status, 200)
-  const data = (await response.json()) as { version: string; healthy: boolean; users: { id: string }[]; rooms: unknown[] }
+  const data = (await response.json()) as {
+    version: string
+    healthy: boolean
+    users: { id: string }[]
+    rooms: unknown[]
+  }
   assert.equal(typeof data.version, 'string')
   assert.equal(data.healthy, true)
   assert.ok(Array.isArray(data.users))
@@ -97,7 +104,10 @@ test('backup list reflects the backup directory and supports deletion', async ()
 
   const listResponse = await adminRequest('GET', '/api/admin/backups')
   assert.equal(listResponse.status, 200)
-  const listData = (await listResponse.json()) as { backups: { name: string; createdAt: string; includesEnvFile: boolean }[]; running: boolean }
+  const listData = (await listResponse.json()) as {
+    backups: { name: string; createdAt: string; includesEnvFile: boolean }[]
+    running: boolean
+  }
   const entry = listData.backups.find((item) => item.name === backupName)
   assert.ok(entry, 'backup entry should be listed')
   assert.equal(entry!.createdAt, '2026-01-01T00:00:00.000Z')
@@ -191,7 +201,9 @@ test('websocket accepts the native path with an untrusted Host and unicasts by s
   const http = createServer()
   const io = new WsServer(http)
   let connectedId = ''
-  io.on('connection', (socket) => { connectedId = socket.id })
+  io.on('connection', (socket) => {
+    connectedId = socket.id
+  })
   http.listen(0, '127.0.0.1')
   await once(http, 'listening')
   const client = new WebSocket(`ws://127.0.0.1:${(http.address() as { port: number }).port}/ws`, {
@@ -207,7 +219,7 @@ test('websocket accepts the native path with an untrusted Host and unicasts by s
   } finally {
     client.terminate()
     await new Promise<void>((resolve) => io.close(resolve))
-    await new Promise<void>((resolve, reject) => http.close((error) => error ? reject(error) : resolve()))
+    await new Promise<void>((resolve, reject) => http.close((error) => (error ? reject(error) : resolve())))
   }
 })
 
@@ -221,12 +233,24 @@ test('temporary-admin vote shortcut respects deletion restrictions and ordinary 
   member.role = 'admin'
   room.temporaryAdminUserId = member.id
   room.allowTemporaryAdminTrackRemoval = false
-  const track: Track = { id: 'vote-track', title: '歌曲', artist: [], album: '', duration: 180, cover: '',
-    source: 'netease', sourceId: '1', urlId: '1' }
+  const track: Track = {
+    id: 'vote-track',
+    title: '歌曲',
+    artist: [],
+    album: '',
+    duration: 180,
+    cover: '',
+    source: 'netease',
+    sourceId: '1',
+    urlId: '1',
+  }
   room.queue = [track]
   const handlers = new Map<string, (data: unknown) => void>()
   const emitted: { code?: string }[] = []
-  const socket = { id: 'vote-temp-socket', connected: true, data: { identityUserId: member.id },
+  const socket = {
+    id: 'vote-temp-socket',
+    connected: true,
+    data: { identityUserId: member.id },
     on: (event: string, handler: (data: unknown) => void) => handlers.set(event, handler),
     emit: (_event: string, data: { code?: string }) => emitted.push(data),
   } as unknown as TypedSocket
@@ -261,18 +285,33 @@ test('playback failure rejects without an unhandled cleanup promise and subseque
   const playerService = await import('../src/services/playerService.js')
   const { musicProvider } = await import('../src/services/musicProvider.js')
   const { room } = roomService.createRoom('mutex-socket', '房主', '播放恢复', null, 'mutex-user')
-  const original = musicProvider.getStreamInfo
-  musicProvider.getStreamInfo = async () => ({ url: 'https://example.test/audio', requestedQuality: 320, attemptedQuality: 320 })
-  const legacyTrack = { id: 'legacy-track', title: '旧数据歌曲', album: '', duration: 180, cover: '',
-    source: 'netease', sourceId: '1', urlId: '1' } as Track
-  const failingIo = { to: () => { throw new Error('controlled broadcast failure') } } as unknown as TypedServer
+  const original = musicProvider.getStreamInfoDetailed
+  musicProvider.getStreamInfoDetailed = async () => ({
+    result: { url: 'https://example.test/audio', requestedQuality: 320, attemptedQuality: 320 },
+    failure: null,
+  })
+  const legacyTrack = {
+    id: 'legacy-track',
+    title: '旧数据歌曲',
+    album: '',
+    duration: 180,
+    cover: '',
+    source: 'netease',
+    sourceId: '1',
+    urlId: '1',
+  } as Track
+  const failingIo = {
+    to: () => {
+      throw new Error('controlled broadcast failure')
+    },
+  } as unknown as TypedServer
   try {
     await assert.rejects(playerService.playTrackInRoom(failingIo, room.id, legacyTrack), /controlled broadcast failure/)
     await new Promise<void>((resolve) => setImmediate(resolve))
     assert.equal(await playerService.playTrackInRoom(fakeIo, room.id, legacyTrack), true)
     assert.equal(room.currentTrack?.id, legacyTrack.id)
   } finally {
-    musicProvider.getStreamInfo = original
+    musicProvider.getStreamInfoDetailed = original
     playerService.cleanupRoom(room.id)
     roomRepo.delete(room.id)
   }

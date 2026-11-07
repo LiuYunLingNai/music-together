@@ -28,6 +28,8 @@ export interface AudioSettingsState {
   highPrecisionBeats: boolean
   /** 用 htdemucs（WebGPU）真分轨计算鼓点 / 人声；首次开启需下载 92 MB 权重。 */
   highPrecisionStems: boolean
+  /** 播放结束前提前解析并缓冲下一首，减少切歌空档。 */
+  preloadNextTrack: boolean
 }
 
 export const DEFAULT_AUDIO_SETTINGS: AudioSettingsState = {
@@ -38,6 +40,7 @@ export const DEFAULT_AUDIO_SETTINGS: AudioSettingsState = {
   trackFeaturesEnabled: false,
   highPrecisionBeats: false,
   highPrecisionStems: false,
+  preloadNextTrack: true,
 }
 
 const STORAGE_KEY = 'mt-audio-settings'
@@ -71,9 +74,7 @@ const migrateLegacyEqualizer = (legacy: {
       }
     })
     const value = Number(legacyGains[legacyIndex])
-    gains[nearest] = Number.isFinite(value)
-      ? clamp(value, AUDIO_EQUALIZER_MIN_GAIN_DB, AUDIO_EQUALIZER_MAX_GAIN_DB)
-      : 0
+    gains[nearest] = Number.isFinite(value) ? clamp(value, AUDIO_EQUALIZER_MIN_GAIN_DB, AUDIO_EQUALIZER_MAX_GAIN_DB) : 0
   })
   const effects = createNeutralAudioEffects()
   return {
@@ -102,17 +103,15 @@ const resolveStored = (value: StoredAudioSettings | null | undefined): AudioSett
     0,
     AUDIO_CROSSFADE_MAX_MS,
   )
-  const outputDeviceId = typeof value?.outputDeviceId === 'string' && value.outputDeviceId
-    ? value.outputDeviceId
-    : 'default'
+  const outputDeviceId =
+    typeof value?.outputDeviceId === 'string' && value.outputDeviceId ? value.outputDeviceId : 'default'
   const equalizer = value?.equalizer
     ? resolveAudioEqualizerSettings(value.equalizer)
     : value && ('equalizerGains' in value || 'equalizerEnabled' in value)
       ? migrateLegacyEqualizer(value)
       : cloneDefaultEqualizer()
-  const replayGainMode: ReplayGainMode = value?.replayGainMode === 'track' || value?.replayGainMode === 'auto'
-    ? value.replayGainMode
-    : 'off'
+  const replayGainMode: ReplayGainMode =
+    value?.replayGainMode === 'track' || value?.replayGainMode === 'auto' ? value.replayGainMode : 'off'
   return {
     equalizer,
     crossfadeMs,
@@ -121,6 +120,7 @@ const resolveStored = (value: StoredAudioSettings | null | undefined): AudioSett
     trackFeaturesEnabled: value?.trackFeaturesEnabled === true,
     highPrecisionBeats: value?.highPrecisionBeats === true,
     highPrecisionStems: value?.highPrecisionStems === true,
+    preloadNextTrack: value?.preloadNextTrack !== false,
   }
 }
 
@@ -155,6 +155,7 @@ interface AudioSettingsStore extends AudioSettingsState {
   setTrackFeaturesEnabled: (enabled: boolean) => void
   setHighPrecisionBeats: (enabled: boolean) => void
   setHighPrecisionStems: (enabled: boolean) => void
+  setPreloadNextTrack: (enabled: boolean) => void
 }
 
 const initial = read()
@@ -169,6 +170,7 @@ export const useAudioSettingsStore = create<AudioSettingsStore>((set, get) => {
       trackFeaturesEnabled: patch.trackFeaturesEnabled ?? get().trackFeaturesEnabled,
       highPrecisionBeats: patch.highPrecisionBeats ?? get().highPrecisionBeats,
       highPrecisionStems: patch.highPrecisionStems ?? get().highPrecisionStems,
+      preloadNextTrack: patch.preloadNextTrack ?? get().preloadNextTrack,
     }
     persist(next)
     set(next)
@@ -200,5 +202,6 @@ export const useAudioSettingsStore = create<AudioSettingsStore>((set, get) => {
     setTrackFeaturesEnabled: (trackFeaturesEnabled) => update({ trackFeaturesEnabled }),
     setHighPrecisionBeats: (highPrecisionBeats) => update({ highPrecisionBeats }),
     setHighPrecisionStems: (highPrecisionStems) => update({ highPrecisionStems }),
+    setPreloadNextTrack: (preloadNextTrack) => update({ preloadNextTrack }),
   }
 })

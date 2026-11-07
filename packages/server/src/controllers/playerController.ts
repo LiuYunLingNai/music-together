@@ -15,6 +15,8 @@ import { roomRepo } from '../repositories/roomRepository.js'
 import * as playerService from '../services/playerService.js'
 import * as roomService from '../services/roomService.js'
 import * as trackFallbackService from '../services/trackFallbackService.js'
+import * as authService from '../services/authService.js'
+import { inferMediaFailure } from '../services/playbackFailure.js'
 import { estimateCurrentTimeAt } from '../services/syncService.js'
 import { logger } from '../utils/logger.js'
 import { recordMediaFallbackRequest } from '../services/playbackMetrics.js'
@@ -82,6 +84,7 @@ export function registerPlayerController(io: TypedServer, socket: TypedSocket) {
       const parsed = playerNextSchema.safeParse(raw ?? {})
       await playerService.playNextTrackInRoom(ctx.io, ctx.roomId, ctx.room.playMode, {
         expectedTrackId: parsed.success ? parsed.data.trackId : undefined,
+        forceRoaming: parsed.success ? parsed.data.forceRoaming : undefined,
       })
     }),
   )
@@ -98,10 +101,21 @@ export function registerPlayerController(io: TypedServer, socket: TypedSocket) {
     withRoom(async (ctx, raw) => {
       if (!(await checkSocketRateLimit(ctx.socket))) return
       const trackId = typeof raw?.trackId === 'string' ? raw.trackId : undefined
-      const track = await playerService.refreshCurrentStreamUrl(ctx.roomId, trackId)
+      const degrade = raw?.degrade === true
+      const track = await playerService.refreshCurrentStreamUrl(ctx.roomId, trackId, { degrade })
       if (track && (!trackId || track.id === trackId)) {
         ctx.io.to(ctx.roomId).emit(EVENTS.PLAYER_STREAM_REFRESHED, { track })
       }
+    }),
+  )
+
+  socket.on(
+    EVENTS.PLAYER_RETRY_TRACK,
+    withPermission('play', 'Player', async (ctx, raw) => {
+      if (!(await checkSocketRateLimit(ctx.socket))) return
+      const trackId = typeof raw?.trackId === 'string' ? raw.trackId : undefined
+      const degrade = raw?.degrade === true
+      await playerService.retryFailedTrack(ctx.io, ctx.roomId, trackId, { degrade })
     }),
   )
 
@@ -149,9 +163,14 @@ export function registerPlayerController(io: TypedServer, socket: TypedSocket) {
       const candidates = await trackFallbackService.findAlternativeTracks(current, 1)
       const best = candidates[0]
       if (!best) {
-        ctx.socket.emit(EVENTS.ROOM_ERROR, {
-          code: ERROR_CODE.STREAM_FAILED,
-          message: '没有找到可用的替代音源',
+        const auth = authService.getBestAuth(current.source, ctx.roomId)
+        ctx.socket.emit(EVENTS.PLAYER_PLAYBACK_FAILURE, {
+          trackId: current.id,
+          track: current,
+          failure: inferMediaFailure(current, Boolean(auth)),
+          // A single client's media failure must not interrupt the rest of the
+          // room; keep the room playing and let this listener choose.
+          nextAction: 'stop',
         })
         return
       }

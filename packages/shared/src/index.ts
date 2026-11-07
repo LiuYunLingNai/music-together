@@ -1,5 +1,6 @@
 export * from './types.js'
 export * from './lyricMatch.js'
+export * from './trackMatch.js'
 export * from './pureMusic.js'
 export * from './musicCapabilities.js'
 export * from './events.js'

@@ -2,7 +2,12 @@ import type { AudioQuality, MusicSource } from '@music-together/shared'
 import { LRUCache } from 'lru-cache'
 import pLimit from 'p-limit'
 import { logger } from '../utils/logger.js'
-import { musicProvider, type StreamUrlResult } from './musicProvider.js'
+import {
+  musicProvider,
+  type ProviderStreamFailure,
+  type StreamResolutionOutcome,
+  type StreamUrlResult,
+} from './musicProvider.js'
 
 const SOURCE_CONCURRENCY = 3
 const NEGATIVE_TTL_MIN_MS = 20_000
@@ -50,8 +55,8 @@ function emptyMetrics(): StreamResolutionMetrics {
 
 const metrics = emptyMetrics()
 const limiters = new Map<MusicSource, Limiter>()
-const inFlight = new Map<string, Promise<StreamUrlResult | null>>()
-const negativeCache = new LRUCache<string, true>({ max: 1_000, ttl: 30_000 })
+const inFlight = new Map<string, Promise<StreamResolutionOutcome>>()
+const negativeCache = new LRUCache<string, ProviderStreamFailure>({ max: 1_000, ttl: 30_000 })
 
 function limiterFor(source: MusicSource): Limiter {
   let limiter = limiters.get(source)
@@ -84,6 +89,19 @@ export async function resolveStream(
   quality: AudioQuality = 320,
   options: ResolveStreamOptions = {},
 ): Promise<StreamUrlResult | null> {
+  return (await resolveStreamDetailed(source, urlId, quality, options)).result
+}
+
+/**
+ * Same as {@link resolveStream}, but keeps the provider's failure facts so the
+ * player can explain why a track could not be resolved.
+ */
+export async function resolveStreamDetailed(
+  source: MusicSource,
+  urlId: string,
+  quality: AudioQuality = 320,
+  options: ResolveStreamOptions = {},
+): Promise<StreamResolutionOutcome> {
   const { cookie, forceRefresh = false, vipType = 0 } = options
   const shareable = !cookie
   const key = `${source}:${urlId}:${quality}`
@@ -96,10 +114,13 @@ export async function resolveStream(
   if (shareable) {
     if (forceRefresh) {
       negativeCache.delete(key)
-    } else if (negativeCache.has(key)) {
-      metrics.negativeHits += 1
-      sourceMetrics.negativeHits += 1
-      return null
+    } else {
+      const cachedFailure = negativeCache.get(key)
+      if (cachedFailure) {
+        metrics.negativeHits += 1
+        sourceMetrics.negativeHits += 1
+        return { result: null, failure: cachedFailure }
+      }
     }
     const shared = inFlight.get(shareKey)
     if (shared) {
@@ -109,9 +130,12 @@ export async function resolveStream(
     }
   }
 
-  let task: Promise<StreamUrlResult | null>
-  task = limiterFor(source)(() => musicProvider.getStreamInfo(source, urlId, quality, cookie, forceRefresh, vipType))
-    .then((result) => {
+  let task: Promise<StreamResolutionOutcome>
+  task = limiterFor(source)(() =>
+    musicProvider.getStreamInfoDetailed(source, urlId, quality, cookie, forceRefresh, vipType),
+  )
+    .then((outcome) => {
+      const result = outcome.result
       if (result?.fromCache) {
         metrics.cacheHits += 1
         sourceMetrics.cacheHits += 1
@@ -119,17 +143,23 @@ export async function resolveStream(
       if (!result) {
         metrics.failures += 1
         sourceMetrics.failures += 1
+        const failure = outcome.failure ?? { reason: 'unknown' as const }
         if (shareable && !forceRefresh) {
-          negativeCache.set(key, true, { ttl: negativeTtlMs() })
+          negativeCache.set(key, failure, { ttl: negativeTtlMs() })
         }
+        return { result: null, failure }
       }
-      return result
+      return { result, failure: null }
     })
     .catch((error: unknown) => {
       metrics.failures += 1
       sourceMetrics.failures += 1
       logger.warn('播放地址解析异常', { source, urlId, quality, error })
-      return null
+      const failure: ProviderStreamFailure = {
+        reason: 'upstream-unreachable',
+        providerMessage: error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200),
+      }
+      return { result: null, failure }
     })
     .finally(() => {
       if (inFlight.get(shareKey) === task) inFlight.delete(shareKey)

@@ -18,22 +18,11 @@ import {
   formatAudioEffectValue,
   sliderPositionToAudioEffect,
 } from '@/lib/audioEffects/model'
-import {
-  AUDIO_CROSSFADE_MAX_MS,
-  useAudioSettingsStore,
-} from '@/stores/audioSettingsStore'
+import { AUDIO_CROSSFADE_MAX_MS, useAudioSettingsStore } from '@/stores/audioSettingsStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useSleepTimerStore } from '@/stores/sleepTimerStore'
-import {
-  getBeatThisState,
-  loadBeatThisModel,
-  subscribeBeatThisState,
-} from '@/services/analysis/beatThisModel'
-import {
-  getHtdemucsState,
-  loadHtdemucsModel,
-  subscribeHtdemucsState,
-} from '@/services/analysis/htdemucsModel'
+import { getBeatThisState, loadBeatThisModel, subscribeBeatThisState } from '@/services/analysis/beatThisModel'
+import { getHtdemucsState, loadHtdemucsModel, subscribeHtdemucsState } from '@/services/analysis/htdemucsModel'
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { SettingRow } from './SettingRow'
 
@@ -143,6 +132,7 @@ export function PlaybackSection() {
         <Separator className="mt-2 mb-4" />
         <OutputDeviceSetting />
         <CrossfadeSetting />
+        <PreloadNextSetting />
         <ReplayGainSetting />
       </div>
 
@@ -173,7 +163,8 @@ function OutputDeviceSetting() {
     const mediaDevices = navigator.mediaDevices
     if (!mediaDevices?.enumerateDevices) return
     const refresh = () => {
-      void mediaDevices.enumerateDevices()
+      void mediaDevices
+        .enumerateDevices()
         .then((all) => setDevices(all.filter((device) => device.kind === 'audiooutput')))
         .catch(() => setDevices([]))
     }
@@ -227,10 +218,25 @@ function CrossfadeSetting() {
         </SelectTrigger>
         <SelectContent>
           {options.map(([value, label]) => (
-            <SelectItem key={value} value={String(value)}>{label}</SelectItem>
+            <SelectItem key={value} value={String(value)}>
+              {label}
+            </SelectItem>
           ))}
         </SelectContent>
       </Select>
+    </SettingRow>
+  )
+}
+
+function PreloadNextSetting() {
+  const enabled = useAudioSettingsStore((state) => state.preloadNextTrack)
+  const setEnabled = useAudioSettingsStore((state) => state.setPreloadNextTrack)
+  return (
+    <SettingRow
+      label="预加载下一首"
+      description="播放结束前约 25 秒解析并缓冲下一首，减少切歌空档；Bilibili 音源暂不预加载。"
+    >
+      <Switch aria-label="预加载下一首" checked={enabled} onCheckedChange={setEnabled} />
     </SettingRow>
   )
 }
@@ -273,15 +279,18 @@ function SleepTimerSetting() {
   const setDurationMinutes = useSleepTimerStore((state) => state.setDurationMinutes)
   const arm = useSleepTimerStore((state) => state.arm)
   const disarm = useSleepTimerStore((state) => state.disarm)
-  const stopAt = deadlineMs === null
-    ? null
-    : new Date(deadlineMs).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  const stopAt =
+    deadlineMs === null
+      ? null
+      : new Date(deadlineMs).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
   return (
     <SettingRow
       label="睡眠定时器"
-      description={stopAt === null
-        ? '到期后本机淡出停止，不改变房间播放状态。'
-        : `本机将在 ${stopAt} 淡出停止；房间其他人不受影响。`}
+      description={
+        stopAt === null
+          ? '到期后本机淡出停止，不改变房间播放状态。'
+          : `本机将在 ${stopAt} 淡出停止；房间其他人不受影响。`
+      }
     >
       <div className="flex items-center gap-2">
         <Select
@@ -298,12 +307,16 @@ function SleepTimerSetting() {
           </SelectTrigger>
           <SelectContent>
             {SLEEP_TIMER_OPTIONS.map(([value, label]) => (
-              <SelectItem key={value} value={String(value)}>{label}</SelectItem>
+              <SelectItem key={value} value={String(value)}>
+                {label}
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>
         {deadlineMs !== null && (
-          <Button variant="ghost" size="sm" onClick={disarm}>取消</Button>
+          <Button variant="ghost" size="sm" onClick={disarm}>
+            取消
+          </Button>
         )}
       </div>
     </SettingRow>
@@ -351,16 +364,15 @@ function EqualizerSettings() {
         <Switch aria-label="启用均衡器" checked={equalizer.enabled} onCheckedChange={setEnabled} />
       </SettingRow>
       <SettingRow label="预设" description="选择内置音色或自定义槽；调整任意频段后会写入自定义槽并开启处理。">
-        <Select
-          value={equalizer.preset}
-          onValueChange={(value) => applyPreset(value as AudioEqualizerModeId)}
-        >
+        <Select value={equalizer.preset} onValueChange={(value) => applyPreset(value as AudioEqualizerModeId)}>
           <SelectTrigger size="sm" aria-label="均衡器预设">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             {Object.entries(PRESET_LABELS).map(([value, label]) => (
-              <SelectItem key={value} value={value}>{label}</SelectItem>
+              <SelectItem key={value} value={value}>
+                {label}
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -382,7 +394,8 @@ function EqualizerSettings() {
                 onValueChange={([next]) => setBand(index, next)}
               />
               <span className="w-12 text-right text-xs tabular-nums text-muted-foreground">
-                {gain > 0 ? '+' : ''}{gain} dB
+                {gain > 0 ? '+' : ''}
+                {gain} dB
               </span>
             </div>
           </SettingRow>
@@ -484,8 +497,7 @@ function EffectSettings() {
                 max={1000}
                 step={1}
                 value={[audioEffectToSliderPosition(control, value)]}
-                onValueChange={([position]) =>
-                  setEffect(control.id, sliderPositionToAudioEffect(control, position))}
+                onValueChange={([position]) => setEffect(control.id, sliderPositionToAudioEffect(control, position))}
               />
               <span className="w-16 text-right text-xs tabular-nums text-muted-foreground">
                 {formatAudioEffectValue(control, value)}

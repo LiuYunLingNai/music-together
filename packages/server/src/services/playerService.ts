@@ -1,9 +1,18 @@
-import type { AudioQuality, MusicSource, PlayMode, PlayState, ScheduledPlayState, Track } from '@music-together/shared'
-import { EVENTS, ERROR_CODE, NTP, TIMING, clampPlaybackPosition, nextPlaybackRevision } from '@music-together/shared'
+import type {
+  AudioQuality,
+  MusicSource,
+  PlayMode,
+  PlayState,
+  PlaybackFailure,
+  ScheduledPlayState,
+  Track,
+} from '@music-together/shared'
+import { EVENTS, NTP, TIMING, clampPlaybackPosition, nextPlaybackRevision } from '@music-together/shared'
 import { roomRepo } from '../repositories/roomRepository.js'
 import { nanoid } from 'nanoid'
 import { musicProvider } from './musicProvider.js'
-import { resolveStream } from './streamResolutionService.js'
+import { resolveStreamDetailed } from './streamResolutionService.js'
+import { decideFailureAction, toPlaybackFailure } from './playbackFailure.js'
 import * as queueService from './queueService.js'
 import * as trackFallbackService from './trackFallbackService.js'
 import * as authService from './authService.js'
@@ -14,7 +23,7 @@ import { config } from '../config.js'
 import { logger } from '../utils/logger.js'
 import type { RoomData } from '../repositories/types.js'
 import type { TypedServer, TypedSocket } from '../middleware/types.js'
-import { getEffectiveQuality, providerQualityRank, type MembershipTier } from './audioQualityPolicy.js'
+import { degradeQuality, getEffectiveQuality, providerQualityRank, type MembershipTier } from './audioQualityPolicy.js'
 import { roamingService, shouldPreferRoamingForNext } from './roamingService.js'
 import { shouldRemovePlayedTrackAfterAdvance } from './queueNavigation.js'
 import {
@@ -191,6 +200,20 @@ async function resolveStreamUrl(
   forceRefresh = false,
   vipType: MembershipTier = 0,
 ): Promise<ResolvedStreamUrl | null> {
+  return (await resolveStreamUrlDetailed(source, urlId, bitrate, cookie, forceRefresh, vipType)).result
+}
+
+async function resolveStreamUrlDetailed(
+  source: MusicSource,
+  urlId: string,
+  bitrate: AudioQuality,
+  cookie?: string,
+  forceRefresh = false,
+  vipType: MembershipTier = 0,
+): Promise<{
+  result: ResolvedStreamUrl | null
+  failure: import('./musicProvider.js').ProviderStreamFailure | null
+}> {
   const attemptedBitrate = getEffectiveQuality(source, bitrate, vipType)
   if (attemptedBitrate !== bitrate && bitrate !== 'highest') {
     logger.info('已根据平台会员等级调整请求音质', {
@@ -201,13 +224,69 @@ async function resolveStreamUrl(
       vipType,
     })
   }
-  const result = await resolveStream(source, urlId, attemptedBitrate, { cookie, forceRefresh, vipType })
-  return result ? { ...result, attemptedBitrate } : null
+  const outcome = await resolveStreamDetailed(source, urlId, attemptedBitrate, { cookie, forceRefresh, vipType })
+  return {
+    result: outcome.result ? { ...outcome.result, attemptedBitrate } : null,
+    failure: outcome.failure,
+  }
+}
+
+const failureSkipTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+function clearFailureSkip(roomId: string): void {
+  const timer = failureSkipTimers.get(roomId)
+  if (!timer) return
+  clearTimeout(timer)
+  failureSkipTimers.delete(roomId)
+}
+
+function scheduleFailureSkip(io: TypedServer, roomId: string, trackId: string, delayMs: number): void {
+  clearFailureSkip(roomId)
+  const timer = setTimeout(() => {
+    failureSkipTimers.delete(roomId)
+    const room = roomRepo.get(roomId)
+    if (!room || room.currentTrack?.id !== trackId) return
+    void playNextTrackInRoom(io, roomId, room.playMode, { expectedTrackId: trackId, skipDebounce: true })
+  }, delayMs)
+  failureSkipTimers.set(roomId, timer)
+}
+
+/** Park the room on the failed track and tell every client why it stopped. */
+function publishPlaybackFailure(
+  io: TypedServer,
+  roomId: string,
+  room: RoomData,
+  track: Track,
+  failure: PlaybackFailure,
+): void {
+  const action = decideFailureAction(failure, true)
+  room.currentTrack = track
+  room.playState = {
+    isPlaying: false,
+    currentTime: 0,
+    serverTimestamp: Date.now(),
+    revision: nextPlaybackRevision(room.playState),
+  }
+  roomRepo.persist(roomId)
+  io.to(roomId).emit(EVENTS.PLAYER_PAUSE, {
+    playState: { ...room.playState, serverTimeToExecute: room.playState.serverTimestamp },
+  })
+  io.to(roomId).emit(EVENTS.PLAYER_PLAYBACK_FAILURE, {
+    trackId: track.id,
+    track,
+    failure,
+    nextAction: action.nextAction,
+    ...(action.autoActionInMs ? { autoActionInMs: action.autoActionInMs } : {}),
+  })
+  io.to(roomId).emit(EVENTS.ROOM_STATE, toPublicRoomState(room))
+  broadcastRoomList(io)
+  if (action.nextAction === 'skip' && action.autoActionInMs) {
+    scheduleFailureSkip(io, roomId, track.id, action.autoActionInMs)
+  }
 }
 
 /**
  * 预热下一首的播放地址：只填 provider 的 URL 缓存，不下载音频、不改房间状态。
- *
  * 切歌时 `_playTrackInRoom` 仍会重新解析，但命中缓存后省掉一次上游往返。
  * Bilibili 的 DASH 地址每次都要新解析，带 cookie 的 VIP 地址也不会进缓存，
  * 这两类直接跳过。
@@ -251,6 +330,7 @@ export function autoPlayIfEmpty(io: TypedServer, roomId: string, track: Track): 
 async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): Promise<boolean> {
   const room = roomRepo.get(roomId)
   if (!room) return false
+  clearFailureSkip(roomId)
 
   // Never trust/reuse a client-provided URL here. Resolving on the server is
   // what lets us record the provider's actual bitrate and refresh expired URLs.
@@ -262,13 +342,14 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
   }
   let streamResolution: ResolvedStreamUrl | null = null
   let usedAuthenticatedAccount = false
+  let streamFailure: import('./musicProvider.js').ProviderStreamFailure | null = null
 
   // Always resolve on the server so the URL is fresh and actual quality is known.
   if (!resolved.streamUrl) {
     try {
       const platformAuth = authService.getBestAuth(resolved.source, roomId)
       const cookie = platformAuth?.cookie
-      const url = await resolveStreamUrl(
+      const resolution = await resolveStreamUrlDetailed(
         resolved.source,
         resolved.urlId,
         room.audioQuality,
@@ -276,11 +357,12 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
         false,
         platformAuth?.vipType ?? 0,
       )
+      const url = resolution.result
+      streamFailure = resolution.failure
       if (url) usedAuthenticatedAccount = Boolean(platformAuth)
 
       if (!url) {
         const isVip = resolved.vip
-        const hint = isVip && !cookie ? '（VIP 歌曲，需要有用户登录 VIP 账号）' : ''
         logger.warn('无法获取歌曲播放地址，准备尝试跨平台匹配', {
           roomId,
           trackId: resolved.id,
@@ -395,16 +477,16 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
           }
         }
 
-        // If still no streamUrl, follow original failure path
+        // If still no streamUrl, keep the track as the current item and let the
+        // room decide what to do with the structured failure.
         if (!resolved.streamUrl) {
-          // Auto-remove the invalid track from the queue
-          queueService.removeTrack(roomId, resolved.id)
-          const room2 = roomRepo.get(roomId)
-          if (room2) io.to(roomId).emit(EVENTS.QUEUE_UPDATED, { queue: room2.queue })
-          io.to(roomId).emit(EVENTS.ROOM_ERROR, {
-            code: ERROR_CODE.STREAM_FAILED,
-            message: `无法获取「${resolved.title}」的播放链接${hint}，已从列表移除`,
-          })
+          publishPlaybackFailure(
+            io,
+            roomId,
+            room,
+            resolved,
+            toPlaybackFailure(resolved.source, streamFailure ?? { reason: 'unknown' }),
+          )
           return false
         }
       }
@@ -609,6 +691,7 @@ export function setCurrentTrack(roomId: string, track: Track | null): void {
  * Used when no next track is available (queue empty, track removed, queue cleared).
  */
 export function stopPlayback(io: TypedServer, roomId: string): void {
+  clearFailureSkip(roomId)
   setCurrentTrack(roomId, null)
   const room = roomRepo.get(roomId)
   const stoppedState = room?.playState ?? {
@@ -662,9 +745,10 @@ export function playNextTrackInRoom(
   io: TypedServer,
   roomId: string,
   playMode: PlayMode,
-  options?: { skipDebounce?: boolean; expectedTrackId?: string },
+  options?: { skipDebounce?: boolean; expectedTrackId?: string; forceRoaming?: boolean },
 ): Promise<void> {
   return withPlayMutex(roomId, async () => {
+    clearFailureSkip(roomId)
     // Checked inside the mutex: the track may have advanced naturally while
     // this request waited, and skipping then would drop the new track too.
     if (options?.expectedTrackId) {
@@ -695,13 +779,31 @@ export function playNextTrackInRoom(
     const tryRoaming = async (): Promise<boolean> => {
       roamingAttempted = true
       try {
-        const roamingTrack = await roamingService.getNextTrack(room)
+        const roamingTracks = await roamingService.getBatch(room)
+        if (roamingTracks.length === 0) return false
+        // 一批一起入队：正常的下一次切歌会直接从队列里取到它们，
+        // 不必每首歌再打一次推荐接口。入队失败（容量满）时放弃漫游，
+        // 交给下面的队列回绕/停止逻辑。
+        const added = queueService.addBatchTracks(roomId, roamingTracks)
+        if (added === 0) return false
+        const roomAfterQueue = roomRepo.get(roomId)
+        if (roomAfterQueue) io.to(roomId).emit(EVENTS.QUEUE_UPDATED, { queue: roomAfterQueue.queue })
+        return true
+      } catch (error) {
+        logger.warn('房间漫游推荐不可用', { roomId, source: room.roamingSource, error })
+      }
+      return false
+    }
+
+    // Explicit roam action (queue header button): leave the user queue in
+    // place, play one recommendation right away, and keep the played track
+    // visible in the queue. The rest of the batch is only fetched by the
+    // automatic tail refill below.
+    if (options?.forceRoaming) {
+      try {
+        const [roamingTrack] = await roamingService.getBatch(room, 1)
         if (roamingTrack && (await _playTrackInRoom(io, roomId, roamingTrack))) {
-          // Keep roaming songs visible in the room playlist. Add only after
-          // playback succeeds so an unplayable recommendation is not left in
-          // the queue; queue capacity still follows the normal server limit.
-          const playedRoom = roomRepo.get(roomId)
-          const playedTrack = playedRoom?.currentTrack
+          const playedTrack = roomRepo.get(roomId)?.currentTrack
           const queuedTrack = playedTrack
             ? { ...playedTrack, streamUrl: undefined, requiresServerProxy: undefined, streamFormat: undefined }
             : roamingTrack
@@ -712,25 +814,27 @@ export function playNextTrackInRoom(
             io.to(roomId).emit(EVENTS.QUEUE_UPDATED, { queue: roomAfterQueue.queue })
           }
           lastSkipTimestamp.set(roomId, { action: 'next', timestamp: Date.now() })
-          return true
+          return
         }
       } catch (error) {
         logger.warn('房间漫游推荐不可用', { roomId, source: room.roamingSource, error })
       }
-      return false
+      // fall through to normal navigation when roaming cannot produce a track
     }
 
     // loop-all would otherwise wrap to the first queued song before roaming
-    // gets a chance. At the queue tail (and after a roaming song), request a
-    // fresh recommendation first; a failed request falls back to the normal
-    // playback mode below.
-    if (shouldPreferRoamingForNext(room, playMode) && (await tryRoaming())) {
-      return
+    // gets a chance. At the queue tail (and after a roaming song), refill the
+    // queue with a recommendation batch, then let the normal navigation pick
+    // the first new track. A failed request falls back to the playback mode.
+    if (shouldPreferRoamingForNext(room, playMode)) {
+      await tryRoaming()
     }
 
-    const nextTrack = queueService.getNextTrack(roomId, playMode)
+    let nextTrack = queueService.getNextTrack(roomId, playMode)
+    if (!nextTrack && !roamingAttempted && room.roamingEnabled) {
+      if (await tryRoaming()) nextTrack = queueService.getNextTrack(roomId, playMode)
+    }
     if (!nextTrack) {
-      if (!roamingAttempted && (await tryRoaming())) return
       stopPlayback(io, roomId)
       return
     }
@@ -887,7 +991,11 @@ const lastManualStreamRefreshAt = new Map<string, number>()
 const lastManualStreamRefreshOkAt = new Map<string, number>()
 const manualStreamRefreshInFlight = new Map<string, Promise<Track | null>>()
 
-export function refreshCurrentStreamUrl(roomId: string, requestedTrackId?: string): Promise<Track | null> {
+export function refreshCurrentStreamUrl(
+  roomId: string,
+  requestedTrackId?: string,
+  options?: { degrade?: boolean },
+): Promise<Track | null> {
   const inFlight = manualStreamRefreshInFlight.get(roomId)
   if (inFlight) return inFlight
 
@@ -910,10 +1018,13 @@ export function refreshCurrentStreamUrl(roomId: string, requestedTrackId?: strin
   const task = (async (): Promise<Track | null> => {
     try {
       const auth = authService.getBestAuth(track.source, roomId)
+      const quality = options?.degrade
+        ? degradeQuality(track.source, room.audioQuality, auth?.vipType ?? 0)
+        : room.audioQuality
       const refreshed = await resolveStreamUrl(
         track.source,
         track.urlId,
-        room.audioQuality,
+        quality,
         auth?.cookie,
         true,
         auth?.vipType ?? 0,
@@ -930,6 +1041,8 @@ export function refreshCurrentStreamUrl(roomId: string, requestedTrackId?: strin
         event: 'player.stream_url_refreshed',
         roomId,
         trackId: track.id,
+        degraded: options?.degrade === true,
+        quality,
       })
       return room.currentTrack
     } catch (err) {
@@ -942,6 +1055,73 @@ export function refreshCurrentStreamUrl(roomId: string, requestedTrackId?: strin
 
   manualStreamRefreshInFlight.set(roomId, task)
   return task
+}
+
+/**
+ * 用户从失败提示里点“重试”：绕过负缓存重新解析，并重新开始当前曲目。
+ * 登录/购买后调用同一入口即可。
+ */
+export function retryFailedTrack(
+  io: TypedServer,
+  roomId: string,
+  requestedTrackId?: string,
+  options?: { degrade?: boolean },
+): Promise<boolean> {
+  return withPlayMutex(roomId, async () => {
+    clearFailureSkip(roomId)
+    const room = roomRepo.get(roomId)
+    const track = room?.currentTrack
+    if (!room || !track) return false
+    if (requestedTrackId && requestedTrackId !== track.id) return false
+
+    const auth = authService.getBestAuth(track.source, roomId)
+    const quality = options?.degrade
+      ? degradeQuality(track.source, room.audioQuality, auth?.vipType ?? 0)
+      : room.audioQuality
+    const resolution = await resolveStreamUrlDetailed(
+      track.source,
+      track.urlId,
+      quality,
+      auth?.cookie,
+      true,
+      auth?.vipType ?? 0,
+    )
+    if (!resolution.result) {
+      publishPlaybackFailure(
+        io,
+        roomId,
+        room,
+        track,
+        toPlaybackFailure(track.source, resolution.failure ?? { reason: 'unknown' }),
+      )
+      return false
+    }
+
+    const updated: Track = {
+      ...track,
+      streamUrl: resolution.result.url,
+      streamFormat: resolution.result.streamFormat,
+      requiresServerProxy: resolution.result.requiresServerProxy,
+    }
+    room.currentTrack = updated
+    const queueIndex = room.queue.findIndex((item) => item.id === track.id)
+    if (queueIndex >= 0) room.queue[queueIndex] = updated
+    const scheduleTime = getScheduleTime(roomId)
+    room.playState = {
+      isPlaying: true,
+      currentTime: 0,
+      serverTimestamp: scheduleTime,
+      revision: nextPlaybackRevision(room.playState),
+    }
+    roomRepo.persist(roomId)
+    io.to(roomId).emit(EVENTS.PLAYER_PLAY, {
+      track: updated,
+      playState: scheduled(room.playState, roomId, scheduleTime),
+    })
+    io.to(roomId).emit(EVENTS.QUEUE_UPDATED, { queue: room.queue })
+    broadcastRoomList(io)
+    return true
+  })
 }
 
 export type SourceSwitchResult =
@@ -959,6 +1139,7 @@ export function switchCurrentTrackSource(
   trigger: 'manual' | 'automatic' = 'manual',
 ): Promise<SourceSwitchResult> {
   return withPlayMutex(roomId, async () => {
+    clearFailureSkip(roomId)
     const room = roomRepo.get(roomId)
     const current = room?.currentTrack
     if (!room || !current || current.id !== trackId) return { ok: false, reason: 'NOT_CURRENT' as const }

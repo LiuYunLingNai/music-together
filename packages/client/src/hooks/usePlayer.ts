@@ -4,9 +4,10 @@ import { PLAYER_PLAY_DEDUP_MS } from '@/lib/constants'
 import { storage } from '@/lib/storage'
 import { useSocketContext } from '@/providers/socket-context'
 import { usePlayerStore } from '@/stores/playerStore'
+import { usePlaybackFailureStore } from '@/stores/playbackFailureStore'
 import { useRoomStore } from '@/stores/roomStore'
 import { useSleepTimerStore } from '@/stores/sleepTimerStore'
-import type { RoomState, ScheduledPlayState, Track } from '@music-together/shared'
+import type { PlaybackFailureEvent, ScheduledPlayState, Track } from '@music-together/shared'
 import { EVENTS, getPlaybackRevision, isStalePlaybackAction } from '@music-together/shared'
 import { useCallback, useEffect, useRef } from 'react'
 import { useHowl } from './useHowl'
@@ -14,21 +15,12 @@ import { useLyric } from './useLyric'
 import { useMediaSession } from './useMediaSession'
 import { usePlayerSync } from './usePlayerSync'
 import { useSleepTimer } from './useSleepTimer'
+import { useNextTrackPreload } from './useNextTrackPreload'
 import { getScheduledPlaybackPosition } from '@/lib/playbackSync'
 import { getProxiedCoverUrl } from '@/lib/cover'
+import { predictNextTrack } from '@/lib/nextTrack'
 import type { MediaFailureKind } from '@/lib/mediaFailure'
 import { toast } from 'sonner'
-
-/** 预言服务端下一首（`queueService.getNextTrack` 的客户端镜像）；shuffle 由服务端随机，不猜。 */
-function predictNextTrack(room: RoomState | null): Track | null {
-  if (!room || room.queue.length === 0) return null
-  const currentIndex = room.currentTrack ? room.queue.findIndex((track) => track.id === room.currentTrack?.id) : -1
-  if (room.playMode === 'loop-one') return room.currentTrack ?? room.queue[0] ?? null
-  if (room.playMode === 'shuffle') return null
-  const nextIndex = currentIndex + 1
-  if (nextIndex < room.queue.length) return room.queue[nextIndex] ?? null
-  return room.playMode === 'loop-all' ? (room.queue[0] ?? null) : null
-}
 
 function prefetchCover(track: Track): void {
   if (!track.cover || typeof Image === 'undefined') return
@@ -96,12 +88,18 @@ export function usePlayer() {
       if (recoveryTimerRef.current) clearTimeout(recoveryTimerRef.current)
 
       if (nextAttempt === 1) {
-        console.warn('媒体加载失败，请求重新解析音源:', kind)
-        socket.emit(EVENTS.PLAYER_REFRESH_STREAM, { trackId: track.id })
+        // 解码/格式不支持时先降一档；纯网络失败只换地址，避免无谓地降低整房间音质。
+        const degrade = kind === 'decode' || kind === 'unsupported'
+        console.warn(degrade ? '媒体格式失败，请求降档重新解析音源:' : '媒体加载失败，请求重新解析音源:', kind)
+        socket.emit(EVENTS.PLAYER_REFRESH_STREAM, { trackId: track.id, degrade })
       } else {
         console.warn('音源刷新失败，请求跨源回退:', kind)
         socket.emit(EVENTS.PLAYER_REQUEST_SOURCE_FALLBACK, { trackId: track.id })
       }
+
+      const failureMessage = track.vip
+        ? `「${track.title}」可能需要登录或会员，已尝试降档与换源；可登录对应平台后重试`
+        : `「${track.title}」加载失败，已跳到下一首`
 
       recoveryTimerRef.current = setTimeout(
         () => {
@@ -118,12 +116,12 @@ export function usePlayer() {
               recoveryTimerRef.current = null
               if (recoveryRef.current?.trackId !== track.id) return
               recoveryRef.current = null
-              toast.error(`「${track.title}」加载失败，已跳到下一首`)
+              toast.error(failureMessage)
               autoNext()
             }, 15_000)
             return
           }
-          toast.error(`「${track.title}」加载失败，已跳到下一首`)
+          toast.error(failureMessage)
           autoNext()
         },
         nextAttempt === 1 ? 8_000 : 15_000,
@@ -137,6 +135,8 @@ export function usePlayer() {
     howlRef,
     soundIdRef,
     loadTrack,
+    preloadTrack,
+    disposePreloaded,
     schedulePlayback,
     cancelScheduledPlayback,
     pausePlayback,
@@ -144,6 +144,8 @@ export function usePlayer() {
     setPlaybackTempo,
   } = useHowl(autoNext, recoverFromLoadFailure)
   const { fetchLyric, prefetchLyric } = useLyric()
+
+  useNextTrackPreload(preloadTrack, disposePreloaded)
 
   useSleepTimer(howlRef, pausePlayback)
 
@@ -165,6 +167,7 @@ export function usePlayer() {
   // Listen for PLAYER_PLAY events (new track load)
   useEffect(() => {
     const onPlayerPlay = (data: { track: Track; playState: ScheduledPlayState }) => {
+      usePlaybackFailureStore.getState().dismiss()
       recoveryRef.current = null
       recoveryAttemptsRef.current = null
       if (recoveryTimerRef.current) {
@@ -260,6 +263,25 @@ export function usePlayer() {
       socket.off(EVENTS.PLAYER_PLAY, onPlayerPlay)
     }
   }, [socket, loadTrack, fetchLyric, prefetchLyric, schedulePlayback])
+
+  // Server parked the room on a track it could not resolve: stop the local
+  // recovery/skip timers and explain the reason with actionable choices.
+  useEffect(() => {
+    const onPlaybackFailure = (data: PlaybackFailureEvent) => {
+      if (recoveryTimerRef.current) {
+        clearTimeout(recoveryTimerRef.current)
+        recoveryTimerRef.current = null
+      }
+      recoveryRef.current = null
+      recoveryAttemptsRef.current = null
+      usePlayerStore.getState().setIsPlaying(false)
+      usePlaybackFailureStore.getState().show(data)
+    }
+    socket.on(EVENTS.PLAYER_PLAYBACK_FAILURE, onPlaybackFailure)
+    return () => {
+      socket.off(EVENTS.PLAYER_PLAYBACK_FAILURE, onPlaybackFailure)
+    }
+  }, [socket])
 
   useEffect(() => {
     const onTrackMetadataUpdated = (data: { track: Track }) => {

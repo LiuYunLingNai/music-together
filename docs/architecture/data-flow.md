@@ -50,17 +50,17 @@ graph TB
 - WebSocket 仍使用 `/ws` 的原生 JSON 事件协议。`player:play` 保留空载荷续播及完整 Track 直播放，显式歌曲载荷增加运行时校验；定向发送通过 socket ID 查询连接，不将 socket ID 当作房间名。
 - 网页房间设置以已有 `room:settings` 服务端广播确认保存结果，不新增 ACK 协议；失败、断线或超时不会提示保存成功。
 
-| 分类         | 客户端 → 服务端                                                                                                                     | 服务端 → 客户端                                                                                                                            |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Room**     | `room:create`, `room:join`, `room:leave`, `room:list`, `room:settings`, `room:set_role`                                             | `room:created`, `room:state`, `room:user_joined`, `room:user_left`, `room:settings`, `room:error`, `room:list_update`, `room:role_changed` |
-| **Player**   | `player:play`, `player:pause`, `player:seek`, `player:next`（可选 `{ trackId }`）, `player:prev`, `player:sync`, `player:sync_request`, `player:set_mode` | `player:play`, `player:pause`, `player:resume`, `player:seek`, `player:sync_response`                                                      |
-| **Queue**    | `queue:add`, `queue:add_batch`, `queue:remove`, `queue:reorder`, `queue:clear`                                                      | `queue:updated`                                                                                                                            |
-| **Chat**     | `chat:message`                                                                                                                      | `chat:message`, `chat:history`                                                                                                             |
-| **Vote**     | `vote:start`, `vote:cast`                                                                                                           | `vote:started`, `vote:result`                                                                                                              |
-| **Auth**     | `auth:request_qr`, `auth:check_qr`, `auth:set_cookie`, `auth:logout`, `auth:get_status`                                             | `auth:qr_generated`, `auth:qr_status`, `auth:set_cookie_result`, `auth:status_update`, `auth:my_status`                                    |
-| **Playlist** | `playlist:get_my`                                                                                                                   | `playlist:my_list`                                                                                                                         |
-| **NTP**      | `ntp:ping`                                                                                                                          | `ntp:pong`                                                                                                                                 |
-| **Server**   | —                                                                                                                                   | `server:audio_proxy_policy`                                                                                                                |
+| 分类         | 客户端 → 服务端                                                                                                                                                                                                                                                        | 服务端 → 客户端                                                                                                                                                              |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Room**     | `room:create`, `room:join`, `room:leave`, `room:list`, `room:settings`, `room:set_role`                                                                                                                                                                                | `room:created`, `room:state`, `room:user_joined`, `room:user_left`, `room:settings`, `room:error`, `room:list_update`, `room:role_changed`                                   |
+| **Player**   | `player:play`, `player:pause`, `player:seek`, `player:next`（可选 `{ trackId }`）, `player:prev`, `player:sync`, `player:sync_request`, `player:set_mode`, `player:refresh_stream`（可选 `{ trackId, degrade }`）, `player:retry_track`（可选 `{ trackId, degrade }`） | `player:play`, `player:pause`, `player:resume`, `player:seek`, `player:sync_response`, `player:stream_refreshed`, `player:playback_failure`（结构化失败原因 + `nextAction`） |
+| **Queue**    | `queue:add`, `queue:add_batch`, `queue:remove`, `queue:reorder`, `queue:clear`                                                                                                                                                                                         | `queue:updated`                                                                                                                                                              |
+| **Chat**     | `chat:message`                                                                                                                                                                                                                                                         | `chat:message`, `chat:history`                                                                                                                                               |
+| **Vote**     | `vote:start`, `vote:cast`                                                                                                                                                                                                                                              | `vote:started`, `vote:result`                                                                                                                                                |
+| **Auth**     | `auth:request_qr`, `auth:check_qr`, `auth:set_cookie`, `auth:logout`, `auth:get_status`                                                                                                                                                                                | `auth:qr_generated`, `auth:qr_status`, `auth:set_cookie_result`, `auth:status_update`, `auth:my_status`                                                                      |
+| **Playlist** | `playlist:get_my`                                                                                                                                                                                                                                                      | `playlist:my_list`                                                                                                                                                           |
+| **NTP**      | `ntp:ping`                                                                                                                                                                                                                                                             | `ntp:pong`                                                                                                                                                                   |
+| **Server**   | —                                                                                                                                                                                                                                                                      | `server:audio_proxy_policy`                                                                                                                                                  |
 
 ## 关键数据模型
 
@@ -245,8 +245,9 @@ interface ChatMessage {
 
 房主可在房间设置中开启私人漫游，并选择网易云、QQ 音乐、酷狗或酷狗概念版。漫游请求始终使用永久房主 `creatorId` 自己保存的平台凭据，不会借用管理员或其他成员的账号；房主未登录所选平台时，服务端拒绝开启，房主退出当前漫游平台后服务端自动关闭漫游。
 
-- 顺序播放到队尾，或列表循环即将从队尾回绕时，`playerService` 会优先调用 `roamingService` 获取个性化推荐；当前歌曲已经来自漫游时，下一首会继续漫游。队列中尚有后继点歌时仍优先播放点歌，单曲循环与随机播放保持原语义；推荐或歌曲解析失败则回退原播放模式，确实没有下一首时才停止。
-- 漫游歌曲标记为 `requestedBy: '私人漫游'`，成功开始播放后追加到房间播放列表并广播 `queue:updated`；连续切歌会从当前漫游曲目继续请求推荐，有人在当前漫游曲目之后新增点歌时仍优先播放该点歌。服务端过滤当前歌曲、队列歌曲和房间最近漫游歌曲，避免重复推荐。
+- 顺序播放到队尾，或列表循环即将从队尾回绕时，`playerService` 会调用 `roamingService.getBatch` 一次取回最多 5 首推荐并整批入队，再由正常队列导航播放第一首。这样连续跳歌不必逐首等待推荐接口，也更接近上游 Personal FM 的连续电台体验。队列中尚有后继点歌时仍优先播放点歌，单曲循环与随机播放保持原语义；推荐失败则回退原播放模式，确实没有下一首时才停止。
+- 播放列表头部的“私人漫游”按钮可在房主开启漫游后立即播放一首推荐（`player:next` 携带 `forceRoaming: true`），不打断队列中的点歌顺序，只把当前播放切到推荐；房间空闲且队列为空时开启漫游会直接开始第一首推荐。
+- 漫游歌曲标记为 `requestedBy: '私人漫游'`，成功开始播放后追加到房间播放列表并广播 `queue:updated`；服务端过滤当前歌曲、队列歌曲和房间最近漫游歌曲，避免重复推荐。
 - 网易云支持 `DEFAULT`、`FAMILIAR`、`EXPLORE`、运动、专注、深夜和 `aidj` 模式，通过 `personal_fm_mode` 请求；场景值拆成 `mode=SCENE_RCMD` 与 `submode=EXERCISE|FOCUS|NIGHT_EMO`。上游没有可靠的模式发现接口，因此合法列表由 shared 维护，未知或旧持久化值回退到 `DEFAULT`。
 - QQ 音乐、酷狗和酷狗概念版当前固定使用默认个性化推荐，不接受网易云模式参数；概念版使用概念版独立账号和推荐接口。
 - `RoomState` 与 `room:settings` 增加可选 `roamingEnabled`、`roamingSource`、`roamingMode` 字段，旧版 Web、Android 和 Windows 客户端可安全忽略；永久房间会持久化这些设置。
@@ -327,30 +328,31 @@ B站没有与房间 128K、320K 完全对应的普通 DASH 音轨，因此分别
 
 ## REST API
 
-| 路径                            | 方法  | 用途                                                                                                    |
-| ------------------------------- | ----- | ------------------------------------------------------------------------------------------------------- |
-| `/api/music/search`             | GET   | 搜索曲目（`source` + `keyword` + `page`）                                                               |
-| `/api/music/url`                | GET   | 解析流媒体 URL（`source` + `id`）                                                                       |
-| `/api/music/lyric`              | GET   | 获取平台歌词；返回 LRC/翻译/音译，以及 `wordLyric + wordFormat + source` 结构化逐字合同（yrc/qrc/krc/ttml/enhanced-lrc） |
-| `/api/music/lyric-supplement`   | GET   | 当前来源缺少可靠逐词或时间轴需要修复时，并行搜索其他平台；按标题/歌手/专辑/时长加权评分返回 YRC/KRC/LRC 候选，由客户端统一评分择优；结果按曲目缓存并合并并发请求 |
-| `/api/music/ttml`               | GET   | 代理 AMLL TTML DB；仅允许配置的 HTTPS 主机，最多跟随 3 次重定向且每一跳重新校验白名单，限制 2 MiB/6 秒；进程内 24 小时缓存、并发合并与 ETag |
-| `/api/music/amll-ttml`          | GET   | 按 `ncmMusicId`/`qqMusicId` 精确查询 AMLL 官方 TTML API；固定上游域名、5 秒超时、2 MiB 上限、24 小时缓存与 ETag |
-| `/api/music/cover`              | GET   | 获取封面图                                                                                              |
-| `/api/music/cover-proxy`        | GET   | 代理受信音乐 CDN 封面；兼容升级白名单主机的旧 HTTP 地址，逐跳校验 HTTPS 重定向、图片类型和 10 MiB 上限                |
-| `/api/music/playlist`           | GET   | 获取歌单曲目列表（`source` + `id` + `limit` + `offset`），分页返回 `{ tracks, total, offset, hasMore }` |
-| `/api/music/hot`                | GET   | 获取房间内可见的官方热歌榜；校验 HTTP 身份和房间成员身份，支持 `source=netease|tencent|kugou` 及 `limit`/`offset` 分页，服务端分别缓存网易云热歌榜、QQ 热歌榜和酷狗热歌榜，`refresh=true` 可强制刷新 |
-| `/api/rooms/:roomId/check`      | GET   | 房间预检（存在性 + 是否需要密码），用于分享链接直接访问时的前置校验                                     |
-| `/api/rooms/:roomId/share/qr`   | GET   | 校验并生成当前浏览器访问域名下的 `/join?ROMMid=...` 房间分享二维码                                      |
-| `/api/playlists`                | GET   | 列出当前账号的本地歌单（元信息 + 派生封面 + 曲目数）；仅对已设置密码的账号开放，访客返回 403                |
-| `/api/playlists`                | POST  | 新建本地歌单（`{ name }`），封顶 `USER_PLAYLIST_MAX`                                                     |
-| `/api/playlists/:id`            | GET   | 获取歌单详情（含按顺序排列的 `tracks`）                                                                 |
-| `/api/playlists/:id`            | PATCH | 重命名歌单（`{ name }`）                                                                                |
-| `/api/playlists/:id`            | DELETE| 删除歌单及其曲目                                                                                        |
-| `/api/playlists/:id/tracks`     | POST  | 向歌单追加曲目（`{ tracks }`，单曲/整队通用）；按 `Track.id` 去重、封顶 `USER_PLAYLIST_TRACKS_MAX`、写入前剥离 `streamUrl` 等短时效字段 |
-| `/api/playlists/:id/tracks/:trackId` | DELETE | 从歌单移除单曲                                                                                    |
-| `/api/admin/audio-proxy-policy` | GET   | 服务器管理员读取酷狗全局强制代理策略                                                                    |
-| `/api/admin/audio-proxy-policy` | PATCH | 服务器管理员部分更新代理策略并广播完整结果                                                              |
-| `/api/health`                   | GET   | 健康检查                                                                                                |
+| 路径                                 | 方法   | 用途                                                                                                                                                             |
+| ------------------------------------ | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/api/music/search`                  | GET    | 搜索曲目（`source` + `keyword` + `page`）                                                                                                                        |
+| `/api/music/search-all`              | GET    | 跨源统一搜索：并行查询网易云/QQ/酷狗/概念版（单源 4 秒超时、失败隔离），按规范化标题+艺人聚合同曲的不同版本；无个人 cookie 时进程内缓存 60 秒                    |
+| `/api/music/url`                     | GET    | 解析流媒体 URL（`source` + `id`）；带 `roomId` 时使用房间内最高会员凭证，供下一首预热与降档重试复用                                                              |
+| `/api/music/lyric`                   | GET    | 获取平台歌词；返回 LRC/翻译/音译，以及 `wordLyric + wordFormat + source` 结构化逐字合同（yrc/qrc/krc/ttml/enhanced-lrc）                                         |
+| `/api/music/lyric-supplement`        | GET    | 当前来源缺少可靠逐词或时间轴需要修复时，并行搜索其他平台；按标题/歌手/专辑/时长加权评分返回 YRC/KRC/LRC 候选，由客户端统一评分择优；结果按曲目缓存并合并并发请求 |
+| `/api/music/ttml`                    | GET    | 代理 AMLL TTML DB；仅允许配置的 HTTPS 主机，最多跟随 3 次重定向且每一跳重新校验白名单，限制 2 MiB/6 秒；进程内 24 小时缓存、并发合并与 ETag                      |
+| `/api/music/amll-ttml`               | GET    | 按 `ncmMusicId`/`qqMusicId` 精确查询 AMLL 官方 TTML API；固定上游域名、5 秒超时、2 MiB 上限、24 小时缓存与 ETag                                                  |
+| `/api/music/cover`                   | GET    | 获取封面图                                                                                                                                                       |
+| `/api/music/cover-proxy`             | GET    | 代理受信音乐 CDN 封面；兼容升级白名单主机的旧 HTTP 地址，逐跳校验 HTTPS 重定向、图片类型和 10 MiB 上限                                                           |
+| `/api/music/playlist`                | GET    | 获取歌单曲目列表（`source` + `id` + `limit` + `offset`），分页返回 `{ tracks, total, offset, hasMore }`                                                          |
+| `/api/music/hot`                     | GET    | 获取房间内可见的官方热歌榜；校验 HTTP 身份和房间成员身份，支持 `source=netease                                                                                   | tencent | kugou`及`limit`/`offset` 分页，服务端分别缓存网易云热歌榜、QQ 热歌榜和酷狗热歌榜，`refresh=true` 可强制刷新 |
+| `/api/rooms/:roomId/check`           | GET    | 房间预检（存在性 + 是否需要密码），用于分享链接直接访问时的前置校验                                                                                              |
+| `/api/rooms/:roomId/share/qr`        | GET    | 校验并生成当前浏览器访问域名下的 `/join?ROMMid=...` 房间分享二维码                                                                                               |
+| `/api/playlists`                     | GET    | 列出当前账号的本地歌单（元信息 + 派生封面 + 曲目数）；仅对已设置密码的账号开放，访客返回 403                                                                     |
+| `/api/playlists`                     | POST   | 新建本地歌单（`{ name }`），封顶 `USER_PLAYLIST_MAX`                                                                                                             |
+| `/api/playlists/:id`                 | GET    | 获取歌单详情（含按顺序排列的 `tracks`）                                                                                                                          |
+| `/api/playlists/:id`                 | PATCH  | 重命名歌单（`{ name }`）                                                                                                                                         |
+| `/api/playlists/:id`                 | DELETE | 删除歌单及其曲目                                                                                                                                                 |
+| `/api/playlists/:id/tracks`          | POST   | 向歌单追加曲目（`{ tracks }`，单曲/整队通用）；按 `Track.id` 去重、封顶 `USER_PLAYLIST_TRACKS_MAX`、写入前剥离 `streamUrl` 等短时效字段                          |
+| `/api/playlists/:id/tracks/:trackId` | DELETE | 从歌单移除单曲                                                                                                                                                   |
+| `/api/admin/audio-proxy-policy`      | GET    | 服务器管理员读取酷狗全局强制代理策略                                                                                                                             |
+| `/api/admin/audio-proxy-policy`      | PATCH  | 服务器管理员部分更新代理策略并广播完整结果                                                                                                                       |
+| `/api/health`                        | GET    | 健康检查                                                                                                                                                         |
 
 ---
 

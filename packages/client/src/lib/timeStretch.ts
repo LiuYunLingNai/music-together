@@ -108,7 +108,7 @@ const connectEqualizer = (input: AudioNode, equalizer: BiquadFilterNode[], outpu
 const applyEqualizer = (graph: StretchGraph): void => {
   const { equalizer } = useAudioSettingsStore.getState()
   graph.equalizer.forEach((filter, index) => {
-    filter.gain.setTargetAtTime(equalizer.enabled ? equalizer.gains[index] ?? 0 : 0, graph.context.currentTime, 0.015)
+    filter.gain.setTargetAtTime(equalizer.enabled ? (equalizer.gains[index] ?? 0) : 0, graph.context.currentTime, 0.015)
   })
   graph.effectChain?.apply(equalizer.effects, equalizer.enabled)
 }
@@ -367,7 +367,10 @@ function installVolumeRouting(audio: HTMLMediaElement, gain: GainNode): void {
     set(next: number) {
       const clamped = Math.max(0, Math.min(1, next))
       const branch = splitVolumeGain(clamped)
-      gain.gain.value = branch
+      // Howler's HTML5 fade writes `el.volume` every animation step; jumping
+      // the graph gain on each write produces zipper noise. A 5 ms ramp keeps
+      // the same perceived curve without audible steps.
+      gain.gain.setTargetAtTime(branch, gain.context.currentTime, 0.005)
       volumeAtFloor = clamped <= VOLUME_FLOOR_THRESHOLD
       // 元素写同一分支值（上游同样同时写两处）。写地板而非 0：
       // 元素 volume=0 会让进图的信号物理静音，分析线跟着全零。
@@ -403,11 +406,7 @@ function disableGraph(graph: StretchGraph, failed = false): void {
   //   元素 volume 属性已被转发到 gain（installVolumeRouting），不能把
   //   元素直接接回 destination 而绕过它 —— 否则"元素 volume=1 全幅直出"
   //   会让用户音量失控（变成最大音量）。
-  connectEqualizer(
-    graph.source,
-    graph.equalizer,
-    graph.chainInput ?? graph.volumeGain ?? graph.context.destination,
-  )
+  connectEqualizer(graph.source, graph.equalizer, graph.chainInput ?? graph.volumeGain ?? graph.context.destination)
   if (graph.volumeGain) graph.volumeGain.connect(graph.context.destination)
   graph.audio.playbackRate = 1
 }
@@ -427,11 +426,7 @@ function enableGraph(graph: StretchGraph): void {
   if (graph.volumeGain) graph.volumeGain.disconnect()
   graph.source.connect(graph.node)
   // 与正常建图保持同一条链：worklet → EQ → 效果链 → volumeGain → destination。
-  connectEqualizer(
-    graph.node,
-    graph.equalizer,
-    graph.chainInput ?? graph.volumeGain ?? graph.context.destination,
-  )
+  connectEqualizer(graph.node, graph.equalizer, graph.chainInput ?? graph.volumeGain ?? graph.context.destination)
   if (graph.volumeGain) graph.volumeGain.connect(graph.context.destination)
   graph.bypassed = false
   graph.metricsSnapshots = 0
@@ -445,7 +440,10 @@ function enableGraph(graph: StretchGraph): void {
  * not support AudioWorklet or the processor underruns, native 1.0x playback
  * is restored instead of producing malformed audio.
  */
-export async function attachTimeStretch(howl: Howl): Promise<TimeStretchController | null> {
+export async function attachTimeStretch(
+  howl: Howl,
+  options?: { tempoEnabled?: boolean },
+): Promise<TimeStretchController | null> {
   if (typeof AudioContext === 'undefined') return null
   const audio = getAudioElement(howl)
   if (!audio) return null
@@ -477,6 +475,7 @@ export async function attachTimeStretch(howl: Howl): Promise<TimeStretchControll
     // 复用分支同样要回到 activeGraphs：releaseTimeStretch 在上一首 unload 时删掉了它，
     // 不补回来，本曲之后拖动 EQ / 分析完成发布 ReplayGain 都更新不到这张图。
     activeGraphs.add(existing)
+    if (options?.tempoEnabled === false) disableGraph(existing)
     applyAudioSettings(existing)
     return createController(existing)
   }
@@ -586,6 +585,10 @@ export async function attachTimeStretch(howl: Howl): Promise<TimeStretchControll
     graphByAudio.set(audio, graph)
     activeGraphs.delete(pendingGraph)
     activeGraphs.add(graph)
+    // Start in the direct path when tempo correction is disabled: the worklet
+    // never processes a single audible sample, so its WSOLA artifacts cannot
+    // leak into the opening moments of a track.
+    if (options?.tempoEnabled === false) disableGraph(graph)
     // These Howls use HTML5 Audio, so Howler's auto-suspend scan does not
     // count them as active WebAudio sounds. The media element is nevertheless
     // routed through this context; allowing Howler to suspend it would leave

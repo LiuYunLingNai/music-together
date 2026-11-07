@@ -9,6 +9,7 @@ import type {
   PlayMode,
   Playlist,
   PlatformAuthStatus,
+  PlaybackFailureEvent,
   RoomListItem,
   RoomState,
   ScheduledPlayState,
@@ -61,6 +62,7 @@ export interface ServerToClientEvents {
   [EVENTS.PLAYER_TRACK_METADATA_UPDATED]: (data: { track: Track }) => void
   [EVENTS.PLAYER_STREAM_REFRESHED]: (data: { track: Track }) => void
   [EVENTS.PLAYER_SOURCE_SWITCHED]: (data: { track: Track; currentTime: number; isPlaying: boolean }) => void
+  [EVENTS.PLAYER_PLAYBACK_FAILURE]: (data: PlaybackFailureEvent) => void
   [EVENTS.PLAYER_SYNC_RESPONSE]: (data: {
     currentTime: number
     isPlaying: boolean
@@ -153,14 +155,15 @@ export interface ClientToServerEvents {
    * `trackId` 可选：带上时服务端只在它仍是当前曲目时才切歌，避免歌曲已经
    * 自然播完后，排队中的请求把新歌也跳掉。旧客户端不带这个字段，退回原有防抖。
    */
-  [EVENTS.PLAYER_NEXT]: (data?: { trackId?: string }) => void
+  [EVENTS.PLAYER_NEXT]: (data?: { trackId?: string; forceRoaming?: boolean }) => void
   [EVENTS.PLAYER_PREV]: () => void
   [EVENTS.PLAYER_SYNC]: (data: { currentTime: number; hostServerTime?: number }) => void
   [EVENTS.PLAYER_SYNC_REQUEST]: () => void
   [EVENTS.PLAYER_SET_MODE]: (data: { mode: PlayMode }) => void
-  [EVENTS.PLAYER_REFRESH_STREAM]: (data?: { trackId?: string }) => void
+  [EVENTS.PLAYER_REFRESH_STREAM]: (data?: { trackId?: string; degrade?: boolean }) => void
   [EVENTS.PLAYER_SOURCE_SWITCH]: (data: { trackId: string; track: Track }) => void
   [EVENTS.PLAYER_REQUEST_SOURCE_FALLBACK]: (data?: { trackId?: string }) => void
+  [EVENTS.PLAYER_RETRY_TRACK]: (data?: { trackId?: string; degrade?: boolean }) => void
 
   [EVENTS.QUEUE_ADD]: (data: { track: Track }) => void
   [EVENTS.QUEUE_INSERT_AFTER_CURRENT]: (data: { track: Track }) => void

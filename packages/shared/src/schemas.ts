@@ -97,6 +97,8 @@ export const playerSetModeSchema = z.object({
 // 空载荷表示"切下一首"；带 trackId 时只在它仍在播放时才执行（旧客户端不带）。
 export const playerNextSchema = z.object({
   trackId: z.string().max(200).optional(),
+  /** Bypass queue order and start the next private-roaming batch immediately. */
+  forceRoaming: z.boolean().optional(),
 })
 
 // ---------------------------------------------------------------------------
@@ -218,6 +220,13 @@ export const searchQuerySchema = z.discriminatedUnion('source', [
   }),
 ])
 
+export const unifiedSearchQuerySchema = z.object({
+  keyword: z.string().min(1).max(LIMITS.SEARCH_KEYWORD_MAX_LENGTH),
+  /** Per-source result count before grouping. */
+  limit: z.coerce.number().int().min(1).max(20).default(10),
+  roomId: z.string().min(1).max(10).optional(),
+})
+
 export const recommendationsQuerySchema = z.object({
   roomId: z.string().min(1).max(10),
   platform: musicSourceSchema.optional(),
@@ -241,6 +250,8 @@ export const hotSongsQuerySchema = z.object({
 export const urlQuerySchema = z.object({
   source: musicSourceSchema,
   urlId: z.string().min(1).max(2000),
+  /** Optional room context: resolve with the room's best credential so preloads match playback. */
+  roomId: z.string().min(1).max(100).optional(),
   bitrate: z
     .preprocess((value) => {
       if (typeof value !== 'string' || value.trim() === '') return value
