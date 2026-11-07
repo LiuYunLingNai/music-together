@@ -27,16 +27,13 @@ export function ManualFallbackDialog() {
   const track = useManualFallbackStore((state) => state.track)
   const close = useManualFallbackStore((state) => state.close)
   const { socket } = useSocketContext()
-  const [candidates, setCandidates] = useState<FallbackCandidate[]>([])
-  const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState<{ trackId: string; items: FallbackCandidate[] } | null>(null)
+  const candidates = result && track && result.trackId === track.id ? result.items : []
+  const loading = track !== null && result?.trackId !== track.id
 
   useEffect(() => {
-    if (!track) {
-      setCandidates([])
-      return
-    }
+    if (!track) return
     let alive = true
-    setLoading(true)
     const params = new URLSearchParams({
       source: track.source,
       title: track.title,
@@ -45,17 +42,15 @@ export function ManualFallbackDialog() {
     if (track.album) params.set('album', track.album)
     for (const artist of track.artist) params.append('artists', artist)
 
+    const trackId = track.id
     void fetch(`${SERVER_URL}/api/music/fallback-candidates?${params}`, { credentials: 'include' })
       .then(async (response) => {
         if (!response.ok) throw new Error('lookup failed')
         const data = (await response.json()) as { candidates?: FallbackCandidate[] }
-        if (alive) setCandidates(data.candidates ?? [])
+        if (alive) setResult({ trackId, items: data.candidates ?? [] })
       })
       .catch(() => {
-        if (alive) setCandidates([])
-      })
-      .finally(() => {
-        if (alive) setLoading(false)
+        if (alive) setResult({ trackId, items: [] })
       })
 
     return () => {
@@ -63,7 +58,7 @@ export function ManualFallbackDialog() {
     }
   }, [track])
 
-  const useCandidate = (candidate: FallbackCandidate) => {
+  const applyCandidate = (candidate: FallbackCandidate) => {
     if (!track || !socket) return
     socket.emit(EVENTS.PLAYER_SOURCE_SWITCH, { trackId: track.id, track: candidate.track })
     toast.loading(`正在切换到${PLATFORM_LABELS[candidate.track.source]}…`, {
@@ -96,7 +91,7 @@ export function ManualFallbackDialog() {
                     key={`${candidate.track.source}:${candidate.track.sourceId}`}
                     type="button"
                     className="flex w-full items-center justify-between gap-3 rounded-md bg-muted/40 px-3 py-2 text-left hover:bg-muted/70"
-                    onClick={() => useCandidate(candidate)}
+                    onClick={() => applyCandidate(candidate)}
                   >
                     <div className="min-w-0">
                       <p className="truncate text-sm">

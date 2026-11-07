@@ -106,7 +106,7 @@ function LyricSourceMatch() {
     }
   }
 
-  const useCandidate = (candidate: PlatformLyricCandidate) => {
+  const applyCandidate = (candidate: PlatformLyricCandidate) => {
     if (!track) return
     const selection: LyricSourceOverride = {
       kind: 'platform',
@@ -120,7 +120,7 @@ function LyricSourceMatch() {
     toast.success(`已改用${PLATFORM_LABELS[candidate.source]}的歌词`)
   }
 
-  const useTtmlCandidate = async (candidate: TtmlLyricCandidate) => {
+  const applyTtmlCandidate = async (candidate: TtmlLyricCandidate) => {
     if (!track) return
     const candidateKey = `${candidate.platform}:${candidate.id}`
     setSelectingTtml(candidateKey)
@@ -227,7 +227,7 @@ function LyricSourceMatch() {
                     ? 'secondary'
                     : 'outline'
                 }
-                onClick={() => useCandidate(candidate)}
+                onClick={() => applyCandidate(candidate)}
               >
                 {override?.kind === 'platform' &&
                 override.source === candidate.source &&
@@ -263,7 +263,7 @@ function LyricSourceMatch() {
                   size="sm"
                   variant={active ? 'secondary' : 'outline'}
                   disabled={selectingTtml === `${candidate.platform}:${candidate.id}`}
-                  onClick={() => void useTtmlCandidate(candidate)}
+                  onClick={() => void applyTtmlCandidate(candidate)}
                 >
                   {selectingTtml === `${candidate.platform}:${candidate.id}` ? '检查中…' : active ? '使用中' : '使用'}
                 </Button>
