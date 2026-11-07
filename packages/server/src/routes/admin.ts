@@ -23,6 +23,10 @@ import {
 } from '../services/backupService.js'
 import { kickUserFromRoom, refreshAccountMembership } from '../services/roomService.js'
 import { estimateCurrentTime } from '../services/syncService.js'
+import { getStreamResolutionMetrics } from '../services/streamResolutionService.js'
+import { getTtmlProxyMetrics } from '../services/ttmlProxyService.js'
+import { getAmllLyricsMetrics } from '../services/amllLyricsService.js'
+import { getPlaybackMetrics } from '../services/playbackMetrics.js'
 import * as authService from '../services/authService.js'
 import { logger } from '../utils/logger.js'
 import { EVENTS, musicSourceSchema } from '@music-together/shared'
@@ -120,6 +124,12 @@ export function createAdminRoutes(io: TypedServer): Router {
     res.json({
       version: config.version,
       healthy: true,
+      streamResolution: getStreamResolutionMetrics(),
+      playback: getPlaybackMetrics(),
+      lyrics: {
+        ttmlProxy: getTtmlProxyMetrics(),
+        amll: getAmllLyricsMetrics(),
+      },
       users: users.map((user) => ({
         id: user.id,
         nickname: user.nickname,

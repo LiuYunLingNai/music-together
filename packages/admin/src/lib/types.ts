@@ -53,9 +53,20 @@ export interface SetupStatus {
 }
 
 /** GET /api/admin/overview */
+export interface AdminPlaybackMetrics {
+  autoFallbackAttempts: number
+  autoFallbackSuccess: number
+  autoFallbackFailed: number
+  manualSourceSwitches: number
+  automaticSourceSwitches: number
+  sourceSwitchFailed: number
+  mediaFallbackRequests: number
+}
+
 export interface AdminOverview {
   version: string
   healthy: boolean
+  playback?: AdminPlaybackMetrics
   users: AdminUser[]
   rooms: AdminRoom[]
 }
