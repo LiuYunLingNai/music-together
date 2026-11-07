@@ -1,4 +1,10 @@
-import type { MusicSource, Track } from '@music-together/shared'
+import {
+  isLyricMatchAcceptable,
+  normalizeLyricMatchText,
+  scoreLyricMatch,
+  type MusicSource,
+  type Track,
+} from '@music-together/shared'
 import { musicProvider } from './musicProvider.js'
 
 // Keep scope minimal: only support netease <-> tencent <-> kugou auto fallback.
@@ -18,22 +24,6 @@ function normalizeText(input: string): string {
     .replace(/[\-—_·•:：,，.。/\\|]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-}
-
-function tokenize(input: string): string[] {
-  const t = normalizeText(input)
-  if (!t) return []
-  return t.split(' ').filter(Boolean)
-}
-
-function jaccard(a: string[], b: string[]): number {
-  if (a.length === 0 || b.length === 0) return 0
-  const A = new Set(a)
-  const B = new Set(b)
-  let inter = 0
-  for (const x of A) if (B.has(x)) inter++
-  const union = A.size + B.size - inter
-  return union === 0 ? 0 : inter / union
 }
 
 function normalizeArtists(artists: string[]): string[] {
@@ -58,43 +48,32 @@ function normalizeArtists(artists: string[]): string[] {
   return out
 }
 
-function hasVersionTag(title: string): boolean {
+type VersionTag = 'live' | 'remix' | 'instrumental' | 'cover'
+
+function versionTag(title: string): VersionTag | null {
   const t = normalizeText(title)
-  return /(live|remix|instrumental|伴奏|纯音乐|翻唱|现场|混音)/.test(t)
+  if (/(live|现场)/.test(t)) return 'live'
+  if (/(remix|混音)/.test(t)) return 'remix'
+  if (/(instrumental|伴奏|纯音乐)/.test(t)) return 'instrumental'
+  if (/翻唱/.test(t)) return 'cover'
+  return null
 }
 
 function durationOk(original: Track, candidate: Track): boolean {
   // duration is seconds (see shared types); allow 0 when unknown
   if (!original.duration || !candidate.duration) return true
-  const diff = Math.abs(original.duration - candidate.duration)
-  // strict reject for huge mismatch
-  if (diff > 10) return false
-  return true
+  return Math.abs(original.duration - candidate.duration) <= 10
 }
 
-function scoreCandidate(original: Track, candidate: Track): number {
-  const titleA = tokenize(original.title)
-  const titleB = tokenize(candidate.title)
-  const titleSim = jaccard(titleA, titleB)
+function scoreCandidate(original: Track, candidate: Track): number | null {
+  if (!durationOk(original, candidate)) return null
+  if (versionTag(original.title) !== versionTag(candidate.title)) return null
 
-  const artistsA = normalizeArtists(original.artist)
-  const artistsB = normalizeArtists(candidate.artist)
-  const artistSim = jaccard(artistsA, artistsB)
-
-  // Duration score: 1 when <=3s, linearly drop to 0 at 10s
-  let durationSim = 0.5
-  if (original.duration && candidate.duration) {
-    const diff = Math.abs(original.duration - candidate.duration)
-    durationSim = diff <= 3 ? 1 : diff >= 10 ? 0 : 1 - (diff - 3) / 7
-  }
-
-  // Penalize obvious version tag mismatch (keep it conservative)
-  const tagA = hasVersionTag(original.title)
-  const tagB = hasVersionTag(candidate.title)
-  const tagPenalty = !tagA && tagB ? 0.15 : 0
-
-  const score = 0.5 * titleSim + 0.35 * artistSim + 0.15 * durationSim - tagPenalty
-  return Math.max(0, Math.min(1, score))
+  const match = scoreLyricMatch(
+    { title: original.title, artists: original.artist, duration: original.duration },
+    { title: candidate.title, artists: candidate.artist, duration: candidate.duration },
+  )
+  return isLyricMatchAcceptable(match) ? match.score : null
 }
 
 export function getFallbackTargetSource(from: MusicSource): MusicSource | null {
@@ -105,6 +84,57 @@ export function getFallbackTargetSource(from: MusicSource): MusicSource | null {
   return null
 }
 
+export function isFallbackSource(source: MusicSource): boolean {
+  return SUPPORTED_SOURCES.has(source)
+}
+
+function sortCandidates(scored: FallbackCandidate[], original: Track): FallbackCandidate[] {
+  return scored.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score
+    const durationDifference =
+      Math.abs(a.track.duration - original.duration) - Math.abs(b.track.duration - original.duration)
+    if (durationDifference !== 0) return durationDifference
+    return a.track.artist.length - b.track.artist.length
+  })
+}
+
+async function searchScored(original: Track, source: MusicSource): Promise<FallbackCandidate[]> {
+  const artists = normalizeArtists(original.artist)
+  const primaryArtist = artists[0] ?? ''
+  const keyword = `${original.title} ${primaryArtist}`.trim()
+
+  let candidates = await musicProvider.search(source, keyword, 8, 1)
+  if (!candidates.length && primaryArtist) {
+    // Cross-platform artist names differ often enough that a title-only retry is worth one extra request.
+    candidates = await musicProvider.search(source, original.title, 8, 1)
+  }
+
+  const scored: FallbackCandidate[] = []
+  for (const candidate of candidates) {
+    const score = scoreCandidate(original, candidate)
+    if (score === null) continue
+    scored.push({ track: candidate, score })
+  }
+  return sortCandidates(scored, original)
+}
+
+/** Scored cross-source candidates for the manual source picker, best first. */
+export async function findAlternativeTracks(original: Track, limit = 10): Promise<FallbackCandidate[]> {
+  const sources = [...SUPPORTED_SOURCES].filter((source) => source !== original.source)
+  const groups = await Promise.all(
+    sources.map((source) => searchScored(original, source).catch(() => [] as FallbackCandidate[])),
+  )
+  const seen = new Set<string>()
+  return sortCandidates(groups.flat(), original)
+    .filter((candidate) => {
+      const key = `${candidate.track.source}:${candidate.track.sourceId}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .slice(0, limit)
+}
+
 export async function findBestAlternativeTrack(
   original: Track,
   toSource: MusicSource,
@@ -113,29 +143,16 @@ export async function findBestAlternativeTrack(
   if (!SUPPORTED_SOURCES.has(toSource)) return null
   if (original.source === toSource) return null
 
-  const artists = normalizeArtists(original.artist)
-  const primaryArtist = artists[0] ?? ''
-  const keyword = `${original.title} ${primaryArtist}`.trim()
-
-  const candidates = await musicProvider.search(toSource, keyword, 8, 1)
-  if (!candidates.length) return null
-
-  const scored: FallbackCandidate[] = []
-  for (const c of candidates) {
-    if (!durationOk(original, c)) continue
-    const score = scoreCandidate(original, c)
-    scored.push({ track: c, score })
-  }
-
-  scored.sort((a, b) => b.score - a.score)
+  const scored = await searchScored(original, toSource)
   const best = scored[0]
   const second = scored[1]
 
   if (!best) return null
 
-  // Conservative threshold to avoid wrong matches
-  if (best.score < 0.82) return null
-  if (second && best.score - second.score < 0.05) return null
+  // Ambiguous identities are worse than no fallback; duplicate entries of the same song are fine.
+  const identity = (track: Track) =>
+    `${normalizeLyricMatchText(track.title)}\u0002${track.artist.map(normalizeLyricMatchText).sort().join(',')}`
+  if (second && identity(best.track) !== identity(second.track) && best.score - second.score < 5) return null
 
   return best
 }

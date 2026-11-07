@@ -1,4 +1,5 @@
 import { getServerTime, isCalibrated } from '@/lib/clockSync'
+import { PLATFORM_LABELS } from '@/lib/platform'
 import { PLAYER_PLAY_DEDUP_MS } from '@/lib/constants'
 import { storage } from '@/lib/storage'
 import { useSocketContext } from '@/providers/socket-context'
@@ -21,9 +22,7 @@ import { toast } from 'sonner'
 /** 预言服务端下一首（`queueService.getNextTrack` 的客户端镜像）；shuffle 由服务端随机，不猜。 */
 function predictNextTrack(room: RoomState | null): Track | null {
   if (!room || room.queue.length === 0) return null
-  const currentIndex = room.currentTrack
-    ? room.queue.findIndex((track) => track.id === room.currentTrack?.id)
-    : -1
+  const currentIndex = room.currentTrack ? room.queue.findIndex((track) => track.id === room.currentTrack?.id) : -1
   if (room.playMode === 'loop-one') return room.currentTrack ?? room.queue[0] ?? null
   if (room.playMode === 'shuffle') return null
   const nextIndex = currentIndex + 1
@@ -87,21 +86,48 @@ export function usePlayer() {
       const track = usePlayerStore.getState().currentTrack
       const roomTrackId = useRoomStore.getState().room?.currentTrack?.id
       if (!track || roomTrackId !== track.id) return false
-      if (recoveryRef.current?.trackId === track.id) return false
+      // A recovery is already in flight: keep suppressing the default skip until it settles.
+      if (recoveryRef.current?.trackId === track.id) return true
       const attempts = recoveryAttemptsRef.current?.trackId === track.id ? recoveryAttemptsRef.current.count : 0
-      if (attempts >= 1) return false
-      recoveryAttemptsRef.current = { trackId: track.id, count: attempts + 1 }
+      if (attempts >= 2) return false
+      const nextAttempt = attempts + 1
+      recoveryAttemptsRef.current = { trackId: track.id, count: nextAttempt }
       recoveryRef.current = { trackId: track.id }
-      console.warn('媒体加载失败，请求重新解析音源:', kind)
-      socket.emit(EVENTS.PLAYER_REFRESH_STREAM, { trackId: track.id })
       if (recoveryTimerRef.current) clearTimeout(recoveryTimerRef.current)
-      recoveryTimerRef.current = setTimeout(() => {
-        recoveryTimerRef.current = null
-        if (recoveryRef.current?.trackId !== track.id) return
-        recoveryRef.current = null
-        toast.error(`「${track.title}」加载失败，已跳到下一首`)
-        autoNext()
-      }, 12_000)
+
+      if (nextAttempt === 1) {
+        console.warn('媒体加载失败，请求重新解析音源:', kind)
+        socket.emit(EVENTS.PLAYER_REFRESH_STREAM, { trackId: track.id })
+      } else {
+        console.warn('音源刷新失败，请求跨源回退:', kind)
+        socket.emit(EVENTS.PLAYER_REQUEST_SOURCE_FALLBACK, { trackId: track.id })
+      }
+
+      recoveryTimerRef.current = setTimeout(
+        () => {
+          recoveryTimerRef.current = null
+          if (recoveryRef.current?.trackId !== track.id) return
+          recoveryRef.current = null
+          if (nextAttempt === 1) {
+            // URL refresh did not help; try the same song on another provider before skipping.
+            recoveryAttemptsRef.current = { trackId: track.id, count: 2 }
+            recoveryRef.current = { trackId: track.id }
+            console.warn('音源刷新超时，请求跨源回退')
+            socket.emit(EVENTS.PLAYER_REQUEST_SOURCE_FALLBACK, { trackId: track.id })
+            recoveryTimerRef.current = setTimeout(() => {
+              recoveryTimerRef.current = null
+              if (recoveryRef.current?.trackId !== track.id) return
+              recoveryRef.current = null
+              toast.error(`「${track.title}」加载失败，已跳到下一首`)
+              autoNext()
+            }, 15_000)
+            return
+          }
+          toast.error(`「${track.title}」加载失败，已跳到下一首`)
+          autoNext()
+        },
+        nextAttempt === 1 ? 8_000 : 15_000,
+      )
       return true
     },
     [autoNext, socket],
@@ -275,6 +301,28 @@ export function usePlayer() {
   }, [socket, loadTrack, schedulePlayback])
 
   useEffect(() => {
+    const onSourceSwitched = (data: { track: Track; currentTime: number; isPlaying: boolean }) => {
+      if (recoveryTimerRef.current) {
+        clearTimeout(recoveryTimerRef.current)
+        recoveryTimerRef.current = null
+      }
+      recoveryRef.current = null
+      recoveryAttemptsRef.current = null
+      useRoomStore.getState().updateRoom({ currentTrack: data.track })
+      usePlayerStore.getState().setCurrentTrack(data.track)
+      loadTrack(data.track, data.currentTime, data.isPlaying)
+      fetchLyric(data.track)
+      if (data.isPlaying) schedulePlayback(data.currentTime, getServerTime(), () => fetchLyric(data.track))
+      toast.success(`已切换到${PLATFORM_LABELS[data.track.source]}：${data.track.title}`, {
+        id: 'manual-source-switch',
+      })
+    }
+
+    socket.on(EVENTS.PLAYER_SOURCE_SWITCHED, onSourceSwitched)
+    return () => socket.off(EVENTS.PLAYER_SOURCE_SWITCHED, onSourceSwitched)
+  }, [socket, loadTrack, fetchLyric, schedulePlayback])
+
+  useEffect(() => {
     return () => {
       if (recoveryTimerRef.current) {
         clearTimeout(recoveryTimerRef.current)
@@ -366,10 +414,7 @@ export function usePlayer() {
       const playState = useRoomStore.getState().room?.playState
       if (playState?.isPlaying) {
         const now = getServerTime()
-        schedulePlayback(
-          getScheduledPlaybackPosition(playState.currentTime, playState.serverTimestamp, now),
-          now,
-        )
+        schedulePlayback(getScheduledPlaybackPosition(playState.currentTime, playState.serverTimestamp, now), now)
       }
     }
   }, [socket, schedulePlayback])

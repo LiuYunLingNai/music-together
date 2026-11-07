@@ -3,6 +3,7 @@ import { EVENTS, ERROR_CODE, NTP, TIMING, clampPlaybackPosition, nextPlaybackRev
 import { roomRepo } from '../repositories/roomRepository.js'
 import { nanoid } from 'nanoid'
 import { musicProvider } from './musicProvider.js'
+import { resolveStream } from './streamResolutionService.js'
 import * as queueService from './queueService.js'
 import * as trackFallbackService from './trackFallbackService.js'
 import * as authService from './authService.js'
@@ -16,6 +17,13 @@ import type { TypedServer, TypedSocket } from '../middleware/types.js'
 import { getEffectiveQuality, providerQualityRank, type MembershipTier } from './audioQualityPolicy.js'
 import { roamingService, shouldPreferRoamingForNext } from './roamingService.js'
 import { shouldRemovePlayedTrackAfterAdvance } from './queueNavigation.js'
+import {
+  recordAutoFallbackAttempt,
+  recordAutoFallbackFailed,
+  recordAutoFallbackSuccess,
+  recordSourceSwitch,
+  recordSourceSwitchFailed,
+} from './playbackMetrics.js'
 
 // ---------------------------------------------------------------------------
 // Per-room mutex for playTrackInRoom (prevents concurrent execution)
@@ -193,7 +201,7 @@ async function resolveStreamUrl(
       vipType,
     })
   }
-  const result = await musicProvider.getStreamInfo(source, urlId, attemptedBitrate, cookie, forceRefresh, vipType)
+  const result = await resolveStream(source, urlId, attemptedBitrate, { cookie, forceRefresh, vipType })
   return result ? { ...result, attemptedBitrate } : null
 }
 
@@ -240,7 +248,8 @@ export function autoPlayIfEmpty(io: TypedServer, roomId: string, track: Track): 
   })
 }
 
-async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): Promise<boolean> {  const room = roomRepo.get(roomId)
+async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): Promise<boolean> {
+  const room = roomRepo.get(roomId)
   if (!room) return false
 
   // Never trust/reuse a client-provided URL here. Resolving on the server is
@@ -299,6 +308,7 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
           const trackTitle = resolved.title
           const toSource = trackFallbackService.getFallbackTargetSource(fromSource)
           if (toSource) {
+            recordAutoFallbackAttempt()
             const attemptId = nanoid()
             io.to(roomId).emit(EVENTS.ROOM_AUTO_FALLBACK, {
               attemptId,
@@ -361,6 +371,7 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
                   resolved.artist = replacement.artist
                   resolved.title = replacement.title
                   resolved.cover = replacement.cover
+                  recordAutoFallbackSuccess()
                   resolved.streamUrl = replacement.streamUrl
                   resolved.streamFormat = replacement.streamFormat
                   resolved.requiresServerProxy = replacement.requiresServerProxy
@@ -371,6 +382,7 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
             }
 
             if (!resolved.streamUrl) {
+              recordAutoFallbackFailed()
               io.to(roomId).emit(EVENTS.ROOM_AUTO_FALLBACK, {
                 attemptId,
                 status: 'failed',
@@ -631,7 +643,11 @@ export function stopPlaybackSafe(io: TypedServer, roomId: string): Promise<void>
 
 function removePreviousTrackAfterAdvance(roomId: string, previousTrack: Track | null): boolean {
   const room = roomRepo.get(roomId)
-  if (!room || !previousTrack || !shouldRemovePlayedTrackAfterAdvance(room.removePlayedTracks, previousTrack, room.currentTrack)) {
+  if (
+    !room ||
+    !previousTrack ||
+    !shouldRemovePlayedTrackAfterAdvance(room.removePlayedTracks, previousTrack, room.currentTrack)
+  ) {
     return false
   }
   return queueService.removeTrack(roomId, previousTrack.id)
@@ -926,6 +942,78 @@ export function refreshCurrentStreamUrl(roomId: string, requestedTrackId?: strin
 
   manualStreamRefreshInFlight.set(roomId, task)
   return task
+}
+
+export type SourceSwitchResult =
+  { ok: true; track: Track } | { ok: false; reason: 'NOT_CURRENT' | 'INVALID_SOURCE' | 'NO_RESOURCE' }
+
+/**
+ * Replace the current track with an equivalent track from another provider while
+ * keeping the queue identity and the room's playback position untouched.
+ */
+export function switchCurrentTrackSource(
+  io: TypedServer,
+  roomId: string,
+  trackId: string,
+  candidate: Track,
+  trigger: 'manual' | 'automatic' = 'manual',
+): Promise<SourceSwitchResult> {
+  return withPlayMutex(roomId, async () => {
+    const room = roomRepo.get(roomId)
+    const current = room?.currentTrack
+    if (!room || !current || current.id !== trackId) return { ok: false, reason: 'NOT_CURRENT' as const }
+    if (!trackFallbackService.isFallbackSource(candidate.source) || candidate.source === current.source) {
+      recordSourceSwitchFailed()
+      return { ok: false, reason: 'INVALID_SOURCE' as const }
+    }
+
+    const auth = authService.getBestAuth(candidate.source, roomId)
+    const resolved = await resolveStreamUrl(
+      candidate.source,
+      candidate.urlId,
+      room.audioQuality,
+      auth?.cookie,
+      true,
+      auth?.vipType ?? 0,
+    )
+    if (!resolved) {
+      recordSourceSwitchFailed()
+      return { ok: false, reason: 'NO_RESOURCE' as const }
+    }
+
+    const replacement: Track = {
+      ...candidate,
+      id: current.id,
+      requestedBy: current.requestedBy,
+      streamUrl: resolved.url,
+      streamFormat: resolved.streamFormat,
+      requiresServerProxy: resolved.requiresServerProxy,
+    }
+
+    room.currentTrack = replacement
+    const queueIndex = room.queue.findIndex((track) => track.id === trackId)
+    if (queueIndex >= 0) room.queue[queueIndex] = replacement
+    roomRepo.persist(roomId)
+
+    const currentTime = estimateCurrentTimeAt(roomId, Date.now())
+    io.to(roomId).emit(EVENTS.PLAYER_SOURCE_SWITCHED, {
+      track: replacement,
+      currentTime,
+      isPlaying: room.playState.isPlaying,
+    })
+    io.to(roomId).emit(EVENTS.QUEUE_UPDATED, { queue: room.queue })
+    io.to(roomId).emit(EVENTS.ROOM_STATE, toPublicRoomState(room))
+    logger.info('Room switched the current track source', {
+      event: 'player.source_switched',
+      roomId,
+      trackId,
+      fromSource: current.source,
+      toSource: replacement.source,
+      trigger,
+    })
+    recordSourceSwitch(trigger)
+    return { ok: true, track: replacement }
+  })
 }
 
 /**

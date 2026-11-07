@@ -1,5 +1,6 @@
 import { useSocketContext } from '@/providers/socket-context'
 import { useRoomStore } from '@/stores/roomStore'
+import { useManualFallbackStore } from '@/stores/manualFallbackStore'
 import { storage } from '@/lib/storage'
 import { ERROR_CODE, EVENTS } from '@music-together/shared'
 import type {
@@ -148,9 +149,20 @@ export function useRoomState() {
         TIMEOUT: '超时',
       }
       const reasonText = data.reasonType ? (reasonMap[data.reasonType] ?? null) : null
+      const currentTrack = useRoomStore.getState().room?.currentTrack
       toast.error(
         reasonText ? `自动换源失败：${data.trackTitle}（${reasonText}）` : `自动换源失败：${data.trackTitle}`,
-        { id },
+        {
+          id,
+          ...(currentTrack
+            ? {
+                action: {
+                  label: '手动换源',
+                  onClick: () => useManualFallbackStore.getState().open(currentTrack),
+                },
+              }
+            : {}),
+        },
       )
     }
 
@@ -159,6 +171,7 @@ export function useRoomState() {
       // so skip the generic toast to avoid duplicate feedback.
       if (error.code === ERROR_CODE.WRONG_PASSWORD) return
 
+      toast.dismiss('manual-source-switch')
       toast.error(error.message)
       if (error.code === ERROR_CODE.ROOM_NOT_FOUND) {
         navigate('/', { replace: true })

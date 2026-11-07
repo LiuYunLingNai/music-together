@@ -5,6 +5,7 @@ import {
   playerPlaySchema,
   playerSeekSchema,
   playerSetModeSchema,
+  playerSourceSwitchSchema,
 } from '@music-together/shared'
 import type { TypedServer, TypedSocket } from '../middleware/types.js'
 import { createWithPermission, defineAbilityForRoomUser } from '../middleware/withControl.js'
@@ -13,12 +14,16 @@ import { checkSocketRateLimit } from '../middleware/socketRateLimiter.js'
 import { roomRepo } from '../repositories/roomRepository.js'
 import * as playerService from '../services/playerService.js'
 import * as roomService from '../services/roomService.js'
+import * as trackFallbackService from '../services/trackFallbackService.js'
 import { estimateCurrentTimeAt } from '../services/syncService.js'
 import { logger } from '../utils/logger.js'
+import { recordMediaFallbackRequest } from '../services/playbackMetrics.js'
+
+/** Keep a roomful of failing clients from triggering the same cross-source search repeatedly. */
+const lastSourceFallbackAt = new Map<string, number>()
 
 export function registerPlayerController(io: TypedServer, socket: TypedSocket) {
   const withPermission = createWithPermission(io)
-
   socket.on(
     EVENTS.PLAYER_PLAY,
     withPermission('play', 'Player', async (ctx, data) => {
@@ -96,6 +101,73 @@ export function registerPlayerController(io: TypedServer, socket: TypedSocket) {
       const track = await playerService.refreshCurrentStreamUrl(ctx.roomId, trackId)
       if (track && (!trackId || track.id === trackId)) {
         ctx.io.to(ctx.roomId).emit(EVENTS.PLAYER_STREAM_REFRESHED, { track })
+      }
+    }),
+  )
+
+  socket.on(
+    EVENTS.PLAYER_SOURCE_SWITCH,
+    withPermission('play', 'Player', async (ctx, data) => {
+      if (!(await checkSocketRateLimit(ctx.socket))) return
+      const parsed = playerSourceSwitchSchema.safeParse(data)
+      if (!parsed.success) {
+        ctx.socket.emit(EVENTS.ROOM_ERROR, { code: ERROR_CODE.INVALID_INPUT, message: '无效的换源请求' })
+        return
+      }
+      const result = await playerService.switchCurrentTrackSource(
+        ctx.io,
+        ctx.roomId,
+        parsed.data.trackId,
+        parsed.data.track,
+      )
+      if (!result.ok) {
+        const message =
+          result.reason === 'NO_RESOURCE'
+            ? '该平台暂时无法获取播放地址'
+            : result.reason === 'INVALID_SOURCE'
+              ? '不能切换到当前音源'
+              : '当前歌曲已变化，请重试'
+        ctx.socket.emit(EVENTS.ROOM_ERROR, { code: ERROR_CODE.INVALID_INPUT, message })
+      }
+    }),
+  )
+
+  socket.on(
+    EVENTS.PLAYER_REQUEST_SOURCE_FALLBACK,
+    withPermission('play', 'Player', async (ctx, raw) => {
+      if (!(await checkSocketRateLimit(ctx.socket))) return
+      const current = ctx.room.currentTrack
+      if (!current) return
+      const trackId = typeof raw?.trackId === 'string' ? raw.trackId : undefined
+      if (trackId && trackId !== current.id) return
+
+      const now = Date.now()
+      if (now - (lastSourceFallbackAt.get(ctx.roomId) ?? 0) < 15_000) return
+      lastSourceFallbackAt.set(ctx.roomId, now)
+      recordMediaFallbackRequest()
+
+      const candidates = await trackFallbackService.findAlternativeTracks(current, 1)
+      const best = candidates[0]
+      if (!best) {
+        ctx.socket.emit(EVENTS.ROOM_ERROR, {
+          code: ERROR_CODE.STREAM_FAILED,
+          message: '没有找到可用的替代音源',
+        })
+        return
+      }
+
+      const result = await playerService.switchCurrentTrackSource(
+        ctx.io,
+        ctx.roomId,
+        current.id,
+        best.track,
+        'automatic',
+      )
+      if (!result.ok) {
+        ctx.socket.emit(EVENTS.ROOM_ERROR, {
+          code: ERROR_CODE.STREAM_FAILED,
+          message: '替代音源也无法播放',
+        })
       }
     }),
   )

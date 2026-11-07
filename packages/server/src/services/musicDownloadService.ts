@@ -14,7 +14,8 @@ import { getAvailableAudioQualities, providerQualityRank, type MembershipTier } 
 import { createKugouDecryptStream, getKugouEncryptedAudio, kugouAudioContentType } from './kugouEncryptedAudio.js'
 import { normalizeKugouAudioUrl } from './kugouAudioUrl.js'
 import { parseBilibiliStreamId } from './bilibiliInput.js'
-import { musicProvider, type StreamUrlResult } from './musicProvider.js'
+import type { StreamUrlResult } from './musicProvider.js'
+import { resolveStream } from './streamResolutionService.js'
 
 const resolveLimit = pLimit(3)
 const UPSTREAM_CONNECT_TIMEOUT_MS = 15_000
@@ -86,7 +87,10 @@ export async function resolveDownloadOptions(roomId: string, track: Track): Prom
     qualities.map((quality) =>
       resolveLimit(async () => ({
         requestedQuality: quality,
-        stream: await musicProvider.getStreamInfo(track.source, track.urlId, quality, auth?.cookie, false, vipType),
+        stream: await resolveStream(track.source, track.urlId, quality, {
+          cookie: auth?.cookie,
+          vipType,
+        }),
       })),
     ),
   )
@@ -120,7 +124,11 @@ async function resolveDownloadStream(
     throw new MusicDownloadError('当前房间账号无权下载该音质', 403)
   }
 
-  const stream = await musicProvider.getStreamInfo(track.source, track.urlId, quality, auth?.cookie, true, vipType)
+  const stream = await resolveStream(track.source, track.urlId, quality, {
+    cookie: auth?.cookie,
+    forceRefresh: true,
+    vipType,
+  })
   if (!stream) throw new MusicDownloadError('该音质暂时无法下载', 502)
   if (
     stream.actualQuality &&
