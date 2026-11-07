@@ -18,6 +18,8 @@ export interface KrcInfo {
   album?: string
   by?: string
   offset?: string
+  /** Original decrypted KRC text, kept for the structured lyric contract. */
+  raw?: string
   items: KrcWord[][]
 }
 
@@ -82,6 +84,7 @@ export function parseKrc(content: string): KrcInfo {
       duration: word.duration / 1000,
     })),
   )
+  result.raw = content
   return result
 }
 

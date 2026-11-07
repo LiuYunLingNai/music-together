@@ -1,13 +1,31 @@
-import type { MusicSource, Track } from '@music-together/shared'
+import {
+  isLyricMatchAcceptable,
+  isPureMusicLyricText,
+  LYRIC_SUPPLEMENT_SOURCE_IDS,
+  MUSIC_SOURCE_CAPABILITIES,
+  normalizeLyricMatchText,
+  scoreLyricMatch,
+  type LyricMatchScore,
+  type MusicSource,
+  type Track,
+} from '@music-together/shared'
 import { LRUCache } from 'lru-cache'
 import type { AmllLyricLine, LyricResult } from './musicProvider.js'
 
 const SUPPLEMENT_TIMEOUT_MS = 2_500
-const DURATION_TOLERANCE_SECONDS = 3
 const SUCCESS_CACHE_TTL_MS = 24 * 60 * 60 * 1_000
 const NEGATIVE_CACHE_TTL_MS = 10 * 60 * 1_000
-const EMPTY_SUPPLEMENT: LyricSupplementResult = { source: null, lyric: '' }
-const SUPPLEMENT_SOURCES = ['netease', 'kugou', 'tencent'] as const
+const EMPTY_SUPPLEMENT: LyricSupplementResult = {
+  source: null,
+  lyric: '',
+  lyricId: '',
+  title: '',
+  artist: [],
+  duration: 0,
+}
+const SUPPLEMENT_SOURCES = LYRIC_SUPPLEMENT_SOURCE_IDS.filter(
+  (source) => MUSIC_SOURCE_CAPABILITIES[source].lyrics.supplement,
+)
 
 export interface LyricSupplementRequest {
   source: MusicSource
@@ -19,11 +37,19 @@ export interface LyricSupplementRequest {
 
 export interface LyricSupplementCandidate {
   source: (typeof SUPPLEMENT_SOURCES)[number]
+  lyricId: string
+  title: string
+  artist: string[]
+  duration: number
   lyric: string
   tlyric?: string
   romalrc?: string
   yrc?: string
   wordByWord?: AmllLyricLine[]
+  wordLyric?: string
+  wordFormat?: LyricResult['wordFormat']
+  /** Identity score used to pick this candidate; exposed for diagnostics and future UI. */
+  matchScore?: LyricMatchScore
 }
 
 export interface LyricSupplementResult extends Omit<LyricSupplementCandidate, 'source'> {
@@ -36,30 +62,27 @@ export interface LyricSupplementProvider {
   getLyric(source: MusicSource, lyricId: string): Promise<LyricResult>
 }
 
-function normalizeIdentity(value: string): string {
-  return value.normalize('NFKC').toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
-}
-
-function selectMatchingTrack(request: LyricSupplementRequest, tracks: Track[]): Track | null {
-  const title = normalizeIdentity(request.title)
-  const artists = new Set(request.artists.map(normalizeIdentity).filter(Boolean))
-
-  const matches = tracks.filter((track) => {
-    if (normalizeIdentity(track.title) !== title) return false
-    if (!Number.isFinite(track.duration) || Math.abs(track.duration - request.duration) > DURATION_TOLERANCE_SECONDS) {
-      return false
-    }
-    const candidateArtists = new Set(track.artist.map(normalizeIdentity).filter(Boolean))
-    return artists.size > 0 && [...artists].every((artist) => candidateArtists.has(artist))
-  })
-
-  return (
-    matches.sort((left, right) => {
-      const durationDifference = Math.abs(left.duration - request.duration) - Math.abs(right.duration - request.duration)
+function selectMatchingTrack(
+  request: LyricSupplementRequest,
+  tracks: Track[],
+): { track: Track; matchScore: LyricMatchScore } | null {
+  const scored = tracks
+    .map((track) => ({
+      track,
+      matchScore: scoreLyricMatch(
+        { title: request.title, artists: request.artists, duration: request.duration },
+        { title: track.title, artists: track.artist, album: track.album, duration: track.duration },
+      ),
+    }))
+    .filter(({ matchScore }) => isLyricMatchAcceptable(matchScore))
+    .sort((left, right) => {
+      if (right.matchScore.score !== left.matchScore.score) return right.matchScore.score - left.matchScore.score
+      const durationDifference =
+        Math.abs(left.track.duration - request.duration) - Math.abs(right.track.duration - request.duration)
       if (durationDifference !== 0) return durationDifference
-      return left.artist.length - right.artist.length
-    })[0] ?? null
-  )
+      return left.track.artist.length - right.track.artist.length
+    })
+  return scored[0] ?? null
 }
 
 export class LyricSupplementService {
@@ -69,7 +92,7 @@ export class LyricSupplementService {
   constructor(private readonly provider: LyricSupplementProvider) {}
 
   async getSupplement(request: LyricSupplementRequest): Promise<LyricSupplementResult> {
-    const key = [request.source, request.lyricId, normalizeIdentity(request.title), request.duration].join(':')
+    const key = [request.source, request.lyricId, normalizeLyricMatchText(request.title), request.duration].join(':')
     const cached = this.cache.get(key)
     if (cached) return cached
 
@@ -102,29 +125,38 @@ export class LyricSupplementService {
     const sources = SUPPLEMENT_SOURCES.filter((source) => source !== request.source)
     const candidates = await Promise.all(
       sources.map(async (source): Promise<LyricSupplementCandidate | null> => {
-      try {
-        const tracks = await this.provider.search(source, keyword, 10, 1)
-        const track = selectMatchingTrack(request, tracks)
-        if (!track) return null
-        const lyric = await this.provider.getLyric(source, track.lyricId ?? track.sourceId)
-        if (!lyric.lyric && !lyric.yrc && !lyric.wordByWord?.length) return null
-        return {
-          source,
-          lyric: lyric.lyric,
-          tlyric: lyric.tlyric,
-          romalrc: lyric.romalrc,
-          yrc: lyric.yrc,
-          wordByWord: lyric.wordByWord,
+        try {
+          const tracks = await this.provider.search(source, keyword, 10, 1)
+          const match = selectMatchingTrack(request, tracks)
+          if (!match) return null
+          const lyric = await this.provider.getLyric(source, match.track.lyricId ?? match.track.sourceId)
+          if (!lyric.lyric && !lyric.yrc && !lyric.wordLyric && !lyric.wordByWord?.length) return null
+          if (isPureMusicLyricText(lyric.lyric)) return null
+          return {
+            source,
+            lyricId: match.track.lyricId ?? match.track.sourceId,
+            title: match.track.title,
+            artist: match.track.artist,
+            duration: match.track.duration,
+            lyric: lyric.lyric,
+            tlyric: lyric.tlyric,
+            romalrc: lyric.romalrc,
+            yrc: lyric.yrc,
+            wordByWord: lyric.wordByWord,
+            wordLyric: lyric.wordLyric,
+            wordFormat: lyric.wordFormat,
+            matchScore: match.matchScore,
+          }
+        } catch {
+          return null
         }
-      } catch {
-        return null
-      }
       }),
     ).then((results) => results.filter((candidate): candidate is LyricSupplementCandidate => candidate !== null))
 
     if (candidates.length === 0) return EMPTY_SUPPLEMENT
     const legacyCandidate =
-      candidates.find((candidate) => candidate.wordByWord?.length || candidate.yrc) ?? candidates[0]
+      candidates.find((candidate) => candidate.wordByWord?.length || candidate.wordLyric || candidate.yrc) ??
+      candidates[0]
     return { ...legacyCandidate, candidates }
   }
 }

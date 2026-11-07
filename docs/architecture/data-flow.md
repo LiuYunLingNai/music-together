@@ -331,8 +331,10 @@ B站没有与房间 128K、320K 完全对应的普通 DASH 音轨，因此分别
 | ------------------------------- | ----- | ------------------------------------------------------------------------------------------------------- |
 | `/api/music/search`             | GET   | 搜索曲目（`source` + `keyword` + `page`）                                                               |
 | `/api/music/url`                | GET   | 解析流媒体 URL（`source` + `id`）                                                                       |
-| `/api/music/lyric`              | GET   | 获取歌词                                                                                                |
-| `/api/music/lyric-supplement`   | GET   | 当前来源缺少可靠逐词或时间轴需要修复时，并行搜索其他平台；按标准化曲名、全部歌手和 ±3 秒时长匹配后返回 YRC/KRC/LRC 候选，由客户端统一评分择优；结果按曲目缓存并合并并发请求 |
+| `/api/music/lyric`              | GET   | 获取平台歌词；返回 LRC/翻译/音译，以及 `wordLyric + wordFormat + source` 结构化逐字合同（yrc/qrc/krc/ttml/enhanced-lrc） |
+| `/api/music/lyric-supplement`   | GET   | 当前来源缺少可靠逐词或时间轴需要修复时，并行搜索其他平台；按标题/歌手/专辑/时长加权评分返回 YRC/KRC/LRC 候选，由客户端统一评分择优；结果按曲目缓存并合并并发请求 |
+| `/api/music/ttml`               | GET   | 代理 AMLL TTML DB；仅允许配置的 HTTPS 主机，最多跟随 3 次重定向且每一跳重新校验白名单，限制 2 MiB/6 秒；进程内 24 小时缓存、并发合并与 ETag |
+| `/api/music/amll-ttml`          | GET   | 按 `ncmMusicId`/`qqMusicId` 精确查询 AMLL 官方 TTML API；固定上游域名、5 秒超时、2 MiB 上限、24 小时缓存与 ETag |
 | `/api/music/cover`              | GET   | 获取封面图                                                                                              |
 | `/api/music/cover-proxy`        | GET   | 代理受信音乐 CDN 封面；兼容升级白名单主机的旧 HTTP 地址，逐跳校验 HTTPS 重定向、图片类型和 10 MiB 上限                |
 | `/api/music/playlist`           | GET   | 获取歌单曲目列表（`source` + `id` + `limit` + `offset`），分页返回 `{ tracks, total, offset, hasMore }` |
@@ -354,6 +356,10 @@ B站没有与房间 128K、320K 完全对应的普通 DASH 音轨，因此分别
 
 ### 2026-09 播放与资源优化
 
+- QQ 音乐歌词接口返回 3DES + deflate 加密的 QRC XML；服务端解密后以 `wordLyric + wordFormat=qrc` 返回，客户端用 AMLL 的 `parseQrc` 还原逐字、对唱与背景声结构。解密或格式校验失败时保留 Meting 的 LRC。
+- AMLL TTML 按平台 ID 未命中时，服务端用歌名 + 首位歌手搜索候选，按标题/歌手/专辑评分（≥75）后取最高分候选的 TTML；搜索页缓存 10 分钟，未命中同样缓存 10 分钟，避免重复打 AMLL。
+- Folia 视觉读取 `songPart` / `isChorus` / `chorusEffect`；适配层保留 TTML 的 songPart，并用上游同款“重复最多歌词行即副歌”规则补齐其他格式。这里只提供上游既有视觉分支所需的数据，不新增视觉设计。
+- 行级 LRC 在进入 Folia 前按上游规则估算逐词时间和行尾阅读时长；开头制作名单按 smart 策略在引子放不下时整块隐藏，经典播放器与 Folia 共用这份展示前过滤。
 - Web 在基础歌词缺少可靠逐字、外语歌词缺少翻译或韩日语歌词缺少音译时，提前启动一次跨源匹配；逐字时间、对唱和背景声继续使用质量最高的 AMLL 主时间轴，翻译与音译分别优先采用和主轴分行、顺序及时间匹配度最高的来源，再由其他来源补齐空缺。慢 TTML 未结束时仍可展示通过既有质量评估的补源结果。
 - 逐字质量同时检查全曲动画、文本、有效时间和重复段落覆盖；带对唱或背景声的候选必须先达到完整度与时间有效性门槛，避免残缺结构仅凭标记数量覆盖完整主轴。
 - 当完整逐字源替换残缺 TTML 时，仅将通过原文、顺序和时间共同验证的对唱/背景声标记迁移到新主轴；逐字内容与时间保持来源原值，无法匹配的结构不迁移。

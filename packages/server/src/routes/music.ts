@@ -3,6 +3,10 @@ import {
   urlQuerySchema,
   lyricQuerySchema,
   lyricSupplementQuerySchema,
+  lyricCandidatesQuerySchema,
+  fallbackCandidatesQuerySchema,
+  ttmlQuerySchema,
+  amllTtmlQuerySchema,
   coverQuerySchema,
   downloadOptionsQuerySchema,
   downloadQuerySchema,
@@ -17,6 +21,8 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import type { ZodSchema } from 'zod'
 import { musicProvider } from '../services/musicProvider.js'
+import { resolveStream } from '../services/streamResolutionService.js'
+import * as trackFallbackService from '../services/trackFallbackService.js'
 import * as authService from '../services/authService.js'
 import { roomRepo } from '../repositories/roomRepository.js'
 import { audioProxyPolicyRepo } from '../repositories/audioProxyPolicyRepository.js'
@@ -37,10 +43,26 @@ import { MusicDownloadError, resolveDownloadOptions, streamDownload } from '../s
 import { audioProxyRateLimit, musicMetadataRateLimit } from '../middleware/httpRateLimiter.js'
 import { createHotSongsService, hotSongsPlaylistId } from '../services/hotSongsService.js'
 import { LyricSupplementService } from '../services/lyricSupplementService.js'
+import { getTtml, TtmlProxyError } from '../services/ttmlProxyService.js'
+import { getAmllTtml, searchAmllCandidates, searchAmllTtml } from '../services/amllLyricsService.js'
 
 const router: RouterType = Router()
 const hotSongsService = createHotSongsService(musicProvider)
 const lyricSupplementService = new LyricSupplementService(musicProvider)
+
+const LYRIC_TIMING_TAG = /\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?\]|\[\d+,\d+\]|\(\d+,\d+,\d+\)|<[^>]+>/g
+const LYRIC_META_LINE = /^\s*\[[a-z][^\]]*:.*]\s*$/i
+
+function lyricPreview(text: string): string {
+  const qrc = text.match(/LyricContent="([\s\S]*?)"/)?.[1]
+  const content = (qrc ?? text).replace(/&quot;/g, '"').replace(/&#10;/g, '\n')
+  for (const raw of content.split(/\r?\n/)) {
+    const line = raw.replace(LYRIC_TIMING_TAG, '').trim()
+    if (!line || LYRIC_META_LINE.test(line) || /^[/.\s]+$/.test(line)) continue
+    return line.slice(0, 80)
+  }
+  return ''
+}
 
 /**
  * Wrap an async route handler with validation + error handling.
@@ -203,8 +225,8 @@ router.get(
   musicMetadataRateLimit,
   validated(urlQuerySchema, 'Get stream URL', async (data, _req, res) => {
     const { source, urlId, bitrate } = data
-    const url = await musicProvider.getStreamUrl(source, urlId, bitrate)
-    res.json({ url })
+    const stream = await resolveStream(source, urlId, bitrate)
+    res.json({ url: stream?.url ?? null })
   }),
 )
 
@@ -274,7 +296,7 @@ router.get(
   validated(lyricQuerySchema, 'Get lyric', async (data, _req, res) => {
     const { source, lyricId } = data
     const result = await musicProvider.getLyric(source, lyricId)
-    const hasLyric = !!(result.lyric || result.yrc || result.wordByWord?.length)
+    const hasLyric = !!(result.lyric || result.yrc || result.wordLyric || result.wordByWord?.length)
     res.setHeader('Cache-Control', hasLyric ? 'private, max-age=3600' : 'private, no-store')
     res.json(result)
   }),
@@ -287,6 +309,130 @@ router.get(
     const result = await lyricSupplementService.getSupplement(data)
     res.setHeader('Cache-Control', result.source ? 'private, max-age=3600' : 'private, no-store')
     res.json(result)
+  }),
+)
+
+router.get(
+  '/lyric-candidates',
+  musicMetadataRateLimit,
+  validated(lyricCandidatesQuerySchema, 'Get lyric candidates', async (data, _req, res) => {
+    const [result, ttmlCandidates] = await Promise.all([
+      data.source && data.lyricId
+        ? lyricSupplementService.getSupplement({
+            source: data.source,
+            lyricId: data.lyricId,
+            title: data.title,
+            artists: data.artists,
+            duration: data.duration,
+          })
+        : null,
+      searchAmllCandidates({ title: data.title, artists: data.artists, duration: data.duration }).catch(() => []),
+    ])
+    res.setHeader(
+      'Cache-Control',
+      result?.candidates?.length || ttmlCandidates.length ? 'private, max-age=600' : 'private, no-store',
+    )
+    res.json({
+      candidates: (result?.candidates ?? []).map(
+        ({ source, lyricId, title, artist, duration, lyric, wordLyric, yrc, wordByWord, matchScore }) => ({
+          source,
+          lyricId,
+          title,
+          artist,
+          duration,
+          preview: lyricPreview(lyric || wordLyric || yrc || ''),
+          hasWordTiming: Boolean(wordByWord?.length || wordLyric || yrc),
+          matchScore,
+        }),
+      ),
+      ttmlCandidates,
+    })
+  }),
+)
+
+router.get(
+  '/fallback-candidates',
+  musicMetadataRateLimit,
+  validated(fallbackCandidatesQuerySchema, 'Get fallback candidates', async (data, _req, res) => {
+    const original: Track = {
+      id: 'fallback-query',
+      title: data.title,
+      artist: data.artists,
+      album: data.album ?? '',
+      duration: data.duration,
+      cover: '',
+      source: data.source,
+      sourceId: '',
+      urlId: '',
+    }
+    const candidates = await trackFallbackService.findAlternativeTracks(original)
+    res.setHeader('Cache-Control', candidates.length ? 'private, max-age=120' : 'private, no-store')
+    res.json({ candidates })
+  }),
+)
+
+router.get(
+  '/ttml',
+  musicMetadataRateLimit,
+  validated(ttmlQuerySchema, 'Get TTML', async (data, req, res) => {
+    try {
+      const ifNoneMatch = typeof req.headers['if-none-match'] === 'string' ? req.headers['if-none-match'] : undefined
+      const result = await getTtml(data.url, ifNoneMatch)
+      if (!result) {
+        res.status(404).end()
+        return
+      }
+      res.setHeader('ETag', result.etag)
+      if (result.notModified) {
+        res.status(304).end()
+        return
+      }
+      res.setHeader('Content-Type', 'application/ttml+xml; charset=utf-8')
+      res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800')
+      res.status(200).send(result.body)
+    } catch (error) {
+      const statusCode = error instanceof TtmlProxyError ? error.statusCode : 502
+      let host = 'invalid'
+      try {
+        host = new URL(data.url).hostname
+      } catch {
+        // Keep the log useful even when the client sent an invalid URL.
+      }
+      logger.warn('TTML 代理请求失败', {
+        statusCode,
+        host,
+        message: error instanceof Error ? error.message : String(error),
+      })
+      res.status(statusCode).json({ error: 'TTML unavailable' })
+    }
+  }),
+)
+
+router.get(
+  '/amll-ttml',
+  musicMetadataRateLimit,
+  validated(amllTtmlQuerySchema, 'Get AMLL TTML', async (data, req, res) => {
+    const ifNoneMatch = typeof req.headers['if-none-match'] === 'string' ? req.headers['if-none-match'] : undefined
+    let result = await getAmllTtml(data.platform, data.id, ifNoneMatch)
+    if (!result && data.title) {
+      result = await searchAmllTtml(
+        data.platform,
+        { title: data.title, artists: data.artists ?? [], album: data.album, duration: data.duration },
+        ifNoneMatch,
+      )
+    }
+    if (!result) {
+      res.status(404).end()
+      return
+    }
+    res.setHeader('ETag', result.etag)
+    if (result.notModified) {
+      res.status(304).end()
+      return
+    }
+    res.setHeader('Content-Type', 'application/ttml+xml; charset=utf-8')
+    res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800')
+    res.status(200).send(result.body)
   }),
 )
 

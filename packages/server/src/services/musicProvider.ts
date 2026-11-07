@@ -1,13 +1,16 @@
 import Meting from '@meting/core'
-import type {
-  AudioQuality,
-  BilibiliStreamFormat,
-  MusicSource,
-  NeteaseRoamingMode,
-  Playlist,
-  RecommendationPagination,
-  RoamingSource,
-  Track,
+import {
+  MUSIC_SOURCE_CAPABILITIES,
+  type AudioQuality,
+  type BilibiliStreamFormat,
+  type LyricPayloadSource,
+  type LyricWordFormat,
+  type MusicSource,
+  type NeteaseRoamingMode,
+  type Playlist,
+  type RecommendationPagination,
+  type RoamingSource,
+  type Track,
 } from '@music-together/shared'
 import { LRUCache } from 'lru-cache'
 import { nanoid } from 'nanoid'
@@ -34,6 +37,7 @@ import { logger } from '../utils/logger.js'
 import { parseNeteaseRecommendedPlaylistPage } from './recommendationParsers.js'
 import { getCoverArtwork, normalizeHighQualityCoverUrl } from './coverArtwork.js'
 import { getKrcByHash, type KrcInfo } from './kugouLyricService.js'
+import { qrcDecrypt } from './qqQrcDecrypt.js'
 import { parseNeteaseTrack } from './neteaseTrackParser.js'
 import crypto from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -78,6 +82,10 @@ export interface LyricResult {
   romalrc: string
   yrc: string
   wordByWord?: AmllLyricLine[]
+  /** Raw word-timing payload; clients parse it according to `wordFormat`. */
+  wordLyric?: string
+  wordFormat?: LyricWordFormat
+  source?: LyricPayloadSource
 }
 
 /** 将 KRC 解析结果转为 AMLL LyricLine 格式 */
@@ -302,6 +310,57 @@ async function withTimeout<T>(promise: Promise<T>, ms = API_TIMEOUT_MS): Promise
   }
 }
 
+const QQ_LYRIC_MAX_CHARS = 2 * 1024 * 1024
+
+/** QQ returns word-by-word lyrics (QRC XML) encrypted from the same lyric endpoint. */
+async function getTencentQrcLyric(
+  songMid: string,
+): Promise<{ lyric: string; translation: string; romanization: string } | null> {
+  const response = await fetch('https://u.y.qq.com/cgi-bin/musicu.fcg', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Referer: 'https://y.qq.com/',
+    },
+    body: JSON.stringify({
+      comm: { ct: 24, cv: 0 },
+      lyric: {
+        module: 'music.musichallSong.PlayLyricInfo',
+        method: 'GetPlayLyricInfo',
+        param: {
+          songMid,
+          type: 0,
+          crypt: 1,
+          qrc: 1,
+          qrc_t: 0,
+          lrc_t: 0,
+          trans: 1,
+          trans_t: 0,
+          roma: 1,
+          roma_t: 0,
+        },
+      },
+    }),
+    signal: AbortSignal.timeout(8_000),
+  })
+  if (!response.ok) throw new Error(`QQ QRC HTTP ${response.status}`)
+  const raw = await response.text()
+  if (raw.length > QQ_LYRIC_MAX_CHARS) throw new Error('QQ QRC payload is too large')
+  const body = JSON.parse(raw) as {
+    lyric?: { code?: number; data?: { lyric?: string; trans?: string; roma?: string } }
+  }
+  if (body.lyric?.code !== 0) return null
+  const data = body.lyric?.data
+  if (!data?.lyric) return null
+  const lyric = await qrcDecrypt(data.lyric)
+  if (!/\[\d+,\d+\]/.test(lyric)) return null
+  const [translation, romanization] = await Promise.all([
+    data.trans ? qrcDecrypt(data.trans).catch(() => '') : '',
+    data.roma ? qrcDecrypt(data.roma).catch(() => '') : '',
+  ])
+  return { lyric, translation, romanization }
+}
+
 /** QQ's legacy lyric endpoint can omit translations that its explicit lyric request provides. */
 async function getTencentTranslatedLyric(songMid: string): Promise<string> {
   const response = await fetch('https://u.y.qq.com/cgi-bin/musicu.fcg', {
@@ -321,7 +380,7 @@ async function getTencentTranslatedLyric(songMid: string): Promise<string> {
     signal: AbortSignal.timeout(8_000),
   })
   if (!response.ok) throw new Error(`QQ lyric HTTP ${response.status}`)
-  const body = await response.json() as {
+  const body = (await response.json()) as {
     lyric?: { code?: number; data?: { trans?: string } }
   }
   if (body.lyric?.code !== 0) return ''
@@ -362,15 +421,7 @@ function normalizeBitrate(value: unknown): number | null {
 }
 
 type NeteaseSoundQualityLevel =
-  | 'standard'
-  | 'higher'
-  | 'exhigh'
-  | 'lossless'
-  | 'dolby'
-  | 'hires'
-  | 'jyeffect'
-  | 'jymaster'
-  | 'sky'
+  'standard' | 'higher' | 'exhigh' | 'lossless' | 'dolby' | 'hires' | 'jyeffect' | 'jymaster' | 'sky'
 
 function neteaseQualityToLevel(quality: AudioQuality): NeteaseSoundQualityLevel | null {
   switch (quality) {
@@ -1410,7 +1461,7 @@ class MusicProvider {
     if (!keyword.trim()) return []
 
     try {
-      if (source === 'bilibili') return []
+      if (!MUSIC_SOURCE_CAPABILITIES[source].album) return []
 
       if (source === 'tencent') {
         const url = 'https://u.y.qq.com/cgi-bin/musicu.fcg'
@@ -1517,7 +1568,7 @@ class MusicProvider {
     if (!keyword.trim()) return []
 
     try {
-      if (source === 'bilibili') return []
+      if (!MUSIC_SOURCE_CAPABILITIES[source].playlist) return []
 
       if (source === 'tencent') {
         const url = 'https://u.y.qq.com/cgi-bin/musicu.fcg'
@@ -1875,11 +1926,11 @@ class MusicProvider {
 
     const tracks = rawSongs
       .slice(0, size)
-      .map((song) => (
+      .map((song) =>
         source === 'kugou' || source === 'kugou_concept'
           ? this.kugouSongToTrack(song, source)
-          : this.rawToTrack(song, source)
-      ))
+          : this.rawToTrack(song, source),
+      )
       .filter((track): track is Track => track !== null)
       .filter((track) => Boolean(track.sourceId && track.sourceId !== 'undefined' && track.sourceId !== 'null'))
     await this.batchResolveCover(tracks, source)
@@ -2658,7 +2709,8 @@ class MusicProvider {
     const empty = { lyric: '', tlyric: '', romalrc: '', yrc: '' as string }
 
     try {
-      if (source === 'bilibili') return empty
+      const lyricCapabilities = MUSIC_SOURCE_CAPABILITIES[source].lyrics
+      if (!lyricCapabilities.lrc && !lyricCapabilities.wordByWord) return empty
 
       let result: LyricResult = {
         ...empty,
@@ -2679,6 +2731,9 @@ class MusicProvider {
           yrc: (body.yrc?.lyric as string) || '',
         }
         if (result.yrc) {
+          result.wordLyric = result.yrc
+          result.wordFormat = 'yrc'
+          result.source = 'platform'
           logger.debug('已获取网易云逐字歌词', { source: 'netease', lyricId })
         }
       } else if (source === 'kugou' || source === 'kugou_concept') {
@@ -2705,13 +2760,18 @@ class MusicProvider {
           const krcInfo = await withTimeout(getKrcByHash(lyricId))
           if (krcInfo?.items?.length) {
             result.wordByWord = krcToAmllLines(krcInfo)
+            result.source = 'platform'
+            if (krcInfo.raw) {
+              result.wordLyric = krcInfo.raw
+              result.wordFormat = 'krc'
+            }
             logger.debug('已获取酷狗逐字歌词', { source: 'kugou', lyricId })
           }
         } catch {
           /* 静默回退到 LRC */
         }
       } else {
-        // QQ 音乐：保留 Meting 原词，仅在其未提供译文时补取 QQ 的翻译轨道
+        // QQ 音乐：Meting 提供 LRC/译文，QQ 歌词接口额外提供加密 QRC 逐字轨
         const meting = this.createInstance(source)
         const raw = await withTimeout(meting.lyric(lyricId))
         if (raw === null || raw === undefined) {
@@ -2729,19 +2789,36 @@ class MusicProvider {
         } catch {
           return empty
         }
-        if (source === 'tencent' && result.lyric && !result.tlyric) {
-          try {
-            result.tlyric = await getTencentTranslatedLyric(lyricId)
-          } catch (err) {
-            logger.debug('QQ 译文补取失败，保留原歌词', { lyricId, err })
+        if (source === 'tencent') {
+          const [qrcResult, translationResult] = await Promise.allSettled([
+            getTencentQrcLyric(lyricId),
+            result.lyric && !result.tlyric ? getTencentTranslatedLyric(lyricId) : Promise.resolve(''),
+          ])
+          if (qrcResult.status === 'fulfilled' && qrcResult.value) {
+            result.wordLyric = qrcResult.value.lyric
+            result.wordFormat = 'qrc'
+            result.source = 'platform'
+            if (qrcResult.value.translation) result.tlyric = qrcResult.value.translation
+            if (qrcResult.value.romanization) result.romalrc = qrcResult.value.romanization
+            logger.debug('已获取 QQ 逐字歌词', { lyricId })
+          } else if (qrcResult.status === 'rejected') {
+            logger.debug('QQ 逐字歌词获取失败，保留 LRC', { lyricId, err: qrcResult.reason })
+          }
+          if (translationResult.status === 'fulfilled' && translationResult.value && !result.tlyric) {
+            result.tlyric = translationResult.value
+          } else if (translationResult.status === 'rejected') {
+            logger.debug('QQ 译文补取失败，保留原歌词', { lyricId, err: translationResult.reason })
           }
         }
+        if (!result.source) result.source = 'lrc'
       }
+
+      if (!result.source) result.source = result.wordFormat ? 'platform' : 'lrc'
 
       // An empty result is usually a transient upstream problem rather than a
       // song without lyrics. Caching it for 24h would hide the lyrics until
       // restart, so give it a short TTL and let the next request retry.
-      const hasLyric = Boolean(result.lyric || result.yrc || result.wordByWord?.length)
+      const hasLyric = Boolean(result.lyric || result.yrc || result.wordLyric || result.wordByWord?.length)
       this.lyricCache.set(cacheKey, result, hasLyric ? undefined : { ttl: EMPTY_LYRIC_TTL })
       return result
     } catch (err) {
@@ -2767,7 +2844,12 @@ class MusicProvider {
     return task
   }
 
-  private async resolveCover(source: MusicSource, picId: string, requestSize: number, cacheKey: string): Promise<string> {
+  private async resolveCover(
+    source: MusicSource,
+    picId: string,
+    requestSize: number,
+    cacheKey: string,
+  ): Promise<string> {
     try {
       if (source === 'bilibili') {
         const streamId = parseBilibiliStreamId(picId)

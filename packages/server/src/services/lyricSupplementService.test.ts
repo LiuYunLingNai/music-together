@@ -118,6 +118,13 @@ describe('LyricSupplementService', () => {
     fakeProvider.search.mockRejectedValue(new Error('provider unavailable'))
     const service = new LyricSupplementService(fakeProvider)
 
-    await expect(service.getSupplement(request)).resolves.toEqual({ source: null, lyric: '' })
+    await expect(service.getSupplement(request)).resolves.toEqual({
+      source: null,
+      lyric: '',
+      lyricId: '',
+      title: '',
+      artist: [],
+      duration: 0,
+    })
   })
 })
