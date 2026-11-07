@@ -1,4 +1,6 @@
 import type { LyricLine, LyricWord } from '@applemusic-like-lyrics/core'
+import { parseQrc } from '@applemusic-like-lyrics/lyric'
+import { applyLrcOffset } from './lyricLrc'
 
 /**
  * 一行 LRC 的**全部**时间戳与其后的正文。
@@ -130,8 +132,9 @@ const LRC_BACKGROUND_LINE = /^[(（](.+)[)）]$/
  */
 function parseLrcLines(lrc: string): LrcTimedLine[] {
   const parsed: LrcTimedLine[] = []
+  const normalizedLrc = applyLrcOffset(lrc)
 
-  for (const rawLine of lrc.split(/\r?\n/)) {
+  for (const rawLine of normalizedLrc.split(/\r?\n/)) {
     // 旧实现不锚定行首：时间戳写在行中间（`作词：[00:12]某某`）也能取到。
     // 这里保持同一语义 —— 从第一个时间戳起算，只是把**连续的**整组都展开。
     const start = rawLine.search(LRC_TIMESTAMP_PATTERN)
@@ -165,10 +168,29 @@ function parseLrcLines(lrc: string): LrcTimedLine[] {
 }
 
 function parseTimedLyricText(lrc: string): TimedLyricText[] {
+  const qrc = parseQrcTimedLyricText(lrc)
+  if (qrc.length > 0) return qrc
   return parseLrcLines(lrc).flatMap(({ text, startTime }) => {
     const normalizedText = normalizeLyricText(text)
     return normalizedText ? [{ text, normalizedText, startTime }] : []
   })
+}
+
+/** QQ romanization arrives as a QRC track, while translations usually arrive as LRC. */
+function parseQrcTimedLyricText(text: string): TimedLyricText[] {
+  if (!/<QrcInfos[\s>]/i.test(text) && !/^\s*\[\d+,\d+\]/m.test(text)) return []
+  try {
+    return parseQrc(text).flatMap((line) => {
+      const value = (line.words ?? [])
+        .map((word) => word.word)
+        .join('')
+        .trim()
+      const normalizedText = normalizeLyricText(value)
+      return normalizedText ? [{ text: value, normalizedText, startTime: line.startTime }] : []
+    })
+  } catch {
+    return []
+  }
 }
 
 function countNormalizedCharacters(value: string): number {
@@ -412,7 +434,8 @@ function measureTimelineOffset(
     const difference = orderedLines[index].startTime - orderedCandidates[index].startTime
     if (Math.abs(difference) <= 5_000) positional.push(difference)
   }
-  if (positional.length < 3) return { offset: differences.length ? median(differences) : 0, support: differences.length }
+  if (positional.length < 3)
+    return { offset: differences.length ? median(differences) : 0, support: differences.length }
   return { offset: median(positional), support: positional.length }
 }
 

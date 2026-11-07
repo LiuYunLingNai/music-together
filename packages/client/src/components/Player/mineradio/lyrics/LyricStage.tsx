@@ -36,6 +36,8 @@ import { usePlayerStore } from '@/stores/playerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { getLyricOffsetKey } from '@/lib/lyricOffset'
 import { buildAMLLLinesFromLrc } from '@/lib/lyricLrc'
+import { filterLyricLines } from '@/lib/lyrics/lyricLineRules'
+import { useLyricLineFilter } from '@/hooks/useLyricLineFilter'
 import { lyricPlayerBridge } from '@/lib/lyricPlayerBridge'
 import { maskObsceneLine, type ObsceneMaskMode } from './obsceneMask'
 
@@ -794,6 +796,7 @@ export function LyricStage({
   const currentTrack = usePlayerStore((s) => s.currentTrack)
   const maskObsceneChar = useSettingsStore((s) => s.lyricMaskObsceneWordChar)
   const maskMode = useSettingsStore((s) => s.lyricMaskObsceneWordsMode)
+  const shouldHideLine = useLyricLineFilter()
 
   // 显示模式决定轨道可见半径
   const stackLines = lyricLineCountForMode(displayMode, customLineCount)
@@ -815,10 +818,10 @@ export function LyricStage({
 
   // 逐字数据优先；没有 ttmlLines 时用 LRC 文本兜底
   const stageLines = useMemo<StageLine[]>(() => {
-    if (ttmlLines && ttmlLines.length > 0) return buildStageLines(ttmlLines)
+    if (ttmlLines && ttmlLines.length > 0) return buildStageLines(filterLyricLines(ttmlLines, shouldHideLine))
     const fallback = buildAMLLLinesFromLrc(lyric, tlyric)
-    return buildStageLines(fallback)
-  }, [ttmlLines, lyric, tlyric])
+    return buildStageLines(filterLyricLines(fallback, shouldHideLine))
+  }, [ttmlLines, lyric, tlyric, shouldHideLine])
 
   const activeIndex = useMemo(() => findActiveLineIndex(stageLines, nowSeconds), [stageLines, nowSeconds])
 

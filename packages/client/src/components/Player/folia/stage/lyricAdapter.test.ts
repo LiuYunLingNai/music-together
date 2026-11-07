@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { LyricLine as AMLLLyricLine } from '@applemusic-like-lyrics/core'
-import { findFoliaActiveLineIndex, foldFoliaBackgroundVocals, toFoliaLine } from './lyricAdapter'
+import {
+  estimateLrcLineEndTimes,
+  findFoliaActiveLineIndex,
+  foldFoliaBackgroundVocals,
+  hideCrowdedLeadingStaffBlock,
+  toFoliaLine,
+} from './lyricAdapter'
 import type { Line } from '../types'
+import { applyChorusEffects } from './foliaChorus'
 import { attachFoliaInterludes } from './lyricPresentation'
 
 /**
@@ -74,10 +81,110 @@ describe('AMLL → folia 歌词适配', () => {
     expect(line.renderHints!.renderEndTime).toBeGreaterThanOrEqual(line.endTime)
   })
 
+  it('行级歌词按上游规则估算逐词时间，未请求时不改动', () => {
+    const lrcLine = amllLine({
+      words: [{ word: 'Hello world', startTime: 0, endTime: 2_000, romanWord: '', obscene: false }],
+      startTime: 0,
+      endTime: 2_000,
+      translatedLyric: '',
+    })
+    expect(toFoliaLine(lrcLine, 0).words).toHaveLength(1)
+
+    const estimated = toFoliaLine(lrcLine, 0, true)
+    expect(estimated.words.map((word) => word.text)).toEqual(['Hello', 'world'])
+    expect(estimated.fullText).toBe('Hello world')
+    expect(estimated.words[0]?.startTime).toBe(0)
+    expect(estimated.words[1]?.endTime).toBeLessThanOrEqual(2)
+  })
+
+  it('中文行级歌词按字拆分估算时间', () => {
+    const lrcLine = amllLine({
+      words: [{ word: '无声开在乌云之下', startTime: 1_000, endTime: 4_000, romanWord: '', obscene: false }],
+      startTime: 1_000,
+      endTime: 4_000,
+      translatedLyric: '',
+    })
+
+    const estimated = toFoliaLine(lrcLine, 0, true)
+    expect(estimated.words.map((word) => word.text)).toEqual(['无', '声', '开', '在', '乌', '云', '之', '下'])
+  })
+
+  it('长间隙前的行尾按阅读时长收窄，避免高亮拖到间奏', () => {
+    const lines = [
+      amllLine({
+        words: [{ word: '很短的一句', startTime: 10_000, endTime: 30_000, romanWord: '', obscene: false }],
+        startTime: 10_000,
+        endTime: 30_000,
+      }),
+      amllLine({ startTime: 30_000, endTime: 32_000 }),
+    ]
+
+    const [timed] = estimateLrcLineEndTimes(lines)
+    expect(timed?.endTime).toBeLessThan(30_000)
+    expect(timed?.endTime).toBeGreaterThan(10_000)
+  })
+
+  it('保留 TTML songPart，并把 chorus 段映射成上游读取的 isChorus', () => {
+    const chorus = { ...amllLine(), songPart: 'Chorus', blockIndex: 2 }
+    const line = toFoliaLine(chorus, 0)
+    expect(line.songPart).toBe('Chorus')
+    expect(line.blockIndex).toBe(2)
+    expect(line.isChorus).toBe(true)
+    expect(toFoliaLine(amllLine(), 0).isChorus).toBeUndefined()
+  })
+
   it('缺字段不抛错（防御不完整的歌词数据）', () => {
     const broken = { startTime: 0, endTime: 0 } as unknown as AMLLLyricLine
     expect(() => toFoliaLine(broken, 0)).not.toThrow()
     expect(toFoliaLine(broken, 0).fullText).toBe('')
+  })
+})
+
+describe('开头制作名单', () => {
+  const line = (fullText: string, startTime: number, endTime: number): Line => ({
+    words: [],
+    startTime,
+    endTime,
+    fullText,
+  })
+
+  it('前奏放得下时保留制作名单', () => {
+    const lines = [line('作词：甲', 0, 1), line('作曲：乙', 1, 2), line('第一句歌词', 5, 8)]
+    expect(hideCrowdedLeadingStaffBlock(lines)).toHaveLength(3)
+  })
+
+  it('前奏放不下时整块隐藏，并带走分隔行', () => {
+    const lines = [line('作词：甲', 0, 1), line('作曲：乙', 1, 2), line('#', 2, 3), line('第一句歌词', 3, 6)]
+    expect(hideCrowdedLeadingStaffBlock(lines).map((entry) => entry.fullText)).toEqual(['第一句歌词'])
+  })
+})
+
+describe('副歌标记', () => {
+  const line = (fullText: string, startTime: number): Line => ({
+    words: [],
+    startTime,
+    endTime: startTime + 1,
+    fullText,
+  })
+
+  it('把重复次数最多的歌词文本标为副歌，并给同一文本同一个效果', () => {
+    const lines = [line('副歌', 0), line('主歌', 1), line('副歌', 2)]
+    const result = applyChorusEffects(lines, '[00:00.00]副歌\n[00:01.00]主歌\n[00:02.00]副歌')
+
+    expect(result.map((entry) => Boolean(entry.isChorus))).toEqual([true, false, true])
+    expect(result[0].chorusEffect).toBeDefined()
+    expect(result[0].chorusEffect).toBe(result[2].chorusEffect)
+  })
+
+  it('没有重复文本时不改动行', () => {
+    const lines = [line('只出现一次', 0)]
+    expect(applyChorusEffects(lines, '[00:00.00]只出现一次')).toBe(lines)
+  })
+
+  it('TTML 已标记的副歌行也会补上视觉效果', () => {
+    const [result] = applyChorusEffects([{ ...line('副歌', 0), isChorus: true }], '')
+    expect(result.isChorus).toBe(true)
+    expect(result.chorusEffect).toBeDefined()
   })
 })
 

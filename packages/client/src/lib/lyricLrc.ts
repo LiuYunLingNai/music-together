@@ -36,6 +36,32 @@ const LEADING_TIMESTAMPS = /^(?:\s*\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?\])+/
 const SINGLE_TIMESTAMP = /\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?\]/g
 /** 整行被一对括号包住 = 背景人声（上游 `parseLrc` 的 `bgRegex` 同语义）。 */
 const BACKGROUND_LINE = /^[(（](.+)[)）]$/
+const OFFSET_TAG = /^\s*\[offset\s*:\s*([+-]?\d+)\s*\]\s*$/im
+const OFFSET_TAG_ALL = /^\s*\[offset\s*:\s*[+-]?\d+\s*\]\s*$/gim
+const OFFSET_TIMESTAMP = /\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?\]/g
+
+function formatTimestamp(milliseconds: number): string {
+  const minutes = Math.floor(milliseconds / 60_000)
+  const seconds = Math.floor(milliseconds / 1_000) % 60
+  const fraction = milliseconds % 1_000
+  return `[${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(fraction).padStart(3, '0')}]`
+}
+
+/**
+ * Apply an LRC `[offset:ms]` tag to every timestamp in that track.
+ * Positive offsets display earlier (OpenMusic/Folia convention); values clamp at zero.
+ * The tag is removed so calling this twice cannot apply the offset twice.
+ */
+export function applyLrcOffset(lrc: string): string {
+  if (!lrc) return lrc
+  const offset = Number(lrc.match(OFFSET_TAG)?.[1] ?? 0)
+  if (!Number.isSafeInteger(offset) || offset === 0) return lrc
+  return lrc.replace(OFFSET_TAG_ALL, '').replace(OFFSET_TIMESTAMP, (_tag, minutes, seconds, fraction) => {
+    const milliseconds =
+      (Number(minutes) * 60 + Number(seconds)) * 1_000 + Number((fraction ?? '').padEnd(3, '0').slice(0, 3))
+    return formatTimestamp(Math.max(0, milliseconds - offset))
+  })
+}
 
 /**
  * 解析 LRC 文本。
@@ -54,8 +80,9 @@ const BACKGROUND_LINE = /^[(（](.+)[)）]$/
  */
 export function parseLRC(lrc: string): LrcLine[] {
   const lines: LrcLine[] = []
+  const normalizedLrc = applyLrcOffset(lrc)
 
-  for (const rawLine of lrc.split(/\r?\n/)) {
+  for (const rawLine of normalizedLrc.split(/\r?\n/)) {
     // 与旧实现一致：不要求时间戳在行首（`作词：[00:12]某某` 也取得到），
     // 只是把连续的整组时间戳逐个展开。
     const start = rawLine.search(SINGLE_TIMESTAMP)

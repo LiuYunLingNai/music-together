@@ -1,5 +1,6 @@
 import { NTP, type MusicSource } from '@music-together/shared'
 import { SYNC_PACKET_INTERVAL_MAX_SECONDS, SYNC_PACKET_INTERVAL_MIN_SECONDS } from '@/lib/constants'
+import { isLyricLineRule, type LyricLineRule } from '@/lib/lyrics/lyricLineRules'
 import { normalizeFoliaSettings, type FoliaSettings } from './foliaSettings'
 import { DEFAULT_SMART_BEAT_SETTINGS, type SmartBeatSettings } from '@/services/beatFx/beatFxTypes'
 import { resolveSmartBeatSettings, type SmartBeatPatch } from '@/services/beatFx/smartBeatSettings'
@@ -212,13 +213,19 @@ export type LyricDisplaySetting = (typeof LYRIC_DISPLAY_SETTINGS)[number]
 export const LYRIC_TRANSLATION_SETTINGS = ['off', 'current', 'dual', 'multi'] as const
 export type LyricTranslationSetting = (typeof LYRIC_TRANSLATION_SETTINGS)[number]
 
+export const LYRIC_PREFERRED_SOURCES = ['auto', 'platform', 'ttml'] as const
+export type LyricPreferredSource = (typeof LYRIC_PREFERRED_SOURCES)[number]
+
+const LEGACY_TTML_DB_URL = 'https://amlldb.bikonoo.com/ncm-lyrics/%s.ttml'
+
 /** 所有持久化设置项的默认值 — 供 store 层的 resettable 工厂使用 */
 export const SETTING_DEFAULTS = {
   playbackTempoSyncEnabled: false,
   playbackHardSeekSyncEnabled: false,
   syncPacketIntervalSeconds: NTP.STEADY_STATE_INTERVAL_MS / 1000,
   ttmlEnabled: true,
-  ttmlDbUrl: 'https://amlldb.bikonoo.com/ncm-lyrics/%s.ttml',
+  ttmlDbUrl: 'https://api.beta.amllhub.bikonoo.com/api/v1/lyrics/ncm-lyrics/%s.ttml',
+  lyricPreferredSource: 'auto' as LyricPreferredSource,
   lyricAlignAnchor: 'center' as 'top' | 'center' | 'bottom',
   lyricAlignPosition: 0.4,
   lyricEnableSpring: true,
@@ -233,6 +240,7 @@ export const SETTING_DEFAULTS = {
   lyricFontSize: 90,
   lyricTranslationFontSize: 75,
   lyricRomanFontSize: 75,
+  lyricLineRules: [] as LyricLineRule[],
   lyricOffsets: {} as Record<string, number>,
   bgFps: 30,
   bgFlowSpeed: 2,
@@ -256,9 +264,9 @@ export const storage = {
     const saved = safeGetJSON<unknown>('foliaSettings')
     // Remember an existing Folia selection when upgrading from the lyric-only stage.
     const fallback = normalizeFoliaSettings({ lyricMode: safeGet('visualStage') })
-    return normalizeFoliaSettings(saved && typeof saved === 'object' && !Array.isArray(saved)
-      ? { ...fallback, ...saved }
-      : fallback)
+    return normalizeFoliaSettings(
+      saved && typeof saved === 'object' && !Array.isArray(saved) ? { ...fallback, ...saved } : fallback,
+    )
   },
   /** `normalized`：调用方（settingsStore）已归一化，省掉一次全树校验。 */
   setFoliaSettings: (value: FoliaSettings, normalized = false) => {
@@ -370,6 +378,13 @@ export const storage = {
   },
   setLyricRomanFontSize: (v: number) => safeSet('lyricRomanFontSize', String(v)),
 
+  getLyricLineRules: () => {
+    const stored = safeGetJSON<unknown>('lyricLineRules')
+    return Array.isArray(stored) ? stored.filter(isLyricLineRule) : []
+  },
+  setLyricLineRules: (rules: LyricLineRule[]) =>
+    safeSetJSON('lyricLineRules', rules.filter(isLyricLineRule).slice(0, 100)),
+
   getLyricOffsets: () => {
     const stored = safeGetJSON<Record<string, unknown>>('lyricOffsets')
     if (!stored) return {}
@@ -385,8 +400,19 @@ export const storage = {
   getTtmlEnabled: () => safeGet('ttmlEnabled') !== 'false', // 默认开启
   setTtmlEnabled: (v: boolean) => safeSet('ttmlEnabled', String(v)),
 
-  getTtmlDbUrl: () => safeGet('ttmlDbUrl') || SETTING_DEFAULTS.ttmlDbUrl,
+  getTtmlDbUrl: () => {
+    const stored = safeGet('ttmlDbUrl')
+    return !stored || stored === LEGACY_TTML_DB_URL ? SETTING_DEFAULTS.ttmlDbUrl : stored
+  },
   setTtmlDbUrl: (v: string) => safeSet('ttmlDbUrl', v),
+
+  getLyricPreferredSource: () => {
+    const stored = safeGet('lyricPreferredSource')
+    return (LYRIC_PREFERRED_SOURCES as readonly string[]).includes(stored ?? '')
+      ? (stored as LyricPreferredSource)
+      : SETTING_DEFAULTS.lyricPreferredSource
+  },
+  setLyricPreferredSource: (v: LyricPreferredSource) => safeSet('lyricPreferredSource', v),
 
   // Background settings
   getBgFps: () => {

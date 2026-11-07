@@ -3,7 +3,9 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { getLyricOffsetKey } from '@/lib/lyricOffset'
 import { lyricPlayerBridge } from '@/lib/lyricPlayerBridge'
 import { getLyricSeekTime } from '@/lib/lyricSeek'
-import { buildAMLLLinesFromLrc, mergeLyrics } from '@/lib/lyricLrc'
+import { buildAMLLLinesFromLrc } from '@/lib/lyricLrc'
+import { filterLyricLines } from '@/lib/lyrics/lyricLineRules'
+import { useLyricLineFilter } from '@/hooks/useLyricLineFilter'
 import { AbilityContext } from '@/providers/ability-context'
 import type { LyricLineMouseEvent } from '@applemusic-like-lyrics/core'
 import '@applemusic-like-lyrics/core/style.css'
@@ -62,13 +64,18 @@ export function LyricDisplay({ onSeek, seekEnabled = true }: LyricDisplayProps) 
   const playerRef = useRef<LyricPlayerRef>(null)
   const [lyricPlayer, setLyricPlayer] = useState<LyricPlayerRef['lyricPlayer']>()
 
+  const shouldHideLine = useLyricLineFilter()
   // LRC 回退路径（仅在没有 TTML 时使用）。解析与配对实现在 `@/lib/lyricLrc`，
   // 与 folia 舞台共用同一份 —— 见该模块顶部说明。
-  const lrcLines = useMemo(() => mergeLyrics(lyric, tlyric), [lyric, tlyric])
   const lrcAmllLines = useMemo(() => buildAMLLLinesFromLrc(lyric, tlyric), [lyric, tlyric])
+  const visibleTtmlLines = useMemo(
+    () => (ttmlLines ? filterLyricLines(ttmlLines, shouldHideLine) : null),
+    [ttmlLines, shouldHideLine],
+  )
+  const visibleLrcLines = useMemo(() => filterLyricLines(lrcAmllLines, shouldHideLine), [lrcAmllLines, shouldHideLine])
   // TTML 优先，LRC 回退
-  const seekableLines = ttmlLines ?? lrcAmllLines
-  const hasLyrics = ttmlLines ? ttmlLines.length > 0 : lrcLines.length > 0
+  const seekableLines = visibleTtmlLines ?? visibleLrcLines
+  const hasLyrics = visibleTtmlLines ? visibleTtmlLines.length > 0 : visibleLrcLines.length > 0
   const lyricSeekEnabled = seekEnabled && canSeek && !isCalibrating && duration > 0
 
   const handleLyricLineClick = useCallback(

@@ -7,10 +7,17 @@ import { getProxiedCoverUrl } from '@/lib/cover'
 import { motionValue } from 'motion/react'
 import type { AudioBands, Line } from '../types'
 import { PlayerState } from '../types'
-import { findFoliaActiveLineIndex, foldFoliaBackgroundVocals, toFoliaLine } from '../../stage/lyricAdapter'
+import {
+    estimateLrcLineEndTimes,
+    findFoliaActiveLineIndex,
+    foldFoliaBackgroundVocals,
+    hideCrowdedLeadingStaffBlock,
+    toFoliaLine,
+} from '../../stage/lyricAdapter'
 import { attachFoliaInterludes } from '../../stage/lyricPresentation'
 import { getLyricOffsetKey } from '@/lib/lyricOffset'
 import { isIcuFoliaReady, loadIcuFolia, segmentIcuFolia } from '@/lib/lyrics/icuFolia'
+import { compileLyricLineRules, type LyricLineRule } from '@/lib/lyrics/lyricLineRules'
 import { HAN_OR_KANA } from '@/lib/lyrics/hanKanaText'
 
 /**
@@ -40,7 +47,7 @@ export interface DisplayPlaybackState {
 }
 
 /** 歌词转换按源对象、字幕开关与 icu 就绪状态缓存：store 每 100ms 更新一次，长歌词不该每次重转。 */
-let lineCache: { ttml: unknown; lyric: string; tlyric: string; translation: boolean; romanization: boolean; icuReady: boolean; lines: Line[] } | null = null
+let lineCache: { ttml: unknown; lyric: string; tlyric: string; translation: boolean; romanization: boolean; icuReady: boolean; rules: readonly LyricLineRule[]; lines: Line[] } | null = null
 let icuLoadStarted = false
 
 /** 与舞台同源的 CJK 切词：窗口的实时预览也要拿到 `autoWordSegments`。 */
@@ -55,12 +62,14 @@ const bakeAutoWordSegments = (lines: Line[]): void => {
 
 const displayLines = (state: HostPlayerState): Line[] => {
     const { showTranslation, showRomanization } = useSettingsStore.getState().foliaSettings
+    const lineRules = useSettingsStore.getState().lyricLineRules
     if (lineCache
         && lineCache.ttml === state.ttmlLines
         && lineCache.lyric === state.lyric
         && lineCache.tlyric === state.tlyric
         && lineCache.translation === showTranslation
         && lineCache.romanization === showRomanization
+        && lineCache.rules === lineRules
         && lineCache.icuReady === isIcuFoliaReady()) {
         return lineCache.lines
     }
@@ -77,13 +86,21 @@ const displayLines = (state: HostPlayerState): Line[] => {
         })
     }
     // 与舞台同判据：关掉的翻译 / 音译在窗口的实时预览里也不该出现。
-    const built = attachFoliaInterludes(foldFoliaBackgroundVocals(source.map(toFoliaLine)))
+    const estimateLrcTiming = !(state.ttmlLines && state.ttmlLines.length > 0)
+    const timedSource = estimateLrcTiming ? estimateLrcLineEndTimes(source) : source
+    const folded = foldFoliaBackgroundVocals(
+        timedSource.map((line, index) => toFoliaLine(line, index, estimateLrcTiming)),
+    )
+    const built = attachFoliaInterludes(hideCrowdedLeadingStaffBlock(folded))
     bakeAutoWordSegments(built)
-    const lines = built.map((line) => ({
-        ...line,
-        translation: showTranslation ? line.translation : undefined,
-        romanization: showRomanization ? line.romanization : undefined,
-    }))
+    const shouldHideLine = compileLyricLineRules(lineRules)
+    const lines = built
+        .filter((line) => !shouldHideLine(line.fullText))
+        .map((line) => ({
+            ...line,
+            translation: showTranslation ? line.translation : undefined,
+            romanization: showRomanization ? line.romanization : undefined,
+        }))
     lineCache = {
         ttml: state.ttmlLines,
         lyric: state.lyric,
@@ -91,6 +108,7 @@ const displayLines = (state: HostPlayerState): Line[] => {
         translation: showTranslation,
         romanization: showRomanization,
         icuReady: isIcuFoliaReady(),
+        rules: lineRules,
         lines,
     }
     return lines

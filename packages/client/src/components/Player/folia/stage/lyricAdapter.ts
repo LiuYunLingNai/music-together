@@ -1,12 +1,16 @@
-import type { LyricLine as AMLLLyricLine } from '@applemusic-like-lyrics/core'
+import type { LyricLine } from '@/lib/lyricPresentation'
 import { useEffect, useMemo, useState } from 'react'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { buildAMLLLinesFromLrc } from '@/lib/lyricLrc'
+import { buildTimedWords, estimateLrcLineEndTime } from '../upstream/utils/lyrics/estimatedLineTiming'
 import { buildLineRenderHints } from '../upstream/utils/lyrics/renderHints'
+import { findHiddenLeadingStaffIndexes } from '@/lib/lyrics/staffCredits'
 import type { Line, Theme, Word } from '../types'
+import { applyChorusEffects } from './foliaChorus'
 import { attachFoliaInterludes } from './lyricPresentation'
 import { HAN_OR_KANA } from '@/lib/lyrics/hanKanaText'
+import { useLyricLineFilter } from '@/hooks/useLyricLineFilter'
 import { isIcuFoliaReady, loadIcuFolia, segmentIcuFolia } from '@/lib/lyrics/icuFolia'
 
 /**
@@ -56,8 +60,8 @@ function lineToBackgroundVocal(line: Line): NonNullable<Line['backgroundVocal']>
  * 导出供测试直接调用（`__testToFoliaLine`）：时间单位换算（ms → s）差 1000 倍
  * 不会报错但会让全部动画错位，值得单测钉住。生产代码只经 `useFoliaLines`。
  */
-export function toFoliaLine(line: AMLLLyricLine, index: number): Line {
-  const words: Word[] = (line.words ?? []).map((word) => ({
+export function toFoliaLine(line: LyricLine, index: number, estimateLrcTiming = false): Line {
+  const sourceWords: Word[] = (line.words ?? []).map((word) => ({
     text: word.word ?? '',
     startTime: toSeconds(word.startTime),
     endTime: toSeconds(word.endTime),
@@ -65,9 +69,17 @@ export function toFoliaLine(line: AMLLLyricLine, index: number): Line {
 
   // LRC 回退路径只给一个覆盖整行的 word，此时拼接就是整行文本；
   // TTML 路径的 words 拼接同样等于整行。
-  const fullText = words.map((word) => word.text).join('')
+  const fullText = sourceWords.map((word) => word.text).join('')
   const startTime = toSeconds(line.startTime)
   const endTime = toSeconds(line.endTime)
+  // Folia's parser estimates per-word timing for line-synced lyrics. The shared
+  // LRC path deliberately keeps one word per line for AMLL, so estimate here
+  // instead of mistaking LRC-only lines for word-timed sources.
+  const estimatedWords =
+    estimateLrcTiming && sourceWords.length === 1 && fullText.trim()
+      ? buildTimedWords(fullText, startTime, endTime)
+      : []
+  const words = estimatedWords.length > 1 ? estimatedWords : sourceWords
 
   return {
     id: `folia-line-${index}`,
@@ -83,8 +95,31 @@ export function toFoliaLine(line: AMLLLyricLine, index: number): Line {
     //   非对唱曲目两边都是同一个值 → cappella 的 resolver 因
     //   "agent 少于 2 个"返回 null，回落到它自己的左右序列（与上游一致）。
     agentId: line.isBG ? 'bg' : line.isDuet ? 'duet' : 'main',
+    ...(line.songPart ? { songPart: line.songPart } : {}),
+    ...(line.blockIndex !== undefined ? { blockIndex: line.blockIndex } : {}),
+    ...(line.songPart?.trim().toLowerCase() === 'chorus' ? { isChorus: true } : {}),
     renderHints: buildLineRenderHints({ startTime, endTime, words }),
   }
+}
+
+/**
+ * Folia's "smart" staff policy: keep the leading credit block when the intro
+ * fits it, otherwise hide the whole block. Folia lines use seconds.
+ */
+export function hideCrowdedLeadingStaffBlock(lines: Line[]): Line[] {
+  const removed = findHiddenLeadingStaffIndexes(lines, 1.5, 1)
+  return removed ? lines.filter((_, index) => !removed.has(index)) : lines
+}
+
+/** Folia's parser trims a line followed by a long gap to a reading-time estimate. */
+export function estimateLrcLineEndTimes(lines: LyricLine[]): LyricLine[] {
+  return lines.map((line, index) => {
+    const text = (line.words ?? []).map((word) => word.word ?? '').join('')
+    if (!text.trim()) return line
+    const next = lines[index + 1]
+    const endSeconds = estimateLrcLineEndTime(text, line.startTime / 1_000, next ? next.startTime / 1_000 : undefined)
+    return { ...line, endTime: Math.round(Math.max(line.startTime + 100, endSeconds * 1_000)) }
+  })
 }
 
 /**
@@ -103,6 +138,8 @@ export function useFoliaLines(): Line[] {
   const ttmlLines = usePlayerStore((s) => s.ttmlLines)
   const lyric = usePlayerStore((s) => s.lyric)
   const tlyric = usePlayerStore((s) => s.tlyric)
+  const estimateLrcTiming = !(ttmlLines && ttmlLines.length > 0)
+  const shouldHideLine = useLyricLineFilter()
 
   const source = useMemo(
     () => (ttmlLines && ttmlLines.length > 0 ? ttmlLines : buildAMLLLinesFromLrc(lyric, tlyric)),
@@ -125,7 +162,10 @@ export function useFoliaLines(): Line[] {
   }, [source, icuReady])
 
   return useMemo(() => {
-    const lines = source.map(toFoliaLine)
+    const timedSource = estimateLrcTiming ? estimateLrcLineEndTimes(source) : source
+    const lines = timedSource
+      .map((line, index) => toFoliaLine(line, index, estimateLrcTiming))
+      .filter((line) => !shouldHideLine(line.fullText))
     if (icuReady) {
       for (const line of lines) {
         if (!line.fullText) continue
@@ -133,8 +173,9 @@ export function useFoliaLines(): Line[] {
         if (segments) line.autoWordSegments = segments
       }
     }
-    return attachFoliaInterludes(foldFoliaBackgroundVocals(lines))
-  }, [source, icuReady])
+    const folded = foldFoliaBackgroundVocals(lines)
+    return applyChorusEffects(attachFoliaInterludes(hideCrowdedLeadingStaffBlock(folded)), lyric)
+  }, [source, icuReady, lyric, estimateLrcTiming, shouldHideLine])
 }
 
 /**

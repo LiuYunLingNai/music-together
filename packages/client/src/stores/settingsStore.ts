@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { LyricLineRule } from '@/lib/lyrics/lyricLineRules'
 import { FOLIA_DEFAULTS, normalizeFoliaSettings, type FoliaSettings } from '@/lib/foliaSettings'
 import { resolveSmartBeatSettings, type SmartBeatPatch } from '@/services/beatFx/smartBeatSettings'
 import { DEFAULT_SMART_BEAT_SETTINGS, type SmartBeatSettings } from '@/services/beatFx/beatFxTypes'
@@ -7,6 +8,7 @@ import {
   SETTING_DEFAULTS,
   type LyricDisplaySetting,
   type LyricMotionSetting,
+  type LyricPreferredSource,
   type LyricRendererSetting,
   type LyricTranslationSetting,
   type VisualQualitySetting,
@@ -50,6 +52,7 @@ type SettingsStore = {
   ResettableFields<'syncPacketIntervalSeconds', number> &
   ResettableFields<'ttmlEnabled', boolean> &
   ResettableFields<'ttmlDbUrl', string> &
+  ResettableFields<'lyricPreferredSource', LyricPreferredSource> &
   ResettableFields<'lyricAlignAnchor', 'top' | 'center' | 'bottom'> &
   ResettableFields<'lyricAlignPosition', number> &
   ResettableFields<'lyricEnableSpring', boolean> &
@@ -63,7 +66,8 @@ type SettingsStore = {
   ResettableFields<'lyricFontWeight', number> &
   ResettableFields<'lyricFontSize', number> &
   ResettableFields<'lyricTranslationFontSize', number> &
-  ResettableFields<'lyricRomanFontSize', number> & {
+  ResettableFields<'lyricRomanFontSize', number> &
+  ResettableFields<'lyricLineRules', LyricLineRule[]> & {
     lyricOffsets: Record<string, number>
     setLyricOffset: (key: string, offsetMs: number) => void
     clearLyricOffset: (key: string) => void
@@ -179,6 +183,7 @@ export const useSettingsStore = create<SettingsStore>((set) => {
     ),
     ...resettable('ttmlEnabled', storage.getTtmlEnabled, storage.setTtmlEnabled),
     ...resettable('ttmlDbUrl', storage.getTtmlDbUrl, storage.setTtmlDbUrl),
+    ...resettable('lyricPreferredSource', storage.getLyricPreferredSource, storage.setLyricPreferredSource),
     ...resettable('lyricAlignAnchor', storage.getLyricAlignAnchor, storage.setLyricAlignAnchor),
     ...resettable('lyricAlignPosition', storage.getLyricAlignPosition, storage.setLyricAlignPosition),
     ...resettable('lyricEnableSpring', storage.getLyricEnableSpring, storage.setLyricEnableSpring),
@@ -197,6 +202,7 @@ export const useSettingsStore = create<SettingsStore>((set) => {
     ...resettable('lyricFontSize', storage.getLyricFontSize, storage.setLyricFontSize),
     ...resettable('lyricTranslationFontSize', storage.getLyricTranslationFontSize, storage.setLyricTranslationFontSize),
     ...resettable('lyricRomanFontSize', storage.getLyricRomanFontSize, storage.setLyricRomanFontSize),
+    ...resettable('lyricLineRules', storage.getLyricLineRules, storage.setLyricLineRules),
     lyricOffsets: storage.getLyricOffsets(),
     setLyricOffset: (key, offsetMs) => {
       const value = Math.round(Math.max(-10_000, Math.min(10_000, offsetMs)))
