@@ -24,6 +24,12 @@ export type ErrorCode = (typeof ERROR_CODE)[keyof typeof ERROR_CODE]
 
 export type MusicSource = 'netease' | 'tencent' | 'kugou' | 'kugou_concept' | 'bilibili'
 
+/** Raw word-timing formats a lyric response may carry. */
+export type LyricWordFormat = 'yrc' | 'qrc' | 'krc' | 'ttml' | 'enhanced-lrc'
+
+/** Where the lyric payload came from; `lrc` means line-only fallback. */
+export type LyricPayloadSource = 'platform' | 'amll' | 'lrc'
+
 /** Official hot-song chart providers exposed in the room sidebar. */
 export type HotSongsSource = Extract<MusicSource, 'netease' | 'tencent' | 'kugou'>
 
@@ -44,9 +50,7 @@ export const NETEASE_ROAMING_MODES = [
 export type NeteaseRoamingMode = (typeof NETEASE_ROAMING_MODES)[number]
 
 export function normalizeNeteaseRoamingMode(value: unknown): NeteaseRoamingMode {
-  return NETEASE_ROAMING_MODES.includes(value as NeteaseRoamingMode)
-    ? (value as NeteaseRoamingMode)
-    : 'DEFAULT'
+  return NETEASE_ROAMING_MODES.includes(value as NeteaseRoamingMode) ? (value as NeteaseRoamingMode) : 'DEFAULT'
 }
 
 /** Server-wide Kugou transport policy. Bilibili always uses the server proxy. */
@@ -210,7 +214,7 @@ export interface RoomState {
   roamingEnabled?: boolean
   /** Provider used for personalized room roaming. */
   roamingSource?: RoamingSource
-/** 网易云私人漫游模式；QQ/酷狗及酷狗概念版使用 DEFAULT。 */
+  /** 网易云私人漫游模式；QQ/酷狗及酷狗概念版使用 DEFAULT。 */
   roamingMode?: NeteaseRoamingMode
   /** 密码明文（仅 owner 可见；普通成员和临时管理员只收到 hasPassword） */
   password?: string | null

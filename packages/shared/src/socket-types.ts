@@ -60,6 +60,7 @@ export interface ServerToClientEvents {
   [EVENTS.PLAYER_SEEK]: (data: { playState: ScheduledPlayState }) => void
   [EVENTS.PLAYER_TRACK_METADATA_UPDATED]: (data: { track: Track }) => void
   [EVENTS.PLAYER_STREAM_REFRESHED]: (data: { track: Track }) => void
+  [EVENTS.PLAYER_SOURCE_SWITCHED]: (data: { track: Track; currentTime: number; isPlaying: boolean }) => void
   [EVENTS.PLAYER_SYNC_RESPONSE]: (data: {
     currentTime: number
     isPlaying: boolean
@@ -111,11 +112,7 @@ export interface ServerToClientEvents {
     reason?: 'not_found' | 'reauth_required' | 'error'
   }) => void
   /** 服务端所在机器上已登录的 QQ 客户端账号（仅同机访问时才有内容）。 */
-  [EVENTS.AUTH_LOCAL_QQ_ACCOUNTS]: (data: {
-    available: boolean
-    accounts: LocalQqAccount[]
-    message?: string
-  }) => void
+  [EVENTS.AUTH_LOCAL_QQ_ACCOUNTS]: (data: { available: boolean; accounts: LocalQqAccount[]; message?: string }) => void
   [EVENTS.AUTH_LOCAL_QQ_LOGIN_RESULT]: (data: {
     success: boolean
     message: string
@@ -162,6 +159,8 @@ export interface ClientToServerEvents {
   [EVENTS.PLAYER_SYNC_REQUEST]: () => void
   [EVENTS.PLAYER_SET_MODE]: (data: { mode: PlayMode }) => void
   [EVENTS.PLAYER_REFRESH_STREAM]: (data?: { trackId?: string }) => void
+  [EVENTS.PLAYER_SOURCE_SWITCH]: (data: { trackId: string; track: Track }) => void
+  [EVENTS.PLAYER_REQUEST_SOURCE_FALLBACK]: (data?: { trackId?: string }) => void
 
   [EVENTS.QUEUE_ADD]: (data: { track: Track }) => void
   [EVENTS.QUEUE_INSERT_AFTER_CURRENT]: (data: { track: Track }) => void

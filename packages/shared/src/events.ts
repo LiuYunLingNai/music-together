@@ -34,6 +34,9 @@ export const EVENTS = {
   PLAYER_TRACK_METADATA_UPDATED: 'player:track_metadata_updated',
   PLAYER_REFRESH_STREAM: 'player:refresh_stream',
   PLAYER_STREAM_REFRESHED: 'player:stream_refreshed',
+  PLAYER_SOURCE_SWITCH: 'player:source_switch',
+  PLAYER_SOURCE_SWITCHED: 'player:source_switched',
+  PLAYER_REQUEST_SOURCE_FALLBACK: 'player:request_source_fallback',
 
   // Queue management
   QUEUE_ADD: 'queue:add',

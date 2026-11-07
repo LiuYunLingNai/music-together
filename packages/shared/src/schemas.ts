@@ -133,6 +133,11 @@ export const playerPlaySchema = z.object({
   track: trackSchema.extend({ requestedBy: z.string().max(LIMITS.NICKNAME_MAX_LENGTH).optional() }).optional(),
 })
 
+export const playerSourceSwitchSchema = z.object({
+  trackId: z.string().min(1).max(200),
+  track: trackSchema,
+})
+
 export const queueInsertAfterCurrentSchema = queueAddSchema
 
 export const queueAddBatchSchema = z.object({
@@ -182,6 +187,17 @@ export const chatMessageSchema = z.object({
 export const musicSourceSchema = z.enum(['netease', 'tencent', 'kugou', 'kugou_concept', 'bilibili'])
 export const hotSongsSourceSchema = z.enum(['netease', 'tencent', 'kugou'])
 
+export const fallbackCandidatesQuerySchema = z.object({
+  source: musicSourceSchema,
+  title: z.string().min(1).max(300),
+  artists: z.preprocess(
+    (value) => (Array.isArray(value) ? value : value === undefined ? [] : [value]),
+    z.array(z.string().min(1).max(200)).min(1).max(10),
+  ),
+  duration: z.coerce.number().finite().positive().max(86_400),
+  album: z.string().max(300).optional(),
+})
+
 const searchQueryCommonShape = {
   limit: z.coerce.number().int().min(1).max(LIMITS.SEARCH_PAGE_SIZE_MAX).default(20),
   page: z.coerce.number().int().min(1).max(LIMITS.SEARCH_PAGE_MAX).default(1),
@@ -216,7 +232,10 @@ export const hotSongsQuerySchema = z.object({
   source: hotSongsSourceSchema.default('netease'),
   limit: z.coerce.number().int().min(1).max(30).default(30),
   offset: z.coerce.number().int().min(0).max(500).default(0),
-  refresh: z.enum(['true', 'false']).transform((value) => value === 'true').default(false),
+  refresh: z
+    .enum(['true', 'false'])
+    .transform((value) => value === 'true')
+    .default(false),
 })
 
 export const urlQuerySchema = z.object({
@@ -249,6 +268,22 @@ export const lyricQuerySchema = z.object({
   lyricId: z.string().min(1).max(2000),
 })
 
+export const ttmlQuerySchema = z.object({
+  url: z.string().trim().min(1).max(2048),
+})
+
+export const amllTtmlQuerySchema = z.object({
+  platform: z.enum(['ncm', 'qq']),
+  id: z.string().trim().min(1).max(200),
+  title: z.string().trim().min(1).max(300).optional(),
+  artists: z.preprocess(
+    (value) => (value === undefined ? undefined : Array.isArray(value) ? value : [value]),
+    z.array(z.string().trim().min(1).max(200)).min(1).max(10).optional(),
+  ),
+  album: z.string().trim().max(300).optional(),
+  duration: z.coerce.number().finite().positive().max(86_400).optional(),
+})
+
 export const lyricSupplementQuerySchema = lyricQuerySchema.extend({
   title: z.string().min(1).max(300),
   artists: z.preprocess(
@@ -256,6 +291,12 @@ export const lyricSupplementQuerySchema = lyricQuerySchema.extend({
     z.array(z.string().min(1).max(200)).min(1).max(10),
   ),
   duration: z.coerce.number().finite().positive().max(86_400),
+})
+
+/** Manual lyric matching may search AMLL by metadata alone, without a platform lyric id. */
+export const lyricCandidatesQuerySchema = lyricSupplementQuerySchema.extend({
+  source: musicSourceSchema.optional(),
+  lyricId: z.string().min(1).max(2000).optional(),
 })
 
 export const coverQuerySchema = z.object({
