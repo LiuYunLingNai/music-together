@@ -49,18 +49,47 @@ export function addBatchTracks(roomId: string, tracks: Track[]): number {
 /**
  * Insert a new track right after the current playing track.
  * If current track is missing from the queue (edge race), insert to the front.
+ * Returns the actual queued entry (which may have a new id on collision).
  */
-export function insertAfterCurrent(roomId: string, track: Track): boolean {
+export function insertTrackAfterCurrent(roomId: string, track: Track): Track | null {
   const room = roomRepo.get(roomId)
-  if (!room) return false
-  if (room.queue.length >= LIMITS.QUEUE_MAX_SIZE) return false
+  if (!room) return null
+  if (room.queue.length >= LIMITS.QUEUE_MAX_SIZE) return null
 
   const currentId = room.currentTrack?.id
   const currentIndex = currentId ? room.queue.findIndex((t) => t.id === currentId) : -1
   const insertIndex = currentIndex >= 0 ? currentIndex + 1 : 0
-  room.queue.splice(insertIndex, 0, withUniqueId(room, track))
+  const entry = withUniqueId(room, track)
+  room.queue.splice(insertIndex, 0, entry)
   roomRepo.persist(roomId)
-  return true
+  return entry
+}
+
+/**
+ * Insert several tracks right after the current playing track, keeping their order.
+ * Returns the actual queued entries (ids may change on collision); stops at queue capacity.
+ */
+export function insertTracksAfterCurrent(roomId: string, tracks: Track[]): Track[] {
+  const room = roomRepo.get(roomId)
+  if (!room || tracks.length === 0) return []
+
+  const currentId = room.currentTrack?.id
+  const currentIndex = currentId ? room.queue.findIndex((t) => t.id === currentId) : -1
+  let insertIndex = currentIndex >= 0 ? currentIndex + 1 : 0
+  const inserted: Track[] = []
+  for (const track of tracks) {
+    if (room.queue.length >= LIMITS.QUEUE_MAX_SIZE) break
+    const entry = withUniqueId(room, track)
+    room.queue.splice(insertIndex, 0, entry)
+    inserted.push(entry)
+    insertIndex += 1
+  }
+  if (inserted.length > 0) roomRepo.persist(roomId)
+  return inserted
+}
+
+export function insertAfterCurrent(roomId: string, track: Track): boolean {
+  return insertTrackAfterCurrent(roomId, track) !== null
 }
 
 export function removeTrack(roomId: string, trackId: string): boolean {
@@ -86,6 +115,32 @@ export function clearQueue(roomId: string): void {
     room.queue = []
     roomRepo.persist(roomId)
   }
+}
+
+/** 清掉当前曲之前的已播放项；当前曲和待播项保持不动。 */
+export function removePlayedTracks(roomId: string): number {
+  const room = roomRepo.get(roomId)
+  if (!room?.currentTrack) return 0
+  const currentIndex = room.queue.findIndex((track) => track.id === room.currentTrack?.id)
+  if (currentIndex <= 0) return 0
+  const removed = room.queue.splice(0, currentIndex)
+  roomRepo.persist(roomId)
+  return removed.length
+}
+
+/** 切换漫游平台/模式时清掉尚未播放的旧漫游曲目；当前曲目保留。 */
+export function removePendingRoamingTracks(roomId: string): number {
+  const room = roomRepo.get(roomId)
+  if (!room) return 0
+  const currentId = room.currentTrack?.id
+  const nextQueue = room.queue.filter(
+    (track) => !(track.roaming === true || track.requestedBy === '私人漫游') || track.id === currentId,
+  )
+  const removed = room.queue.length - nextQueue.length
+  if (removed <= 0) return 0
+  room.queue = nextQueue
+  roomRepo.persist(roomId)
+  return removed
 }
 
 export function reorderTracks(roomId: string, trackIds: string[]): void {

@@ -11,7 +11,7 @@ import { EVENTS, NTP, TIMING, clampPlaybackPosition, nextPlaybackRevision } from
 import { roomRepo } from '../repositories/roomRepository.js'
 import { nanoid } from 'nanoid'
 import { musicProvider } from './musicProvider.js'
-import { resolveStreamDetailed } from './streamResolutionService.js'
+import { resolveStream, resolveStreamDetailed } from './streamResolutionService.js'
 import { decideFailureAction, toPlaybackFailure } from './playbackFailure.js'
 import * as queueService from './queueService.js'
 import * as trackFallbackService from './trackFallbackService.js'
@@ -24,7 +24,9 @@ import { logger } from '../utils/logger.js'
 import type { RoomData } from '../repositories/types.js'
 import type { TypedServer, TypedSocket } from '../middleware/types.js'
 import { degradeQuality, getEffectiveQuality, providerQualityRank, type MembershipTier } from './audioQualityPolicy.js'
-import { roamingService, shouldPreferRoamingForNext } from './roamingService.js'
+import * as listeningReportService from './listeningReportService.js'
+import { isRoamingTrack, roamingService, shouldPreferRoamingForNext } from './roamingService.js'
+import * as automixService from './automixService.js'
 import { shouldRemovePlayedTrackAfterAdvance } from './queueNavigation.js'
 import {
   recordAutoFallbackAttempt,
@@ -291,6 +293,47 @@ function publishPlaybackFailure(
  * Bilibili 的 DASH 地址每次都要新解析，带 cookie 的 VIP 地址也不会进缓存，
  * 这两类直接跳过。
  */
+/**
+ * 队列里只剩少量漫游曲目时后台补一批，避免下一首切歌时同步等推荐接口。
+ * 只有“当前曲之后全是漫游曲目”才补，用户自己的点歌仍然优先。
+ */
+const roamingRefillTasks = new Map<string, Promise<Track[]>>()
+
+function refillRoamingTail(io: TypedServer, roomId: string): Promise<Track[]> {
+  const existing = roamingRefillTasks.get(roomId)
+  if (existing) return existing
+
+  const task = (async (): Promise<Track[]> => {
+    const room = roomRepo.get(roomId)
+    if (!room?.roamingEnabled) return []
+    const currentIndex = room.currentTrack
+      ? room.queue.findIndex((track) => track.id === room.currentTrack?.id)
+      : -1
+    const upcoming = room.queue.slice(currentIndex + 1)
+    if (upcoming.some((track) => !isRoamingTrack(track))) return []
+    if (upcoming.filter((track) => isRoamingTrack(track)).length > 2) return []
+
+    try {
+      const tracks = await roamingService.getBatch(room)
+      if (tracks.length === 0) return []
+      const added = queueService.addBatchTracks(roomId, tracks)
+      if (added === 0) return []
+      const updated = roomRepo.get(roomId)
+      if (updated) io.to(roomId).emit(EVENTS.QUEUE_UPDATED, { queue: updated.queue })
+      return tracks.slice(0, added)
+    } catch (error) {
+      logger.warn('房间漫游后台补货失败', { roomId, source: room.roamingSource, error })
+      return []
+    }
+  })()
+
+  roamingRefillTasks.set(roomId, task)
+  void task.finally(() => {
+    if (roamingRefillTasks.get(roomId) === task) roamingRefillTasks.delete(roomId)
+  })
+  return task
+}
+
 async function preResolveNextStream(roomId: string): Promise<void> {
   try {
     const room = roomRepo.get(roomId)
@@ -299,10 +342,91 @@ async function preResolveNextStream(roomId: string): Promise<void> {
     if (!next || next.id === room.currentTrack?.id || next.source === 'bilibili') return
     const auth = authService.getBestAuth(next.source, roomId)
     if (auth?.cookie) return
-    await resolveStreamUrl(next.source, next.urlId, room.audioQuality, undefined, false, 0)
+    // 这是后台预热，不是用户点歌：必须走 prefetch 语义，否则上游 5xx 时
+    // 会把整个平台的点歌一起冷却。
+    await resolveStream(next.source, next.urlId, room.audioQuality, { purpose: 'prefetch' })
   } catch (error) {
     logger.debug('下一首播放地址预解析失败', { roomId, error })
   }
+}
+
+/**
+ * Re-arm the room's transition point from the current play state. `loop-one`
+ * never crossfades into itself; with roaming enabled the batch refill will
+ * normally leave a queued successor behind.
+ */
+function rescheduleAutomix(io: TypedServer, roomId: string): void {
+  const room = roomRepo.get(roomId)
+  if (!room) return
+  const next = room.playMode === 'loop-one' ? null : queueService.getNextTrack(room.id, room.playMode)
+  const successor = next && next.id !== room.currentTrack?.id ? next : null
+  automixService.scheduleAutomix(
+    roomId,
+    successor,
+    (decision, trackId) => {
+      void playNextTrackInRoom(io, roomId, room.playMode, {
+        skipDebounce: true,
+        expectedTrackId: trackId,
+        automixOverlapSec: decision.overlapSec,
+        automixStyle: decision.style,
+        automixInStartSec: decision.inStartSec,
+        automixStretch: decision.stretch,
+        automixTiltDb: decision.tiltDb,
+        automixEchoThrow: decision.echoThrow,
+        automixCrossover: decision.crossover,
+        automixBpm: decision.bpm,
+        automixShapeBands: decision.shapeBands,
+        automixSweepOut: decision.sweepOut,
+        automixTogether: decision.together,
+        automixTrimDb: decision.trimDb,
+        automixOutgoingReferenceDb: decision.outgoingReferenceDb,
+        automixIncomingReferenceDb: decision.incomingReferenceDb,
+        automixRelation: decision.relation,
+        automixOutgoingBarSec: decision.outgoingBarSec,
+        automixIncomingBarSec: decision.incomingBarSec,
+        automixOutgoingDownbeatOffset: decision.outgoingDownbeatOffset,
+        automixIncomingSectionStart: decision.incomingSectionStart,
+        automixIncomingLeadInSec: decision.incomingLeadInSec,
+        automixExpansion: decision.expansion,
+        automixOutgoingBeatsPerBar: decision.outgoingBeatsPerBar,
+      })
+    },
+    (decision, fromTrackId, toTrackId) => {
+      io.to(roomId).emit(EVENTS.PLAYER_AUTOMIX_PLAN, {
+        fromTrackId,
+        toTrackId,
+        overlapMs: Math.round(decision.overlapSec * 1000),
+        outStartMs: Math.round(decision.outStartSec * 1000),
+        inStartMs: Math.round(decision.inStartSec * 1000),
+        style: decision.style,
+        stretch: decision.stretch,
+        tiltDb: decision.tiltDb,
+        echoThrow: decision.echoThrow,
+        crossover: decision.crossover,
+        bpm: decision.bpm,
+        shapeBands: decision.shapeBands,
+        sweepOut: decision.sweepOut,
+        together: decision.together,
+        trimDb: decision.trimDb,
+        relation: decision.relation,
+        outgoingBarSec: decision.outgoingBarSec,
+        incomingBarSec: decision.incomingBarSec,
+        outgoingDownbeatOffset: decision.outgoingDownbeatOffset,
+        incomingSectionStart: decision.incomingSectionStart,
+        incomingLeadInSec: decision.incomingLeadInSec,
+        expansion: decision.expansion,
+        outgoingBeatsPerBar: decision.outgoingBeatsPerBar,
+        reason: decision.reason,
+      })
+    },
+  )
+}
+
+/**
+ * 队列在播放期间新增曲目时补排过渡点；没有后继时原本不会安排定时器。
+ */
+export function refreshAutomixScheduling(io: TypedServer, roomId: string): void {
+  rescheduleAutomix(io, roomId)
 }
 
 /**
@@ -327,10 +451,44 @@ export function autoPlayIfEmpty(io: TypedServer, roomId: string, track: Track): 
   })
 }
 
-async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): Promise<boolean> {
+interface AutomixTransition {
+  overlapMs: number
+  fromTrackId: string
+  style?: import('@music-together/shared').TransitionStyle
+  /** 新曲进入的媒体时间（已写入 playState.currentTime）。 */
+  startAtMs: number
+  stretch: number
+  tiltDb: [number, number]
+  echoThrow: boolean
+  crossover: number
+  bpm: number | null
+  shapeBands: boolean
+  sweepOut: boolean
+  together: number
+  trimDb: number
+  outgoingReferenceDb: number | null
+  incomingReferenceDb: number | null
+  relation: import('@music-together/shared').KeyRelation
+  outgoingBarSec: number | null
+  incomingBarSec: number | null
+  outgoingDownbeatOffset: number | null
+  incomingSectionStart: number | null
+  incomingLeadInSec: number | null
+  expansion: number | null
+  outgoingBeatsPerBar: number | null
+}
+
+async function _playTrackInRoom(
+  io: TypedServer,
+  roomId: string,
+  track: Track,
+  transition?: AutomixTransition,
+): Promise<boolean> {
   const room = roomRepo.get(roomId)
   if (!room) return false
   clearFailureSkip(roomId)
+  // 新的曲目接管时间线，之前排好的过渡点作废。
+  automixService.cancelAutomix(roomId)
 
   // Never trust/reuse a client-provided URL here. Resolving on the server is
   // what lets us record the provider's actual bitrate and refresh expired URLs.
@@ -534,6 +692,13 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
     }
   }
 
+  // 实际音质随当前曲目下发（可选字段）：客户端据此显示音质标签与降级提示。
+  resolved.audioQuality = streamResolution?.actualQuality
+  resolved.audioBitrate = streamResolution?.actualBitrate ?? null
+  resolved.qualityDowngraded = streamResolution
+    ? isQualityDowngraded(resolved.source, room.audioQuality, streamResolution)
+    : false
+
   // Update room state — align serverTimestamp with the scheduled execution time
   // so estimateCurrentTime() is accurate from the first scheduled frame.
   room.currentTrack = resolved
@@ -541,7 +706,8 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
   const scheduleTime = getScheduleTime(roomId)
   room.playState = {
     isPlaying: true,
-    currentTime: 0,
+    // 过渡时从上游 planner 给的 inStart 进入，跳过前奏静音；普通播放从 0 开始。
+    currentTime: transition ? transition.startAtMs / 1000 : 0,
     serverTimestamp: scheduleTime,
     revision: nextPlaybackRevision(room.playState),
   }
@@ -550,14 +716,22 @@ async function _playTrackInRoom(io: TypedServer, roomId: string, track: Track): 
   io.to(roomId).emit(EVENTS.PLAYER_PLAY, {
     track: resolved,
     playState: scheduled(room.playState, roomId, scheduleTime),
+    ...(transition ? { automix: transition } : {}),
   })
 
   // 预解析下一首的播放地址（只填 provider 的 URL 缓存，不下载音频）：
   // 切歌时省掉一次上游 URL 解析往返，过渡更接近无缝。异步执行，失败静默。
   void preResolveNextStream(roomId)
 
+  // 自动混音：在当前曲目结束前 overlap 秒推进，新旧两首在客户端重叠。
+  rescheduleAutomix(io, roomId)
+
+  // 听歌打卡只针对“提供音源且在线并主动开启”的网易云账号。
+  listeningReportService.beginListeningReport(roomId, room)
+
   // 通知大厅用户当前播放曲目变化
   broadcastRoomList(io)
+  void refillRoamingTail(io, roomId)
 
   const artistLabel = (Array.isArray(resolved.artist) ? resolved.artist : []).filter(Boolean).join(' / ') || '未知歌手'
   const requestedQuality = formatAudioQuality(room.audioQuality)
@@ -624,6 +798,8 @@ export function resumeTrack(io: TypedServer, roomId: string, _initiatorSocket?: 
   roomRepo.persist(roomId)
   // All clients (including initiator) must execute at the same scheduled moment
   io.to(roomId).emit(EVENTS.PLAYER_RESUME, { playState: scheduled(room.playState, roomId, scheduleTime) })
+  listeningReportService.resumeListeningReport(roomId)
+  rescheduleAutomix(io, roomId)
   return true
 }
 
@@ -643,6 +819,8 @@ export function pauseTrack(io: TypedServer, roomId: string, _initiatorSocket?: T
   roomRepo.persist(roomId)
   // All clients must pause at the same scheduled moment
   io.to(roomId).emit(EVENTS.PLAYER_PAUSE, { playState: scheduled(room.playState, roomId, scheduleTime) })
+  listeningReportService.pauseListeningReport(roomId)
+  automixService.cancelAutomix(roomId)
 }
 
 export function seekTrack(io: TypedServer, roomId: string, currentTime: number, _initiatorSocket?: TypedSocket): void {
@@ -660,6 +838,9 @@ export function seekTrack(io: TypedServer, roomId: string, currentTime: number, 
   roomRepo.persist(roomId)
   // All clients must seek at the same scheduled moment
   io.to(roomId).emit(EVENTS.PLAYER_SEEK, { playState: scheduled(room.playState, roomId, scheduleTime) })
+  listeningReportService.seekListeningReport(roomId, currentTime)
+  // 拖动改变剩余时间，过渡点必须按新位置重排。
+  rescheduleAutomix(io, roomId)
 }
 
 export function updatePlayState(roomId: string, update: Partial<PlayState>): void {
@@ -692,6 +873,8 @@ export function setCurrentTrack(roomId: string, track: Track | null): void {
  */
 export function stopPlayback(io: TypedServer, roomId: string): void {
   clearFailureSkip(roomId)
+  listeningReportService.finishListeningReport(roomId, 'stop')
+  automixService.cancelAutomix(roomId)
   setCurrentTrack(roomId, null)
   const room = roomRepo.get(roomId)
   const stoppedState = room?.playState ?? {
@@ -745,7 +928,36 @@ export function playNextTrackInRoom(
   io: TypedServer,
   roomId: string,
   playMode: PlayMode,
-  options?: { skipDebounce?: boolean; expectedTrackId?: string; forceRoaming?: boolean },
+  options?: {
+    skipDebounce?: boolean
+    expectedTrackId?: string
+    forceRoaming?: boolean
+    /** 自动混音预先决定的重叠时长（秒）；由服务端调度器传入。 */
+    automixOverlapSec?: number
+    /** 上游 `transitionChooser` 选出的过渡类型。 */
+    automixStyle?: import('@music-together/shared').TransitionStyle
+    /** 新曲进入点（秒），过渡时跳过前奏静音。 */
+    automixInStartSec?: number
+    automixStretch?: number
+    automixTiltDb?: [number, number]
+    automixEchoThrow?: boolean
+    automixCrossover?: number
+    automixBpm?: number | null
+    automixShapeBands?: boolean
+    automixSweepOut?: boolean
+    automixTogether?: number
+    automixTrimDb?: number
+    automixOutgoingReferenceDb?: number | null
+    automixIncomingReferenceDb?: number | null
+    automixRelation?: import('@music-together/shared').KeyRelation
+    automixOutgoingBarSec?: number | null
+    automixIncomingBarSec?: number | null
+    automixOutgoingDownbeatOffset?: number | null
+    automixIncomingSectionStart?: number | null
+    automixIncomingLeadInSec?: number | null
+    automixExpansion?: number | null
+    automixOutgoingBeatsPerBar?: number | null
+  },
 ): Promise<void> {
   return withPlayMutex(roomId, async () => {
     clearFailureSkip(roomId)
@@ -795,26 +1007,53 @@ export function playNextTrackInRoom(
       return false
     }
 
-    // Explicit roam action (queue header button): leave the user queue in
-    // place, play one recommendation right away, and keep the played track
-    // visible in the queue. The rest of the batch is only fetched by the
-    // automatic tail refill below.
+    // Explicit roam action (queue header button): insert the recommendation
+    // right after the current track and play that queued entry. The queue then
+    // shows the song that is actually playing, and NEXT continues with the
+    // user's own queue instead of treating the queue as if nothing was playing.
     if (options?.forceRoaming) {
       try {
-        const [roamingTrack] = await roamingService.getBatch(room, 1)
-        if (roamingTrack && (await _playTrackInRoom(io, roomId, roamingTrack))) {
-          const playedTrack = roomRepo.get(roomId)?.currentTrack
-          const queuedTrack = playedTrack
-            ? { ...playedTrack, streamUrl: undefined, requiresServerProxy: undefined, streamFormat: undefined }
-            : roamingTrack
-          const removedPreviousTrack = removePreviousTrackAfterAdvance(roomId, previousTrack)
-          const addedRoamingTrack = queueService.addTrack(roomId, queuedTrack)
-          const roomAfterQueue = roomRepo.get(roomId)
-          if ((removedPreviousTrack || addedRoamingTrack) && roomAfterQueue) {
-            io.to(roomId).emit(EVENTS.QUEUE_UPDATED, { queue: roomAfterQueue.queue })
+        // 一次取整批：只播第一条，其余留在当前曲之后。这样起播后的补货
+        // 不会再立刻打第二次推荐接口（上游 FM 同样是流式批量补）。
+        const roamingTracks = await roamingService.getBatch(room)
+        if (roamingTracks.length === 0) {
+          // 后台补货在飞时 getBatch 会被同账号节流直接返回空；等它落队后
+          // 走下面的普通导航，队列里已经有可播的漫游曲。
+          const pendingRefill = roamingRefillTasks.get(roomId)
+          if (pendingRefill) await pendingRefill
+        }
+        if (roamingTracks.length > 0) {
+          const queuedTracks = roamingTracks.map((track) => ({
+            ...track,
+            streamUrl: undefined,
+            requiresServerProxy: undefined,
+            streamFormat: undefined,
+          }))
+          const [first, ...rest] = queuedTracks
+          const inserted = first ? queueService.insertTracksAfterCurrent(roomId, [first]) : []
+          if (inserted.length > 0) {
+            // 其余推荐放到队尾：显式漫游仍然只插一首到当前曲之后，NEXT 继续
+            // 走用户自己的队列；同时队列里已有后续漫游曲，起播后的补货不会
+            // 立刻再打一次推荐接口。
+            const beforeAppend = roomRepo.get(roomId)?.queue.length ?? 0
+            if (rest.length > 0) queueService.addBatchTracks(roomId, rest)
+            const appended = roomRepo.get(roomId)?.queue.slice(beforeAppend) ?? []
+            if (await _playTrackInRoom(io, roomId, inserted[0]!)) {
+              removePreviousTrackAfterAdvance(roomId, previousTrack)
+              const roomAfterQueue = roomRepo.get(roomId)
+              if (roomAfterQueue) {
+                io.to(roomId).emit(EVENTS.QUEUE_UPDATED, { queue: roomAfterQueue.queue })
+              }
+              lastSkipTimestamp.set(roomId, { action: 'next', timestamp: Date.now() })
+              return
+            }
+            // 播放失败：撤销刚插入的队列项，保持队列与当前播放一致。
+            for (const track of [...inserted, ...appended]) queueService.removeTrack(roomId, track.id)
+            const roomAfterQueue = roomRepo.get(roomId)
+            if (roomAfterQueue) {
+              io.to(roomId).emit(EVENTS.QUEUE_UPDATED, { queue: roomAfterQueue.queue })
+            }
           }
-          lastSkipTimestamp.set(roomId, { action: 'next', timestamp: Date.now() })
-          return
         }
       } catch (error) {
         logger.warn('房间漫游推荐不可用', { roomId, source: room.roamingSource, error })
@@ -827,7 +1066,11 @@ export function playNextTrackInRoom(
     // queue with a recommendation batch, then let the normal navigation pick
     // the first new track. A failed request falls back to the playback mode.
     if (shouldPreferRoamingForNext(room, playMode)) {
-      await tryRoaming()
+      // 起播后的后台补货可能正在飞：等它落队，避免把“同账号请求在飞”误判成
+      // 没有下一首而停播。
+      const pendingRefill = roamingRefillTasks.get(roomId)
+      if (pendingRefill) await pendingRefill
+      else await tryRoaming()
     }
 
     let nextTrack = queueService.getNextTrack(roomId, playMode)
@@ -846,7 +1089,34 @@ export function playNextTrackInRoom(
     // In loop-one, getNextTrack keeps returning the failed track itself, so
     // fall back to sequential order once it has failed.
     const MAX_ADVANCE_ATTEMPTS = 5
-    let success = await _playTrackInRoom(io, roomId, nextTrack)
+    const transition: AutomixTransition | undefined = options?.automixOverlapSec
+      ? {
+          overlapMs: Math.round(options.automixOverlapSec * 1000),
+          fromTrackId: previousTrack?.id ?? '',
+          style: options.automixStyle,
+          startAtMs: Math.round((options.automixInStartSec ?? 0) * 1000),
+          stretch: options.automixStretch ?? 1,
+          tiltDb: options.automixTiltDb ?? [0, 0],
+          echoThrow: options.automixEchoThrow ?? false,
+          crossover: options.automixCrossover ?? 0.5,
+          bpm: options.automixBpm ?? null,
+          shapeBands: options.automixShapeBands ?? false,
+          sweepOut: options.automixSweepOut ?? false,
+          together: options.automixTogether ?? 0,
+          trimDb: options.automixTrimDb ?? 0,
+          outgoingReferenceDb: options.automixOutgoingReferenceDb ?? null,
+          incomingReferenceDb: options.automixIncomingReferenceDb ?? null,
+          relation: options.automixRelation ?? 'unknown',
+          outgoingBarSec: options.automixOutgoingBarSec ?? null,
+          incomingBarSec: options.automixIncomingBarSec ?? null,
+          outgoingDownbeatOffset: options.automixOutgoingDownbeatOffset ?? null,
+          incomingSectionStart: options.automixIncomingSectionStart ?? null,
+          incomingLeadInSec: options.automixIncomingLeadInSec ?? null,
+          expansion: options.automixExpansion ?? null,
+          outgoingBeatsPerBar: options.automixOutgoingBeatsPerBar ?? null,
+        }
+      : undefined
+    let success = await _playTrackInRoom(io, roomId, nextTrack, transition)
     let attemptedTrackId = nextTrack.id
     for (let attempt = 1; !success && attempt < MAX_ADVANCE_ATTEMPTS; attempt += 1) {
       const retryMode = playMode === 'loop-one' ? 'sequential' : playMode
@@ -1232,6 +1502,8 @@ export async function syncPlaybackToSocket(
     // state before syncing playback.
     preparePlaybackForJoiningRoom(roomId, room)
     const shouldAutoPlay = isAloneInRoom || room.playState.isPlaying
+    // 空房期间过渡定时器已被取消；恢复播放后必须按新的时间线重排。
+    if (shouldAutoPlay) rescheduleAutomix(io, roomId)
 
     const snapshotTimestamp = Date.now()
     const joinCalibrationDelayMs = NTP.INITIAL_INTERVAL_MS * NTP.MAX_INITIAL_SAMPLES + 100
@@ -1272,6 +1544,8 @@ export function cleanupRoom(roomId: string): void {
   lastSkipTimestamp.delete(roomId)
   lastStreamUrlRefreshAt.delete(roomId)
   playMutexes.delete(roomId)
+  automixService.cancelAutomix(roomId)
+  automixService.clearTrackProfiles(roomId)
 }
 
 /**

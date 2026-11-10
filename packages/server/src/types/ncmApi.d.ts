@@ -63,6 +63,31 @@ declare module '@neteasecloudmusicapienhanced/api' {
     login_qr_create(params: { key: string; qrimg: boolean } & RequestBaseConfig): Promise<{ body: QrCreateResponse }>
     login_qr_check(params: { key: string } & RequestBaseConfig): Promise<{ body: QrCheckResponse }>
     login_status(params: RequestBaseConfig): Promise<{ body: LoginStatusResponse }>
+    cloudsearch(params: {
+      keywords: string
+      type?: number
+      limit?: number
+      offset?: number
+    } & RequestBaseConfig): Promise<{
+      body: {
+        code?: number
+        result?: {
+          artists?: Array<{ id?: number; name?: string; picUrl?: string; albumSize?: number }>
+        }
+      }
+    }>
+    login_refresh(params: RequestBaseConfig): Promise<{
+      body: { code?: number; cookie?: string; [key: string]: unknown }
+    }>
+    like(params: {
+      id: string | number
+      like?: boolean | string
+      alg?: string
+      time?: string | number
+    } & RequestBaseConfig): Promise<{ body: { code?: number } }>
+    likelist(params: { uid: string | number } & RequestBaseConfig): Promise<{
+      body: { code?: number; ids?: Array<string | number> }
+    }>
     user_playlist(
       params: { uid: number; limit: number; offset: number } & RequestBaseConfig,
     ): Promise<{ body: UserPlaylistResponse }>
@@ -71,6 +96,14 @@ declare module '@neteasecloudmusicapienhanced/api' {
       body: {
         code?: number
         data?: { dailySongs?: Record<string, unknown>[] }
+      }
+    }>
+
+    personal_fm(params: RequestBaseConfig): Promise<{
+      body: {
+        code?: number
+        data?: Record<string, unknown>[]
+        result?: Record<string, unknown>[]
       }
     }>
 
@@ -141,6 +174,22 @@ declare module '@neteasecloudmusicapienhanced/api' {
         [key: string]: unknown
       }
     }>
+    /** 听歌打卡（PC 客户端日志上报） */
+    scrobble_v1(params: {
+      id: string | number
+      time: string | number
+      total?: string | number
+      name?: string
+      artist?: string
+      level?: string
+      bitrate?: string | number
+    } & RequestBaseConfig): Promise<{
+      body: {
+        code?: number
+        [key: string]: unknown
+      }
+    }>
+
     song_url_v1(params: { id: string | number; level: string } & RequestBaseConfig): Promise<{
       body: {
         data?: Array<{ url?: string; br?: number; level?: string }>

@@ -16,6 +16,10 @@ export function toPublicRoomState(data: RoomData): RoomState {
     allowTemporaryAdminQueueClear: data.allowTemporaryAdminQueueClear,
     removePlayedTracks: data.removePlayedTracks,
     roamingEnabled: data.roamingEnabled,
+    automixEnabled: data.automixEnabled,
+    transitionMode: data.transitionMode,
+    crossfadeMaxSec: data.crossfadeMaxSec,
+    automixPerformance: data.automixPerformance,
     roamingSource: data.roamingSource,
     roamingMode: data.roamingMode,
     audioQuality: data.audioQuality,
@@ -33,5 +37,17 @@ export function toPublicRoomStateForOwner(data: RoomData): RoomState {
   return {
     ...toPublicRoomState(data),
     password: data.password ?? null,
+    bannedMembers: data.bannedMembers,
+  }
+}
+
+/**
+ * 服务器管理员/房主管理视角：需要封禁名单来解封，但不应看到房间密码。
+ * 被封禁者本身不会在房间内，普通成员也拿不到这份状态。
+ */
+export function toPublicRoomStateForModerator(data: RoomData): RoomState {
+  return {
+    ...toPublicRoomState(data),
+    bannedMembers: data.bannedMembers,
   }
 }

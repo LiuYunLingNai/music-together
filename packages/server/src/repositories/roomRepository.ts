@@ -1,6 +1,9 @@
 import {
+  CROSSFADE_DEFAULT_SEC,
   HIGHEST_AUDIO_QUALITY,
   LIMITS,
+  clampCrossfadeSeconds,
+  isTransitionMode,
   type ClientInfo,
   type RoomListItem,
   type RoomMember,
@@ -42,9 +45,14 @@ interface PersistedRoomState {
   allowTemporaryAdminQueueClear?: boolean
   removePlayedTracks?: boolean
   roamingEnabled?: boolean
+  automixEnabled?: boolean
+  transitionMode?: RoomData['transitionMode']
+  crossfadeMaxSec?: number
+  automixPerformance?: boolean
   roamingSource?: RoomData['roamingSource']
   roamingMode?: RoomData['roamingMode']
   audioQuality: RoomData['audioQuality']
+  bannedMembers?: RoomData['bannedMembers']
   queue: RoomData['queue']
   currentTrack: RoomData['currentTrack']
   playState: RoomData['playState']
@@ -256,6 +264,15 @@ export class InMemoryRoomRepository implements RoomRepository {
         }
 
         const members = this.loadPermanentMembers(row.id, state.creatorId, new Set(state.adminUserIds ?? []))
+        const queue = (state.queue ?? []).slice(0, LIMITS.QUEUE_MAX_SIZE).map(withoutStreamUrl)
+        const currentTrack = state.currentTrack ? withoutStreamUrl(state.currentTrack) : null
+        // 旧版本/崩溃恢复可能把当前曲目留在队列之外：补回队首，否则客户端
+        // 找不到“正在播放”，NEXT 也会从第一首重新开始。
+        if (currentTrack && !queue.some((track) => track.id === currentTrack.id)) {
+          queue.unshift(currentTrack)
+          // 补回当前曲后仍需遵守队列上限；队尾多出的一首可以丢弃。
+          if (queue.length > LIMITS.QUEUE_MAX_SIZE) queue.pop()
+        }
         this.rooms.set(row.id, {
           id: row.id,
           name: state.name,
@@ -270,15 +287,20 @@ export class InMemoryRoomRepository implements RoomRepository {
             state.allowTemporaryAdminQueueClear ?? state.allowTemporaryAdminQueueManagement ?? false,
           removePlayedTracks: state.removePlayedTracks ?? false,
           roamingEnabled: state.roamingEnabled ?? false,
+          automixEnabled: state.automixEnabled ?? false,
+          transitionMode: isTransitionMode(state.transitionMode) ? state.transitionMode : 'automix',
+          crossfadeMaxSec: clampCrossfadeSeconds(state.crossfadeMaxSec ?? CROSSFADE_DEFAULT_SEC),
+          automixPerformance: state.automixPerformance ?? false,
           roamingSource: state.roamingSource ?? 'netease',
           roamingMode: normalizeNeteaseRoamingMode(state.roamingMode),
           hidden: state.hidden ?? false,
           permanent: true,
           audioQuality: state.audioQuality,
           members,
+          bannedMembers: state.bannedMembers ?? [],
           users: [],
-          queue: (state.queue ?? []).slice(0, LIMITS.QUEUE_MAX_SIZE).map(withoutStreamUrl),
-          currentTrack: state.currentTrack ? withoutStreamUrl(state.currentTrack) : null,
+          queue,
+          currentTrack,
           playState: restorePlayState(state),
           playMode: state.playMode ?? 'loop-all',
         })
@@ -330,9 +352,14 @@ export class InMemoryRoomRepository implements RoomRepository {
       allowTemporaryAdminQueueClear: room.allowTemporaryAdminQueueClear,
       removePlayedTracks: room.removePlayedTracks,
       roamingEnabled: room.roamingEnabled,
+      automixEnabled: room.automixEnabled,
+      transitionMode: room.transitionMode,
+      crossfadeMaxSec: room.crossfadeMaxSec,
+      automixPerformance: room.automixPerformance,
       roamingSource: room.roamingSource,
       roamingMode: room.roamingMode,
       audioQuality: room.audioQuality,
+      bannedMembers: room.bannedMembers,
       queue: room.queue.map(withoutStreamUrl),
       currentTrack: room.currentTrack ? withoutStreamUrl(room.currentTrack) : null,
       playState: room.playState,

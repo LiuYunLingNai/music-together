@@ -18,6 +18,7 @@ import { nanoid } from 'nanoid'
 import pLimit from 'p-limit'
 import ncmApi from '@neteasecloudmusicapienhanced/api'
 import * as kugouAuth from './kugouAuthService.js'
+import * as neteaseAuth from './neteaseAuthService.js'
 import * as tencentAuth from './tencentAuthService.js'
 import * as bilibiliAuth from './bilibiliAuthService.js'
 import { getKugouQualityFallbacks } from './audioQualityPolicy.js'
@@ -496,6 +497,16 @@ function qualityToBitrate(quality: AudioQuality): 128 | 192 | 320 | 999 {
   return typeof quality === 'number' ? quality : 999
 }
 
+/** 网易云 scrobble 使用的客户端词汇；未知档位按 exhigh 处理。 */
+function neteaseScrobbleQuality(quality: AudioQuality): { level: string; bitrate: number } {
+  if (quality === 128) return { level: 'standard', bitrate: 128 }
+  if (quality === 192) return { level: 'higher', bitrate: 192 }
+  if (quality === 320) return { level: 'exhigh', bitrate: 320 }
+  if (quality === 999 || quality === 'netease_master') return { level: 'lossless', bitrate: 999 }
+  if (quality === 'netease_hires') return { level: 'hires', bitrate: 1999 }
+  return { level: 'exhigh', bitrate: 320 }
+}
+
 function hashTencentGtk(value: string): number {
   let hash = 5381
   for (const character of value) hash += (hash << 5) + character.charCodeAt(0)
@@ -634,7 +645,7 @@ class MusicProvider {
     ttl: 30 * MINUTE,
   })
   // Layer 3: Resource Caches — scalar values for stream URLs, covers, lyrics.
-  private streamUrlCache = new LRUCache<string, CachedStreamUrl>({ max: 500, ttl: 1 * HOUR })
+  private streamUrlCache = new LRUCache<string, CachedStreamUrl>({ max: 500, ttl: 20 * MINUTE })
   private coverCache = new LRUCache<string, string>({ max: 1000, ttl: 24 * HOUR })
   private lyricCache = new LRUCache<string, LyricResult>({
     max: 500,
@@ -1812,6 +1823,128 @@ class MusicProvider {
     }
   }
 
+  /** 歌手搜索结果：名称 + 头像；点击后由客户端用名称继续搜歌。 */
+  async searchArtist(
+    source: MusicSource,
+    keyword: string,
+    limit = 20,
+    page = 1,
+    cookie?: string | null,
+  ): Promise<Track[]> {
+    if (!keyword.trim() || source === 'bilibili') return []
+    const size = Math.max(1, Math.min(50, Math.floor(limit)))
+    const currentPage = Math.max(1, Math.floor(page))
+
+    try {
+      if (source === 'netease') {
+        const result = await withTimeout(
+          ncmApi.cloudsearch({
+            keywords: keyword,
+            type: 100,
+            limit: size,
+            offset: (currentPage - 1) * size,
+            ...(cookie ? { cookie } : {}),
+            timestamp: Date.now(),
+          }),
+        )
+        const artists = result?.body?.code === 200 ? result.body.result?.artists : undefined
+        if (!Array.isArray(artists)) return []
+        return artists.flatMap((artist) => {
+          const id = String(artist.id ?? '').trim()
+          if (!id) return []
+          return [
+            {
+              id: nanoid(),
+              source: 'netease' as const,
+              sourceId: id,
+              urlId: id,
+              title: artist.name || 'Unknown',
+              artist: [],
+              album: '',
+              duration: 0,
+              cover: String(artist.picUrl ?? '').replace(/^http:/, 'https:'),
+            },
+          ]
+        })
+      }
+
+      if (source === 'tencent') {
+        const payload = {
+          comm: { ct: '6', cv: '80600', tmeAppID: 'qqmusic' },
+          'music.search.SearchCgiService.DoSearchForQQMusicDesktop': {
+            module: 'music.search.SearchCgiService',
+            method: 'DoSearchForQQMusicDesktop',
+            param: { num_per_page: size, page_num: currentPage, search_type: 1, query: keyword, grp: 1 },
+          },
+        }
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          Referer: 'https://y.qq.com',
+          'User-Agent': 'QQ%E9%9F%B3%E4%B9%90/73222',
+        }
+        if (cookie) headers.Cookie = cookie
+        const response = await withTimeout(
+          fetch('https://u.y.qq.com/cgi-bin/musicu.fcg', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(payload),
+          }).then((res) => res.json() as Promise<Record<string, any>>),
+        )
+        const singers = response?.['music.search.SearchCgiService.DoSearchForQQMusicDesktop']?.data?.body?.singer?.list
+        if (!Array.isArray(singers)) return []
+        return singers.flatMap((singer: Record<string, any>) => {
+          const mid = String(singer.singerMID ?? '').trim()
+          if (!mid) return []
+          return [
+            {
+              id: nanoid(),
+              source: 'tencent' as const,
+              sourceId: mid,
+              urlId: mid,
+              title: String(singer.singerName ?? 'Unknown'),
+              artist: [],
+              album: '',
+              duration: 0,
+              cover: String(singer.singerPic ?? '').replace(/^http:/, 'https:'),
+            },
+          ]
+        })
+      }
+
+      const params = new URLSearchParams({
+        keyword,
+        page: String(currentPage),
+        pagesize: String(size),
+      })
+      const response = await withTimeout(
+        fetch(`https://mobilecdn.kugou.com/api/v3/search/singer?${params}`).then(
+          (res) => res.json() as Promise<Record<string, any>>,
+        ),
+      )
+      const singers = Array.isArray(response?.data) ? response.data.slice(0, size) : []
+      return singers.flatMap((singer: Record<string, any>) => {
+        const id = String(singer.singerid ?? '').trim()
+        if (!id) return []
+        return [
+          {
+            id: nanoid(),
+            source: source as 'kugou' | 'kugou_concept',
+            sourceId: id,
+            urlId: id,
+            title: String(singer.singername ?? 'Unknown'),
+            artist: [],
+            album: '',
+            duration: 0,
+            cover: '',
+          },
+        ]
+      })
+    } catch (error) {
+      logger.warn(`Artist search failed for ${source}`, { keyword, error })
+      return []
+    }
+  }
+
   /** Fetch a platform's native logged-in recommendation feed. */
   async getRecommendations(
     source: MusicSource,
@@ -1823,9 +1956,10 @@ class MusicProvider {
 
     switch (source) {
       case 'netease': {
-        const [dailyResult, personalizedResult] = await Promise.allSettled([
+        const [dailyResult, personalizedResult, dailySongsResult] = await Promise.allSettled([
           withTimeout(ncmApi.recommend_resource({ cookie, timestamp: Date.now() })),
           withTimeout(ncmApi.personalized({ cookie, limit: 100, timestamp: Date.now() })),
+          withTimeout(ncmApi.recommend_songs({ cookie, timestamp: Date.now() })),
         ])
         const daily =
           dailyResult.status === 'fulfilled' &&
@@ -1845,6 +1979,19 @@ class MusicProvider {
         if (!daily) logger.warn('Netease daily recommendation feed failed')
         if (!personalized) logger.warn('Netease personalized recommendation feed failed')
 
+        const dailySongs =
+          dailySongsResult.status === 'fulfilled' &&
+          dailySongsResult.value?.body?.code === 200 &&
+          Array.isArray(dailySongsResult.value.body.data?.dailySongs)
+            ? dailySongsResult.value.body.data.dailySongs
+            : []
+        const tracks = dailySongs
+          .slice(0, limit)
+          .map((song) => this.rawToTrack(song, 'netease'))
+          .filter((track): track is Track => Boolean(track?.sourceId))
+        await this.batchResolveCover(tracks, 'netease')
+        this.registerTracks(tracks)
+
         const page = parseNeteaseRecommendedPlaylistPage(
           daily,
           personalized,
@@ -1852,7 +1999,7 @@ class MusicProvider {
           pagination.neteasePlaylistOffset ?? pagination.playlistOffset ?? 0,
         )
         return {
-          tracks: [],
+          tracks,
           playlists: page.playlists,
           pagination: { playlists: { hasMore: page.hasMore, nextOffset: page.nextOffset } },
         }
@@ -1939,32 +2086,75 @@ class MusicProvider {
     cookie: string,
     mode: NeteaseRoamingMode = 'DEFAULT',
     limit = 20,
-  ): Promise<Track[]> {
+    page = 1,
+  ): Promise<{ tracks: Track[]; nextPage?: number }> {
     const size = Math.max(1, Math.min(50, Math.floor(limit)))
     let rawSongs: Record<string, unknown>[]
+    let nextPage: number | undefined
 
     switch (source) {
       case 'netease': {
         const [neteaseMode, submode] = mode.split(':', 2)
-        const result = await withTimeout(
-          ncmApi.personal_fm_mode({
-            cookie,
-            timestamp: Date.now(),
-            mode: neteaseMode,
-            ...(submode ? { submode } : {}),
-            limit: size,
-          }),
-        )
-        const body = result?.body
-        if (body?.code !== 200 || !Array.isArray(body.data)) {
-          throw new Error('Netease roaming recommendation feed failed')
+        // 上游对 DEFAULT 固定走 /personal_fm：/personal/fm/mode 在部分账号/接口版本上
+        // 会直接回 405（操作频繁）。模式接口失败时也回退到 /personal_fm，和上游一致。
+        // 不传 limit：上游电台无论传什么都只返回 3 首，传了反而多一层参数校验。
+        const fetchDefaultFm = () =>
+          withTimeout(ncmApi.personal_fm({ cookie, timestamp: Date.now() }))
+        const readFmSongs = (body: { data?: unknown; result?: unknown } | undefined): Record<string, unknown>[] | null => {
+          const data = body?.data
+          if (Array.isArray(data)) return data
+          const result = body?.result
+          return Array.isArray(result) ? result : null
         }
-        rawSongs = body.data
+
+        if (!neteaseMode || neteaseMode === 'DEFAULT') {
+          const result = await fetchDefaultFm()
+          const songs = readFmSongs(result?.body)
+          if (!songs) {
+            throw new Error(`Netease roaming recommendation feed failed (code=${result?.body?.code ?? 'unknown'})`)
+          }
+          rawSongs = songs
+        } else {
+          let songs: Record<string, unknown>[] | null = null
+          try {
+            const result = await withTimeout(
+              ncmApi.personal_fm_mode({
+                cookie,
+                timestamp: Date.now(),
+                mode: neteaseMode,
+                ...(submode ? { submode } : {}),
+              }),
+            )
+            if (result?.body?.code === 200) songs = readFmSongs(result.body)
+            if (!songs) {
+              logger.warn('Netease personal fm mode unavailable, falling back to /personal_fm', {
+                mode: neteaseMode,
+                code: result?.body?.code,
+              })
+            }
+          } catch (error) {
+            logger.warn('Netease personal fm mode failed, falling back to /personal_fm', {
+              mode: neteaseMode,
+              error,
+            })
+          }
+          if (!songs) {
+            const fallback = await fetchDefaultFm()
+            songs = readFmSongs(fallback?.body)
+            if (!songs) {
+              throw new Error(
+                `Netease roaming recommendation feed failed (code=${fallback?.body?.code ?? 'unknown'})`,
+              )
+            }
+          }
+          rawSongs = songs
+        }
         break
       }
       case 'tencent': {
-        const result = await tencentAuth.getRadarRecommendations(cookie, 1)
+        const result = await tencentAuth.getRadarRecommendations(cookie, Math.max(1, Math.floor(page)))
         rawSongs = result.songs
+        nextPage = result.hasMore ? result.nextPage : 1
         break
       }
       case 'kugou':
@@ -1991,7 +2181,7 @@ class MusicProvider {
     await this.batchResolveCover(tracks, source)
     for (const track of tracks) this.enrichFromRegistry(track)
     this.registerTracks(tracks)
-    return tracks
+    return { tracks, ...(nextPage !== undefined ? { nextPage } : {}) }
   }
 
   // ---------------------------------------------------------------------------
@@ -2536,10 +2726,12 @@ class MusicProvider {
         })
         return null
       }
+      const reportedBitrate = normalizeBitrate(data.br)
       return {
         url,
-        actualBitrate: normalizeBitrate(data.br) ?? qualityToBitrate(quality),
-        actualQuality: neteaseLevelToQuality(data.level) ?? quality,
+        // 只上报上游真正返回的码率/档位；两者都缺失时宁可未知，也不拿请求档位冒充实际。
+        actualBitrate: reportedBitrate,
+        actualQuality: neteaseLevelToQuality(data.level),
       }
     } catch (err) {
       if (!retried && isXeapiPublicKeyMissing(err) && (await ensureNeteaseEnhancedConfig(true))) {
@@ -2742,6 +2934,89 @@ class MusicProvider {
     return {
       result,
       failure: result ? null : (sink.value ?? { reason: 'unknown' }),
+    }
+  }
+
+  /** 网易云喜欢/取消喜欢；只允许数字歌曲 id。 */
+  async setNeteaseLiked(cookie: string, id: string, liked: boolean): Promise<boolean> {
+    if (!cookie || !/^\d+$/.test(id)) return false
+    try {
+      const response = await withTimeout(
+        ncmApi.like({ id, like: liked, cookie, timestamp: Date.now() }),
+        15_000,
+      )
+      return Number((response as { body?: { code?: unknown } })?.body?.code) === 200
+    } catch (error) {
+      logger.warn('网易云喜欢操作失败', { id, error: error instanceof Error ? error.message : String(error) })
+      return false
+    }
+  }
+
+  /** 当前账号是否已喜欢这首网易云歌曲。 */
+  async isNeteaseLiked(cookie: string, id: string): Promise<boolean> {
+    if (!cookie || !/^\d+$/.test(id)) return false
+    const uid = await neteaseAuth.getUserId(cookie)
+    if (!uid) return false
+    try {
+      const response = await withTimeout(
+        ncmApi.likelist({ uid, cookie, timestamp: Date.now() }),
+        15_000,
+      )
+      const ids = (response as { body?: { ids?: unknown } })?.body?.ids
+      return Array.isArray(ids) && ids.map(String).includes(id)
+    } catch (error) {
+      logger.warn('网易云喜欢列表查询失败', { id, error: error instanceof Error ? error.message : String(error) })
+      return false
+    }
+  }
+
+  /**
+   * 网易云听歌打卡。写入真实账号，调用方必须先确认账号主开启并在线；
+   * 这里只负责协议与结果判定，不做任何限流。
+   */
+  async reportNeteasePlay(
+    cookie: string,
+    report: {
+      id: string
+      playedSeconds: number
+      totalSeconds?: number
+      name?: string
+      artist?: string
+      quality: AudioQuality
+    },
+  ): Promise<boolean> {
+    if (!cookie) return false
+    const { level, bitrate } = neteaseScrobbleQuality(report.quality)
+    try {
+      const response = await withTimeout(
+        ncmApi.scrobble_v1({
+          id: report.id,
+          time: Math.round(report.playedSeconds),
+          ...(report.totalSeconds && report.totalSeconds > 0
+            ? { total: Math.round(report.totalSeconds) }
+            : {}),
+          ...(report.name ? { name: report.name } : {}),
+          ...(report.artist ? { artist: report.artist } : {}),
+          level,
+          bitrate,
+          cookie,
+          timestamp: Date.now(),
+        }),
+        15_000,
+      )
+      const body = (response as { body?: { code?: unknown } })?.body ?? (response as { code?: unknown })
+      const code = Number((body as { code?: unknown })?.code)
+      if (code !== 200) {
+        logger.warn('网易云听歌打卡未获接受', { trackId: report.id, code })
+        return false
+      }
+      return true
+    } catch (error) {
+      logger.warn('网易云听歌打卡请求失败', {
+        trackId: report.id,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return false
     }
   }
 

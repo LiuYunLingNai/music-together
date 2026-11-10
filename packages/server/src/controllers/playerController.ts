@@ -6,6 +6,8 @@ import {
   playerSeekSchema,
   playerSetModeSchema,
   playerSourceSwitchSchema,
+  playerTrackProfileSchema,
+  playerTrackLinesSchema,
 } from '@music-together/shared'
 import type { TypedServer, TypedSocket } from '../middleware/types.js'
 import { createWithPermission, defineAbilityForRoomUser } from '../middleware/withControl.js'
@@ -13,6 +15,7 @@ import { createWithRoom } from '../middleware/withRoom.js'
 import { checkSocketRateLimit } from '../middleware/socketRateLimiter.js'
 import { roomRepo } from '../repositories/roomRepository.js'
 import * as playerService from '../services/playerService.js'
+import * as automixService from '../services/automixService.js'
 import * as roomService from '../services/roomService.js'
 import * as trackFallbackService from '../services/trackFallbackService.js'
 import * as authService from '../services/authService.js'
@@ -249,4 +252,38 @@ export function registerPlayerController(io: TypedServer, socket: TypedSocket) {
       })
     }
   })
+
+  // 客户端离线分析完成后上报曲目画像；服务端只接受房间内已知曲目，
+  // 用于统一决定过渡点（不是客户端能直接影响播放状态的指令）。
+  socket.on(
+    EVENTS.PLAYER_TRACK_PROFILE,
+    withRoom((ctx, raw) => {
+      const parsed = playerTrackProfileSchema.safeParse(raw)
+      if (!parsed.success) return
+      const { trackId, profile } = parsed.data
+      const known =
+        ctx.room.currentTrack?.id === trackId ||
+        ctx.room.queue.some((track) => track.id === trackId)
+      if (!known) return
+      automixService.saveTrackProfile(ctx.roomId, trackId, profile)
+      // 画像可能刚补上：按新证据重排过渡点（重叠长度/风格可能变化）。
+      playerService.refreshAutomixScheduling(io, ctx.roomId)
+    }),
+  )
+
+  // 歌词时间线是 planner 判定「无人声窗口」的证据，只接受房间内已知曲目。
+  socket.on(
+    EVENTS.PLAYER_TRACK_LINES,
+    withRoom((ctx, raw) => {
+      const parsed = playerTrackLinesSchema.safeParse(raw)
+      if (!parsed.success) return
+      const { trackId, lines } = parsed.data
+      const known =
+        ctx.room.currentTrack?.id === trackId ||
+        ctx.room.queue.some((track) => track.id === trackId)
+      if (!known) return
+      automixService.saveTrackLines(ctx.roomId, trackId, lines)
+      playerService.refreshAutomixScheduling(io, ctx.roomId)
+    }),
+  )
 }

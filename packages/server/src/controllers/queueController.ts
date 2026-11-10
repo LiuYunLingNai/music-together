@@ -43,6 +43,8 @@ export function registerQueueController(io: TypedServer, socket: TypedSocket) {
         return
       }
       io.to(ctx.roomId).emit(EVENTS.QUEUE_UPDATED, { queue: ctx.room.queue })
+      // 可能刚出现第一首后继曲目，补排自动混音过渡点。
+      playerService.refreshAutomixScheduling(io, ctx.roomId)
 
       // System message
       const msg = chatService.createSystemMessage(ctx.roomId, `${ctx.user.nickname} 点了一首「${track.title}」`)
@@ -78,19 +80,21 @@ export function registerQueueController(io: TypedServer, socket: TypedSocket) {
       }
       const track: Track = { ...parsed.data.track, requestedBy: ctx.user.nickname }
 
-      const added = queueService.insertAfterCurrent(ctx.roomId, track)
-      if (!added) {
+      const inserted = queueService.insertTrackAfterCurrent(ctx.roomId, track)
+      if (!inserted) {
         socket.emit(EVENTS.ROOM_ERROR, { code: ERROR_CODE.QUEUE_FULL, message: '播放队列已满' })
         return
       }
       io.to(ctx.roomId).emit(EVENTS.QUEUE_UPDATED, { queue: ctx.room.queue })
+      // 置顶曲目可能成为新的后继，重排自动混音落点。
+      playerService.refreshAutomixScheduling(io, ctx.roomId)
 
       // System message
       const msg = chatService.createSystemMessage(ctx.roomId, `${ctx.user.nickname} 置顶了一首「${track.title}」`)
       io.to(ctx.roomId).emit(EVENTS.CHAT_MESSAGE, msg)
 
       // If nothing was playing, auto-play this track.
-      await playerService.autoPlayIfEmpty(io, ctx.roomId, track)
+      await playerService.autoPlayIfEmpty(io, ctx.roomId, inserted)
 
       logger.info(`“${ctx.user.nickname}”置顶下一首：《${track.title}》`, {
         event: 'queue.track_inserted_next',
@@ -123,6 +127,7 @@ export function registerQueueController(io: TypedServer, socket: TypedSocket) {
         return
       }
       io.to(ctx.roomId).emit(EVENTS.QUEUE_UPDATED, { queue: ctx.room.queue })
+      playerService.refreshAutomixScheduling(io, ctx.roomId)
 
       const label = playlistName ? `歌单「${playlistName}」` : '歌单'
       const msg = chatService.createSystemMessage(
@@ -179,6 +184,9 @@ export function registerQueueController(io: TypedServer, socket: TypedSocket) {
       if (isCurrentTrack) {
         if (successor) await playerService.playTrackInRoom(io, ctx.roomId, successor)
         else playerService.stopPlayback(io, ctx.roomId)
+      } else {
+        // 删掉的是未来曲目：后继可能变了，已排好的过渡落点必须作废重排。
+        playerService.refreshAutomixScheduling(io, ctx.roomId)
       }
 
       logger.info(`已从播放队列移除《${removedTrack?.title ?? trackId}》`, {
@@ -205,6 +213,7 @@ export function registerQueueController(io: TypedServer, socket: TypedSocket) {
       const { trackIds } = parsed.data
       queueService.reorderTracks(ctx.roomId, trackIds)
       io.to(ctx.roomId).emit(EVENTS.QUEUE_UPDATED, { queue: ctx.room.queue })
+      playerService.refreshAutomixScheduling(io, ctx.roomId)
       logger.info(`房间 ${ctx.roomId} 的播放队列顺序已调整`, {
         event: 'queue.reordered',
         roomId: ctx.roomId,
@@ -284,6 +293,30 @@ export function registerQueueController(io: TypedServer, socket: TypedSocket) {
         operatorId: ctx.user.id,
         operator: ctx.user.nickname,
       })
+    }),
+  )
+
+  socket.on(
+    EVENTS.QUEUE_REMOVE_PLAYED,
+    withPermission('remove', 'Queue', async (ctx) => {
+      if (!canManageQueue(ctx.user.id, ctx.room, ctx.room.allowTemporaryAdminTrackRemoval)) {
+        ctx.socket.emit(EVENTS.ROOM_ERROR, {
+          code: ERROR_CODE.NO_PERMISSION,
+          message: '房主未允许临时管理员删除歌曲',
+        })
+        return
+      }
+      const removed = queueService.removePlayedTracks(ctx.roomId)
+      if (removed > 0) {
+        io.to(ctx.roomId).emit(EVENTS.QUEUE_UPDATED, { queue: ctx.room.queue })
+        logger.info(`“${ctx.user.nickname}”清理了房间 ${ctx.roomId} 的 ${removed} 首已播放歌曲`, {
+          event: 'queue.played_removed',
+          roomId: ctx.roomId,
+          removed,
+          operatorId: ctx.user.id,
+          operator: ctx.user.nickname,
+        })
+      }
     }),
   )
 }
