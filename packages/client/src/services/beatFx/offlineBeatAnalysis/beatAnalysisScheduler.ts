@@ -114,6 +114,10 @@ export interface BeatAnalysisEnv {
   highPrecisionBeats?: boolean
   /** 用 htdemucs 真分轨计算鼓点 / 人声特征。 */
   highPrecisionStems?: boolean
+  /** 顺带计算自动混音的曲目画像（房间开启自动混音时）。 */
+  wantProfile?: boolean
+  /** 曲目声明时长；用于媒体缓存的整曲校验。 */
+  durationSec?: number
   /** 曲目声明时长（秒）。音频明显短于它时按试听片段处理，不落盘缓存分析结果。 */
   expectedDuration?: number
 }
@@ -223,10 +227,13 @@ function scheduleBeatAnalysisUncached(
       skipMusicTempo: BEAT_ANALYSIS_CONFIG.skipMusicTempoWhilePlaying && !env.isPlaying(),
       background: true,
       song: song || null,
+      bytesKey: cacheKey,
+      durationSec: env.durationSec,
       wantLoudness: env.wantLoudness === true,
       wantFeatures: env.wantFeatures === true,
       highPrecisionBeats: env.highPrecisionBeats === true,
       highPrecisionStems: env.highPrecisionStems === true,
+      wantProfile: env.wantProfile === true,
     })
       .then((map) => {
         busy = false
@@ -272,7 +279,7 @@ export function scheduleBeatAnalysis(
   // 响度 / 特征 / beat_this 都是可选的附加产物：带不同附加产物的分析结果分开缓存，
   // 否则 Mineradio 先分析出的「无特征」结果会被 Folia 直接命中，本地拍点也会被
   // 高精度模式误当成模型结果。
-  const flags = `${env.wantLoudness ? 'l' : ''}${env.wantFeatures ? 'f' : ''}${env.highPrecisionBeats ? 'h' : ''}${env.highPrecisionStems ? 's' : ''}`
+  const flags = `${env.wantLoudness ? 'l' : ''}${env.wantFeatures ? 'f' : ''}${env.highPrecisionBeats ? 'h' : ''}${env.highPrecisionStems ? 's' : ''}${env.wantProfile ? 'p' : ''}`
   const key = `${cacheKey ?? audioUrl}|${flags}`
   const cached = getCachedBeatMap(key)
   if (cached) {

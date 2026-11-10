@@ -11,7 +11,11 @@ type SearchResult = Track | Playlist
  * 搜索逻辑 hook — 管理搜索/翻页/abort/竞态保护。
  * 从 SearchDialog 中提取，使 UI 组件只关注渲染。
  */
-export function useSearch(source: MusicSource, type: 'song' | 'album' | 'playlist' = 'song', roomId?: string) {
+export function useSearch(
+  source: MusicSource,
+  type: 'song' | 'album' | 'playlist' | 'artist' = 'song',
+  roomId?: string,
+) {
   const [results, setResults] = useState<SearchResult[]>([])
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -37,7 +41,7 @@ export function useSearch(source: MusicSource, type: 'song' | 'album' | 'playlis
       searchKeyword: string,
       searchPage: number,
       signal: AbortSignal,
-      searchType: 'song' | 'album' | 'playlist',
+      searchType: 'song' | 'album' | 'playlist' | 'artist',
     ): Promise<{ tracks: SearchResult[]; hasMore: boolean }> => {
       const params = new URLSearchParams({
         source: searchSource,
@@ -57,7 +61,7 @@ export function useSearch(source: MusicSource, type: 'song' | 'album' | 'playlis
   )
 
   const search = useCallback(
-    (keyword: string) => {
+    (keyword: string, overrideType?: 'song' | 'album' | 'playlist' | 'artist') => {
       const trimmed = keyword.trim()
       if (!trimmed) return
 
@@ -71,7 +75,7 @@ export function useSearch(source: MusicSource, type: 'song' | 'album' | 'playlis
       setLoadingMore(false)
       setLoading(true)
       setHasSearched(true)
-      fetchPage(source, trimmed, 1, controller.signal, type)
+      fetchPage(source, trimmed, 1, controller.signal, overrideType ?? type)
         .then((data) => {
           if (searchIdRef.current !== currentSearchId) return
           setResults(data.tracks)

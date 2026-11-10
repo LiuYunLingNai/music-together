@@ -169,8 +169,12 @@ export function mergeLyrics(original: string, translated: string): MergedLyricLi
  */
 export function toAMLLLines(lines: MergedLyricLine[]): AMLLLyricLine[] {
   return lines.map((line, i, arr) => {
-    const startMs = Math.round(line.time * 1000)
-    const endMs = Math.round((arr[i + 1]?.time ?? line.time + 5) * 1000)
+    // AMLL 0.6 的 setLyricLines 会校验时间戳：非有限或负数直接抛错，这里先夹一次。
+    const startSec = Number.isFinite(line.time) ? Math.max(0, line.time) : 0
+    const nextTime = arr[i + 1]?.time
+    const endSec = Number.isFinite(nextTime) ? (nextTime as number) : startSec + 5
+    const startMs = Math.round(startSec * 1000)
+    const endMs = Math.max(startMs, Math.round(endSec * 1000))
     return {
       words: [
         {

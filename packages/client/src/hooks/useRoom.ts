@@ -1,5 +1,7 @@
 import { useSocketContext } from '@/providers/socket-context'
 import { resetAllRoomState } from '@/lib/resetStores'
+import { clearAudioBytes } from '@/lib/audioBytes'
+import { clearPrefetchCache } from '@/lib/prefetchService'
 import { storage } from '@/lib/storage'
 import { EVENTS } from '@music-together/shared'
 import { useCallback } from 'react'
@@ -10,6 +12,7 @@ import { useChatSync } from './room/useChatSync'
 import { useQueueSync } from './room/useQueueSync'
 import { useAuthSync } from './room/useAuthSync'
 import { useConnectionGuard } from './room/useConnectionGuard'
+import { useNearbyPrefetch } from './useNearbyPrefetch'
 
 /**
  * Composition hook that wires up all room-related socket event listeners.
@@ -25,11 +28,14 @@ export function useRoom() {
   useQueueSync()
   useAuthSync()
   useConnectionGuard()
+  useNearbyPrefetch()
 
   const leaveRoom = useCallback(() => {
     const roomId = useRoomStore.getState().room?.id
     if (roomId) storage.clearRejoinToken(roomId)
     socket.emit(EVENTS.ROOM_LEAVE)
+    clearAudioBytes()
+    clearPrefetchCache()
     resetAllRoomState()
   }, [socket])
 
@@ -44,6 +50,10 @@ export function useRoom() {
       allowTemporaryAdminQueueClear?: boolean
       removePlayedTracks?: boolean
       roamingEnabled?: boolean
+      automixEnabled?: boolean
+      transitionMode?: import('@music-together/shared').TransitionMode
+      crossfadeMaxSec?: number
+      automixPerformance?: boolean
       roamingSource?: import('@music-together/shared').RoamingSource
       roamingMode?: import('@music-together/shared').NeteaseRoamingMode
     }) => {
@@ -86,5 +96,19 @@ export function useRoom() {
     [socket],
   )
 
-  return { leaveRoom, updateSettings, setUserRole }
+  const kickUser = useCallback(
+    (userId: string, ban = false) => {
+      socket.emit(EVENTS.ROOM_KICK, { userId, ban })
+    },
+    [socket],
+  )
+
+  const unbanUser = useCallback(
+    (userId: string) => {
+      socket.emit(EVENTS.ROOM_UNBAN, { userId })
+    },
+    [socket],
+  )
+
+  return { leaveRoom, updateSettings, setUserRole, kickUser, unbanUser }
 }

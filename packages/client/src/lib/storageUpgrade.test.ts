@@ -23,7 +23,9 @@ describe('老用户升级路径', () => {
     expect(s.getVisualQuality()).toBe('balanced') // medium -> balanced
     expect(s.getVisualStage()).toBe('emily') // untouched
     expect(s.getLyricRenderer()).toBe('amll') // untouched
-    expect(s.getLyricFontSize()).toBe(90) // untouched
+    expect(s.getClassicLyricFontSize()).toBe(90) // 复制自旧键
+    expect(s.getMineradioLyricFontSize()).toBe(90)
+    expect(s.getFoliaLyricFontSize()).toBe(90)
     expect(s.getPlaybackTempoSyncEnabled()).toBe(true) // untouched
   }, 15_000)
 
@@ -44,8 +46,27 @@ describe('老用户升级路径', () => {
     expect(s.getVisualBloom()).toBe(false)
   })
 
-  it('已经是 v3 的用户再加载不会被再次迁移', async () => {
+  it('v3 老用户升级后，共用设置被复制到各播放器族且旧键移除', async () => {
     localStorage.setItem('mt-settingsSchemaVersion', '3')
+    localStorage.setItem('mt-lyricFontSize', '120')
+    localStorage.setItem('mt-lyricEnableBlur', 'false')
+    localStorage.setItem('mt-bgFps', '30')
+    localStorage.setItem('mt-visualQuality', 'ultra')
+
+    const s = (await import('./storage')).storage
+    expect(s.getClassicLyricFontSize()).toBe(120)
+    expect(s.getMineradioLyricFontSize()).toBe(120)
+    expect(s.getFoliaLyricFontSize()).toBe(120)
+    expect(s.getClassicLyricEnableBlur()).toBe(false)
+    expect(s.getMineradioLyricEnableBlur()).toBe(false)
+    expect(s.getFoliaFrameRate()).toBe(30)
+    expect(s.getFoliaVisualQuality()).toBe('ultra')
+    expect(localStorage.getItem('mt-lyricFontSize')).toBeNull()
+    expect(localStorage.getItem('mt-lyricEnableBlur')).toBeNull()
+  })
+
+  it('已经是 v4 的用户再加载不会被再次迁移', async () => {
+    localStorage.setItem('mt-settingsSchemaVersion', '4')
     localStorage.setItem('mt-visualQuality', 'ultra')
     const s = (await import('./storage')).storage
     expect(s.getVisualQuality()).toBe('ultra')

@@ -1,6 +1,10 @@
 export interface AudioEffectNodes {
   highpass: BiquadFilterNode
   lowpass: BiquadFilterNode
+  /** 两个截止滤波器都在中性端点时走的直通支路。 */
+  filterBypass: GainNode
+  /** 滤波器支路的回混增益，与 filterBypass 互补淡化。 */
+  filterReturn: GainNode
   drive: WaveShaperNode
   crush: WaveShaperNode
   wowDelay: DelayNode
@@ -63,6 +67,8 @@ export const createAudioEffectNodes = (context: AudioContext): AudioEffectNodes 
   return {
     highpass,
     lowpass,
+    filterBypass: createGain(1),
+    filterReturn: createGain(0),
     drive,
     crush,
     wowDelay,
@@ -83,9 +89,15 @@ export const createAudioEffectNodes = (context: AudioContext): AudioEffectNodes 
 }
 
 export const connectAudioEffectNodes = (nodes: AudioEffectNodes, input: AudioNode, output: AudioNode): void => {
+  // 截止滤波器单独走一条支路，而不是串在主路上。即使停在中性端点（20 Hz / 20 kHz），
+  // biquad 也不透明：20 Hz 高通会把低频相位转几十度，峰值落点随之偏移。接近满幅的
+  // 母带因此可能被推出 0 dBFS（实测 +1.3 dB），全部音效关闭时照样在输出端削波。
+  input.connect(nodes.filterBypass)
   input.connect(nodes.highpass)
   nodes.highpass.connect(nodes.lowpass)
-  nodes.lowpass.connect(nodes.drive)
+  nodes.lowpass.connect(nodes.filterReturn)
+  nodes.filterBypass.connect(nodes.drive)
+  nodes.filterReturn.connect(nodes.drive)
   nodes.drive.connect(nodes.crush)
   nodes.crush.connect(nodes.wowDelay)
   nodes.wowDelay.connect(nodes.stereoInput)
@@ -110,10 +122,12 @@ export const connectAudioEffectNodes = (nodes: AudioEffectNodes, input: AudioNod
 }
 
 export const disconnectAudioEffectNodes = (nodes: AudioEffectNodes, input: AudioNode): void => {
-  try {
-    input.disconnect(nodes.highpass)
-  } catch {
-    // 音频图可能已随 AudioContext 一起销毁。
+  for (const entry of [nodes.highpass, nodes.filterBypass]) {
+    try {
+      input.disconnect(entry)
+    } catch {
+      // 音频图可能已随 AudioContext 一起销毁。
+    }
   }
   Object.values(nodes).forEach((node) => node.disconnect())
 }

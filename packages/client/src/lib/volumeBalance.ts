@@ -1,41 +1,34 @@
 /**
- * 智能响度平衡（ReplayGain `auto`）—— 上游
- * `services/volumeBalance/balanceRules.ts` 的决策部分。
+ * 智能响度平衡（ReplayGain `auto`）在宿主侧的输入适配：
+ * 上游 `services/volumeBalance/balanceRules.ts` 原样放在 `automix/upstream`，
+ * 这里只把宿主的整曲离线读数接进去，并维护 `typical` 历史。
  *
- * 宿主能拿到的“整曲读数”来自离线分析的积分响度，所以等价的输入是
- * `file` 与 `typical`；`played / profile / tag / head / platform / live`
- * 这些上游读数在宿主没有对应数据源，不参与决策。
+ * 上游的 `played / tag / head / platform / live` 读数在宿主没有对应数据源；
+ * `file` 是离线分析给出的整曲测量，也是上游最信任的一档。
  */
 
 import type { LoudnessInfo, ReplayGainMode } from '@/services/beatFx/offlineBeatAnalysis/loudness'
+import {
+  TYPICAL_SIZE,
+  chooseBalance as chooseBalanceFromRules,
+  typicalGainDb,
+  VOLUME_BALANCE_TARGET_DB,
+  type BalanceChoice,
+} from './automix/upstream/balanceRules'
 
-export const VOLUME_BALANCE_TARGET_DB = -14
-export const VOLUME_BALANCE_MAX_BOOST_DB = 6
-export const VOLUME_BALANCE_PEAK_CEILING_DB = -1.5
-export const TYPICAL_SIZE = 20
-export const TYPICAL_FALLBACK_DB = -5
+export {
+  TYPICAL_FALLBACK_DB,
+  TYPICAL_SIZE,
+  VOLUME_BALANCE_MAX_BOOST_DB,
+  VOLUME_BALANCE_PEAK_CEILING_DB,
+  VOLUME_BALANCE_TARGET_DB,
+  liftWithinPeak,
+  planBalanceMove,
+  typicalGainDb,
+} from './automix/upstream/balanceRules'
+export type { BalanceChoice, MoveQuestion } from './automix/upstream/balanceRules'
 
-const SILENCE_DB = -90
 const STORAGE_KEY = 'mt-volume-balance-history'
-
-const isAudible = (loudness: number): boolean => loudness > SILENCE_DB
-
-/** 允许抬升时同时受“最大抬升”和“峰值天花板”限制。 */
-export const liftWithinPeak = (gainDb: number, peak?: number | null): number => {
-  if (gainDb <= 0) return gainDb
-  if (!(typeof peak === 'number' && peak > 0)) return 0
-  const headroomDb = VOLUME_BALANCE_PEAK_CEILING_DB - 20 * Math.log10(peak)
-  return Math.min(gainDb, VOLUME_BALANCE_MAX_BOOST_DB, Math.max(0, headroomDb))
-}
-
-/** 最近 TYPICAL_SIZE 个整曲读数的中位数增益，永不为正；没有读数时用保守的 -5 dB。 */
-export const typicalGainDb = (gains: readonly number[]): number => {
-  const recent = gains.slice(-TYPICAL_SIZE).filter(Number.isFinite).sort((a, b) => a - b)
-  if (!recent.length) return TYPICAL_FALLBACK_DB
-  const middle = Math.floor(recent.length / 2)
-  const median = recent.length % 2 ? recent[middle] : (recent[middle - 1] + recent[middle]) / 2
-  return Math.min(0, median)
-}
 
 const readHistory = (): number[] => {
   if (typeof window === 'undefined') return []
@@ -67,22 +60,12 @@ export const recordWholeTrackGain = (gainDb: number): void => {
   }
 }
 
-export interface BalanceChoice {
-  reading: 'file' | 'typical'
-  gainDb: number
-  effectiveGainDb: number
-  estimated: boolean
-}
-
 /** 有整曲读数就用它；否则用最近读数的典型值，并且只允许衰减。 */
-export const chooseBalance = (file: LoudnessInfo | null): BalanceChoice => {
-  if (file && isAudible(file.lufs)) {
-    const gainDb = VOLUME_BALANCE_TARGET_DB - file.lufs
-    return { reading: 'file', gainDb, effectiveGainDb: liftWithinPeak(gainDb, file.peak), estimated: false }
-  }
-  const typicalDb = typicalGainDb(historyOf())
-  return { reading: 'typical', gainDb: typicalDb, effectiveGainDb: Math.min(0, typicalDb), estimated: true }
-}
+export const chooseBalance = (file: LoudnessInfo | null): BalanceChoice =>
+  chooseBalanceFromRules({
+    file: file ? { loudness: file.lufs, peak: file.peak } : null,
+    typicalDb: typicalGainDb(historyOf()),
+  })
 
 export const replayGainDbFor = (info: LoudnessInfo | null, mode: ReplayGainMode): number => {
   if (mode === 'off') return 0
@@ -92,6 +75,3 @@ export const replayGainDbFor = (info: LoudnessInfo | null, mode: ReplayGainMode)
   if (db > 0 && info.peak > 0) db = Math.min(db, -20 * Math.log10(info.peak))
   return db
 }
-
-export const replayGainLinearFor = (info: LoudnessInfo | null, mode: ReplayGainMode): number =>
-  10 ** (replayGainDbFor(info, mode) / 20)

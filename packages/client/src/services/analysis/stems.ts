@@ -1,4 +1,5 @@
 import { HTDEMUCS_SEGMENT } from './htdemucsWgsl/runtime'
+import type { StemChannels } from './htdemucsModel'
 import { separateHtdemucsSegment } from './htdemucsModel'
 
 /**
@@ -46,6 +47,85 @@ const weightAt = (at: number, index: number, starts: number[], win: Float32Array
   return Math.max(Math.fround(before + win[at - starts[index]]), 1e-8)
 }
 
+/** 立体声四轨（自动混音 deck 用）。窗口与整曲分轨共用同一套网格和权重。 */
+export interface StemStereo {
+  left: Float32Array
+  right: Float32Array
+}
+
+export interface StemWindowSet {
+  drums: StemStereo
+  bass: StemStereo
+  other: StemStereo
+  vocals: StemStereo
+}
+
+/** 任意长度窗口（通常 5–12 s）→ 四轨立体声；`isCurrent` 为 false 时中止。 */
+export const separateStereoWindow = async (
+  left: Float32Array,
+  right: Float32Array,
+  isCurrent: () => boolean,
+): Promise<StemWindowSet | null> => {
+  const total = left.length
+  if (!total) return null
+  const win = stemSegmentWindow()
+  const starts = stemSegmentStarts(total)
+  const make = () => ({ left: new Float32Array(total), right: new Float32Array(total) })
+  const drums = make()
+  const bass = make()
+  const other = make()
+  const vocals = make()
+  const inLeft = new Float32Array(HTDEMUCS_SEGMENT)
+  const inRight = new Float32Array(HTDEMUCS_SEGMENT)
+  let divided = 0
+
+  for (let index = 0; index < starts.length; index += 1) {
+    if (!isCurrent()) return null
+    const start = starts[index]
+    const n = Math.min(HTDEMUCS_SEGMENT, total - start)
+    inLeft.fill(0)
+    inRight.fill(0)
+    inLeft.set(left.subarray(start, start + n))
+    inRight.set(right.subarray(start, start + n))
+    const stems = await separateHtdemucsSegment(inLeft, inRight, {
+      // 过渡窗口在前台：与上游一样用 auto 分片，别让分轨把可视化帧吃掉。
+      slice: 'auto',
+      priority: 'foreground',
+      isStale: () => !isCurrent(),
+    })
+    if (stems.length < 4) return null
+
+    for (let offset = 0; offset < n; offset += 1) {
+      const at = start + offset
+      const w = win[offset]
+      const write = (target: StemStereo, stem: StemChannels) => {
+        target.left[at] += stem.left[offset] * w
+        target.right[at] += stem.right[offset] * w
+      }
+      write(drums, stems[0]!)
+      write(bass, stems[1]!)
+      write(other, stems[2]!)
+      write(vocals, stems[3]!)
+    }
+
+    const final = index + 1 < starts.length ? starts[index + 1] : total
+    for (let at = Math.max(divided, start); at < final; at += 1) {
+      const divisor = weightAt(at, index, starts, win)
+      drums.left[at]! /= divisor
+      drums.right[at]! /= divisor
+      bass.left[at]! /= divisor
+      bass.right[at]! /= divisor
+      other.left[at]! /= divisor
+      other.right[at]! /= divisor
+      vocals.left[at]! /= divisor
+      vocals.right[at]! /= divisor
+    }
+    divided = Math.max(divided, final)
+    await new Promise<void>((resolve) => { setTimeout(resolve, 0) })
+  }
+  return { drums, bass, other, vocals }
+}
+
 /** 44.1 kHz 立体声 → 单声道鼓轨与人声轨；`isCurrent` 为 false 时中止并返回 null。 */
 export const separateWholeTrack = async (
   left: Float32Array,
@@ -70,9 +150,15 @@ export const separateWholeTrack = async (
     inRight.fill(0)
     inLeft.set(left.subarray(start, start + n))
     inRight.set(right.subarray(start, start + n))
-    const stems = await separateHtdemucsSegment(inLeft, inRight)
+    const stems = await separateHtdemucsSegment(inLeft, inRight, {
+      // 整曲特征是后台产物：用 none 换 Windows 上的吞吐，切歌后丢弃未跑的段。
+      slice: 'none',
+      priority: 'background',
+      isStale: () => !isCurrent(),
+    })
+    // worker 按 [drums, bass, other, vocals] 顺序整跑四个源。
     const drumStem = stems[0]
-    const vocalStem = stems[1]
+    const vocalStem = stems[3]
     if (!drumStem || !vocalStem) return null
 
     for (let offset = 0; offset < n; offset += 1) {

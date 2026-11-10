@@ -1,4 +1,4 @@
-import type { LyricPlayerBase } from '@applemusic-like-lyrics/core'
+import { LayoutReason, type LyricPlayerBase } from '@applemusic-like-lyrics/core'
 
 let player: LyricPlayerBase | null = null
 let offsetMs = 0
@@ -19,6 +19,8 @@ let offsetMs = 0
 let frameTimeSeconds = -1
 /** 逐帧时钟的写入时刻（`performance.now()`），用于判断新鲜度。 */
 let frameTimeStamp = 0
+/** 歌词行点击后的本地乐观跳转窗口；服务端 seek 确认前不让逐帧旧时间覆盖它。 */
+let optimisticUntil = 0
 
 /**
  * 逐帧时钟的新鲜度窗口（毫秒）。
@@ -30,7 +32,6 @@ let frameTimeStamp = 0
 const FRAME_TIME_FRESH_MS = 250
 
 const toLyricTime = (timeSeconds: number) => Math.max(0, Math.round(timeSeconds * 1000 - offsetMs))
-export type LyricSeekBehavior = 'immediate' | 'smooth'
 
 export const lyricPlayerBridge = {
   attach(nextPlayer: LyricPlayerBase): () => void {
@@ -49,6 +50,9 @@ export const lyricPlayerBridge = {
       frameTimeSeconds = Math.max(0, timeSeconds)
       frameTimeStamp = performance.now()
     }
+    // 歌词点击的乐观跳转还没等服务端确认时，逐帧旧时间不能把它拉回去。
+    if (!isSeeking && optimisticUntil > performance.now()) return
+    if (isSeeking) optimisticUntil = 0
     player?.setCurrentTime(toLyricTime(timeSeconds), isSeeking)
   },
 
@@ -68,13 +72,31 @@ export const lyricPlayerBridge = {
   clearFrameTime(): void {
     frameTimeSeconds = -1
     frameTimeStamp = 0
+    optimisticUntil = 0
   },
 
-  seek(timeSeconds: number, behavior: LyricSeekBehavior = 'immediate'): void {
+  /** 歌词行点击：先本地跳转，等服务端 seek 确认后再由 `seek()` 校准。 */
+  seekOptimistic(timeSeconds: number): void {
     if (!player) return
     player.resetScroll()
     player.setCurrentTime(toLyricTime(timeSeconds), true)
-    const immediate = behavior === 'immediate'
-    void player.calcLayout(immediate, immediate)
+    void player.calcLayout(LayoutReason.Seek)
+    optimisticUntil = performance.now() + 1500
+  },
+
+  /** 换歌/卸载/用户取消时撤掉乐观窗口，让逐帧时间立刻接管。 */
+  cancelOptimisticSeek(): void {
+    optimisticUntil = 0
+  },
+
+  seek(timeSeconds: number): void {
+    if (!player) return
+    optimisticUntil = 0
+    player.resetScroll()
+    player.setCurrentTime(toLyricTime(timeSeconds), true)
+    // 对齐上游：任何 seek（包括平滑跳转）都走 LayoutReason.Seek。
+    // 只有这个策略带 resetInterlude —— 等待态的「…」必须在这里卸载；
+    // 用 PlaybackTick 会让间奏点在跳转后继续留在屏幕上。
+    void player.calcLayout(LayoutReason.Seek)
   },
 }

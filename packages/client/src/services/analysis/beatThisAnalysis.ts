@@ -2,11 +2,11 @@ import {
   BEAT_THIS_SAMPLE_RATE,
   aggregateChunks,
   beatsFromLogits,
-  melSpectrogram,
   splitForModel,
   type ChunkPrediction,
   type MelSpectrogram,
 } from './beatThis'
+import { melSpectrogramOffThread } from '@/lib/automix/analysisOffThread'
 import { computeBeatAccents, resolveBeatConfidence, type BeatAccents } from './beatAccents'
 import { loadBeatThisModel, runBeatThis } from './beatThisModel'
 
@@ -65,7 +65,7 @@ export const analyseWithBeatThis = async (
   await loadBeatThisModel()
   if (!isCurrent()) return null
 
-  const mel: MelSpectrogram = await melSpectrogram(audio.samples)
+  const mel: MelSpectrogram = await melSpectrogramOffThread(audio.samples)
   if (!isCurrent()) return null
 
   const chunks = splitForModel(mel)
@@ -73,8 +73,9 @@ export const analyseWithBeatThis = async (
   const result = await runBeatThis(
     chunks.map((chunk) => chunk.data),
     { mel: new Float32Array(mel.data), frames: mel.frames },
+    isCurrent,
   )
-  if (!isCurrent()) return null
+  if (!result || !isCurrent()) return null
 
   const predictions: ChunkPrediction[] = chunks.map((chunk, index) => ({
     start: chunk.start,

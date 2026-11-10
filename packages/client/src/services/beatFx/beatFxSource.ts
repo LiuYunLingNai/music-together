@@ -1,7 +1,11 @@
 import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
 import { useAudioSettingsStore } from '@/stores/audioSettingsStore'
-import { SERVER_URL } from '@/lib/config'
+import { playbackUrlFor, trackCacheKey } from '@/lib/playbackSource'
+import { getSocket } from '@/lib/socket'
+import { markProfileReported } from '@/lib/automix/profileClient'
+import { TRACK_PROFILE_VERSION } from '@/lib/automix/upstream/trackProfile'
+import { EVENTS, modeNeedsBeatGrid } from '@music-together/shared'
 import { scheduleBeatAnalysis, type BeatMap } from './offlineBeatAnalysis'
 import { clearTrackFeatures, publishTrackFeatures } from './trackFeatures'
 import { beatTimesOf, downbeatTimesOf, resolveBeatAccents } from './beatAccents'
@@ -32,21 +36,14 @@ const EMPTY: BeatFxTrackResult = { events: [], source: 'none', trackScale: 1 }
 /** 与播放同源的音频 URL（代理规则与 `useHowl` / Mineradio 一致，否则分析拿到 403）。 */
 export function resolveAnalysisUrl(track: NonNullable<ReturnType<typeof usePlayerStore.getState>['currentTrack']>): string | null {
   if (!track.streamUrl) return null
-  const roomId = useRoomStore.getState().room?.id ?? ''
-  if (track.source === 'bilibili') {
-    return `${SERVER_URL}/api/music/bilibili-audio-proxy?url=${encodeURIComponent(track.streamUrl)}&bvid=${encodeURIComponent(track.urlId)}&roomId=${encodeURIComponent(roomId)}`
-  }
-  if (track.source === 'kugou' || track.source === 'kugou_concept') {
-    return `${SERVER_URL}/api/music/kugou-audio-proxy?url=${encodeURIComponent(track.streamUrl)}`
-  }
-  return track.streamUrl
+  return playbackUrlFor(track, track.streamUrl)
 }
 
 /** 稳定的曲目身份键：用于持久化分析缓存（不能带会过期的流地址）。 */
 export function currentTrackCacheKey(): string | null {
   const track = usePlayerStore.getState().currentTrack
   if (!track) return null
-  return `${track.source}:${track.lyricId ?? track.urlId ?? track.title}`
+  return trackCacheKey(track)
 }
 
 /** 当前播放会话的键；切歌 / 重连即变，用来判定拍点表是否还属于这首歌。 */
@@ -54,7 +51,7 @@ export function currentBeatFxKey(): string | null {
   const track = usePlayerStore.getState().currentTrack
   if (!track) return null
   // 曲目身份 + 流地址：同一首歌重新解析出新的直链时也要重analyze 一次。
-  return `${track.source}:${track.lyricId ?? track.urlId ?? track.title}:${track.streamUrl?.slice(-48) ?? ''}`
+  return `${trackCacheKey(track)}:${track.streamUrl?.slice(-48) ?? ''}`
 }
 
 /** 拍点图 → 拍点表（合并重音）。 */
@@ -99,9 +96,23 @@ export function loadBeatFxTrack(onResult: (result: BeatFxTrackResult) => void): 
       wantFeatures: useAudioSettingsStore.getState().trackFeaturesEnabled,
       highPrecisionBeats: useAudioSettingsStore.getState().highPrecisionBeats,
       highPrecisionStems: useAudioSettingsStore.getState().highPrecisionStems,
+      wantProfile:
+        useRoomStore.getState().room?.automixEnabled === true &&
+        modeNeedsBeatGrid(useRoomStore.getState().room?.transitionMode ?? 'automix'),
       expectedDuration: track?.duration,
       onMap: (map) => {
         if (token !== loadSequence) return
+        // 自动混音画像：服务端据此统一下发过渡决策。
+        if (
+          map.profile &&
+          map.profile.version === TRACK_PROFILE_VERSION &&
+          track &&
+          useRoomStore.getState().room?.automixEnabled &&
+          modeNeedsBeatGrid(useRoomStore.getState().room?.transitionMode ?? 'automix')
+        ) {
+          markProfileReported(track.id)
+          getSocket().emit(EVENTS.PLAYER_TRACK_PROFILE, { trackId: track.id, profile: map.profile })
+        }
         if (map.features) publishTrackFeatures(featureKey, map.features)
         const { events, trackScale } = toBeatFxEvents(map)
         onResult(events.length > 0

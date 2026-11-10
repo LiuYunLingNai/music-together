@@ -29,12 +29,13 @@ export const analyzeModelBeatMap = async (
     const analysis = await analyseWithBeatThis(audio, isCurrent)
     if (!analysis || !isCurrent()) return null
     const map = beatMapFromBeatThis(analysis, analysisProfile || 'default')
+    const beatGrid = { beats: analysis.beats, downbeats: analysis.downbeats }
     const loudness = options.wantLoudness ? await measureLoudness(buffer, isCurrent) : undefined
     if (!isCurrent()) return null
     const features = options.wantFeatures
       ? await computeTrackFeatures(buffer, isCurrent, { stems: options.wantStems === true })
       : undefined
-    return { ...map, loudness, features: features ?? undefined }
+    return { ...map, loudness, features: features ?? undefined, beatGrid }
   } catch (error) {
     console.warn('beat_this 分析失败，回退本地分析:', error)
     return null

@@ -99,8 +99,18 @@ export function useAuth() {
       else toast.error(data.message)
     }
 
+    const onSharingResult = (data: { platform: MusicSource; shareWithRoom: boolean; ok: boolean }) => {
+      if (!data.ok) toast.error('共享设置未生效，请重新登录后再试')
+    }
+
+    const onReportingResult = (data: { platform: MusicSource; reportListening: boolean; ok: boolean }) => {
+      if (!data.ok) toast.error('听歌打卡设置未生效，请重新登录后再试')
+    }
+
     socket.on(EVENTS.AUTH_STATUS_UPDATE, onStatusUpdate)
     socket.on(EVENTS.AUTH_MY_STATUS, onMyStatus)
+    socket.on(EVENTS.AUTH_SHARING_RESULT, onSharingResult)
+    socket.on(EVENTS.AUTH_REPORTING_RESULT, onReportingResult)
     socket.on(EVENTS.AUTH_QR_GENERATED, onQrGenerated)
     socket.on(EVENTS.AUTH_QR_STATUS, onQrStatus)
     socket.on(EVENTS.AUTH_CLAIM_KUGOU_CONCEPT_VIP_RESULT, onKugouConceptVipClaim)
@@ -114,6 +124,8 @@ export function useAuth() {
     return () => {
       socket.off(EVENTS.AUTH_STATUS_UPDATE, onStatusUpdate)
       socket.off(EVENTS.AUTH_MY_STATUS, onMyStatus)
+      socket.off(EVENTS.AUTH_SHARING_RESULT, onSharingResult)
+      socket.off(EVENTS.AUTH_REPORTING_RESULT, onReportingResult)
       socket.off(EVENTS.AUTH_QR_GENERATED, onQrGenerated)
       socket.off(EVENTS.AUTH_QR_STATUS, onQrStatus)
       socket.off(EVENTS.AUTH_CLAIM_KUGOU_CONCEPT_VIP_RESULT, onKugouConceptVipClaim)
@@ -157,6 +169,20 @@ export function useAuth() {
     (platform: MusicSource) => {
       storage.removeAuthCookie(platform)
       socket.emit(EVENTS.AUTH_LOGOUT, { platform })
+    },
+    [socket],
+  )
+
+  const setSharing = useCallback(
+    (platform: MusicSource, shareWithRoom: boolean) => {
+      socket.emit(EVENTS.AUTH_SET_SHARING, { platform, shareWithRoom })
+    },
+    [socket],
+  )
+
+  const setReporting = useCallback(
+    (platform: MusicSource, reportListening: boolean) => {
+      socket.emit(EVENTS.AUTH_SET_REPORTING, { platform, reportListening })
     },
     [socket],
   )
@@ -219,6 +245,8 @@ export function useAuth() {
     requestQrCode,
     checkQrStatus,
     setCookie,
+    setSharing,
+    setReporting,
     logout,
     resetQr,
     claimKugouConceptVip,

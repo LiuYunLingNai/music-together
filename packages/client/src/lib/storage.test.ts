@@ -6,31 +6,45 @@ import { SETTING_DEFAULTS, storage } from './storage'
 describe('AMLL settings storage', () => {
   beforeEach(() => localStorage.clear())
 
-  it('uses the fork AMLL defaults', () => {
-    expect(storage.getLyricAlignPosition()).toBe(0.4)
-    expect(storage.getLyricHidePassedLines()).toBe(false)
-    expect(storage.getLyricShowBottomLine()).toBe(true)
-    expect(storage.getLyricMaskObsceneWordsMode()).toBe('')
+  it('uses the fork AMLL defaults per player family', () => {
+    expect(storage.getClassicLyricAlignPosition()).toBe(0.4)
+    expect(storage.getMineradioLyricAlignPosition()).toBe(0.4)
+    expect(storage.getClassicLyricHidePassedLines()).toBe(false)
+    expect(storage.getClassicLyricShowBottomLine()).toBe(true)
+    expect(storage.getClassicLyricMaskObsceneWordsMode()).toBe('')
   })
 
   it('validates enum and numeric settings loaded from storage', () => {
-    localStorage.setItem('mt-lyricMaskObsceneWordsMode', 'invalid')
-    localStorage.setItem('mt-lyricWordFadeWidth', '100')
+    localStorage.setItem('mt-classicLyricMaskObsceneWordsMode', 'invalid')
+    localStorage.setItem('mt-classicLyricWordFadeWidth', '100')
 
-    expect(storage.getLyricMaskObsceneWordsMode()).toBe(SETTING_DEFAULTS.lyricMaskObsceneWordsMode)
-    expect(storage.getLyricWordFadeWidth()).toBe(2)
+    expect(storage.getClassicLyricMaskObsceneWordsMode()).toBe(
+      SETTING_DEFAULTS.classicLyricMaskObsceneWordsMode,
+    )
+    expect(storage.getClassicLyricWordFadeWidth()).toBe(2)
   })
 
   it('persists masking and interaction choices safely', () => {
-    storage.setLyricHidePassedLines(true)
-    storage.setLyricShowBottomLine(false)
-    storage.setLyricMaskObsceneWordsMode('partial-mask')
-    storage.setLyricMaskObsceneWordChar('#more')
+    storage.setClassicLyricHidePassedLines(true)
+    storage.setClassicLyricShowBottomLine(false)
+    storage.setClassicLyricMaskObsceneWordsMode('partial-mask')
+    storage.setClassicLyricMaskObsceneWordChar('#more')
 
-    expect(storage.getLyricHidePassedLines()).toBe(true)
-    expect(storage.getLyricShowBottomLine()).toBe(false)
-    expect(storage.getLyricMaskObsceneWordsMode()).toBe('partial-mask')
-    expect(storage.getLyricMaskObsceneWordChar()).toBe('#')
+    expect(storage.getClassicLyricHidePassedLines()).toBe(true)
+    expect(storage.getClassicLyricShowBottomLine()).toBe(false)
+    expect(storage.getClassicLyricMaskObsceneWordsMode()).toBe('partial-mask')
+    expect(storage.getClassicLyricMaskObsceneWordChar()).toBe('#')
+  })
+
+  it('keeps the two AMLL families independent', () => {
+    storage.setClassicLyricEnableBlur(false)
+    storage.setMineradioLyricEnableBlur(true)
+    storage.setMineradioLyricFontSize(120)
+
+    expect(storage.getClassicLyricEnableBlur()).toBe(false)
+    expect(storage.getMineradioLyricEnableBlur()).toBe(true)
+    expect(storage.getMineradioLyricFontSize()).toBe(120)
+    expect(storage.getClassicLyricFontSize()).toBe(90)
   })
 })
 
@@ -105,11 +119,11 @@ describe('视觉舞台设置', () => {
     }
   })
 
-  it('迁移：schema 已是 v3 时不再改动用户选择', async () => {
+  it('迁移：schema 已是 v4 时不再改动用户选择', async () => {
     vi.resetModules()
     localStorage.clear()
-    // 用户已在 v3 下主动选了 balanced
-    localStorage.setItem('mt-settingsSchemaVersion', '3')
+    // 用户已在 v4 下主动选了 balanced
+    localStorage.setItem('mt-settingsSchemaVersion', '4')
     localStorage.setItem('mt-visualQuality', 'balanced')
 
     const fresh = await import('./storage')

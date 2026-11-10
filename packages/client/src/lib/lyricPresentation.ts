@@ -1,5 +1,6 @@
 import type { LyricLine as AMLLLyricLine } from '@applemusic-like-lyrics/core'
-import { parseEslrc, parseQrc, parseTTML, parseYrc } from '@applemusic-like-lyrics/lyric'
+import { type LyricLine as ParserLyricLine, parseEslrc, parseQrc, parseYrc } from '@applemusic-like-lyrics/lyric'
+import { TTMLParser, toAmllLyrics } from '@applemusic-like-lyrics/ttml'
 import type { LyricWordFormat, MusicSource } from '@music-together/shared'
 import { findHiddenLeadingStaffIndexes } from './lyrics/staffCredits'
 import type { LyricPreferredSource } from './storage'
@@ -64,9 +65,8 @@ export interface LyricPresentation {
 }
 
 /** TTML and YRC parser lines share the same conversion to the core's word shape. */
-export function toCoreLyricLines(lines: ReturnType<typeof parseTTML>['lines']): LyricLine[] {
+export function toCoreLyricLines(lines: ParserLyricLine[]): LyricLine[] {
   return lines.map((line) => {
-    // The TTML parser carries structure fields that AMLL's base type omits.
     const structured = line as typeof line & { songPart?: string; blockIndex?: number }
     return {
       words: line.words.map((word) => ({
@@ -86,6 +86,29 @@ export function toCoreLyricLines(lines: ReturnType<typeof parseTTML>['lines']): 
       ...(structured.blockIndex !== undefined ? { blockIndex: structured.blockIndex } : {}),
     }
   })
+}
+
+/**
+ * TTML 走与上游 amll-player 同一个解析器（`@applemusic-like-lyrics/ttml`）：
+ * 注音（ruby）、不雅词标记（obscene）、对唱与背景人声的判定都由它给出，
+ * 再补回 Folia 使用的 `songPart` / `blockIndex` 结构字段。
+ */
+export function parseTtmlLyricLines(text: string): LyricLine[] {
+  const result = TTMLParser.parse(text)
+  const lines = toAmllLyrics(result).lines as LyricLine[]
+
+  let index = 0
+  const attachStructure = (source: (typeof result.lines)[number]) => {
+    const line = lines[index++]
+    if (!line) return
+    if (source.songPart) line.songPart = source.songPart
+    if (source.blockIndex !== undefined) line.blockIndex = source.blockIndex
+  }
+  for (const source of result.lines) {
+    attachStructure(source)
+    if (source.backgroundVocal) attachStructure(source)
+  }
+  return lines
 }
 
 export function hasUsablePlatformLyric(data: LyricData | null): data is LyricData {
@@ -115,7 +138,7 @@ function parseStructuredWordLines(data: LyricData | null): AMLLLyricLine[] | nul
         lines = toCoreLyricLines(parseQrc(text))
         break
       case 'ttml':
-        lines = toCoreLyricLines(parseTTML(text).lines)
+        lines = parseTtmlLyricLines(text)
         break
       case 'enhanced-lrc':
         lines = toCoreLyricLines(parseEslrc(text))

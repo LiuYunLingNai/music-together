@@ -9,14 +9,13 @@ import {
   hasUsablePlatformLyric,
   isPresentationBetter,
   markSupplementPresentation,
+  parseTtmlLyricLines,
   preserveTtmlStructure,
-  toCoreLyricLines,
   type LyricData,
   type LyricPresentation,
 } from '@/lib/lyricPresentation'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
-import { parseTTML } from '@applemusic-like-lyrics/lyric'
 import type { LyricLine as AMLLLyricLine } from '@applemusic-like-lyrics/core'
 import { isPureMusicLyricText, type Track } from '@music-together/shared'
 import { useCallback, useEffect, useRef } from 'react'
@@ -57,9 +56,9 @@ function isPlausibleTtml(lines: AMLLLyricLine[], durationSeconds: number): boole
 function parsePlausibleTtml(text: string, durationSeconds: number): AMLLLyricLine[] | null {
   if (!text.includes('<tt') && !text.includes('<?xml')) return null
   try {
-    const parsed = parseTTML(text)
-    if (!parsed.lines.length || !isPlausibleTtml(parsed.lines, durationSeconds)) return null
-    return toCoreLyricLines(parsed.lines)
+    const lines = parseTtmlLyricLines(text)
+    if (!lines.length || !isPlausibleTtml(lines, durationSeconds)) return null
+    return lines
   } catch {
     return null
   }
@@ -82,12 +81,43 @@ interface LyricSupplementData extends LyricData {
   candidates?: LyricSupplementCandidate[]
 }
 
+async function fetchLyricSupplement(
+  track: Track,
+  signal: AbortSignal,
+): Promise<LyricSupplementData | null> {
+  const params = new URLSearchParams({
+    source: track.metadataSource ?? track.source,
+    lyricId: track.lyricId!,
+    title: track.title,
+    duration: String(track.duration),
+  })
+  for (const artist of track.artist) params.append('artists', artist)
+  try {
+    const response = await fetch(`${SERVER_URL}/api/music/lyric-supplement?${params}`, {
+      signal,
+      credentials: 'include',
+    })
+    return response.ok ? await response.json() : null
+  } catch {
+    return null
+  }
+}
+
+function linesHaveWordTiming(lines: AMLLLyricLine[] | null): boolean {
+  return Boolean(
+    lines?.some((line) =>
+      line.words.some((word) => Number.isFinite(word.startTime) && Number.isFinite(word.endTime) && word.endTime > word.startTime),
+    ),
+  )
+}
+
 interface PreparedLyricRequest {
   key: string
   startedAt: number
   controller: AbortController
   ttmlPromise: Promise<AMLLLyricLine[] | null>
   lyricPromise: Promise<LyricData | null>
+  supplementPromise: Promise<LyricSupplementData | null> | null
 }
 
 interface CachedLyricPresentation {
@@ -297,7 +327,31 @@ export function useLyric() {
       }
     })()
 
-    const request = { key, startedAt: Date.now(), controller, ttmlPromise, lyricPromise }
+    const canPrefetchSupplement =
+      !override && !ttmlOverride && !!track.lyricId && track.artist.length > 0 && track.duration > 0
+    // 预取阶段就把补充请求挂上去：主源都没有逐词时，等切歌时它已经跑了一半，
+    // 不必等主源返回后才串行发起。TTML 或平台任一有逐词就不补；主源超过
+    // 400ms 仍未齐时先让补充请求起跑，避免慢 TTML 把整条链路拖住。
+    let supplementStarted = false
+    const startSupplement = (): Promise<LyricSupplementData | null> | null => {
+      if (supplementStarted) return null
+      supplementStarted = true
+      return fetchLyricSupplement(track, controller.signal)
+    }
+    const supplementPromise = canPrefetchSupplement
+      ? (async (): Promise<LyricSupplementData | null> => {
+          const primary = Promise.all([ttmlPromise, lyricPromise]).then(([lines, data]) => {
+            if (linesHaveWordTiming(lines)) return null
+            if (data && (data.yrc || data.wordLyric || data.wordByWord?.length)) return null
+            return startSupplement()
+          })
+          const late = new Promise<'late'>((resolve) => setTimeout(() => resolve('late'), 400))
+          const winner = await Promise.race([primary, late])
+          return winner === 'late' ? startSupplement() : winner
+        })().catch(() => null)
+      : null
+
+    const request = { key, startedAt: Date.now(), controller, ttmlPromise, lyricPromise, supplementPromise }
     preparedRef.current = request
     return request
   }, [])
@@ -402,29 +456,13 @@ export function useLyric() {
         !!track.lyricId &&
         track.artist.length > 0 &&
         track.duration > 0
-      const requestSupplement = async (): Promise<LyricSupplementData | null> => {
-        const params = new URLSearchParams({
-          source: track.metadataSource ?? track.source,
-          lyricId: track.lyricId!,
-          title: track.title,
-          duration: String(track.duration),
-        })
-        for (const artist of track.artist) params.append('artists', artist)
-        try {
-          const response = await fetch(`${SERVER_URL}/api/music/lyric-supplement?${params}`, {
-            signal: request.controller.signal,
-            credentials: 'include',
-          })
-          return response.ok ? await response.json() : null
-        } catch {
-          return null
-        }
-      }
+      const requestSupplement = (): Promise<LyricSupplementData | null> =>
+        fetchLyricSupplement(track, request.controller.signal)
       // Start matching while a slow TTML provider is still pending. Only one supplement request is used.
       const earlySupplement =
         canSupplement &&
         (!initialPresentation.quality.hasWordAnimation || needsLyricAuxiliary(initialPresentation.lines ?? []))
-          ? requestSupplement()
+          ? (request.supplementPromise ?? requestSupplement())
           : null
       let baseCompleted = false
       const earlyPublication = earlySupplement
@@ -480,10 +518,12 @@ export function useLyric() {
         (!preferredPresentation.quality.hasWordAnimation ||
           (baseTtmlPresentation?.unresolvedCount ?? 0) > 0 ||
           needsLyricAuxiliary(preferredPresentation.lines ?? []))
+      let supplementHandled = false
       if (needsSupplement) {
         try {
           const supplement = await (earlySupplement ?? requestSupplement())
           if (supplement) {
+            supplementHandled = true
             const supplementCandidates: LyricSupplementCandidate[] = supplement.candidates?.length
               ? supplement.candidates
               : supplement.source
@@ -561,6 +601,46 @@ export function useLyric() {
           }
         } catch {
           if (!isCurrent()) return
+        }
+        // 服务端补充可能刚好超时，后台任务稍后会成功；客户端只补一次，
+        // 不重新走完整歌词请求，避免闪烁。
+        if (!supplementHandled) {
+          window.setTimeout(() => {
+            if (!isCurrent()) return
+            void requestSupplement().then((late) => {
+              if (!late || !isCurrent()) return
+              const candidates = late.candidates?.length
+                ? late.candidates
+                : late.source
+                  ? [{ ...late, source: late.source }]
+                  : []
+              if (candidates.length === 0) return
+              const characterCount = Math.max(
+                preferredPresentation.quality.meaningfulCharacterCount,
+                ...candidates.map(
+                  (candidate) => buildNativePresentation(candidate).quality.meaningfulCharacterCount,
+                ),
+              )
+              const presentations = candidates.map((candidate) =>
+                preserveTtmlStructure(
+                  markSupplementPresentation(
+                    buildNativePresentation(candidate, characterCount, lyricData?.lyric ?? ''),
+                    candidate.source,
+                  ),
+                  baseTtmlPresentation,
+                ),
+              )
+              const best = presentations
+                .filter((presentation) => presentation.quality.hasWordAnimation)
+                .sort((left, right) => right.quality.confidence - left.quality.confidence)[0]
+              if (best && isPresentationBetter(best, preferredPresentation)) {
+                preferredPresentation = best
+                setTtmlLines(best.lines)
+                setLyric(best.lyric, best.tlyric)
+                publishProvenance(best)
+              }
+            })
+          }, 1500)
         }
       }
 

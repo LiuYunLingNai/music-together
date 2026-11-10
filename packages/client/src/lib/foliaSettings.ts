@@ -42,7 +42,6 @@ export interface FoliaSettings {
   backgroundDim: number
   backgroundMotion: boolean
   showProgress: boolean
-  alwaysExpand: boolean
   autoHide: boolean
   manualHide: boolean
   barOffset: number
@@ -78,7 +77,6 @@ export const FOLIA_DEFAULTS: Readonly<FoliaSettings> = {
   backgroundDim: 0.15,
   backgroundMotion: true,
   showProgress: true,
-  alwaysExpand: false,
   autoHide: false,
   manualHide: false,
   barOffset: 32,
@@ -167,7 +165,6 @@ export function normalizeFoliaSettings(value: unknown): FoliaSettings {
   const booleanKeys = [
     'backgroundMotion',
     'showProgress',
-    'alwaysExpand',
     'autoHide',
     'manualHide',
     'showTranslation',

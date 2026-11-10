@@ -15,6 +15,9 @@ import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { fetchCurrentProfile } from '@/lib/profileApi'
+import { resetAllRoomState } from '@/lib/resetStores'
+import { stopActiveAudio } from '@/lib/audioPlaybackLifecycle'
+import { clearAudioBytes } from '@/lib/audioBytes'
 
 /**
  * Handles core room lifecycle events:
@@ -75,6 +78,10 @@ export function useRoomState() {
       allowTemporaryAdminQueueClear: boolean
       removePlayedTracks?: boolean
       roamingEnabled?: boolean
+      automixEnabled?: boolean
+      transitionMode?: import('@music-together/shared').TransitionMode
+      crossfadeMaxSec?: number
+      automixPerformance?: boolean
       roamingSource?: import('@music-together/shared').RoamingSource
       roamingMode?: import('@music-together/shared').NeteaseRoamingMode
       password?: string | null
@@ -173,7 +180,10 @@ export function useRoomState() {
 
       toast.dismiss('manual-source-switch')
       toast.error(error.message)
-      if (error.code === ERROR_CODE.ROOM_NOT_FOUND) {
+      if (error.code === ERROR_CODE.ROOM_NOT_FOUND || error.code === ERROR_CODE.KICKED_FROM_ROOM) {
+        stopActiveAudio()
+        clearAudioBytes()
+        resetAllRoomState()
         navigate('/', { replace: true })
       }
     }

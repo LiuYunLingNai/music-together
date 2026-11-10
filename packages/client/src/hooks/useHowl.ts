@@ -5,15 +5,26 @@ import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { CURRENT_TIME_THROTTLE_MS } from '@/lib/constants'
+import { getPendingAutomixPlan, takePendingAutomixTransition } from '@/lib/playbackTransition'
 import { toast } from 'sonner'
 import { getServerTime } from '@/lib/clockSync'
-import { SERVER_URL } from '@/lib/config'
+import { playbackUrlFor } from '@/lib/playbackSource'
 import {
   attachTimeStretch,
   prepareDirectStreamForTimeStretch,
   releaseTimeStretch,
+  getStemInput,
+  resetAutomixTone,
+  scheduleAutomixBlend,
+  scheduleHowlTransition,
+  setHowlGraphMuted,
   type TimeStretchController,
 } from '@/lib/timeStretch'
+import { startStemTransition, takeStemTransition } from '@/lib/automix/stemDeck'
+import { announceTransition, settleTransition } from '@/lib/automix/transitionCue'
+import { createDeckClock } from '@/lib/automix/upstream/deckClock'
+import { diagMark } from '@/lib/automix/upstream/diag'
+import { applyTempoBend, resetTempoBend } from '@/lib/automix/tempoBend'
 import { setHowlPosition } from '@/lib/howlPosition'
 import { registerActivePlaybackStop } from '@/lib/audioPlaybackLifecycle'
 import { lyricPlayerBridge } from '@/lib/lyricPlayerBridge'
@@ -34,7 +45,8 @@ const STALLED_TIMEOUT_MS = 8_000
 const BUFFERING_TIMEOUT_MS = 30_000
 
 /** Howler keeps the HTML5 element on its first sound. */
-function mediaElementOf(howl: Howl): HTMLMediaElement | null {
+function mediaElementOf(howl: Howl | null): HTMLMediaElement | null {
+  if (!howl) return null
   const sound = (howl as unknown as { _sounds?: Array<{ _node?: HTMLMediaElement }> })._sounds?.[0]
   return sound?._node ?? null
 }
@@ -49,7 +61,8 @@ function mediaElementOf(howl: Howl): HTMLMediaElement | null {
  */
 ;(Howler as typeof Howler & { _canPlayEvent: 'canplay' | 'canplaythrough' })._canPlayEvent = 'canplay'
 
-/** Short fade after a scheduled start masks the decoder's final seek. */
+/** 上游 `SPLICE_SEC`：分轨 deck 与媒体元素交接时只留 8 ms 的交叉，避免可闻的凹陷。 */
+const STEM_SPLICE_SEC = 0.008
 const SCHEDULED_START_FADE_MS = 120
 const DEFAULT_TRACK_CROSSFADE_MS = 80
 const trackCrossfadeMs = (): number => useAudioSettingsStore.getState().crossfadeMs ?? DEFAULT_TRACK_CROSSFADE_MS
@@ -65,6 +78,26 @@ interface PreloadedHowl {
   key: string
   howl: Howl
   canTimeStretch: boolean
+  /** 从本地媒体缓存创建的 blob 预热；不依赖当前直链。 */
+  fromCache?: boolean
+  trackId?: string
+  /** 手动换源会保留队列 id，但源/urlId 已变；缓存 blob 不能跨源复用。 */
+  trackIdentity?: string
+}
+
+/** 缓存预热产生的 blob URL 随 Howl 生命周期释放，避免长会话累计占用内存。 */
+const blobUrlByHowl = new WeakMap<Howl, string>()
+
+function revokeHowlBlobUrl(howl: Howl | null): void {
+  if (!howl) return
+  const url = blobUrlByHowl.get(howl)
+  if (!url) return
+  blobUrlByHowl.delete(howl)
+  try {
+    URL.revokeObjectURL(url)
+  } catch {
+    // 忽略。
+  }
 }
 
 /** 手动换源保持 trackId 不变但换 URL，必须把流地址一起放进预热身份。 */
@@ -75,16 +108,7 @@ function preloadKey(track: Track, streamUrl: string): string {
 const streamFormatFor = (track: Track): string[] =>
   track.source === 'bilibili' ? [track.streamFormat ?? 'm4a'] : ['flac', 'm4a', 'ogg', 'mp3']
 
-function buildPlaybackUrl(track: Track, streamUrl: string): string {
-  const roomId = useRoomStore.getState().room?.id ?? ''
-  if (track.source === 'bilibili') {
-    return `${SERVER_URL}/api/music/bilibili-audio-proxy?url=${encodeURIComponent(streamUrl)}&bvid=${encodeURIComponent(track.urlId)}&roomId=${encodeURIComponent(roomId)}`
-  }
-  if (track.source === 'kugou' || track.source === 'kugou_concept') {
-    return `${SERVER_URL}/api/music/kugou-audio-proxy?url=${encodeURIComponent(streamUrl)}`
-  }
-  return streamUrl
-}
+const buildPlaybackUrl = (track: Track, streamUrl: string): string => playbackUrlFor(track, streamUrl)
 
 /**
  * Manages a Howl audio instance with two-phase loading strategy:
@@ -111,10 +135,16 @@ export function useHowl(
   const scheduledStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const outgoingHowlRef = useRef<Howl | null>(null)
   const outgoingCleanupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** 本次接歌是否已由 scheduleAutomixBlend 排布曲线（避免 unmute 再用旧曲线覆盖）。 */
+  const styledBlendRef = useRef(false)
   const preparedTrackRef = useRef<Track | null>(null)
   const stretchRef = useRef<TimeStretchController | null>(null)
   const stretchReadyRef = useRef<Promise<TimeStretchController | null> | null>(null)
   const preloadedRef = useRef<PreloadedHowl | null>(null)
+  const stemStopRef = useRef<(() => void) | null>(null)
+  const stemCleanupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** 过渡开始后对元素位置做时钟拟合；偏离服务端时间线过多时补一次对齐。 */
+  const deckFitTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Use selectors for the one reactive value we need (volume sync effect)
   const volume = usePlayerStore((s) => s.volume)
@@ -191,6 +221,8 @@ export function useHowl(
       // 初始化尚未完成的元素必须在 unload 放回池后立即摘除，防止下一首歌
       // 复用它，同时旧异步任务又在后台给同一元素建图并覆盖全局 tap。
       finalizeTimeStretchRelease?.()
+      // 元素已经卸载，blob URL 此时释放不会打断正在播放的媒体。
+      revokeHowlBlobUrl(howl)
     }
     // 换歌/卸载时逐帧时钟也必须作废：`releaseTimeStretch` 之后 rAF 可能仍在
     // 旧 Howl 上跑一拍，留下上一首的位置。清掉后消费方立刻回退到 store。
@@ -208,6 +240,7 @@ export function useHowl(
     } catch {
       /* ignore */
     }
+    revokeHowlBlobUrl(preloaded.howl)
   }, [])
 
   const pausePlayback = useCallback(
@@ -238,6 +271,8 @@ export function useHowl(
         clearTimeout(outgoingCleanupTimerRef.current)
         outgoingCleanupTimerRef.current = null
       }
+      resetTempoBend(mediaElementOf(outgoingHowlRef.current))
+      resetAutomixTone(outgoingHowlRef.current)
       disposeHowl(outgoingHowlRef.current)
       outgoingHowlRef.current = null
     },
@@ -254,9 +289,22 @@ export function useHowl(
       clearTimeout(outgoingCleanupTimerRef.current)
       outgoingCleanupTimerRef.current = null
     }
+    if (stemCleanupTimerRef.current) {
+      clearTimeout(stemCleanupTimerRef.current)
+      stemCleanupTimerRef.current = null
+    }
+    if (deckFitTimerRef.current) {
+      clearInterval(deckFitTimerRef.current)
+      deckFitTimerRef.current = null
+    }
+    stemStopRef.current?.()
+    stemStopRef.current = null
     disposePreloaded()
     const current = howlRef.current
     const outgoing = outgoingHowlRef.current
+    if (outgoing !== current) resetTempoBend(mediaElementOf(outgoing))
+    resetAutomixTone(current)
+    resetAutomixTone(outgoing)
     disposeHowl(current)
     if (outgoing !== current) disposeHowl(outgoing)
     howlRef.current = null
@@ -344,6 +392,9 @@ export function useHowl(
   const handleHowlPlay = useCallback(
     (howl: Howl, track: Track, soundId: number) => {
       if (howlRef.current !== howl) return
+      // 服务端下发的自动混音过渡参数只作用于这一次接歌；没有则回落到设置值。
+      const takenTransition = takePendingAutomixTransition()
+      styledBlendRef.current = false
 
       // 上游 `14-player-controls.js:384` —— 播放态确立即撤加载态。
       // 与 onload 那一处重复是**有意的**：onload 之后仍要 seek/对齐/
@@ -358,6 +409,12 @@ export function useHowl(
         )
         howl.volume(0, soundId)
         setHowlPosition(howl, alignedTime, soundId)
+        const previousTrack = usePlayerStore.getState().currentTrack
+        // 本地 hold/暂停后延迟到达的 onplay 可能带着上一对曲目的计划；只认
+        // 服务端为这次接歌下发的 from→to 组合。
+        const transition =
+          takenTransition && previousTrack?.id === takenTransition.fromTrackId ? takenTransition : null
+        const transitionMs = transition?.overlapMs ?? null
         usePlayerStore.getState().setCurrentTrack(track)
         usePlayerStore.getState().setCurrentTime(alignedTime)
         const duration = howl.duration()
@@ -367,19 +424,205 @@ export function useHowl(
         scheduledStart.onCommit?.()
         scheduledStartRef.current = null
         const outgoing = outgoingHowlRef.current
+        let stemActive = false
         if (outgoing && outgoing !== howl) {
           outgoingHowlRef.current = null
-          // outgoing 音量为 0 时 fade(0→0) 会让 Howler 的 fade tween 永久
-          // 空转（同下方 unmute 处的注释）；直接 dispose 前不必渐弱。
-          const crossfadeMs = trackCrossfadeMs()
-          if (outgoing.volume() > 0 && crossfadeMs > 0) {
+          const crossfadeMs = transitionMs ?? trackCrossfadeMs()
+          // 真正的混合才画换歌交接；硬切没有可展开的窗口。
+          if (previousTrack && previousTrack.id !== track.id && crossfadeMs >= 400) {
+            const startsAt = scheduledStart.executeAt
+            const bpm = transition?.bpm ?? null
+            announceTransition({
+              incoming: track,
+              fromTrackId: previousTrack.id,
+              startsAt,
+              seconds: crossfadeMs / 1000,
+              crossover: transition?.crossover ?? 0.5,
+              periodSec: bpm && bpm > 0 ? 60 / bpm : null,
+              // 没有 automix 计划的交叉淡化，以及 planner 明确给的 plainBlend，都是纯淡化。
+              plain: !transition || (transition.style ?? 'plainBlend') === 'plainBlend'
+                ? true
+                : undefined,
+            })
+            window.setTimeout(() => settleTransition(startsAt), crossfadeMs + 120)
+            diagMark(
+              `blend ${transition?.style ?? 'crossfade'} ${(crossfadeMs / 1000).toFixed(2)}s`
+              + `, crossover ${(transition?.crossover ?? 0.5).toFixed(2)}`
+              + `, profiles: outgoing ${transition?.outgoingReferenceDb != null ? 'yes' : 'no'}`
+              + `, incoming ${transition?.incomingReferenceDb != null ? 'yes' : 'no'}`,
+            )
+          }
+
+          // 单人房的 stem 接管：过渡窗口内两首歌都由分轨 deck 出声，元素静音。
+          // 任一侧没有可用音频图就放弃并回退普通淡化，避免半接管造成静音。
+          // 房间里出现第二个听众时停用分轨：听感统一由服务端下发，分轨只服务单人。
+          const soloRoom = (useRoomStore.getState().room?.users.length ?? 0) <= 1
+          // 服务端排定的入歌落点是 plan key 的一部分；带上它才能取到同一份窗口。
+          const plannedStem = getPendingAutomixPlan()
+          const stemInStart =
+            plannedStem &&
+            plannedStem.fromTrackId === previousTrack?.id &&
+            plannedStem.toTrackId === track.id
+              ? plannedStem.inStartMs / 1000
+              : undefined
+          const stemPlan =
+            soloRoom &&
+            transitionMs &&
+            transition?.style !== 'beatCut' &&
+            previousTrack &&
+            previousTrack.id !== track.id
+              ? takeStemTransition(previousTrack.id, track.id, transitionMs / 1000, stemInStart)
+              : null
+          // 元素已经播了这么久，deck 跳过同样的前段，保持同一时间线。
+          const serverElapsed = Math.max(
+            0,
+            Math.min(1, (getServerTime() - scheduledStart.executeAt) / 1000),
+          )
+          if (stemPlan && Howler.ctx && serverElapsed <= 0.5) {
+            // 媒体元素的 currentTime 才是真值；服务端时钟只用来判断是否已经开播。
+            const inEl = mediaElementOf(howl)
+            const outEl = mediaElementOf(outgoing)
+            const usable = (value: number): boolean =>
+              Number.isFinite(value) && value >= -0.05 && value <= 0.5
+            const inMediaElapsed = inEl
+              ? inEl.currentTime - stemPlan.incomingStartSec
+              : Number.NaN
+            const outMediaElapsed = outEl
+              ? outEl.currentTime - stemPlan.outgoingStartSec
+              : Number.NaN
+            const inElapsed = usable(inMediaElapsed)
+              ? Math.max(0, inMediaElapsed)
+              : serverElapsed
+            const outElapsed = usable(outMediaElapsed)
+              ? Math.max(0, outMediaElapsed)
+              : serverElapsed
+            const windowMs = transitionMs ?? 0
+            const incomingMuted = setHowlGraphMuted(howl, true, STEM_SPLICE_SEC)
+            const outgoingMuted = incomingMuted && setHowlGraphMuted(outgoing, true, STEM_SPLICE_SEC)
+            if (outgoingMuted) {
+              diagMark(`stem handover ${windowMs.toFixed(2)}s (${stemPlan.fromId} -> ${stemPlan.toId})`)
+              // 两侧已经静音，起分轨这步失败必须当场松开，否则整首歌都不会再出声。
+              let stopped: (() => void) | null = null
+              try {
+                stopped = startStemTransition(
+                  stemPlan,
+                  Howler.ctx.currentTime + 0.01,
+                  outElapsed,
+                  inElapsed,
+                  getStemInput(outgoing),
+                  getStemInput(howl),
+                )
+              } catch (error) {
+                console.warn('分轨交接失败，回退普通淡化', error)
+                setHowlGraphMuted(outgoing, false, 0.01)
+                setHowlGraphMuted(howl, false, 0.01)
+              }
+              if (stopped) {
+                stemActive = true
+                stemStopRef.current = stopped
+                if (stemCleanupTimerRef.current) clearTimeout(stemCleanupTimerRef.current)
+                stemCleanupTimerRef.current = setTimeout(() => {
+                  stemCleanupTimerRef.current = null
+                  stemStopRef.current?.()
+                  stemStopRef.current = null
+                  if (howlRef.current === howl) setHowlGraphMuted(howl, false, STEM_SPLICE_SEC)
+                }, windowMs + 60)
+              }
+            } else if (incomingMuted) {
+              setHowlGraphMuted(howl, false, 0.01)
+            }
+          }
+
+          // 上游 tempoBend：单人房、非硬切、不走分轨时，让出歌按入歌速度播放，
+          // 音高由元素自己的 preservesPitch 修正。房间场景不做，避免各设备速度不一。
+          const planForPair =
+            transition && previousTrack && transition.fromTrackId === previousTrack.id
+              ? transition
+              : null
+          const style = planForPair?.style ?? 'plainBlend'
+          const tailElement = mediaElementOf(outgoing)
+          // 用户自定义播放速度也占用元素 rate，叠加两种伸缩会互相覆盖，直接放弃 bend。
+          const bendBaseRate = tailElement?.playbackRate ?? 1
+          const bendable =
+            soloRoom &&
+            !stemActive &&
+            planForPair &&
+            style !== 'beatCut' &&
+            planForPair.overlapMs >= 800 &&
+            Math.abs((planForPair.stretch ?? 1) - 1) > 0.001 &&
+            Math.abs(bendBaseRate - 1) < 0.001
+          if (bendable) applyTempoBend(tailElement, planForPair.stretch ?? 1)
+
+          // 三段频段交接 + 回声抛送：服务端把整份计划都下发了，这里只负责执行。
+          const styled =
+            !stemActive && transitionMs && planForPair
+              ? scheduleAutomixBlend(outgoing, howl, {
+                  style,
+                  overlapSec: planForPair.overlapMs / 1000,
+                  crossover: planForPair.crossover ?? 0.5,
+                  tiltDb: planForPair.tiltDb ?? [0, 0],
+                  echoThrow: planForPair.echoThrow ?? false,
+                  bpm: planForPair.bpm ?? null,
+                  shapeBands: planForPair.shapeBands ?? false,
+                  sweepOut: planForPair.sweepOut ?? false,
+                  together: planForPair.together ?? 0,
+                  outgoingReferenceDb: planForPair.outgoingReferenceDb ?? null,
+                  incomingReferenceDb: planForPair.incomingReferenceDb ?? null,
+                })
+              : false
+          styledBlendRef.current = styled
+
+          // 上游 deckClock：媒体元素的 currentTime 是台阶，用一秒读数拟合后能得到真实位置。
+          // 过渡真正在混音时核对它是否落在服务端时间线上，偏得多了补一次对齐。
+          // 分轨 deck 以元素时间为准，不能再 seek。
+          if (deckFitTimerRef.current) {
+            clearInterval(deckFitTimerRef.current)
+            deckFitTimerRef.current = null
+          }
+          const fitElement = styled && !stemActive ? mediaElementOf(howl) : null
+          const fitContext = Howler.ctx
+          if (fitElement && fitContext && scheduledStart) {
+            const clock = createDeckClock()
+            const startedAt = fitContext.currentTime
+            deckFitTimerRef.current = setInterval(() => {
+              const timer = deckFitTimerRef.current
+              if (howlRef.current !== howl || fitElement.paused) {
+                if (timer !== null) clearInterval(timer)
+                deckFitTimerRef.current = null
+                return
+              }
+              clock.sample(fitElement.currentTime, fitContext.currentTime)
+              if (fitContext.currentTime - startedAt < 1) return
+              if (timer !== null) clearInterval(timer)
+              deckFitTimerRef.current = null
+              const fitted = clock.positionAt(fitContext.currentTime)
+              if (fitted === null) return
+              const expected = getScheduledPlaybackPosition(
+                scheduledStart.targetTime,
+                scheduledStart.executeAt,
+                getServerTime(),
+              )
+              if (Math.abs(fitted - expected) > 0.08) setHowlPosition(howl, expected, soundId)
+            }, 25)
+          }
+
+          // 非分轨时走等功率曲线；没有音频图（不支持 CORS 的直连流）才退回 Howler 线性 fade。
+          // outgoing 音量为 0 时 fade(0→0) 会让 Howler 的 fade tween 永久空转。
+          const curved = !stemActive && !styled && transitionMs
+            ? scheduleHowlTransition(outgoing, 'out', transitionMs / 1000)
+            : false
+          if (!curved && !styled && outgoing.volume() > 0 && crossfadeMs > 0) {
             outgoing.fade(outgoing.volume(), 0, crossfadeMs)
           }
           if (outgoingCleanupTimerRef.current) clearTimeout(outgoingCleanupTimerRef.current)
           outgoingCleanupTimerRef.current = setTimeout(() => {
             outgoingCleanupTimerRef.current = null
+            diagMark('settle')
+            // 元素可能被 Howler 回收复用，离开过渡时必须恢复原速与音色。
+            resetTempoBend(mediaElementOf(outgoing))
+            resetAutomixTone(outgoing)
             disposeHowl(outgoing)
-          }, crossfadeMs)
+          }, planForPair?.echoThrow ? Math.max(crossfadeMs, 700) : crossfadeMs)
         }
         if (unmuteTimerRef.current) clearTimeout(unmuteTimerRef.current)
         unmuteTimerRef.current = setTimeout(() => {
@@ -391,8 +634,20 @@ export function useHowl(
           //   （实测：设置 0.8 后 100ms 内被写回）。latestVolume=0（静音用户）
           //   精确命中这个边界。直接定位到终值即可，无需 tween。
           if (latestVolume > 0) {
-            const fadeMs = trackCrossfadeMs() || SCHEDULED_START_FADE_MS
-            howl.fade(0, latestVolume, fadeMs, soundId)
+            const fadeMs = transitionMs ?? (trackCrossfadeMs() || SCHEDULED_START_FADE_MS)
+            if (stemActive) {
+              // 分轨接管期间元素被静音闸门挡住；这里只把音量送到目标值，
+              // 窗口结束时解除静音即可原样接上。
+              howl.volume(latestVolume, soundId)
+            } else if (styledBlendRef.current) {
+              // 三段曲线已在图上，元素音量直接到目标。
+              howl.volume(latestVolume, soundId)
+            } else if (transitionMs && scheduleHowlTransition(howl, 'in', transitionMs / 1000)) {
+              // 等功率曲线在图上，元素音量直接到目标。
+              howl.volume(latestVolume, soundId)
+            } else {
+              howl.fade(0, latestVolume, fadeMs, soundId)
+            }
           } else {
             howl.volume(0, soundId)
           }
@@ -412,6 +667,14 @@ export function useHowl(
   const handleHowlPause = useCallback(
     (howl: Howl) => {
       if (howlRef.current !== howl) return
+      // 暂停时 deck 必须一起停：否则元素静音、分轨还在播。
+      if (stemCleanupTimerRef.current) {
+        clearTimeout(stemCleanupTimerRef.current)
+        stemCleanupTimerRef.current = null
+      }
+      stemStopRef.current?.()
+      stemStopRef.current = null
+      setHowlGraphMuted(howl, false, 0.02)
       usePlayerStore.getState().setIsPlaying(false)
       stopTimeUpdate()
       // ★ 逐帧时钟必须**主动清空**，不能只靠 250ms 新鲜度窗口兜底。
@@ -511,6 +774,18 @@ export function useHowl(
         clearTimeout(loadTimerRef.current)
         loadTimerRef.current = null
       }
+      // 分轨交接只服务当前这两首歌：新曲进来前先收掉 deck，
+      // 否则旧曲的分轨会压在新歌上，旧的总线也再没人断开。
+      if (stemCleanupTimerRef.current) {
+        clearTimeout(stemCleanupTimerRef.current)
+        stemCleanupTimerRef.current = null
+      }
+      if (stemStopRef.current) {
+        stemStopRef.current()
+        stemStopRef.current = null
+        // deck 收掉后元素还处于静音闸门里，恢复原始音量继续当出歌。
+        if (howlRef.current) setHowlGraphMuted(howlRef.current, false, 0.05)
+      }
 
       if (howlRef.current) {
         // Keep one audible outgoing track alive while the replacement loads.
@@ -536,12 +811,20 @@ export function useHowl(
       if (!track.streamUrl) return
 
       const preloadIdentity = preloadKey(track, track.streamUrl)
-      if (preloadedRef.current && preloadedRef.current.key !== preloadIdentity) disposePreloaded()
       const preloaded = preloadedRef.current
+      const usablePreloaded: PreloadedHowl | null =
+        preloaded &&
+        (preloaded.key === preloadIdentity ||
+          (preloaded.fromCache === true &&
+            preloaded.trackId === track.id &&
+            preloaded.trackIdentity === `${track.source}:${track.urlId}`))
+          ? preloaded
+          : null
+      if (preloaded && !usablePreloaded) disposePreloaded()
 
-      if (preloaded) {
+      if (usablePreloaded) {
         preloadedRef.current = null
-        const howl = preloaded.howl
+        const howl = usablePreloaded.howl
         howl.on('load', () => handleHowlLoad(howl, seekTo, deferCommit))
         howl.on('play', (soundId) => handleHowlPlay(howl, track, soundId))
         howl.on('pause', () => handleHowlPause(howl))
@@ -550,9 +833,10 @@ export function useHowl(
         howl.on('playerror', (soundId) => handleHowlPlayError(howl, soundId))
         howlRef.current = howl
         stretchReadyRef.current = (
-          preloaded.canTimeStretch
+          usablePreloaded.canTimeStretch
             ? attachTimeStretch(howl, {
                 tempoEnabled: useSettingsStore.getState().playbackTempoSyncEnabled,
+                automixEnabled: useRoomStore.getState().room?.automixEnabled === true,
               })
             : Promise.resolve(null)
         ).then((controller) => {
@@ -625,6 +909,7 @@ export function useHowl(
         canTimeStretch
           ? attachTimeStretch(howl, {
               tempoEnabled: useSettingsStore.getState().playbackTempoSyncEnabled,
+              automixEnabled: useRoomStore.getState().room?.automixEnabled === true,
             })
           : Promise.resolve(null)
       ).then((controller) => {
@@ -680,6 +965,12 @@ export function useHowl(
         clearTimeout(outgoingCleanupTimerRef.current)
         outgoingCleanupTimerRef.current = null
       }
+      if (stemCleanupTimerRef.current) {
+        clearTimeout(stemCleanupTimerRef.current)
+        stemCleanupTimerRef.current = null
+      }
+      stemStopRef.current?.()
+      stemStopRef.current = null
     }
   }, [stopPlayback])
 
@@ -694,12 +985,12 @@ export function useHowl(
    * 切歌时 `loadTrack` 认出同一 trackId 就接管这个实例，省掉 CDN 往返。
    */
   const preloadTrack = useCallback(
-    (track: Track, streamUrl: string) => {
-      if (!streamUrl) return
+    (track: Track, streamUrl: string, directUrl?: string) => {
+      if (!streamUrl && !directUrl) return
       const key = preloadKey(track, streamUrl)
       if (preloadedRef.current?.key === key) return
       disposePreloaded()
-      const playbackUrl = buildPlaybackUrl(track, streamUrl)
+      const playbackUrl = directUrl ?? buildPlaybackUrl(track, streamUrl)
       const canTimeStretch = prepareDirectStreamForTimeStretch(playbackUrl)
       const howl = new Howl({
         src: [playbackUrl],
@@ -708,7 +999,15 @@ export function useHowl(
         volume: 0,
         preload: true,
       })
-      preloadedRef.current = { key, howl, canTimeStretch }
+      if (directUrl) blobUrlByHowl.set(howl, directUrl)
+      preloadedRef.current = {
+        key,
+        howl,
+        canTimeStretch,
+        fromCache: Boolean(directUrl),
+        trackId: track.id,
+        trackIdentity: `${track.source}:${track.urlId}`,
+      }
       howl.once('loaderror', () => {
         if (preloadedRef.current?.howl !== howl) return
         preloadedRef.current = null
@@ -718,6 +1017,7 @@ export function useHowl(
         } catch {
           /* ignore */
         }
+        revokeHowlBlobUrl(howl)
       })
     },
     [disposePreloaded],

@@ -61,3 +61,70 @@ export function getAudioQualityLabel(quality: AudioQuality, statuses: PlatformAu
     String(quality)
   )
 }
+
+/** 标签用的短文案：无损 / Hi-Res / 320K，而不是设置页的长描述。 */
+const SHORT_LABELS: Partial<Record<AudioQuality, string>> = {
+  128: '128K',
+  192: '192K',
+  320: '320K',
+  999: 'SQ',
+  netease_hires: 'Hi-Res',
+  netease_jyeffect: '臻音',
+  netease_spatial: '环绕',
+  netease_master: '母带',
+  netease_dolby: '杜比',
+  tencent_flac: '无损',
+  tencent_master: '母带',
+  kugou_hires: 'Hi-Res',
+  kugou_master: '母带',
+  bilibili_64: '64K',
+  bilibili_132: '132K',
+  bilibili_192: '192K',
+  bilibili_hires: 'Hi-Res',
+}
+
+const LOSSLESS_QUALITIES = new Set<AudioQuality>([
+  999,
+  'netease_hires',
+  'netease_master',
+  'netease_dolby',
+  'netease_jyeffect',
+  'netease_spatial',
+  'tencent_flac',
+  'tencent_master',
+  'kugou_hires',
+  'kugou_master',
+  'bilibili_hires',
+])
+
+export function getShortAudioQualityLabel(quality?: AudioQuality | null, bitrate?: number | null): string | null {
+  if (quality && SHORT_LABELS[quality]) return SHORT_LABELS[quality]
+  if (typeof bitrate === 'number' && Number.isFinite(bitrate) && bitrate > 0) {
+    return `${Math.round(bitrate)}K`
+  }
+  if (quality) return getAudioQualityLabel(quality)
+  return null
+}
+
+export function isLosslessAudioQuality(quality?: AudioQuality | null, bitrate?: number | null): boolean {
+  if (quality && LOSSLESS_QUALITIES.has(quality)) return true
+  return typeof bitrate === 'number' && bitrate >= 900
+}
+
+export function getAudioQualityBadgeTooltip(options: {
+  quality?: AudioQuality | null
+  bitrate?: number | null
+  downgraded?: boolean
+  requested?: AudioQuality | null
+}): string {
+  const actual =
+    options.quality !== undefined && options.quality !== null
+      ? getAudioQualityLabel(options.quality)
+      : typeof options.bitrate === 'number' && Number.isFinite(options.bitrate)
+        ? `${Math.round(options.bitrate)} kbps`
+        : '未知'
+  const parts = [`实际音质：${actual}`]
+  if (options.requested) parts.push(`房间期望：${getAudioQualityLabel(options.requested)}`)
+  if (options.downgraded) parts.push('已降级')
+  return parts.join(' · ')
+}

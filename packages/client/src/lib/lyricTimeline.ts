@@ -930,11 +930,32 @@ function normalizeLine(line: LyricLine): LyricLine | null {
   const validWordEndTime = timedWords.length > 0 ? Math.max(...timedWords.map((word) => word.endTime)) : -Infinity
   const fallbackStartTime = hasValidLineRange ? line.startTime : validWordStartTime
   const fallbackEndTime = hasValidLineRange ? line.endTime : validWordEndTime
-  const words = line.words.map((word) =>
-    isValidRange(word.startTime, word.endTime)
-      ? { ...word }
-      : { ...word, startTime: fallbackStartTime, endTime: fallbackEndTime },
-  )
+  // 整行没有任何字级时间时，与上游的整行回退词一致：合并成一个词占满整行。
+  // 不能把每个词都填成整行区间 —— 那会让多个词同时满足 AMLL 的强调辉光条件，
+  // 并把逐字遮罩的时间线游标拉回行首，导致本行后续词不再点亮。
+  // 只有部分词有效时，零时长占位词收成一个时间点（跟随前一个有效词的结束），
+  // 既保住文本顺序，又不制造重叠。
+  let words: LyricWord[]
+  if (timedWords.length === 0) {
+    const [first] = line.words
+    words = [
+      {
+        ...first,
+        word: line.words.map((word) => word.word).join(''),
+        startTime: fallbackStartTime,
+        endTime: fallbackEndTime,
+      },
+    ]
+  } else {
+    let cursor = fallbackStartTime
+    words = line.words.map((word) => {
+      if (isValidRange(word.startTime, word.endTime)) {
+        cursor = Math.max(cursor, word.endTime)
+        return { ...word }
+      }
+      return { ...word, startTime: cursor, endTime: cursor }
+    })
+  }
   const wordStartTime = Math.min(...words.map((word) => word.startTime))
   const wordEndTime = Math.max(...words.map((word) => word.endTime))
   const startTime = hasValidLineRange ? Math.min(line.startTime, wordStartTime) : wordStartTime

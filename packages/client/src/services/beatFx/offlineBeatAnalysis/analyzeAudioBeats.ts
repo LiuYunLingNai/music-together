@@ -38,6 +38,8 @@ import { beginAnalysisActivity, endAnalysisActivity } from '../analysisActivity'
 import { analyzeModelBeatMap } from '../../analysis/beatThisTrackMap'
 import { measureLoudness } from './loudness'
 import { computeTrackFeatures } from './trackFeatures'
+import { fetchAudioBytes, commitAudioBytesToCache } from '@/lib/audioBytes'
+import { wholeSongVerdict } from '@/lib/wholeSongCheck'
 
 /** 分析选项 —— 上游 `options`（`prefetch` 已剔除，本项目无预取）。 */
 export interface AnalyzeOptions {
@@ -46,6 +48,10 @@ export interface AnalyzeOptions {
   /** 跳过 music-tempo（上游 `skipMusicTempoWhilePlaying`，出厂 false）。 */
   skipMusicTempo?: boolean
   song?: { name?: string; title?: string; artist?: string } | null
+  /** 会话内音频字节复用键；缺省用 URL。 */
+  bytesKey?: string
+  /** 曲目声明时长；用于识别试听片段，避免污染媒体缓存。 */
+  durationSec?: number
   /** 顺带测量整曲响度（ReplayGain 开启时）。 */
   wantLoudness?: boolean
   /** 顺带计算 Folia 的混音特征（鼓点 / 人声包络）。 */
@@ -54,6 +60,8 @@ export interface AnalyzeOptions {
   highPrecisionBeats?: boolean
   /** 用 htdemucs 真分轨计算鼓点 / 人声特征；不可用或失败时回退混音近似。 */
   highPrecisionStems?: boolean
+  /** 顺带计算自动混音的曲目画像（房间开启自动混音时）。 */
+  wantProfile?: boolean
 }
 
 /** 上游 `beatAnalysisYieldMs`（`01-scene/02-beat-camera-runtime.js:358-363`），预取项已剔除。 */
@@ -113,10 +121,12 @@ export async function analyzeAudioBeats(
     await yieldToIdle(yieldMs(options, 140))
     if (!isCurrent(token)) return null
 
-    const resp = await fetch(audioUrl)
+    const ab = await fetchAudioBytes(options.bytesKey ?? audioUrl, audioUrl, {
+      persist: true,
+      statedDurationSec: options.durationSec ?? null,
+    })
     if (!isCurrent(token)) return null
-    const ab = await resp.arrayBuffer()
-    if (!isCurrent(token)) return null
+    if (!ab) return null
 
     // 上游 `:18-26`：解码用独立的 AudioContext（实时那个可能已 closed），
     // 频段渲染用 OfflineAudioContext。
@@ -140,7 +150,41 @@ export async function analyzeAudioBeats(
     })
     if (dc.close) await dc.close()
     if (!buffer) return null
+    // 试听片段不能代表整首歌：不产出拍点图，也不写缓存。
+    if (wholeSongVerdict(buffer.duration, options.durationSec) === 'not-the-song') {
+      commitAudioBytesToCache(options.bytesKey ?? audioUrl, buffer.duration, options.durationSec ?? null)
+      return null
+    }
+    commitAudioBytesToCache(options.bytesKey ?? audioUrl, buffer.duration, options.durationSec ?? null)
     if (!isCurrent(token)) return null
+
+    /** 自动混音画像：只在房间开启自动混音时计算，未开启不付出这份 CPU。 */
+    const computeProfile = async (
+      grid?: import('@/services/analysis/beatThis').BeatGrid | null,
+    ): Promise<BeatMap['profile']> => {
+      if (!options.wantProfile) return undefined
+      try {
+        const { analyseTrack } = await import('@/lib/automix/upstream/trackProfile')
+        const left = buffer!.getChannelData(0)
+        const right = buffer!.numberOfChannels > 1 ? buffer!.getChannelData(1) : left
+        const mono = new Float32Array(buffer!.length)
+        const side = buffer!.numberOfChannels > 1 ? new Float32Array(buffer!.length) : null
+        for (let index = 0; index < mono.length; index += 1) {
+          const l = left[index]!
+          const r = right[index]!
+          mono[index] = (l + r) / 2
+          if (side) side[index] = (l - r) / 2
+        }
+        return (await analyseTrack(mono, buffer!.sampleRate, {
+          side,
+          grid,
+          gridless: !grid,
+        })) ?? undefined
+      } catch (error) {
+        console.warn('track profile failed:', error)
+        return undefined
+      }
+    }
 
     if (options.highPrecisionBeats) {
       const modelMap = await analyzeModelBeatMap(
@@ -154,7 +198,10 @@ export async function analyzeAudioBeats(
           wantStems: options.highPrecisionStems,
         },
       )
-      if (modelMap) return modelMap
+      if (modelMap) {
+        const profile = await computeProfile(modelMap.beatGrid)
+        return profile ? { ...modelMap, profile } : modelMap
+      }
       if (!isCurrent(token)) return null
     }
 
@@ -615,6 +662,8 @@ export async function analyzeAudioBeats(
         })
       : undefined
     if (!isCurrent(token)) return null
+    const profile = await computeProfile()
+    if (!isCurrent(token)) return null
 
     return {
       kicks,
@@ -629,6 +678,7 @@ export async function analyzeAudioBeats(
       analyzedAt: Date.now(),
       loudness,
       features: features ?? undefined,
+      profile,
     }
   } catch (e) {
     console.warn('beat analysis failed:', e)

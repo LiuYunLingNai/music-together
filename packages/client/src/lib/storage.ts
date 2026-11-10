@@ -2,13 +2,14 @@ import { NTP, type MusicSource } from '@music-together/shared'
 import { SYNC_PACKET_INTERVAL_MAX_SECONDS, SYNC_PACKET_INTERVAL_MIN_SECONDS } from '@/lib/constants'
 import { isLyricLineRule, type LyricLineRule } from '@/lib/lyrics/lyricLineRules'
 import { normalizeFoliaSettings, type FoliaSettings } from './foliaSettings'
+import { COARSE_POINTER_QUERY } from './pointer'
 import { DEFAULT_SMART_BEAT_SETTINGS, type SmartBeatSettings } from '@/services/beatFx/beatFxTypes'
 import { resolveSmartBeatSettings, type SmartBeatPatch } from '@/services/beatFx/smartBeatSettings'
 import { FOLIA_MODES } from './foliaModes'
 
 const PREFIX = 'mt-'
 const SETTINGS_SCHEMA_VERSION_KEY = 'settingsSchemaVersion'
-const SETTINGS_SCHEMA_VERSION = 3
+const SETTINGS_SCHEMA_VERSION = 4
 
 function safeGet(key: string): string | null {
   try {
@@ -32,6 +33,19 @@ function safeRemove(key: string): void {
   } catch {
     // blocked
   }
+}
+
+function readBool(key: string, fallback: boolean): boolean {
+  const raw = safeGet(key)
+  return raw === null ? fallback : raw !== 'false'
+}
+
+function readInt(key: string, fallback: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, safeInt(key, fallback)))
+}
+
+function readFloat(key: string, fallback: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, safeFloat(key, fallback)))
 }
 
 // ---------------------------------------------------------------------------
@@ -117,6 +131,10 @@ function safeEnum<T extends string>(key: string, allowed: readonly T[], fallback
  * running again on reload or restart.
  * Version 2 adds the opt-in hard-seek fallback used while tempo correction is
  * disabled.
+ * Version 4 splits the settings shared by the three player families: AMLL lyric
+ * controls are copied into `classic…` / `mineradio…`, typography into both plus
+ * `folia…`, and Folia's frame rate / quality get their own keys. The legacy
+ * keys are removed so the families no longer write to the same slot.
  */
 function migrateSettings(): void {
   const storedVersion = Math.max(0, safeInt(SETTINGS_SCHEMA_VERSION_KEY, 0))
@@ -137,6 +155,47 @@ function migrateSettings(): void {
     const migrated =
       previous === 'low' ? 'eco' : previous === 'medium' ? 'balanced' : previous === 'high' ? 'high' : null
     if (migrated) safeSet('visualQuality', migrated)
+  }
+
+  if (storedVersion < 4) {
+    // AMLL 歌词设置按播放器族拆分：经典与 3D（AMLL 模式）各继承一份旧值。
+    const AMLL_SPLIT_SUFFIXES = [
+      'AlignAnchor',
+      'AlignPosition',
+      'EnableSpring',
+      'EnableBlur',
+      'EnableScale',
+      'HidePassedLines',
+      'ShowBottomLine',
+      'MaskObsceneWordsMode',
+      'MaskObsceneWordChar',
+      'WordFadeWidth',
+    ]
+    for (const suffix of AMLL_SPLIT_SUFFIXES) {
+      const legacy = safeGet(`lyric${suffix}`)
+      if (legacy !== null) {
+        safeSet(`classicLyric${suffix}`, legacy)
+        safeSet(`mineradioLyric${suffix}`, legacy)
+      }
+      safeRemove(`lyric${suffix}`)
+    }
+
+    // 字号/粗细三族共用过：复制到三族，各自独立。
+    for (const suffix of ['FontSize', 'FontWeight']) {
+      const legacy = safeGet(`lyric${suffix}`)
+      if (legacy !== null) {
+        safeSet(`classicLyric${suffix}`, legacy)
+        safeSet(`mineradioLyric${suffix}`, legacy)
+        safeSet(`foliaLyric${suffix}`, legacy)
+      }
+      safeRemove(`lyric${suffix}`)
+    }
+
+    // Folia 原先借用经典背景的帧率与 3D 的画质。
+    const fps = safeGet('bgFps')
+    if (fps !== null) safeSet('foliaFrameRate', fps)
+    const quality = safeGet('visualQuality')
+    if (quality !== null) safeSet('foliaVisualQuality', quality)
   }
 
   safeSet(SETTINGS_SCHEMA_VERSION_KEY, String(SETTINGS_SCHEMA_VERSION))
@@ -218,39 +277,113 @@ export type LyricPreferredSource = (typeof LYRIC_PREFERRED_SOURCES)[number]
 
 const LEGACY_TTML_DB_URL = 'https://amlldb.bikonoo.com/ncm-lyrics/%s.ttml'
 
+/** AMLL 背景渲染器 — 与上游 amll-player 设置面板暴露的选项一致 */
+export const BG_RENDERERS = ['mesh', 'pixi', 'isolation', 'css-bg'] as const
+export type BgRendererSetting = (typeof BG_RENDERERS)[number]
+
+/** AMLL 歌词控制的出厂值 —— 经典与 3D 两族各持一份（schema v4 起互不影响）。 */
+const AMLL_LYRIC_DEFAULTS = {
+  AlignAnchor: 'center' as 'top' | 'center' | 'bottom',
+  AlignPosition: 0.4,
+  EnableSpring: true,
+  EnableBlur: false,
+  EnableScale: true,
+  HidePassedLines: false,
+  ShowBottomLine: true,
+  MaskObsceneWordsMode: '' as '' | 'full-mask' | 'partial-mask',
+  MaskObsceneWordChar: '*',
+  WordFadeWidth: 0.5,
+  ShowTranslation: true,
+  ShowRoman: true,
+  SwapTransRoman: false,
+  FontWeight: 600,
+  FontSize: 90,
+}
+
+/** 触屏设备：背景渲染改用更省电的出厂值，用户显式改过则以其值为准。 */
+function liteBackground(): boolean {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia(COARSE_POINTER_QUERY).matches
+    : false
+}
+
+export function getBgFpsDefault(): number {
+  return liteBackground() ? 30 : SETTING_DEFAULTS.bgFps
+}
+
+export function getBgRenderScaleDefault(): number {
+  return liteBackground() ? 0.5 : SETTING_DEFAULTS.bgRenderScale
+}
+
 /** 所有持久化设置项的默认值 — 供 store 层的 resettable 工厂使用 */
 export const SETTING_DEFAULTS = {
   playbackTempoSyncEnabled: false,
   playbackHardSeekSyncEnabled: false,
+  transitionCueEnabled: true,
+  songHandoffAnimation: true,
+  classicImmersiveCover: false,
+  dynamicCoverEnabled: true,
+  /** 进度时间显示剩余还是已播放（AMLL Player 同款点击切换）。 */
+  showRemainingTime: true,
+  /** AMLL 歌词字体族与字距；空字符串表示沿用 AMLL 默认。 */
+  lyricFontFamily: '',
+  lyricLetterSpacing: '',
   syncPacketIntervalSeconds: NTP.STEADY_STATE_INTERVAL_MS / 1000,
   ttmlEnabled: true,
   ttmlDbUrl: 'https://api.beta.amllhub.bikonoo.com/api/v1/lyrics/ncm-lyrics/%s.ttml',
   lyricPreferredSource: 'auto' as LyricPreferredSource,
-  lyricAlignAnchor: 'center' as 'top' | 'center' | 'bottom',
-  lyricAlignPosition: 0.4,
-  lyricEnableSpring: true,
-  lyricEnableBlur: false,
-  lyricEnableScale: true,
-  lyricHidePassedLines: false,
-  lyricShowBottomLine: true,
-  lyricMaskObsceneWordsMode: '' as '' | 'full-mask' | 'partial-mask',
-  lyricMaskObsceneWordChar: '*',
-  lyricWordFadeWidth: 0.5,
-  lyricFontWeight: 600,
-  lyricFontSize: 90,
+  classicLyricAlignAnchor: AMLL_LYRIC_DEFAULTS.AlignAnchor,
+  classicLyricAlignPosition: AMLL_LYRIC_DEFAULTS.AlignPosition,
+  classicLyricEnableSpring: AMLL_LYRIC_DEFAULTS.EnableSpring,
+  classicLyricEnableBlur: true,
+  classicLyricEnableScale: AMLL_LYRIC_DEFAULTS.EnableScale,
+  classicLyricHidePassedLines: AMLL_LYRIC_DEFAULTS.HidePassedLines,
+  classicLyricShowBottomLine: AMLL_LYRIC_DEFAULTS.ShowBottomLine,
+  classicLyricMaskObsceneWordsMode: AMLL_LYRIC_DEFAULTS.MaskObsceneWordsMode,
+  classicLyricMaskObsceneWordChar: AMLL_LYRIC_DEFAULTS.MaskObsceneWordChar,
+  classicLyricWordFadeWidth: AMLL_LYRIC_DEFAULTS.WordFadeWidth,
+  classicLyricShowTranslation: AMLL_LYRIC_DEFAULTS.ShowTranslation,
+  classicLyricShowRoman: AMLL_LYRIC_DEFAULTS.ShowRoman,
+  classicLyricSwapTransRoman: AMLL_LYRIC_DEFAULTS.SwapTransRoman,
+  classicLyricFontWeight: AMLL_LYRIC_DEFAULTS.FontWeight,
+  classicLyricFontSize: AMLL_LYRIC_DEFAULTS.FontSize,
+  mineradioLyricAlignAnchor: AMLL_LYRIC_DEFAULTS.AlignAnchor,
+  mineradioLyricAlignPosition: AMLL_LYRIC_DEFAULTS.AlignPosition,
+  mineradioLyricEnableSpring: AMLL_LYRIC_DEFAULTS.EnableSpring,
+  mineradioLyricEnableBlur: AMLL_LYRIC_DEFAULTS.EnableBlur,
+  mineradioLyricEnableScale: AMLL_LYRIC_DEFAULTS.EnableScale,
+  mineradioLyricHidePassedLines: AMLL_LYRIC_DEFAULTS.HidePassedLines,
+  mineradioLyricShowBottomLine: AMLL_LYRIC_DEFAULTS.ShowBottomLine,
+  mineradioLyricMaskObsceneWordsMode: AMLL_LYRIC_DEFAULTS.MaskObsceneWordsMode,
+  mineradioLyricMaskObsceneWordChar: AMLL_LYRIC_DEFAULTS.MaskObsceneWordChar,
+  mineradioLyricWordFadeWidth: AMLL_LYRIC_DEFAULTS.WordFadeWidth,
+  mineradioLyricShowTranslation: AMLL_LYRIC_DEFAULTS.ShowTranslation,
+  mineradioLyricShowRoman: AMLL_LYRIC_DEFAULTS.ShowRoman,
+  mineradioLyricSwapTransRoman: AMLL_LYRIC_DEFAULTS.SwapTransRoman,
+  mineradioLyricFontWeight: AMLL_LYRIC_DEFAULTS.FontWeight,
+  mineradioLyricFontSize: AMLL_LYRIC_DEFAULTS.FontSize,
+  foliaLyricFontWeight: AMLL_LYRIC_DEFAULTS.FontWeight,
+  foliaLyricFontSize: AMLL_LYRIC_DEFAULTS.FontSize,
   lyricTranslationFontSize: 75,
   lyricRomanFontSize: 75,
   lyricLineRules: [] as LyricLineRule[],
   lyricOffsets: {} as Record<string, number>,
-  bgFps: 30,
+  bgFps: 60,
   bgFlowSpeed: 2,
-  bgRenderScale: 0.5,
+  bgRenderScale: 1,
+  bgRenderer: 'mesh' as BgRendererSetting,
+  bgCssBackground: '#111111',
   visualStage: 'classic' as VisualStageSetting,
   visualQuality: 'auto' as VisualQualitySetting,
+  /** Folia 的动画驱动帧率与画质 —— 与经典背景/3D 舞台互相独立。 */
+  foliaFrameRate: 60,
+  foliaVisualQuality: 'auto' as VisualQualitySetting,
   /** 粒子溢光（上游 fx.bloom，出厂关闭）。 */
   visualBloom: false,
   /** 轮廓高亮（上游 fx.edge，出厂关闭）。 */
   visualEdge: false,
+  /** 3D 舞台控制条空闲淡出（出厂开）。 */
+  stageConsoleAutoFade: true,
   lyricRenderer: 'webgl' as LyricRendererSetting,
   lyricMotion: 'float' as LyricMotionSetting,
   lyricDisplayMode3d: 'cinema' as LyricDisplaySetting,
@@ -307,6 +440,20 @@ export const storage = {
   setPlaybackTempoSyncEnabled: (v: boolean) => safeSet('playbackTempoSyncEnabled', String(v)),
   getPlaybackHardSeekSyncEnabled: () => safeGet('playbackHardSeekSyncEnabled') === 'true',
   setPlaybackHardSeekSyncEnabled: (v: boolean) => safeSet('playbackHardSeekSyncEnabled', String(v)),
+  getTransitionCueEnabled: () => safeGet('transitionCueEnabled') !== 'false',
+  setTransitionCueEnabled: (v: boolean) => safeSet('transitionCueEnabled', String(v)),
+  getSongHandoffAnimation: () => safeGet('songHandoffAnimation') !== 'false',
+  setSongHandoffAnimation: (v: boolean) => safeSet('songHandoffAnimation', String(v)),
+  getClassicImmersiveCover: () => safeGet('classicImmersiveCover') === 'true',
+  setClassicImmersiveCover: (v: boolean) => safeSet('classicImmersiveCover', String(v)),
+  getDynamicCoverEnabled: () => safeGet('dynamicCoverEnabled') !== 'false',
+  setDynamicCoverEnabled: (v: boolean) => safeSet('dynamicCoverEnabled', String(v)),
+  getShowRemainingTime: () => readBool('showRemainingTime', true),
+  setShowRemainingTime: (v: boolean) => safeSet('showRemainingTime', String(v)),
+  getLyricFontFamily: () => safeGet('lyricFontFamily') ?? '',
+  setLyricFontFamily: (v: string) => safeSet('lyricFontFamily', v),
+  getLyricLetterSpacing: () => safeGet('lyricLetterSpacing') ?? '',
+  setLyricLetterSpacing: (v: string) => safeSet('lyricLetterSpacing', v),
 
   getSyncPacketIntervalSeconds: () => {
     const seconds = safeInt('syncPacketIntervalSeconds', SETTING_DEFAULTS.syncPacketIntervalSeconds)
@@ -314,68 +461,94 @@ export const storage = {
   },
   setSyncPacketIntervalSeconds: (v: number) => safeSet('syncPacketIntervalSeconds', String(v)),
 
-  // Lyric settings
-  getLyricAlignAnchor: () => safeEnum('lyricAlignAnchor', LYRIC_ANCHORS, SETTING_DEFAULTS.lyricAlignAnchor),
-  setLyricAlignAnchor: (v: (typeof LYRIC_ANCHORS)[number]) => safeSet('lyricAlignAnchor', v),
+  // 经典播放器 — AMLL 歌词
+  getClassicLyricAlignAnchor: () => safeEnum('classicLyricAlignAnchor', LYRIC_ANCHORS, AMLL_LYRIC_DEFAULTS.AlignAnchor),
+  setClassicLyricAlignAnchor: (v: (typeof LYRIC_ANCHORS)[number]) => safeSet('classicLyricAlignAnchor', v),
+  getClassicLyricAlignPosition: () => readFloat('classicLyricAlignPosition', AMLL_LYRIC_DEFAULTS.AlignPosition, 0, 1),
+  setClassicLyricAlignPosition: (v: number) => safeSet('classicLyricAlignPosition', String(v)),
+  getClassicLyricEnableSpring: () => readBool('classicLyricEnableSpring', AMLL_LYRIC_DEFAULTS.EnableSpring),
+  setClassicLyricEnableSpring: (v: boolean) => safeSet('classicLyricEnableSpring', String(v)),
+  getClassicLyricEnableBlur: () => readBool('classicLyricEnableBlur', true),
+  setClassicLyricEnableBlur: (v: boolean) => safeSet('classicLyricEnableBlur', String(v)),
+  getClassicLyricEnableScale: () => readBool('classicLyricEnableScale', AMLL_LYRIC_DEFAULTS.EnableScale),
+  setClassicLyricEnableScale: (v: boolean) => safeSet('classicLyricEnableScale', String(v)),
+  getClassicLyricHidePassedLines: () => readBool('classicLyricHidePassedLines', AMLL_LYRIC_DEFAULTS.HidePassedLines),
+  setClassicLyricHidePassedLines: (v: boolean) => safeSet('classicLyricHidePassedLines', String(v)),
+  getClassicLyricShowBottomLine: () => readBool('classicLyricShowBottomLine', AMLL_LYRIC_DEFAULTS.ShowBottomLine),
+  setClassicLyricShowBottomLine: (v: boolean) => safeSet('classicLyricShowBottomLine', String(v)),
+  getClassicLyricMaskObsceneWordsMode: () =>
+    safeEnum('classicLyricMaskObsceneWordsMode', LYRIC_MASK_MODES, AMLL_LYRIC_DEFAULTS.MaskObsceneWordsMode),
+  setClassicLyricMaskObsceneWordsMode: (v: (typeof LYRIC_MASK_MODES)[number]) =>
+    safeSet('classicLyricMaskObsceneWordsMode', v),
+  getClassicLyricMaskObsceneWordChar: () =>
+    safeGet('classicLyricMaskObsceneWordChar')?.slice(0, 1) || AMLL_LYRIC_DEFAULTS.MaskObsceneWordChar,
+  setClassicLyricMaskObsceneWordChar: (v: string) =>
+    safeSet('classicLyricMaskObsceneWordChar', v.slice(0, 1) || AMLL_LYRIC_DEFAULTS.MaskObsceneWordChar),
+  getClassicLyricWordFadeWidth: () =>
+    readFloat('classicLyricWordFadeWidth', AMLL_LYRIC_DEFAULTS.WordFadeWidth, 0.05, 2),
+  setClassicLyricWordFadeWidth: (v: number) => safeSet('classicLyricWordFadeWidth', String(v)),
+  getClassicLyricShowTranslation: () => readBool('classicLyricShowTranslation', AMLL_LYRIC_DEFAULTS.ShowTranslation),
+  setClassicLyricShowTranslation: (v: boolean) => safeSet('classicLyricShowTranslation', String(v)),
+  getClassicLyricShowRoman: () => readBool('classicLyricShowRoman', AMLL_LYRIC_DEFAULTS.ShowRoman),
+  setClassicLyricShowRoman: (v: boolean) => safeSet('classicLyricShowRoman', String(v)),
+  getClassicLyricSwapTransRoman: () => readBool('classicLyricSwapTransRoman', AMLL_LYRIC_DEFAULTS.SwapTransRoman),
+  setClassicLyricSwapTransRoman: (v: boolean) => safeSet('classicLyricSwapTransRoman', String(v)),
+  getClassicLyricFontWeight: () => readInt('classicLyricFontWeight', AMLL_LYRIC_DEFAULTS.FontWeight, 100, 900),
+  setClassicLyricFontWeight: (v: number) => safeSet('classicLyricFontWeight', String(v)),
+  getClassicLyricFontSize: () => readInt('classicLyricFontSize', AMLL_LYRIC_DEFAULTS.FontSize, 10, 200),
+  setClassicLyricFontSize: (v: number) => safeSet('classicLyricFontSize', String(v)),
 
-  getLyricAlignPosition: () => {
-    const pos = safeFloat('lyricAlignPosition', SETTING_DEFAULTS.lyricAlignPosition)
-    return Math.max(0, Math.min(1, pos))
-  },
-  setLyricAlignPosition: (v: number) => safeSet('lyricAlignPosition', String(v)),
+  // 3D 视觉舞台 — AMLL 歌词（与经典完全独立）
+  getMineradioLyricAlignAnchor: () =>
+    safeEnum('mineradioLyricAlignAnchor', LYRIC_ANCHORS, AMLL_LYRIC_DEFAULTS.AlignAnchor),
+  setMineradioLyricAlignAnchor: (v: (typeof LYRIC_ANCHORS)[number]) => safeSet('mineradioLyricAlignAnchor', v),
+  getMineradioLyricAlignPosition: () =>
+    readFloat('mineradioLyricAlignPosition', AMLL_LYRIC_DEFAULTS.AlignPosition, 0, 1),
+  setMineradioLyricAlignPosition: (v: number) => safeSet('mineradioLyricAlignPosition', String(v)),
+  getMineradioLyricEnableSpring: () => readBool('mineradioLyricEnableSpring', AMLL_LYRIC_DEFAULTS.EnableSpring),
+  setMineradioLyricEnableSpring: (v: boolean) => safeSet('mineradioLyricEnableSpring', String(v)),
+  getMineradioLyricEnableBlur: () => readBool('mineradioLyricEnableBlur', AMLL_LYRIC_DEFAULTS.EnableBlur),
+  setMineradioLyricEnableBlur: (v: boolean) => safeSet('mineradioLyricEnableBlur', String(v)),
+  getMineradioLyricEnableScale: () => readBool('mineradioLyricEnableScale', AMLL_LYRIC_DEFAULTS.EnableScale),
+  setMineradioLyricEnableScale: (v: boolean) => safeSet('mineradioLyricEnableScale', String(v)),
+  getMineradioLyricHidePassedLines: () =>
+    readBool('mineradioLyricHidePassedLines', AMLL_LYRIC_DEFAULTS.HidePassedLines),
+  setMineradioLyricHidePassedLines: (v: boolean) => safeSet('mineradioLyricHidePassedLines', String(v)),
+  getMineradioLyricShowBottomLine: () => readBool('mineradioLyricShowBottomLine', AMLL_LYRIC_DEFAULTS.ShowBottomLine),
+  setMineradioLyricShowBottomLine: (v: boolean) => safeSet('mineradioLyricShowBottomLine', String(v)),
+  getMineradioLyricMaskObsceneWordsMode: () =>
+    safeEnum('mineradioLyricMaskObsceneWordsMode', LYRIC_MASK_MODES, AMLL_LYRIC_DEFAULTS.MaskObsceneWordsMode),
+  setMineradioLyricMaskObsceneWordsMode: (v: (typeof LYRIC_MASK_MODES)[number]) =>
+    safeSet('mineradioLyricMaskObsceneWordsMode', v),
+  getMineradioLyricMaskObsceneWordChar: () =>
+    safeGet('mineradioLyricMaskObsceneWordChar')?.slice(0, 1) || AMLL_LYRIC_DEFAULTS.MaskObsceneWordChar,
+  setMineradioLyricMaskObsceneWordChar: (v: string) =>
+    safeSet('mineradioLyricMaskObsceneWordChar', v.slice(0, 1) || AMLL_LYRIC_DEFAULTS.MaskObsceneWordChar),
+  getMineradioLyricWordFadeWidth: () =>
+    readFloat('mineradioLyricWordFadeWidth', AMLL_LYRIC_DEFAULTS.WordFadeWidth, 0.05, 2),
+  setMineradioLyricWordFadeWidth: (v: number) => safeSet('mineradioLyricWordFadeWidth', String(v)),
+  getMineradioLyricShowTranslation: () =>
+    readBool('mineradioLyricShowTranslation', AMLL_LYRIC_DEFAULTS.ShowTranslation),
+  setMineradioLyricShowTranslation: (v: boolean) => safeSet('mineradioLyricShowTranslation', String(v)),
+  getMineradioLyricShowRoman: () => readBool('mineradioLyricShowRoman', AMLL_LYRIC_DEFAULTS.ShowRoman),
+  setMineradioLyricShowRoman: (v: boolean) => safeSet('mineradioLyricShowRoman', String(v)),
+  getMineradioLyricSwapTransRoman: () => readBool('mineradioLyricSwapTransRoman', AMLL_LYRIC_DEFAULTS.SwapTransRoman),
+  setMineradioLyricSwapTransRoman: (v: boolean) => safeSet('mineradioLyricSwapTransRoman', String(v)),
+  getMineradioLyricFontWeight: () => readInt('mineradioLyricFontWeight', AMLL_LYRIC_DEFAULTS.FontWeight, 100, 900),
+  setMineradioLyricFontWeight: (v: number) => safeSet('mineradioLyricFontWeight', String(v)),
+  getMineradioLyricFontSize: () => readInt('mineradioLyricFontSize', AMLL_LYRIC_DEFAULTS.FontSize, 10, 200),
+  setMineradioLyricFontSize: (v: number) => safeSet('mineradioLyricFontSize', String(v)),
 
-  getLyricEnableSpring: () => safeGet('lyricEnableSpring') !== 'false',
-  setLyricEnableSpring: (v: boolean) => safeSet('lyricEnableSpring', String(v)),
-
-  getLyricEnableBlur: () => safeGet('lyricEnableBlur') === 'true',
-  setLyricEnableBlur: (v: boolean) => safeSet('lyricEnableBlur', String(v)),
-
-  getLyricEnableScale: () => safeGet('lyricEnableScale') !== 'false',
-  setLyricEnableScale: (v: boolean) => safeSet('lyricEnableScale', String(v)),
-
-  getLyricHidePassedLines: () => safeGet('lyricHidePassedLines') === 'true',
-  setLyricHidePassedLines: (v: boolean) => safeSet('lyricHidePassedLines', String(v)),
-
-  getLyricShowBottomLine: () => safeGet('lyricShowBottomLine') !== 'false',
-  setLyricShowBottomLine: (v: boolean) => safeSet('lyricShowBottomLine', String(v)),
-
-  getLyricMaskObsceneWordsMode: () =>
-    safeEnum('lyricMaskObsceneWordsMode', LYRIC_MASK_MODES, SETTING_DEFAULTS.lyricMaskObsceneWordsMode),
-  setLyricMaskObsceneWordsMode: (v: (typeof LYRIC_MASK_MODES)[number]) => safeSet('lyricMaskObsceneWordsMode', v),
-
-  getLyricMaskObsceneWordChar: () =>
-    safeGet('lyricMaskObsceneWordChar')?.slice(0, 1) || SETTING_DEFAULTS.lyricMaskObsceneWordChar,
-  setLyricMaskObsceneWordChar: (v: string) =>
-    safeSet('lyricMaskObsceneWordChar', v.slice(0, 1) || SETTING_DEFAULTS.lyricMaskObsceneWordChar),
-
-  getLyricWordFadeWidth: () => {
-    const width = safeFloat('lyricWordFadeWidth', SETTING_DEFAULTS.lyricWordFadeWidth)
-    return Math.max(0.05, Math.min(2, width))
-  },
-  setLyricWordFadeWidth: (v: number) => safeSet('lyricWordFadeWidth', String(v)),
-
-  getLyricFontWeight: () => {
-    const w = safeInt('lyricFontWeight', SETTING_DEFAULTS.lyricFontWeight)
-    return Math.max(100, Math.min(900, w))
-  },
-  setLyricFontWeight: (v: number) => safeSet('lyricFontWeight', String(v)),
-
-  getLyricFontSize: () => {
-    const size = safeInt('lyricFontSize', SETTING_DEFAULTS.lyricFontSize)
-    return Math.max(10, Math.min(200, size))
-  },
-  setLyricFontSize: (v: number) => safeSet('lyricFontSize', String(v)),
-
-  getLyricTranslationFontSize: () => {
-    const size = safeInt('lyricTranslationFontSize', SETTING_DEFAULTS.lyricTranslationFontSize)
-    return Math.max(10, Math.min(200, size))
-  },
+  // Folia — 字号/粗细（样式工作窗口同样读写这两项）与字幕字号
+  getFoliaLyricFontWeight: () => readInt('foliaLyricFontWeight', AMLL_LYRIC_DEFAULTS.FontWeight, 100, 900),
+  setFoliaLyricFontWeight: (v: number) => safeSet('foliaLyricFontWeight', String(v)),
+  getFoliaLyricFontSize: () => readInt('foliaLyricFontSize', AMLL_LYRIC_DEFAULTS.FontSize, 10, 200),
+  setFoliaLyricFontSize: (v: number) => safeSet('foliaLyricFontSize', String(v)),
+  getLyricTranslationFontSize: () =>
+    readInt('lyricTranslationFontSize', SETTING_DEFAULTS.lyricTranslationFontSize, 10, 200),
   setLyricTranslationFontSize: (v: number) => safeSet('lyricTranslationFontSize', String(v)),
-
-  getLyricRomanFontSize: () => {
-    const size = safeInt('lyricRomanFontSize', SETTING_DEFAULTS.lyricRomanFontSize)
-    return Math.max(10, Math.min(200, size))
-  },
+  getLyricRomanFontSize: () =>
+    readInt('lyricRomanFontSize', SETTING_DEFAULTS.lyricRomanFontSize, 10, 200),
   setLyricRomanFontSize: (v: number) => safeSet('lyricRomanFontSize', String(v)),
 
   getLyricLineRules: () => {
@@ -416,8 +589,9 @@ export const storage = {
 
   // Background settings
   getBgFps: () => {
-    const fps = safeInt('bgFps', SETTING_DEFAULTS.bgFps)
-    return [15, 30, 60].includes(fps) ? fps : SETTING_DEFAULTS.bgFps
+    const fallback = getBgFpsDefault()
+    const fps = safeInt('bgFps', fallback)
+    return [15, 30, 60].includes(fps) ? fps : fallback
   },
   setBgFps: (v: number) => safeSet('bgFps', String(v)),
 
@@ -428,10 +602,17 @@ export const storage = {
   setBgFlowSpeed: (v: number) => safeSet('bgFlowSpeed', String(v)),
 
   getBgRenderScale: () => {
-    const scale = safeFloat('bgRenderScale', SETTING_DEFAULTS.bgRenderScale)
-    return [0.25, 0.5, 0.75, 1].includes(scale) ? scale : SETTING_DEFAULTS.bgRenderScale
+    const fallback = getBgRenderScaleDefault()
+    const scale = safeFloat('bgRenderScale', fallback)
+    return [0.25, 0.5, 0.75, 1].includes(scale) ? scale : fallback
   },
   setBgRenderScale: (v: number) => safeSet('bgRenderScale', String(v)),
+
+  getBgRenderer: () => safeEnum('bgRenderer', BG_RENDERERS, SETTING_DEFAULTS.bgRenderer),
+  setBgRenderer: (v: BgRendererSetting) => safeSet('bgRenderer', v),
+
+  getBgCssBackground: () => safeGet('bgCssBackground') || SETTING_DEFAULTS.bgCssBackground,
+  setBgCssBackground: (v: string) => safeSet('bgCssBackground', v),
 
   // Mineradio 舞台设置
   getVisualStage: () => safeEnum('visualStage', VISUAL_STAGES, SETTING_DEFAULTS.visualStage),
@@ -440,10 +621,24 @@ export const storage = {
   getVisualQuality: () => safeEnum('visualQuality', VISUAL_QUALITIES, SETTING_DEFAULTS.visualQuality),
   setVisualQuality: (v: VisualQualitySetting) => safeSet('visualQuality', v),
 
+  // Folia 舞台设置（与经典背景 / 3D 舞台互相独立）
+  getFoliaFrameRate: () => {
+    const fps = safeInt('foliaFrameRate', SETTING_DEFAULTS.foliaFrameRate)
+    return [15, 30, 60].includes(fps) ? fps : SETTING_DEFAULTS.foliaFrameRate
+  },
+  setFoliaFrameRate: (v: number) => safeSet('foliaFrameRate', String(v)),
+
+  getFoliaVisualQuality: () => safeEnum('foliaVisualQuality', VISUAL_QUALITIES, SETTING_DEFAULTS.foliaVisualQuality),
+  setFoliaVisualQuality: (v: VisualQualitySetting) => safeSet('foliaVisualQuality', v),
+
   // 粒子溢光（上游 fx.bloom，出厂 false）。与画质档无关 —— 上游把它作为
   // 独立设置项（04-fx-defaults.js:91），不随 performanceQuality 变。
   getVisualBloom: () => safeGet('visualBloom') === 'true',
   setVisualBloom: (v: boolean) => safeSet('visualBloom', String(v)),
+
+  /** 3D 舞台控制条：空闲 3 秒后淡到半透明（出厂开）。 */
+  getStageConsoleAutoFade: () => safeGet('stageConsoleAutoFade') !== 'false',
+  setStageConsoleAutoFade: (v: boolean) => safeSet('stageConsoleAutoFade', String(v)),
 
   // 轮廓高亮（上游 fx.edge，出厂 false）。同为独立设置，与画质档无关。
   getVisualEdge: () => safeGet('visualEdge') === 'true',

@@ -40,6 +40,13 @@ export const createAudioEffectChain = ({
 
     rampParam(context, nodes.highpass.frequency, active.highpass)
     rampParam(context, nodes.lowpass.frequency, Math.min(active.lowpass, context.sampleRate * 0.475))
+    // 两个截止都在中性端点时走直通（见 connectAudioEffectNodes）；挪开任一个都会交叉淡化到
+    // 滤波支路，切换本身不出咔哒声。
+    const filtersNeutral =
+      active.highpass <= DEFAULT_AUDIO_EFFECT_SETTINGS.highpass &&
+      active.lowpass >= DEFAULT_AUDIO_EFFECT_SETTINGS.lowpass
+    rampParam(context, nodes.filterBypass.gain, filtersNeutral ? 1 : 0)
+    rampParam(context, nodes.filterReturn.gain, filtersNeutral ? 0 : 1)
 
     if (active.drive !== lastDrive) {
       lastDrive = active.drive

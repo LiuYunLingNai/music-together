@@ -1,13 +1,19 @@
 import { getServerTime, isCalibrated } from '@/lib/clockSync'
 import { PLATFORM_LABELS } from '@/lib/platform'
 import { PLAYER_PLAY_DEDUP_MS } from '@/lib/constants'
+import { setPendingAutomixPlan, setPendingAutomixTransition } from '@/lib/playbackTransition'
 import { storage } from '@/lib/storage'
 import { useSocketContext } from '@/providers/socket-context'
 import { usePlayerStore } from '@/stores/playerStore'
 import { usePlaybackFailureStore } from '@/stores/playbackFailureStore'
 import { useRoomStore } from '@/stores/roomStore'
 import { useSleepTimerStore } from '@/stores/sleepTimerStore'
-import type { PlaybackFailureEvent, ScheduledPlayState, Track } from '@music-together/shared'
+import type {
+  AutomixTransitionPayload,
+  PlaybackFailureEvent,
+  ScheduledPlayState,
+  Track,
+} from '@music-together/shared'
 import { EVENTS, getPlaybackRevision, isStalePlaybackAction } from '@music-together/shared'
 import { useCallback, useEffect, useRef } from 'react'
 import { useHowl } from './useHowl'
@@ -16,6 +22,10 @@ import { useMediaSession } from './useMediaSession'
 import { usePlayerSync } from './usePlayerSync'
 import { useSleepTimer } from './useSleepTimer'
 import { useNextTrackPreload } from './useNextTrackPreload'
+import { useAutomixStemPrep } from './useAutomixStemPrep'
+import { useAnalysisModelAutoLoad } from './useAnalysisModelAutoLoad'
+import { useAutomixProfilePrefetch } from './useAutomixProfilePrefetch'
+import { useAutomixLyricEvidence } from './useAutomixLyricEvidence'
 import { getScheduledPlaybackPosition } from '@/lib/playbackSync'
 import { getProxiedCoverUrl } from '@/lib/cover'
 import { predictNextTrack } from '@/lib/nextTrack'
@@ -146,11 +156,26 @@ export function usePlayer() {
   const { fetchLyric, prefetchLyric } = useLyric()
 
   useNextTrackPreload(preloadTrack, disposePreloaded)
+  useAnalysisModelAutoLoad()
+  useAutomixStemPrep()
+  useAutomixProfilePrefetch()
+  useAutomixLyricEvidence()
 
   useSleepTimer(howlRef, pausePlayback)
 
   // Connect sync (handles SEEK, PAUSE, RESUME + conductor reporting)
   usePlayerSync(howlRef, soundIdRef, schedulePlayback, cancelScheduledPlayback, pausePlayback, setPlaybackTempo)
+
+  // 服务端排好的过渡落点：供分轨准备与执行按同一组参数工作。
+  useEffect(() => {
+    const onAutomixPlan = (plan: Parameters<typeof setPendingAutomixPlan>[0]): void => {
+      setPendingAutomixPlan(plan)
+    }
+    socket.on(EVENTS.PLAYER_AUTOMIX_PLAN, onAutomixPlan)
+    return () => {
+      socket.off(EVENTS.PLAYER_AUTOMIX_PLAN, onAutomixPlan)
+    }
+  }, [socket])
 
   // Reset dedup ref on disconnect so reconnect PLAYER_PLAY is never blocked
   useEffect(() => {
@@ -166,7 +191,11 @@ export function usePlayer() {
 
   // Listen for PLAYER_PLAY events (new track load)
   useEffect(() => {
-    const onPlayerPlay = (data: { track: Track; playState: ScheduledPlayState }) => {
+    const onPlayerPlay = (data: {
+      track: Track
+      playState: ScheduledPlayState
+      automix?: AutomixTransitionPayload
+    }) => {
       usePlaybackFailureStore.getState().dismiss()
       recoveryRef.current = null
       recoveryAttemptsRef.current = null
@@ -241,6 +270,8 @@ export function usePlayer() {
       // Start downloading immediately, while remaining silent. Playback is
       // committed at the shared server time. If this device buffers past the
       // deadline, schedulePlayback aligns it before the fade-in.
+      // 自动混音：这一次接歌用服务端下发的过渡参数，房间内所有人一致。
+      setPendingAutomixTransition(data.automix)
       loadTrack(data.track, data.playState.currentTime, data.playState.isPlaying)
       prefetchLyric(data.track)
       const upcoming = predictNextTrack(useRoomStore.getState().room)
