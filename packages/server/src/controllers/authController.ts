@@ -872,6 +872,60 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
   })
 
   // -------------------------------------------------------------------------
+  // 账号主切换“共享给房间”
+  // -------------------------------------------------------------------------
+
+  socket.on(EVENTS.AUTH_SET_SHARING, (data) => {
+    try {
+      const platform = data?.platform as MusicSource | undefined
+      const shareWithRoom = data?.shareWithRoom
+      const mapping = getSocketMapping(socket.id)
+      if (!mapping || !platform || !VALID_PLATFORMS.has(platform) || typeof shareWithRoom !== 'boolean') {
+        if (platform && VALID_PLATFORMS.has(platform)) {
+          socket.emit(EVENTS.AUTH_SHARING_RESULT, { platform, shareWithRoom: false, ok: false })
+        }
+        return
+      }
+
+      const ok = authService.setShareWithRoom(mapping.userId, platform, shareWithRoom)
+      // 重新开启后把该用户其余共享账号一并恢复到当前房间；关闭只撤出房间池，
+      // 持久化凭据仍供本人点歌与私人歌单使用。
+      if (ok && shareWithRoom) authService.restoreUserCookies(mapping.roomId, mapping.userId)
+      socket.emit(EVENTS.AUTH_SHARING_RESULT, { platform, shareWithRoom, ok })
+      if (ok) broadcastAuthStatus(io, socket, mapping)
+    } catch (err) {
+      logger.error('AUTH_SET_SHARING handler error', err, { socketId: socket.id })
+    }
+  })
+
+  // -------------------------------------------------------------------------
+  // 账号主切换“听歌打卡”（仅网易云）
+  // -------------------------------------------------------------------------
+
+  socket.on(EVENTS.AUTH_SET_REPORTING, (data) => {
+    try {
+      const platform = data?.platform as MusicSource | undefined
+      const reportListening = data?.reportListening
+      const mapping = getSocketMapping(socket.id)
+      if (
+        !mapping ||
+        platform !== 'netease' ||
+        typeof reportListening !== 'boolean'
+      ) {
+        if (platform === 'netease') {
+          socket.emit(EVENTS.AUTH_REPORTING_RESULT, { platform, reportListening: false, ok: false })
+        }
+        return
+      }
+      const ok = authService.setListeningReportEnabled(mapping.userId, platform, reportListening)
+      socket.emit(EVENTS.AUTH_REPORTING_RESULT, { platform, reportListening, ok })
+      if (ok) broadcastAuthStatus(io, socket, mapping)
+    } catch (err) {
+      logger.error('AUTH_SET_REPORTING handler error', err, { socketId: socket.id })
+    }
+  })
+
+  // -------------------------------------------------------------------------
   // 拉取当前认证状态（覆盖延迟挂载场景）
   // -------------------------------------------------------------------------
 

@@ -2,6 +2,8 @@ import {
   searchQuerySchema,
   unifiedSearchQuerySchema,
   urlQuerySchema,
+  likedQuerySchema,
+  likedSetSchema,
   lyricQuerySchema,
   lyricSupplementQuerySchema,
   lyricCandidatesQuerySchema,
@@ -9,6 +11,7 @@ import {
   ttmlQuerySchema,
   amllTtmlQuerySchema,
   coverQuerySchema,
+  dynamicCoverQuerySchema,
   downloadOptionsQuerySchema,
   downloadQuerySchema,
   playlistQuerySchema,
@@ -28,6 +31,7 @@ import * as trackFallbackService from '../services/trackFallbackService.js'
 import { searchAllSources } from '../services/unifiedSearchService.js'
 import * as authService from '../services/authService.js'
 import { getEffectiveQuality } from '../services/audioQualityPolicy.js'
+import { getDynamicCoverUrl } from '../services/dynamicCoverService.js'
 import { roomRepo } from '../repositories/roomRepository.js'
 import { audioProxyPolicyRepo } from '../repositories/audioProxyPolicyRepository.js'
 import { logger } from '../utils/logger.js'
@@ -112,6 +116,9 @@ router.get(
     if (type === 'album') {
       const albums = await musicProvider.searchAlbum(source, keyword, pageSize, pageNum, cookie)
       res.json({ tracks: albums, page: pageNum, hasMore: albums.length >= pageSize })
+    } else if (type === 'artist') {
+      const artists = await musicProvider.searchArtist(source, keyword, pageSize, pageNum, cookie)
+      res.json({ tracks: artists, page: pageNum, hasMore: artists.length >= pageSize })
     } else if (type === 'playlist') {
       const playlists = await musicProvider.searchPlaylist(source, keyword, pageSize, pageNum, cookie)
       res.json({ tracks: playlists, page: pageNum, hasMore: playlists.length >= pageSize })
@@ -242,7 +249,7 @@ router.get(
   '/url',
   musicMetadataRateLimit,
   validated(urlQuerySchema, 'Get stream URL', async (data, _req, res) => {
-    const { source, urlId, bitrate, roomId } = data
+    const { source, urlId, bitrate, roomId, purpose } = data
     let cookie: string | undefined
     let vipType: 0 | 1 | 2 = 0
     let quality = bitrate
@@ -263,10 +270,59 @@ router.get(
         quality = getEffectiveQuality(source, bitrate, vipType)
       }
     }
-    const stream = await resolveStream(source, urlId, quality, { cookie, vipType })
+    const stream = await resolveStream(source, urlId, quality, { cookie, vipType, purpose })
     res.json({ url: stream?.url ?? null })
   }),
 )
+
+router.get(
+  '/liked',
+  musicMetadataRateLimit,
+  validated(likedQuerySchema, 'Get liked state', async ({ source, id, roomId }, req, res) => {
+    if (source !== 'netease') {
+      res.json({ liked: false })
+      return
+    }
+    const identityUserId = req.identityUserId
+    const room = roomRepo.get(roomId)
+    if (!identityUserId || !room || !room.users.some((user) => user.id === identityUserId)) {
+      res.status(403).json({ error: 'Forbidden' })
+      return
+    }
+    const cookie = authService.getUserCookie(identityUserId, source, roomId)
+    if (!cookie) {
+      res.json({ liked: false })
+      return
+    }
+    res.json({ liked: await musicProvider.isNeteaseLiked(cookie, id) })
+  }),
+)
+
+router.post('/liked', musicMetadataRateLimit, async (req, res) => {
+  const parsed = likedSetSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid request' })
+    return
+  }
+  const { source, id, roomId, liked } = parsed.data
+  if (source !== 'netease') {
+    res.status(400).json({ error: '该平台暂不支持喜欢操作' })
+    return
+  }
+  const identityUserId = req.identityUserId
+  const room = roomRepo.get(roomId)
+  if (!identityUserId || !room || !room.users.some((user) => user.id === identityUserId)) {
+    res.status(403).json({ error: 'Forbidden' })
+    return
+  }
+  const cookie = authService.getUserCookie(identityUserId, source, roomId)
+  if (!cookie) {
+    res.status(401).json({ error: '请先登录网易云账号' })
+    return
+  }
+  const ok = await musicProvider.setNeteaseLiked(cookie, id, liked)
+  res.status(ok ? 200 : 502).json({ liked: ok ? liked : !liked, ok })
+})
 
 function getAuthorizedCurrentTrack(roomId: string, trackId: string, req: Request, res: Response): Track | null {
   const identityUserId = req.identityUserId
@@ -485,6 +541,17 @@ router.get(
 )
 
 router.get(
+  '/dynamic-cover',
+  musicMetadataRateLimit,
+  validated(dynamicCoverQuerySchema, 'Get dynamic cover', async (data, _req, res) => {
+    const { source, id, title, artists, duration, album } = data
+    const url = await getDynamicCoverUrl(source, id, { title, artists, duration, album })
+    res.setHeader('Cache-Control', 'no-store')
+    res.json({ url })
+  }),
+)
+
+router.get(
   '/playlist',
   musicMetadataRateLimit,
   validated(playlistQuerySchema, 'Get playlist', async (data, _req, res) => {
@@ -502,6 +569,7 @@ router.get(
         res.status(403).json({ error: 'Forbidden' })
         return
       }
+      // 歌单详情属于个人数据：只认请求者自己的凭据，不回退到房间共享账号。
       cookie = authService.getUserCookie(identityUserId, source, roomId)
     }
 

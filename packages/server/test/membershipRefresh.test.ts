@@ -105,6 +105,8 @@ test('refreshes and persists missing membership details from a restored account'
     vipType: 1,
     vipLabel: 'VIP·伍',
     vipLevel: 5,
+    shareWithRoom: true,
+    reportListening: false,
   })
   const persisted = platformAuthRepo.loadUser('refresh-user').find((entry) => entry.platform === 'netease')
   assert.equal(persisted?.vipLabel, 'VIP·伍')

@@ -388,7 +388,35 @@ async function getRecommendationSongsForEdition(
 }
 
 export async function getRecommendationSongs(cookie: string, limit = 20): Promise<Record<string, unknown>[]> {
-  return getRecommendationSongsForEdition(cookie, limit)
+  const poolSize = Math.max(1, Math.min(50, Math.floor(limit)))
+  const dailyLimit = Math.max(1, Math.floor(poolSize / 2))
+  let dailySongs: Record<string, unknown>[] = []
+
+  try {
+    dailySongs = await getRecommendationSongsForEdition(cookie, dailyLimit)
+  } catch (error) {
+    logger.warn('Kugou daily recommendation failed; trying recommended playlists', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+
+  // 每日推荐是固定列表，连续漫游几轮就会耗尽；再随机抽一两张推荐歌单补池。
+  try {
+    const playlists = shuffleItems(await getRecommendedPlaylists(cookie, 20))
+    for (const playlist of playlists.slice(0, 5)) {
+      const pageSize = Math.max(1, poolSize - dailySongs.length)
+      const pageCount = Math.max(1, Math.ceil(playlist.trackCount / pageSize))
+      const page = Math.floor(Math.random() * pageCount) + 1
+      const result = await getPlaylistTracks(playlist.id, page, pageSize, cookie)
+      if (result.songs.length > 0) return [...dailySongs, ...result.songs].slice(0, poolSize)
+    }
+  } catch (error) {
+    logger.warn('Kugou recommended-playlist roaming failed', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+
+  return dailySongs.length > 0 ? dailySongs : getRecommendationSongsForEdition(cookie, poolSize)
 }
 
 export async function getConceptRecommendationSongs(cookie: string, limit = 20): Promise<Record<string, unknown>[]> {

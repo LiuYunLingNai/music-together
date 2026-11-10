@@ -26,6 +26,8 @@ export function registerPlaylistController(io: TypedServer, socket: TypedSocket)
         return
       }
 
+      // 个人歌单只使用请求者自己的凭据；不得回退到房间共享账号，否则会把
+      // VIP 账号主的私人歌单暴露给同房间成员。
       const cookie = authService.getUserCookie(mapping.userId, platform, mapping.roomId)
       if (!cookie) {
         socket.emit(EVENTS.PLAYLIST_MY_LIST, { platform, playlists: [] })

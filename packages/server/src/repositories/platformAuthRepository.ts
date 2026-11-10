@@ -13,6 +13,10 @@ export interface PersistedPlatformAuth {
   vipLabel?: string
   vipLevel?: number
   avatarUrl?: string
+  /** 是否把该账号的权益共享给所在房间；缺省 true。 */
+  shareWithRoom?: boolean
+  /** 是否允许房间把完整播放的网易云歌曲写入该账号的播放记录；缺省 false。 */
+  reportListening?: boolean
   credentialRefreshAttemptedAt?: number
 }
 
@@ -25,6 +29,8 @@ interface PlatformAuthRow {
   vip_label: string | null
   vip_level: number | null
   avatar_url: string | null
+  share_with_room: number | null
+  report_listening: number | null
   credential_refresh_attempted_at: number | null
 }
 
@@ -39,11 +45,13 @@ const upsertAuth = db.prepare(`
     vip_label,
     vip_level,
     avatar_url,
+    share_with_room,
+    report_listening,
     credential_refresh_attempted_at,
     created_at,
     updated_at
   )
-  VALUES (@id, @userId, @platform, @cookie, @nickname, @vipType, @vipLabel, @vipLevel, @avatarUrl, @refreshAttemptedAt, @now, @now)
+  VALUES (@id, @userId, @platform, @cookie, @nickname, @vipType, @vipLabel, @vipLevel, @avatarUrl, COALESCE(@shareWithRoom, 1), COALESCE(@reportListening, 0), @refreshAttemptedAt, @now, @now)
   ON CONFLICT(id) DO UPDATE SET
     cookie_encrypted = excluded.cookie_encrypted,
     nickname_snapshot = excluded.nickname_snapshot,
@@ -51,6 +59,8 @@ const upsertAuth = db.prepare(`
     vip_label = excluded.vip_label,
     vip_level = excluded.vip_level,
     avatar_url = excluded.avatar_url,
+    share_with_room = COALESCE(@shareWithRoom, platform_auth.share_with_room),
+    report_listening = COALESCE(@reportListening, platform_auth.report_listening),
     credential_refresh_attempted_at = COALESCE(
       excluded.credential_refresh_attempted_at,
       platform_auth.credential_refresh_attempted_at
@@ -58,12 +68,12 @@ const upsertAuth = db.prepare(`
     updated_at = excluded.updated_at
 `)
 const loadUserAuth = db.prepare<[string], PlatformAuthRow>(
-  'SELECT user_id, platform, cookie_encrypted, nickname_snapshot, vip_type, vip_label, vip_level, avatar_url, credential_refresh_attempted_at FROM platform_auth WHERE user_id = ? ORDER BY updated_at DESC',
+  'SELECT user_id, platform, cookie_encrypted, nickname_snapshot, vip_type, vip_label, vip_level, avatar_url, share_with_room, report_listening, credential_refresh_attempted_at FROM platform_auth WHERE user_id = ? ORDER BY updated_at DESC',
 )
-const loadDueTencentAuth = db.prepare<[number], PlatformAuthRow>(
-  `SELECT user_id, platform, cookie_encrypted, nickname_snapshot, vip_type, vip_label, vip_level, avatar_url, credential_refresh_attempted_at
+const loadDuePlatformAuth = db.prepare<[string, number], PlatformAuthRow>(
+  `SELECT user_id, platform, cookie_encrypted, nickname_snapshot, vip_type, vip_label, vip_level, avatar_url, share_with_room, report_listening, credential_refresh_attempted_at
    FROM platform_auth
-   WHERE platform = 'tencent' AND (credential_refresh_attempted_at IS NULL OR credential_refresh_attempted_at <= ?)
+   WHERE platform = ? AND (credential_refresh_attempted_at IS NULL OR credential_refresh_attempted_at <= ?)
    ORDER BY updated_at ASC`,
 )
 const deleteUserPlatformAuth = db.prepare('DELETE FROM platform_auth WHERE user_id = ? AND platform = ?')
@@ -112,6 +122,8 @@ export const platformAuthRepo = {
       vipLabel: entry.vipLabel ?? null,
       vipLevel: entry.vipLevel ?? null,
       avatarUrl: entry.avatarUrl ?? null,
+      shareWithRoom: entry.shareWithRoom === undefined ? null : entry.shareWithRoom ? 1 : 0,
+      reportListening: entry.reportListening === undefined ? null : entry.reportListening ? 1 : 0,
       refreshAttemptedAt: options?.resetCredentialRefreshSchedule ? now : (entry.credentialRefreshAttemptedAt ?? null),
       now,
     })
@@ -139,6 +151,8 @@ export const platformAuthRepo = {
                 vipLabel: row.vip_label ?? undefined,
                 vipLevel: row.vip_level ?? undefined,
                 avatarUrl: row.avatar_url ?? undefined,
+                shareWithRoom: (row.share_with_room ?? 1) !== 0,
+                reportListening: (row.report_listening ?? 0) !== 0,
                 credentialRefreshAttemptedAt: row.credential_refresh_attempted_at ?? undefined,
               },
             ]
@@ -150,8 +164,8 @@ export const platformAuthRepo = {
     return deleteUserPlatformAuth.run(userId, platform).changes > 0
   },
 
-  loadDueTencent(cutoff: number): PersistedPlatformAuth[] {
-    return loadDueTencentAuth.all(cutoff).flatMap((row) => {
+  loadDue(platform: MusicSource, cutoff: number): PersistedPlatformAuth[] {
+    return loadDuePlatformAuth.all(platform, cutoff).flatMap((row) => {
       const cookie = decryptCookie(row.cookie_encrypted)
       return cookie
         ? [
@@ -164,6 +178,8 @@ export const platformAuthRepo = {
               vipLabel: row.vip_label ?? undefined,
               vipLevel: row.vip_level ?? undefined,
               avatarUrl: row.avatar_url ?? undefined,
+              shareWithRoom: (row.share_with_room ?? 1) !== 0,
+              reportListening: (row.report_listening ?? 0) !== 0,
               credentialRefreshAttemptedAt: row.credential_refresh_attempted_at ?? undefined,
             },
           ]

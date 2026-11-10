@@ -1,12 +1,12 @@
 import { timingSafeEqual } from 'node:crypto'
 import type { AudioQuality, ClientInfo, RoomListItem, RoomMember, User, UserRole } from '@music-together/shared'
-import { EVENTS, ERROR_CODE } from '@music-together/shared'
+import { CROSSFADE_DEFAULT_SEC, EVENTS, ERROR_CODE, clampCrossfadeSeconds } from '@music-together/shared'
 import { nanoid } from 'nanoid'
 import type { RoomData } from '../repositories/types.js'
 import { roomRepo } from '../repositories/roomRepository.js'
 import { chatRepo } from '../repositories/chatRepository.js'
 import { scheduleDeletion, cancelDeletionTimer, broadcastRoomList } from './roomLifecycleService.js'
-import { consumeRejoinTicket } from './rejoinTicketService.js'
+import { consumeRejoinTicket, revokeRejoinTickets } from './rejoinTicketService.js'
 import { estimateCurrentTime } from './syncService.js'
 import * as voteService from './voteService.js'
 import { executeVoteAction } from './voteActionService.js'
@@ -14,11 +14,22 @@ import { createSystemMessage } from './chatService.js'
 import { logger } from '../utils/logger.js'
 import type { TypedServer } from '../middleware/types.js'
 import { userRepo } from '../repositories/userRepository.js'
-import { toPublicRoomState, toPublicRoomStateForOwner } from '../utils/roomUtils.js'
+import * as authService from './authService.js'
+import * as automixService from './automixService.js'
+import { pauseListeningReport } from './listeningReportService.js'
+import {
+  toPublicRoomState,
+  toPublicRoomStateForModerator,
+  toPublicRoomStateForOwner,
+} from '../utils/roomUtils.js'
 
 // Re-export from their new homes so existing `roomService.xxx()` callers
 // in controllers don't need import changes.
-export { toPublicRoomState, toPublicRoomStateForOwner } from '../utils/roomUtils.js'
+export {
+  toPublicRoomState,
+  toPublicRoomStateForModerator,
+  toPublicRoomStateForOwner,
+} from '../utils/roomUtils.js'
 export { broadcastRoomList } from './roomLifecycleService.js'
 
 // ---------------------------------------------------------------------------
@@ -253,11 +264,16 @@ export function createRoom(
     allowTemporaryAdminQueueClear: false,
     removePlayedTracks: false,
     roamingEnabled: false,
+    automixEnabled: false,
+    transitionMode: 'automix',
+    crossfadeMaxSec: CROSSFADE_DEFAULT_SEC,
+    automixPerformance: false,
     roamingSource: 'netease',
     roamingMode: 'DEFAULT',
     hidden: false,
     permanent: false,
     audioQuality: 320,
+    bannedMembers: [],
     members: [
       {
         ...user,
@@ -405,6 +421,8 @@ export function leaveRoom(
   }
 
   room.users = room.users.filter((u) => u.id !== userId)
+  // 房间没人时不累计听歌时长；否则空置期间会被算进打卡。
+  if (room.users.length === 0) pauseListeningReport(roomId)
   const member = room.members.find((item) => item.id === userId)
   if (member) {
     // `clients` describes active sockets only. Keep `lastClient` separately so
@@ -432,6 +450,8 @@ export function leaveRoom(
         revision: (room.playState.revision ?? 0) + 1,
       }
       roomRepo.persist(roomId)
+      // 空房自动暂停后不能让已排好的过渡定时器继续按墙钟触发。
+      automixService.cancelAutomix(roomId)
       logger.info(`房间 ${roomId} 已无人在线，播放已自动暂停`, {
         event: 'player.auto_paused_empty_room',
         roomId,
@@ -584,6 +604,10 @@ export function updateSettings(
     allowTemporaryAdminQueueClear?: boolean
     removePlayedTracks?: boolean
     roamingEnabled?: boolean
+    automixEnabled?: boolean
+    transitionMode?: RoomData['transitionMode']
+    crossfadeMaxSec?: number
+    automixPerformance?: boolean
     roamingSource?: RoomData['roamingSource']
     roamingMode?: RoomData['roamingMode']
   },
@@ -628,6 +652,22 @@ export function updateSettings(
     room.roamingEnabled = settings.roamingEnabled
   }
 
+  if (settings.automixEnabled !== undefined) {
+    room.automixEnabled = settings.automixEnabled
+  }
+
+  if (settings.transitionMode !== undefined) {
+    room.transitionMode = settings.transitionMode
+  }
+
+  if (settings.crossfadeMaxSec !== undefined) {
+    room.crossfadeMaxSec = clampCrossfadeSeconds(settings.crossfadeMaxSec)
+  }
+
+  if (settings.automixPerformance !== undefined) {
+    room.automixPerformance = settings.automixPerformance
+  }
+
   if (settings.roamingSource !== undefined) {
     room.roamingSource = settings.roamingSource
   }
@@ -669,6 +709,106 @@ export function setUserRole(
   const hostChanged = electConductor(room)
   roomRepo.persist(roomId)
   return { success: true, roleChanged: directRoleChanged || reconciledRoleChanged, hostChanged }
+}
+
+/**
+ * 房主移出成员，可选本房封禁。在线用户复用 leaveRoom 清理播放/投票/主持状态；
+ * 封禁同时撤销重进票据并撤回该用户共享给房间的平台账号。
+ */
+export function kickRoomMember(
+  roomId: string,
+  targetUserId: string,
+  ban: boolean,
+  io: TypedServer,
+): { kicked: boolean; nickname: string | null } {
+  const room = roomRepo.get(roomId)
+  if (!room) return { kicked: false, nickname: null }
+  if (targetUserId === room.creatorId || userRepo.isServerAdmin(targetUserId)) {
+    return { kicked: false, nickname: null }
+  }
+
+  const onlineUser = room.users.find((item) => item.id === targetUserId)
+  const offlineMember = onlineUser ? null : room.members.find((item) => item.id === targetUserId)
+  if (!onlineUser && !offlineMember) return { kicked: false, nickname: null }
+  const nickname = onlineUser?.nickname ?? offlineMember?.nickname ?? targetUserId
+
+  const targetSockets = io.getSocketsInRoom(roomId).filter((socket) => {
+    const mapping = roomRepo.getSocketMapping(socket.id)
+    return mapping?.roomId === roomId && mapping.userId === targetUserId
+  })
+
+  let leaveResult: ReturnType<typeof leaveRoom> = null
+  for (const socket of targetSockets) {
+    leaveResult = leaveRoom(socket.id, io)
+  }
+
+  room.adminUserIds.delete(targetUserId)
+  if (ban) {
+    if (!room.bannedMembers.some((entry) => entry.id === targetUserId)) {
+      room.bannedMembers.push({ id: targetUserId, nickname, bannedAt: Date.now() })
+    }
+    revokeRejoinTickets(roomId, targetUserId)
+    // 封禁成员不再保留在离线名册里，避免长期占位。
+    roomRepo.removeMember(roomId, targetUserId)
+  } else if (!onlineUser && offlineMember) {
+    roomRepo.removeMember(roomId, targetUserId)
+  }
+
+  // 被移出者的共享账号不再替房间提供权益。
+  authService.removeUserFromRoom(roomId, targetUserId)
+  reconcileRoomRoles(room)
+  const hostChanged = electConductor(room)
+  roomRepo.persist(roomId)
+
+  for (const socket of targetSockets) {
+    socket.leave(roomId)
+    socket.join('lobby')
+    socket.emit(EVENTS.ROOM_ERROR, {
+      code: ERROR_CODE.KICKED_FROM_ROOM,
+      message: ban ? '你已被房主移出并禁止加入本房间' : '你已被房主移出房间',
+    })
+  }
+
+  if (leaveResult && !leaveResult.staleSocketOnly) {
+    io.to(roomId).emit(EVENTS.ROOM_USER_LEFT, leaveResult.user)
+  }
+  if (room.users.length > 0) {
+    io.to(roomId).emit(EVENTS.CHAT_MESSAGE, createSystemMessage(roomId, `${nickname} 已被房主移出房间`))
+    broadcastState(room, io)
+  }
+  logger.info('房主移出成员', {
+    event: 'room.member_kicked',
+    roomId,
+    targetUserId,
+    banned: ban,
+    conductorChanged: hostChanged,
+  })
+  return { kicked: true, nickname }
+}
+
+/** 解除本房封禁。 */
+export function unbanRoomMember(roomId: string, userId: string): boolean {
+  const room = roomRepo.get(roomId)
+  if (!room) return false
+  const index = room.bannedMembers.findIndex((entry) => entry.id === userId)
+  if (index === -1) return false
+  room.bannedMembers.splice(index, 1)
+  roomRepo.persist(roomId)
+  return true
+}
+
+/** 向房间内每个连接发送对应可见性的完整状态（owner 含密码与封禁名单）。 */
+function broadcastState(room: RoomData, io: TypedServer): void {
+  for (const socket of io.getSocketsInRoom(room.id)) {
+    const mapping = roomRepo.getSocketMapping(socket.id)
+    const state =
+      mapping?.userId === room.creatorId
+        ? toPublicRoomStateForOwner(room)
+        : mapping && userRepo.isServerAdmin(mapping.userId)
+          ? toPublicRoomStateForModerator(room)
+          : toPublicRoomState(room)
+    socket.emit(EVENTS.ROOM_STATE, state)
+  }
 }
 
 export function getUserBySocket(socketId: string): User | null {
@@ -733,6 +873,15 @@ export function validateJoinRequest(
 
   const existingMapping = roomRepo.getSocketMapping(socketId)
   const effectiveUserId = identityUserId
+  if (room.bannedMembers?.some((entry) => entry.id === effectiveUserId)) {
+    return {
+      valid: false,
+      errorCode: ERROR_CODE.BANNED_FROM_ROOM,
+      errorMessage: '你已被房主移出本房间，无法再次加入',
+      isRejoin: false,
+      skipPassword: false,
+    }
+  }
   const alreadyInRoom = room.users.some((u) => u.id === effectiveUserId)
   const isCreator = effectiveUserId === room.creatorId
   const isPersistentAdmin = room.adminUserIds.has(effectiveUserId)

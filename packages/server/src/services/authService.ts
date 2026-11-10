@@ -125,18 +125,22 @@ export function addCookie(
   persist = true,
   membership?: MembershipDetails,
   avatarUrl?: string,
+  shareWithRoom?: boolean,
 ): void {
   vipType = normalizeVipType(platform, vipType)
   const { vipLabel, vipLevel } = normalizeMembershipDetails(membership)
+  // 账号主的共享偏好跨登录保留：关闭共享后重新登录不会悄悄把权益放回房间。
+  const share = shareWithRoom ?? platformAuthRepo.loadUser(userId).find((e) => e.platform === platform)?.shareWithRoom ?? true
   const entries = getPlatformEntries(roomId, platform)
   // Dedup by cookie value (same account) or by userId (same socket)
   const idx = entries.findIndex((e) => e.cookie === cookie || e.userId === userId)
   const previousCookie = idx === -1 ? null : entries[idx]?.cookie
   if (idx !== -1) entries.splice(idx, 1)
-  entries.push({ cookie, userId, nickname, vipType, vipLabel, vipLevel, avatarUrl })
+  // 只把共享中的账号放进房间池；关闭共享的账号仍持久化，供本人使用。
+  if (share) entries.push({ cookie, userId, nickname, vipType, vipLabel, vipLevel, avatarUrl })
   if (persist) {
     platformAuthRepo.save(
-      { userId, platform, cookie, nickname, vipType, vipLabel, vipLevel, avatarUrl },
+      { userId, platform, cookie, nickname, vipType, vipLabel, vipLevel, avatarUrl, shareWithRoom: share },
       { resetCredentialRefreshSchedule: platform === 'tencent' && previousCookie !== cookie },
     )
   }
@@ -150,6 +154,7 @@ export function addCookie(
     vipLabel,
     vipLevel,
     avatarUrl,
+    shared: share,
   })
 }
 
@@ -181,7 +186,7 @@ export function removeCookie(roomId: string, platform: MusicSource, userId: stri
 
 /** Restore a user's server-persisted platform accounts into a room pool. */
 export function restoreUserCookies(roomId: string, userId: string): number {
-  const entries = platformAuthRepo.loadUser(userId)
+  const entries = platformAuthRepo.loadUser(userId).filter((entry) => entry.shareWithRoom !== false)
   for (const entry of entries) {
     addCookie(roomId, entry.platform, userId, entry.cookie, entry.nickname, entry.vipType, false, {
       vipLabel: entry.vipLabel,
@@ -189,6 +194,50 @@ export function restoreUserCookies(roomId: string, userId: string): number {
     })
   }
   return entries.length
+}
+
+/**
+ * 切换“共享给房间”偏好。关闭时只从所有房间池撤出，持久化凭据保留，
+ * 本人点歌、私人歌单与漫游仍然可用；下次进入房间也不会再自动带入。
+ */
+export function setShareWithRoom(userId: string, platform: MusicSource, share: boolean): boolean {
+  const persisted = platformAuthRepo.loadUser(userId).find((entry) => entry.platform === platform)
+  if (!persisted) {
+    // 未持久化的凭据只存在于房间池：关闭共享等同撤回这次房间授权，
+    // 无法再切回“仅自己可用”（重登录即可）。
+    if (share) return false
+    for (const roomId of roomCookiePool.keys()) removeCookie(roomId, platform, userId, false)
+    return true
+  }
+  platformAuthRepo.save({ ...persisted, shareWithRoom: share })
+  if (!share) {
+    for (const roomId of roomCookiePool.keys()) {
+      removeCookie(roomId, platform, userId, false)
+    }
+  }
+  return true
+}
+
+/** 账号主是否允许把房间播放写入该平台的播放记录；默认关闭。 */
+export function isListeningReportEnabled(userId: string, platform: MusicSource): boolean {
+  return platformAuthRepo.loadUser(userId).find((entry) => entry.platform === platform)?.reportListening === true
+}
+
+/** 切换听歌打卡偏好；只对已持久化的凭据生效。 */
+export function setListeningReportEnabled(userId: string, platform: MusicSource, enabled: boolean): boolean {
+  const persisted = platformAuthRepo.loadUser(userId).find((entry) => entry.platform === platform)
+  if (!persisted) return false
+  platformAuthRepo.save({ ...persisted, reportListening: enabled })
+  return true
+}
+
+/** 主动离开房间时撤回该用户贡献的所有账号；断线/刷新不触发。 */
+export function removeUserFromRoom(roomId: string, userId: string): void {
+  const pool = roomCookiePool.get(roomId)
+  if (!pool) return
+  for (const platform of pool.keys()) {
+    removeCookie(roomId, platform, userId, false)
+  }
 }
 
 export type MembershipInfoLoader = (platform: MusicSource, cookie: string) => Promise<GetUserInfoResult>
@@ -396,6 +445,9 @@ export function getAnyCookie(platform: MusicSource, roomId: string): string | nu
 export interface BestPlatformAuth {
   cookie: string
   vipType: 0 | 1 | 2
+  /** 提供该凭据的用户；听歌打卡等写操作只作用于这个账号。 */
+  userId: string
+  nickname: string
 }
 
 /** Return the credential with the highest normalized membership tier. */
@@ -410,7 +462,7 @@ export function getBestAuth(platform: MusicSource, roomId: string): BestPlatform
   for (let i = 1; i < entries.length; i++) {
     if (isHigherMembership(entries[i], best)) best = entries[i]
   }
-  return { cookie: best.cookie, vipType: normalizeVipType(platform, best.vipType) }
+  return { cookie: best.cookie, vipType: normalizeVipType(platform, best.vipType), userId: best.userId, nickname: best.nickname }
 }
 
 /**
@@ -457,11 +509,11 @@ export function hasExistingCredential(userId: string, platform: MusicSource, roo
 
 export function getUserCookie(userId: string, platform: MusicSource, roomId: string): string | null {
   const pool = roomCookiePool.get(roomId)
-  if (!pool) return null
-  const entries = pool.get(platform)
-  if (!entries) return null
-  const entry = entries.find((e) => e.userId === userId)
-  return entry?.cookie ?? null
+  const entries = pool?.get(platform)
+  const entry = entries?.find((e) => e.userId === userId)
+  if (entry) return entry.cookie
+  // 未共享的账号不在房间池里，但本人操作（私人歌单、漫游）仍应可用。
+  return platformAuthRepo.loadUser(userId).find((e) => e.platform === platform)?.cookie ?? null
 }
 
 /** Existing VIP records without a detailed label should be revalidated once after upgrades. */
@@ -507,19 +559,24 @@ export function getAllPlatformStatus(roomId: string): PlatformAuthStatus[] {
 export function getUserAuthStatus(userId: string, roomId: string): MyPlatformAuth[] {
   const platforms: MusicSource[] = ['netease', 'tencent', 'kugou', 'kugou_concept', 'bilibili']
   const pool = roomCookiePool.get(roomId)
+  const persisted = platformAuthRepo.loadUser(userId)
   return platforms.map((platform) => {
     const entries = pool?.get(platform) ?? []
     const entry = entries.find((e) => e.userId === userId)
+    const saved = persisted.find((e) => e.platform === platform)
     const result: MyPlatformAuth = {
       platform,
-      loggedIn: !!entry,
-      nickname: entry?.nickname,
-      vipType: entry?.vipType,
-      vipLabel: entry?.vipLabel,
-      vipLevel: entry?.vipLevel,
+      loggedIn: Boolean(entry ?? saved),
+      nickname: entry?.nickname ?? saved?.nickname,
+      vipType: entry?.vipType ?? saved?.vipType,
+      vipLabel: entry?.vipLabel ?? saved?.vipLabel,
+      vipLevel: entry?.vipLevel ?? saved?.vipLevel,
+      shareWithRoom: entry ? true : saved ? saved.shareWithRoom !== false : false,
+      reportListening: saved?.reportListening === true,
     }
-    if (entry?.avatarUrl) {
-      result.avatarUrl = entry.avatarUrl
+    const avatarUrl = entry?.avatarUrl ?? saved?.avatarUrl
+    if (avatarUrl) {
+      result.avatarUrl = avatarUrl
     }
     return result
   })

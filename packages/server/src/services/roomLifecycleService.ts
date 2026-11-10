@@ -26,6 +26,8 @@ import { cleanupRoom as cleanupAuthRoom } from './authService.js'
 import { cleanupRoom as cleanupPlayerRoom } from './playerService.js'
 import { cleanupRoom as cleanupVoteRoom } from './voteService.js'
 import { cleanupRoomRejoinTickets } from './rejoinTicketService.js'
+import { clearRoomListeningReport } from './listeningReportService.js'
+import { roamingService } from './roamingService.js'
 
 // ---------------------------------------------------------------------------
 // Module-level state
@@ -68,6 +70,8 @@ export function scheduleDeletion(roomId: string, io?: TypedServer): void {
       cleanupPlayerRoom(roomId)
       cleanupVoteRoom(roomId)
       cleanupAuthRoom(roomId)
+      clearRoomListeningReport(roomId)
+      roamingService.clearRoom(roomId)
       cleanupRoomRejoinTickets(roomId)
       roomDeletionTimers.delete(roomId)
       logger.info(`空置房间 ${roomId} 已删除`, { event: 'room.deleted', roomId })
@@ -105,6 +109,8 @@ export function destroyRoom(roomId: string, io: TypedServer): boolean {
   cleanupPlayerRoom(roomId)
   cleanupVoteRoom(roomId)
   cleanupAuthRoom(roomId)
+  clearRoomListeningReport(roomId)
+  roamingService.clearRoom(roomId)
   cleanupRoomRejoinTickets(roomId)
   broadcastRoomList(io)
   logger.info(`房间 ${roomId} 已被服务器管理员解散`, { event: 'room.dissolved', roomId })

@@ -150,6 +150,40 @@ export async function checkQrStatus(key: string): Promise<{
  * 验证 Cookie 并获取用户信息
  * 区分「Cookie 已过期」和「临时故障」，以便调用方决定是否移除 Cookie
  */
+/** MUSIC_U 是会话令牌；缺它的 cookie 不能靠 login_refresh 续期。 */
+export function isRefreshableCredential(cookie: string): boolean {
+  return /(?:^|;\s*)MUSIC_U=/.test(cookie)
+}
+
+/**
+ * 用现有 cookie 调 `login_refresh` 换取新的会话 cookie。
+ * 返回的 cookie 必须仍包含 MUSIC_U；否则视为平台拒绝。
+ */
+export async function refreshCredential(cookie: string): Promise<string> {
+  const res = await withTimeout(ncmApi.login_refresh({ cookie, timestamp: Date.now() }))
+  const body = res?.body
+  const code = Number(body?.code)
+  const next = typeof body?.cookie === 'string' ? body.cookie.trim() : ''
+  if (code !== 200 || !isRefreshableCredential(next)) {
+    throw new Error(code === 200 ? '登录刷新未返回有效凭据' : `登录刷新失败（${body?.code ?? 'no code'}）`)
+  }
+  return next
+}
+
+/** 登录状态里的用户 id 缓存；喜欢列表查询用它，避免每次都走完整用户信息。 */
+const userIdByCookie = new Map<string, { userId: number; at: number }>()
+const USER_ID_TTL_MS = 60 * 60_000
+
+export async function getUserId(cookie: string): Promise<number | null> {
+  const cached = userIdByCookie.get(cookie)
+  if (cached && Date.now() - cached.at < USER_ID_TTL_MS) return cached.userId
+  const res = await withTimeout(ncmApi.login_status({ cookie, timestamp: Date.now() }))
+  const userId = Number((res?.body as { data?: { profile?: { userId?: unknown } } })?.data?.profile?.userId)
+  if (!Number.isFinite(userId) || userId <= 0) return null
+  userIdByCookie.set(cookie, { userId, at: Date.now() })
+  return userId
+}
+
 export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
   try {
     const res = await withTimeout(ncmApi.login_status({ cookie, timestamp: Date.now() }))

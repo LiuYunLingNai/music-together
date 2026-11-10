@@ -124,10 +124,10 @@ function buildSearchUrl(query: AmllSearchQuery): string {
   return `${AMLL_SEARCH_URL}?${params.toString()}`
 }
 
-async function fetchSearchPage(query: AmllSearchQuery): Promise<AmllSearchItem[]> {
+async function fetchSearchPage(query: AmllSearchQuery): Promise<{ items: AmllSearchItem[]; failed: boolean }> {
   const key = `${query.musicName ?? ''}\u0002${query.artistName ?? ''}\u0002${query.q ?? ''}`
   const cached = searchPageCache.get(key)
-  if (cached) return cached
+  if (cached) return { items: cached, failed: false }
 
   let response: Response
   try {
@@ -139,20 +139,24 @@ async function fetchSearchPage(query: AmllSearchQuery): Promise<AmllSearchItem[]
       }),
     )
   } catch {
-    return []
+    return { items: [], failed: true }
   }
-  if (response.status !== 200) return []
+  if (response.status !== 200) return { items: [], failed: true }
 
   const body = await response.text()
-  if (!body || Buffer.byteLength(body, 'utf8') > MAX_TTML_BYTES) return []
+  if (!body || Buffer.byteLength(body, 'utf8') > MAX_TTML_BYTES) {
+    return { items: [], failed: true }
+  }
 
   try {
     const payload = JSON.parse(body) as { status?: number; data?: { items?: AmllSearchItem[] } }
-    if (payload.status !== 200 || !Array.isArray(payload.data?.items)) return []
+    if (payload.status !== 200 || !Array.isArray(payload.data?.items)) {
+      return { items: [], failed: true }
+    }
     searchPageCache.set(key, payload.data.items)
-    return payload.data.items
+    return { items: payload.data.items, failed: false }
   } catch {
-    return []
+    return { items: [], failed: true }
   }
 }
 
@@ -229,17 +233,19 @@ export interface AmllTtmlCandidate {
 
 async function findSearchCandidates(
   request: AmllSearchRequest,
-): Promise<Array<{ item: AmllSearchItem; score: LyricMatchScore }>> {
+): Promise<{ matches: Array<{ item: AmllSearchItem; score: LyricMatchScore }>; failed: boolean }> {
   const items: AmllSearchItem[] = []
+  let failed = false
   for (const query of buildSearchQueries(request.title, request.artists)) {
     const page = await fetchSearchPage(query)
-    if (page.length > 0) {
-      items.push(...page)
+    failed = failed || page.failed
+    if (page.items.length > 0) {
+      items.push(...page.items)
       break
     }
   }
 
-  return items
+  const matches = items
     .map((item) => ({ item, score: scoreSearchItem(item, request) }))
     .filter(
       (entry): entry is { item: AmllSearchItem; score: LyricMatchScore } =>
@@ -247,12 +253,13 @@ async function findSearchCandidates(
     )
     .sort((left, right) => right.score.score - left.score.score)
     .slice(0, SEARCH_CANDIDATE_LIMIT)
+  return { matches, failed }
 }
 
 /** Search matches without downloading TTML, for the manual lyric-source picker. */
 export async function searchAmllCandidates(request: AmllSearchRequest): Promise<AmllTtmlCandidate[]> {
   metrics.searchRequests += 1
-  const matches = await findSearchCandidates(request)
+  const { matches } = await findSearchCandidates(request)
   const candidates: AmllTtmlCandidate[] = []
   const seen = new Set<string>()
 
@@ -287,6 +294,8 @@ export async function searchAmllTtml(
     normalizeLyricMatchText(request.title),
     request.artists.map(normalizeLyricMatchText).join(','),
     request.album ? normalizeLyricMatchText(request.album) : '',
+    // 同名不同版本靠时长区分；按 2 秒取整，避免元数据毫秒抖动。
+    request.duration ? String(Math.round(request.duration / 2)) : '',
   ].join('\u0002')
   const cached = searchResultCache.get(cacheKey)
   if (cached !== undefined) {
@@ -294,9 +303,9 @@ export async function searchAmllTtml(
   }
 
   metrics.searchRequests += 1
-  const candidates = await findSearchCandidates(request)
+  const { matches, failed } = await findSearchCandidates(request)
 
-  for (const { item } of candidates) {
+  for (const { item } of matches) {
     for (const id of platformIds(item, platform)) {
       const result = await getAmllTtml(platform, id, ifNoneMatch)
       if (result) {
@@ -307,8 +316,11 @@ export async function searchAmllTtml(
     }
   }
 
-  searchResultCache.set(cacheKey, false)
-  metrics.searchMisses += 1
+  // 搜索接口本身失败时只返回空，不写 10 分钟负缓存；下一次请求还能重试。
+  if (!failed) {
+    searchResultCache.set(cacheKey, false)
+    metrics.searchMisses += 1
+  }
   return null
 }
 
