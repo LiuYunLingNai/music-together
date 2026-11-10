@@ -794,8 +794,8 @@ export function LyricStage({
   const currentTime = usePlayerStore((s) => s.currentTime)
   const lyricOffsets = useSettingsStore((s) => s.lyricOffsets)
   const currentTrack = usePlayerStore((s) => s.currentTrack)
-  const maskObsceneChar = useSettingsStore((s) => s.lyricMaskObsceneWordChar)
-  const maskMode = useSettingsStore((s) => s.lyricMaskObsceneWordsMode)
+  const maskObsceneChar = useSettingsStore((s) => s.mineradioLyricMaskObsceneWordChar)
+  const maskMode = useSettingsStore((s) => s.mineradioLyricMaskObsceneWordsMode)
   const shouldHideLine = useLyricLineFilter()
 
   // 显示模式决定轨道可见半径

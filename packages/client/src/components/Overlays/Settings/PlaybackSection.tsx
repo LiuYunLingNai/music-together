@@ -1,7 +1,6 @@
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Separator } from '@/components/ui/separator'
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { SYNC_PACKET_INTERVAL_MAX_SECONDS, SYNC_PACKET_INTERVAL_MIN_SECONDS } from '@/lib/constants'
@@ -19,12 +18,31 @@ import {
   sliderPositionToAudioEffect,
 } from '@/lib/audioEffects/model'
 import { AUDIO_CROSSFADE_MAX_MS, useAudioSettingsStore } from '@/stores/audioSettingsStore'
+import { webgpuPresent } from '@/lib/automix/stemCapabilities'
+import { clearMediaCache } from '@/lib/mediaCache'
+import { clearAudioBytes } from '@/lib/audioBytes'
+import { useAccountStore } from '@/stores/accountStore'
+import { useRoomStore } from '@/stores/roomStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useSleepTimerStore } from '@/stores/sleepTimerStore'
-import { getBeatThisState, loadBeatThisModel, subscribeBeatThisState } from '@/services/analysis/beatThisModel'
-import { getHtdemucsState, loadHtdemucsModel, subscribeHtdemucsState } from '@/services/analysis/htdemucsModel'
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import {
+  getBeatThisState,
+  importBeatThisModel,
+  loadBeatThisModel,
+  resetBeatThisFailure,
+  subscribeBeatThisState,
+} from '@/services/analysis/beatThisModel'
+import {
+  getHtdemucsState,
+  importHtdemucsModel,
+  loadHtdemucsModel,
+  resetHtdemucsFailure,
+  subscribeHtdemucsState,
+} from '@/services/analysis/htdemucsModel'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { toast } from 'sonner'
 import { SettingRow } from './SettingRow'
+import { SettingsSection } from './SettingsSection'
 
 function SyncIntervalInput({ value, onChange }: { value: number; onChange: (value: number) => void }) {
   const [draft, setDraft] = useState(String(value))
@@ -61,14 +79,12 @@ function SyncIntervalInput({ value, onChange }: { value: number; onChange: (valu
   )
 }
 
-export function PlaybackSection() {
+export function PlaybackSection({ onOpenRoomSettings }: { onOpenRoomSettings?: () => void }) {
   const s = useSettingsStore()
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h3 className="text-base font-semibold">播放同步</h3>
-        <Separator className="mt-2 mb-4" />
+    <div className="space-y-8">
+      <SettingsSection title="播放同步" description="这台设备如何跟房间时钟对齐">
 
         <SettingRow
           label="自动变速校准"
@@ -119,38 +135,74 @@ export function PlaybackSection() {
             onChange={s.setSyncPacketIntervalSeconds}
           />
         </SettingRow>
-      </div>
+      </SettingsSection>
 
-      <div>
-        <h3 className="text-base font-semibold">睡眠定时器</h3>
-        <Separator className="mt-2 mb-4" />
+      <SettingsSection title="睡眠定时器">
         <SleepTimerSetting />
-      </div>
+      </SettingsSection>
 
-      <div>
-        <h3 className="text-base font-semibold">音频输出</h3>
-        <Separator className="mt-2 mb-4" />
+      <SettingsSection title="音频输出">
         <OutputDeviceSetting />
-        <CrossfadeSetting />
         <PreloadNextSetting />
+        <MediaCacheSetting />
         <ReplayGainSetting />
-      </div>
+      </SettingsSection>
 
-      <div>
-        <h3 className="text-base font-semibold">均衡器</h3>
-        <Separator className="mt-2 mb-4" />
+      <SettingsSection
+        title="过渡"
+        description="房间决定两首歌怎么接，这里决定这台设备上看到什么"
+        badge="local"
+      >
+        <TransitionSettings onOpenRoomSettings={onOpenRoomSettings} />
+      </SettingsSection>
+
+      <SettingsSection title="均衡器">
         <EqualizerSettings />
-      </div>
+      </SettingsSection>
 
-      <div>
-        <h3 className="text-base font-semibold">音效</h3>
-        <Separator className="mt-2 mb-4" />
+      <SettingsSection title="音效">
+        <EffectSettings />
+      </SettingsSection>
+
+      <SettingsSection
+        title="实验性功能"
+        description="会占用本机算力与带宽，按需开启"
+        badge="experimental"
+      >
         <HighPrecisionBeatSetting />
         <TrackFeaturesSetting />
         <HighPrecisionStemSetting />
-        <EffectSettings />
-      </div>
+      </SettingsSection>
     </div>
+  )
+}
+
+function TransitionSettings({ onOpenRoomSettings }: { onOpenRoomSettings?: () => void }) {
+  const room = useRoomStore((state) => state.room)
+  const currentUser = useRoomStore((state) => state.currentUser)
+  const isServerAdmin = useAccountStore((state) => state.profile?.role === 'admin')
+  const canEditRoom = currentUser?.role === 'owner' || isServerAdmin
+  const automixEnabled = room?.automixEnabled ?? false
+
+  return (
+    <>
+      {!automixEnabled && (
+        <div className="mb-1 rounded-md border border-dashed px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+          房间当前没有开启自动混音：换歌由服务端直接切歌，本机只做交叉淡化兜底。
+          {canEditRoom && onOpenRoomSettings && (
+            <button
+              type="button"
+              onClick={onOpenRoomSettings}
+              className="ml-1 font-medium text-foreground underline underline-offset-2"
+            >
+              去房间设置开启
+            </button>
+          )}
+        </div>
+      )}
+      <CrossfadeSetting automixEnabled={automixEnabled} />
+      <TransitionCueSetting />
+    </>
   )
 }
 
@@ -195,7 +247,7 @@ function OutputDeviceSetting() {
   )
 }
 
-function CrossfadeSetting() {
+function CrossfadeSetting({ automixEnabled }: { automixEnabled: boolean }) {
   const crossfadeMs = useAudioSettingsStore((state) => state.crossfadeMs)
   const setCrossfadeMs = useAudioSettingsStore((state) => state.setCrossfadeMs)
   const options = [
@@ -209,8 +261,12 @@ function CrossfadeSetting() {
   ] as const
   return (
     <SettingRow
-      label="切歌交叉淡化"
-      description="服务端切换歌曲时，旧曲渐弱、新曲渐强。所有房间成员使用同一段过渡，不会各自提前切歌。"
+      label="交叉淡化兜底"
+      description={
+        automixEnabled
+          ? '仅在服务端没有给出过渡方案时生效，当前房间已开启自动混音，通常不走这里。'
+          : '房间未开启自动混音，切歌时由这台设备用这段时长做旧曲渐弱、新曲渐强。'
+      }
     >
       <Select value={String(crossfadeMs)} onValueChange={(value) => setCrossfadeMs(Number(value))}>
         <SelectTrigger size="sm" aria-label="切歌交叉淡化时长">
@@ -228,6 +284,22 @@ function CrossfadeSetting() {
   )
 }
 
+function TransitionCueSetting() {
+  const enabled = useSettingsStore((state) => state.transitionCueEnabled)
+  const isDefault = useSettingsStore((state) => state.transitionCueEnabled === state.transitionCueEnabledDefault)
+  const setEnabled = useSettingsStore((state) => state.setTransitionCueEnabled)
+  const reset = useSettingsStore((state) => state.resetTransitionCueEnabled)
+  return (
+    <SettingRow
+      label="过渡提示"
+      description="经典舞台的进度条在交叉淡化时逐渐亮起辉光，时间行中间显示「过渡」，整段淡化期间微微呼吸。只在本机显示。"
+      onReset={isDefault ? undefined : reset}
+    >
+      <Switch aria-label="过渡提示" checked={enabled} onCheckedChange={setEnabled} />
+    </SettingRow>
+  )
+}
+
 function PreloadNextSetting() {
   const enabled = useAudioSettingsStore((state) => state.preloadNextTrack)
   const setEnabled = useAudioSettingsStore((state) => state.setPreloadNextTrack)
@@ -238,6 +310,57 @@ function PreloadNextSetting() {
     >
       <Switch aria-label="预加载下一首" checked={enabled} onCheckedChange={setEnabled} />
     </SettingRow>
+  )
+}
+
+function MediaCacheSetting() {
+  const enabled = useAudioSettingsStore((state) => state.mediaCacheEnabled)
+  const limitMb = useAudioSettingsStore((state) => state.mediaCacheLimitMb)
+  const setEnabled = useAudioSettingsStore((state) => state.setMediaCacheEnabled)
+  const setLimitMb = useAudioSettingsStore((state) => state.setMediaCacheLimitMb)
+  const [clearing, setClearing] = useState(false)
+
+  const clear = async () => {
+    if (!window.confirm('确定清空本机已缓存的音频？不会影响房间播放。')) return
+    setClearing(true)
+    try {
+      await clearMediaCache()
+      clearAudioBytes()
+      toast.success('媒体缓存已清空')
+    } finally {
+      setClearing(false)
+    }
+  }
+
+  return (
+    <>
+      <SettingRow
+        label="媒体缓存"
+        description="把已校验的整曲音频存到本机，重播和离线分析不必重复下载；试听片段不会入缓存。"
+      >
+        <Switch aria-label="媒体缓存" checked={enabled} onCheckedChange={setEnabled} />
+      </SettingRow>
+      {enabled && (
+        <SettingRow label="缓存上限" description="超出后按最久未使用淘汰；0 表示不占用额外空间。">
+          <div className="flex items-center gap-2">
+            <Select value={String(limitMb)} onValueChange={(value) => setLimitMb(Number(value))}>
+              <SelectTrigger size="sm" aria-label="媒体缓存上限">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="100">100 MB</SelectItem>
+                <SelectItem value="300">300 MB</SelectItem>
+                <SelectItem value="1000">1 GB</SelectItem>
+                <SelectItem value="0">不缓存</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button variant="outline" size="sm" onClick={() => void clear()} disabled={clearing}>
+              清空
+            </Button>
+          </div>
+        </SettingRow>
+      )}
+    </>
   )
 }
 
@@ -405,6 +528,46 @@ function EqualizerSettings() {
   )
 }
 
+/** 下载被外部下载器接管时的兜底：导入浏览器已经落盘的模型文件。 */
+function ModelImportButton({ onImport }: { onImport: (file: File) => Promise<void> }) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [busy, setBusy] = useState(false)
+  return (
+    <>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+        disabled={busy}
+        title="模型下载被浏览器或下载工具接管时，先正常下载，再从这里选择已下载的 .bin 文件"
+        onClick={() => inputRef.current?.click()}
+      >
+        {busy ? '导入中…' : '导入模型'}
+      </Button>
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".bin"
+        className="hidden"
+        onChange={async (event) => {
+          const file = event.currentTarget.files?.[0]
+          event.currentTarget.value = ''
+          if (!file) return
+          setBusy(true)
+          try {
+            await onImport(file)
+            toast.success('模型权重已导入')
+          } catch (error) {
+            toast.error(error instanceof Error ? error.message : '模型导入失败')
+          } finally {
+            setBusy(false)
+          }
+        }}
+      />
+    </>
+  )
+}
+
 function HighPrecisionBeatSetting() {
   const enabled = useAudioSettingsStore((state) => state.highPrecisionBeats)
   const setEnabled = useAudioSettingsStore((state) => state.setHighPrecisionBeats)
@@ -416,16 +579,39 @@ function HighPrecisionBeatSetting() {
       : model.phase === 'ready'
         ? `已就绪${model.detail ? `（${model.detail}）` : ''}`
         : model.phase === 'unavailable'
-          ? `不可用：${model.detail ?? '未知原因'}；已回退本地分析。`
-          : '模型尚未加载，下一次分析时开始下载。'
+          ? `不可用：${model.detail ?? '未知原因'}；已回退本地分析。若下载被外部工具接管，可点「导入模型」选用已下载的文件。`
+          : '模型当前未驻留（空闲会释放显存），下一次分析会自动重载；也可以点「重新加载」立即装回。'
   return (
     <SettingRow label="高精度拍点（实验）" description={description}>
+      {model.phase !== 'ready' && model.phase !== 'downloading' && (
+        <ModelImportButton
+          onImport={async (file) => {
+            await importBeatThisModel(file)
+            if (enabled) void loadBeatThisModel().catch(() => undefined)
+          }}
+        />
+      )}
+      {enabled && (model.phase === 'idle' || model.phase === 'unavailable') && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            resetBeatThisFailure()
+            void loadBeatThisModel().catch(() => undefined)
+          }}
+        >
+          重新加载
+        </Button>
+      )}
       <Switch
         aria-label="高精度拍点"
         checked={enabled}
         onCheckedChange={(next) => {
           setEnabled(next)
-          if (next) void loadBeatThisModel().catch(() => undefined)
+          if (next) {
+            resetBeatThisFailure()
+            void loadBeatThisModel().catch(() => undefined)
+          }
         }}
       />
     </SettingRow>
@@ -452,24 +638,49 @@ function HighPrecisionStemSetting() {
   const model = useSyncExternalStore(subscribeHtdemucsState, getHtdemucsState)
   const description = !featuresEnabled
     ? '先开启「混音特征分析」；开启后可用 htdemucs 真分轨替代混音近似。'
-    : !enabled
-      ? '用 htdemucs（WebGPU）分出鼓轨与人声轨，鼓点与人声包络更准；首次开启需下载约 92 MB 权重，不支持时自动回退。'
+    : !webgpuPresent()
+      ? '当前浏览器不支持 WebGPU（需 Chrome / Edge 113+）；自动混音的过渡分轨与 Folia 特效都会回退混音近似。'
+      : !enabled
+        ? '用 htdemucs（WebGPU）分出鼓轨与人声轨，鼓点与人声包络更准；首次开启需下载约 92 MB 权重，不支持时自动回退。'
       : model.phase === 'downloading'
         ? `正在下载分轨模型… ${Math.round(model.progress * 100)}%`
         : model.phase === 'ready'
           ? `已就绪${model.detail ? `（${model.detail}）` : ''}`
           : model.phase === 'unavailable'
-            ? `不可用：${model.detail ?? '未知原因'}；已回退混音近似。`
-            : '模型尚未加载，下一次特征分析时开始下载。'
+            ? `不可用：${model.detail ?? '未知原因'}；已回退混音近似。若下载被外部工具接管，可点「导入模型」选用已下载的文件。`
+            : '模型当前未驻留（空闲会释放显存），下一次特征分析会自动重载；也可以点「重新加载」立即装回。'
   return (
     <SettingRow label="真实分轨（实验）" description={description}>
+      {model.phase !== 'ready' && model.phase !== 'downloading' && (
+        <ModelImportButton
+          onImport={async (file) => {
+            await importHtdemucsModel(file)
+            if (enabled) void loadHtdemucsModel().catch(() => undefined)
+          }}
+        />
+      )}
+      {enabled && (model.phase === 'idle' || model.phase === 'unavailable') && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            resetHtdemucsFailure()
+            void loadHtdemucsModel().catch(() => undefined)
+          }}
+        >
+          重新加载
+        </Button>
+      )}
       <Switch
         aria-label="真实分轨"
         checked={enabled}
-        disabled={!featuresEnabled}
+        disabled={!featuresEnabled || (!enabled && !webgpuPresent())}
         onCheckedChange={(next) => {
           setEnabled(next)
-          if (next) void loadHtdemucsModel().catch(() => undefined)
+          if (next) {
+            resetHtdemucsFailure()
+            void loadHtdemucsModel().catch(() => undefined)
+          }
         }}
       />
     </SettingRow>

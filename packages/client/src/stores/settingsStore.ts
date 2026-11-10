@@ -6,11 +6,14 @@ import { DEFAULT_SMART_BEAT_SETTINGS, type SmartBeatSettings } from '@/services/
 import {
   storage,
   SETTING_DEFAULTS,
+  getBgFpsDefault,
+  getBgRenderScaleDefault,
   type LyricDisplaySetting,
   type LyricMotionSetting,
   type LyricPreferredSource,
   type LyricRendererSetting,
   type LyricTranslationSetting,
+  type BgRendererSetting,
   type VisualQualitySetting,
   type VisualStageSetting,
 } from '@/lib/storage'
@@ -39,6 +42,26 @@ type ResettableFields<K extends string, V> = {
   [P in `reset${Capitalize<K>}`]: () => void
 }
 
+/** AMLL 歌词控制 —— 经典与 3D 视觉各一套，schema v4 起互不影响 */
+type AmllLyricFields<F extends 'classic' | 'mineradio'> = ResettableFields<
+  `${F}LyricAlignAnchor`,
+  'top' | 'center' | 'bottom'
+> &
+  ResettableFields<`${F}LyricAlignPosition`, number> &
+  ResettableFields<`${F}LyricEnableSpring`, boolean> &
+  ResettableFields<`${F}LyricEnableBlur`, boolean> &
+  ResettableFields<`${F}LyricEnableScale`, boolean> &
+  ResettableFields<`${F}LyricHidePassedLines`, boolean> &
+  ResettableFields<`${F}LyricShowBottomLine`, boolean> &
+  ResettableFields<`${F}LyricMaskObsceneWordsMode`, '' | 'full-mask' | 'partial-mask'> &
+  ResettableFields<`${F}LyricMaskObsceneWordChar`, string> &
+  ResettableFields<`${F}LyricWordFadeWidth`, number> &
+  ResettableFields<`${F}LyricShowTranslation`, boolean> &
+  ResettableFields<`${F}LyricShowRoman`, boolean> &
+  ResettableFields<`${F}LyricSwapTransRoman`, boolean> &
+  ResettableFields<`${F}LyricFontWeight`, number> &
+  ResettableFields<`${F}LyricFontSize`, number>
+
 /** 合并所有 resettable key 的字段为完整 SettingsStore 类型 */
 type SettingsStore = {
   foliaSettings: FoliaSettings
@@ -49,22 +72,21 @@ type SettingsStore = {
   resetSmartBeat: () => void
 } & ResettableFields<'playbackTempoSyncEnabled', boolean> &
   ResettableFields<'playbackHardSeekSyncEnabled', boolean> &
+  ResettableFields<'transitionCueEnabled', boolean> &
+  ResettableFields<'songHandoffAnimation', boolean> &
+  ResettableFields<'classicImmersiveCover', boolean> &
+  ResettableFields<'dynamicCoverEnabled', boolean> &
+  ResettableFields<'showRemainingTime', boolean> &
+  ResettableFields<'lyricFontFamily', string> &
+  ResettableFields<'lyricLetterSpacing', string> &
   ResettableFields<'syncPacketIntervalSeconds', number> &
   ResettableFields<'ttmlEnabled', boolean> &
   ResettableFields<'ttmlDbUrl', string> &
   ResettableFields<'lyricPreferredSource', LyricPreferredSource> &
-  ResettableFields<'lyricAlignAnchor', 'top' | 'center' | 'bottom'> &
-  ResettableFields<'lyricAlignPosition', number> &
-  ResettableFields<'lyricEnableSpring', boolean> &
-  ResettableFields<'lyricEnableBlur', boolean> &
-  ResettableFields<'lyricEnableScale', boolean> &
-  ResettableFields<'lyricHidePassedLines', boolean> &
-  ResettableFields<'lyricShowBottomLine', boolean> &
-  ResettableFields<'lyricMaskObsceneWordsMode', '' | 'full-mask' | 'partial-mask'> &
-  ResettableFields<'lyricMaskObsceneWordChar', string> &
-  ResettableFields<'lyricWordFadeWidth', number> &
-  ResettableFields<'lyricFontWeight', number> &
-  ResettableFields<'lyricFontSize', number> &
+  AmllLyricFields<'classic'> &
+  AmllLyricFields<'mineradio'> &
+  ResettableFields<'foliaLyricFontWeight', number> &
+  ResettableFields<'foliaLyricFontSize', number> &
   ResettableFields<'lyricTranslationFontSize', number> &
   ResettableFields<'lyricRomanFontSize', number> &
   ResettableFields<'lyricLineRules', LyricLineRule[]> & {
@@ -74,10 +96,15 @@ type SettingsStore = {
   } & ResettableFields<'bgFps', number> &
   ResettableFields<'bgFlowSpeed', number> &
   ResettableFields<'bgRenderScale', number> &
+  ResettableFields<'bgRenderer', BgRendererSetting> &
+  ResettableFields<'bgCssBackground', string> &
   ResettableFields<'visualStage', VisualStageSetting> &
   ResettableFields<'visualQuality', VisualQualitySetting> &
+  ResettableFields<'foliaFrameRate', number> &
+  ResettableFields<'foliaVisualQuality', VisualQualitySetting> &
   ResettableFields<'visualBloom', boolean> &
   ResettableFields<'visualEdge', boolean> &
+  ResettableFields<'stageConsoleAutoFade', boolean> &
   ResettableFields<'lyricRenderer', LyricRendererSetting> &
   ResettableFields<'lyricMotion', LyricMotionSetting> &
   ResettableFields<'lyricDisplayMode3d', LyricDisplaySetting> &
@@ -105,8 +132,10 @@ export const useSettingsStore = create<SettingsStore>((set) => {
     key: K,
     load: () => SettingValue<K>,
     persist: (v: SettingValue<K>) => void,
+    /** 设备相关的出厂值（如触屏的背景档位）；缺省用 SETTING_DEFAULTS。 */
+    defaultOverride?: SettingValue<K>,
   ): Record<string, unknown> {
-    const defaultValue = SETTING_DEFAULTS[key]
+    const defaultValue = defaultOverride ?? SETTING_DEFAULTS[key]
     const initial = load()
     const cap = capitalize(key)
 
@@ -171,6 +200,13 @@ export const useSettingsStore = create<SettingsStore>((set) => {
         return { smartBeat }
       }),
     ...resettable('playbackTempoSyncEnabled', storage.getPlaybackTempoSyncEnabled, storage.setPlaybackTempoSyncEnabled),
+    ...resettable('transitionCueEnabled', storage.getTransitionCueEnabled, storage.setTransitionCueEnabled),
+    ...resettable('songHandoffAnimation', storage.getSongHandoffAnimation, storage.setSongHandoffAnimation),
+    ...resettable('classicImmersiveCover', storage.getClassicImmersiveCover, storage.setClassicImmersiveCover),
+    ...resettable('dynamicCoverEnabled', storage.getDynamicCoverEnabled, storage.setDynamicCoverEnabled),
+    ...resettable('showRemainingTime', storage.getShowRemainingTime, storage.setShowRemainingTime),
+    ...resettable('lyricFontFamily', storage.getLyricFontFamily, storage.setLyricFontFamily),
+    ...resettable('lyricLetterSpacing', storage.getLyricLetterSpacing, storage.setLyricLetterSpacing),
     ...resettable(
       'playbackHardSeekSyncEnabled',
       storage.getPlaybackHardSeekSyncEnabled,
@@ -184,22 +220,119 @@ export const useSettingsStore = create<SettingsStore>((set) => {
     ...resettable('ttmlEnabled', storage.getTtmlEnabled, storage.setTtmlEnabled),
     ...resettable('ttmlDbUrl', storage.getTtmlDbUrl, storage.setTtmlDbUrl),
     ...resettable('lyricPreferredSource', storage.getLyricPreferredSource, storage.setLyricPreferredSource),
-    ...resettable('lyricAlignAnchor', storage.getLyricAlignAnchor, storage.setLyricAlignAnchor),
-    ...resettable('lyricAlignPosition', storage.getLyricAlignPosition, storage.setLyricAlignPosition),
-    ...resettable('lyricEnableSpring', storage.getLyricEnableSpring, storage.setLyricEnableSpring),
-    ...resettable('lyricEnableBlur', storage.getLyricEnableBlur, storage.setLyricEnableBlur),
-    ...resettable('lyricEnableScale', storage.getLyricEnableScale, storage.setLyricEnableScale),
-    ...resettable('lyricHidePassedLines', storage.getLyricHidePassedLines, storage.setLyricHidePassedLines),
-    ...resettable('lyricShowBottomLine', storage.getLyricShowBottomLine, storage.setLyricShowBottomLine),
+    // 经典播放器 — AMLL 歌词
+    ...resettable('classicLyricAlignAnchor', storage.getClassicLyricAlignAnchor, storage.setClassicLyricAlignAnchor),
     ...resettable(
-      'lyricMaskObsceneWordsMode',
-      storage.getLyricMaskObsceneWordsMode,
-      storage.setLyricMaskObsceneWordsMode,
+      'classicLyricAlignPosition',
+      storage.getClassicLyricAlignPosition,
+      storage.setClassicLyricAlignPosition,
     ),
-    ...resettable('lyricMaskObsceneWordChar', storage.getLyricMaskObsceneWordChar, storage.setLyricMaskObsceneWordChar),
-    ...resettable('lyricWordFadeWidth', storage.getLyricWordFadeWidth, storage.setLyricWordFadeWidth),
-    ...resettable('lyricFontWeight', storage.getLyricFontWeight, storage.setLyricFontWeight),
-    ...resettable('lyricFontSize', storage.getLyricFontSize, storage.setLyricFontSize),
+    ...resettable('classicLyricEnableSpring', storage.getClassicLyricEnableSpring, storage.setClassicLyricEnableSpring),
+    ...resettable('classicLyricEnableBlur', storage.getClassicLyricEnableBlur, storage.setClassicLyricEnableBlur),
+    ...resettable('classicLyricEnableScale', storage.getClassicLyricEnableScale, storage.setClassicLyricEnableScale),
+    ...resettable(
+      'classicLyricHidePassedLines',
+      storage.getClassicLyricHidePassedLines,
+      storage.setClassicLyricHidePassedLines,
+    ),
+    ...resettable(
+      'classicLyricShowBottomLine',
+      storage.getClassicLyricShowBottomLine,
+      storage.setClassicLyricShowBottomLine,
+    ),
+    ...resettable(
+      'classicLyricMaskObsceneWordsMode',
+      storage.getClassicLyricMaskObsceneWordsMode,
+      storage.setClassicLyricMaskObsceneWordsMode,
+    ),
+    ...resettable(
+      'classicLyricMaskObsceneWordChar',
+      storage.getClassicLyricMaskObsceneWordChar,
+      storage.setClassicLyricMaskObsceneWordChar,
+    ),
+    ...resettable(
+      'classicLyricWordFadeWidth',
+      storage.getClassicLyricWordFadeWidth,
+      storage.setClassicLyricWordFadeWidth,
+    ),
+    ...resettable(
+      'classicLyricShowTranslation',
+      storage.getClassicLyricShowTranslation,
+      storage.setClassicLyricShowTranslation,
+    ),
+    ...resettable('classicLyricShowRoman', storage.getClassicLyricShowRoman, storage.setClassicLyricShowRoman),
+    ...resettable(
+      'classicLyricSwapTransRoman',
+      storage.getClassicLyricSwapTransRoman,
+      storage.setClassicLyricSwapTransRoman,
+    ),
+    ...resettable('classicLyricFontWeight', storage.getClassicLyricFontWeight, storage.setClassicLyricFontWeight),
+    ...resettable('classicLyricFontSize', storage.getClassicLyricFontSize, storage.setClassicLyricFontSize),
+
+    // 3D 视觉舞台 — AMLL 歌词
+    ...resettable(
+      'mineradioLyricAlignAnchor',
+      storage.getMineradioLyricAlignAnchor,
+      storage.setMineradioLyricAlignAnchor,
+    ),
+    ...resettable(
+      'mineradioLyricAlignPosition',
+      storage.getMineradioLyricAlignPosition,
+      storage.setMineradioLyricAlignPosition,
+    ),
+    ...resettable(
+      'mineradioLyricEnableSpring',
+      storage.getMineradioLyricEnableSpring,
+      storage.setMineradioLyricEnableSpring,
+    ),
+    ...resettable('mineradioLyricEnableBlur', storage.getMineradioLyricEnableBlur, storage.setMineradioLyricEnableBlur),
+    ...resettable(
+      'mineradioLyricEnableScale',
+      storage.getMineradioLyricEnableScale,
+      storage.setMineradioLyricEnableScale,
+    ),
+    ...resettable(
+      'mineradioLyricHidePassedLines',
+      storage.getMineradioLyricHidePassedLines,
+      storage.setMineradioLyricHidePassedLines,
+    ),
+    ...resettable(
+      'mineradioLyricShowBottomLine',
+      storage.getMineradioLyricShowBottomLine,
+      storage.setMineradioLyricShowBottomLine,
+    ),
+    ...resettable(
+      'mineradioLyricMaskObsceneWordsMode',
+      storage.getMineradioLyricMaskObsceneWordsMode,
+      storage.setMineradioLyricMaskObsceneWordsMode,
+    ),
+    ...resettable(
+      'mineradioLyricMaskObsceneWordChar',
+      storage.getMineradioLyricMaskObsceneWordChar,
+      storage.setMineradioLyricMaskObsceneWordChar,
+    ),
+    ...resettable(
+      'mineradioLyricWordFadeWidth',
+      storage.getMineradioLyricWordFadeWidth,
+      storage.setMineradioLyricWordFadeWidth,
+    ),
+    ...resettable(
+      'mineradioLyricShowTranslation',
+      storage.getMineradioLyricShowTranslation,
+      storage.setMineradioLyricShowTranslation,
+    ),
+    ...resettable('mineradioLyricShowRoman', storage.getMineradioLyricShowRoman, storage.setMineradioLyricShowRoman),
+    ...resettable(
+      'mineradioLyricSwapTransRoman',
+      storage.getMineradioLyricSwapTransRoman,
+      storage.setMineradioLyricSwapTransRoman,
+    ),
+    ...resettable('mineradioLyricFontWeight', storage.getMineradioLyricFontWeight, storage.setMineradioLyricFontWeight),
+    ...resettable('mineradioLyricFontSize', storage.getMineradioLyricFontSize, storage.setMineradioLyricFontSize),
+
+    // Folia — 字号/粗细与字幕字号
+    ...resettable('foliaLyricFontWeight', storage.getFoliaLyricFontWeight, storage.setFoliaLyricFontWeight),
+    ...resettable('foliaLyricFontSize', storage.getFoliaLyricFontSize, storage.setFoliaLyricFontSize),
     ...resettable('lyricTranslationFontSize', storage.getLyricTranslationFontSize, storage.setLyricTranslationFontSize),
     ...resettable('lyricRomanFontSize', storage.getLyricRomanFontSize, storage.setLyricRomanFontSize),
     ...resettable('lyricLineRules', storage.getLyricLineRules, storage.setLyricLineRules),
@@ -223,13 +356,23 @@ export const useSettingsStore = create<SettingsStore>((set) => {
         return { lyricOffsets }
       })
     },
-    ...resettable('bgFps', storage.getBgFps, storage.setBgFps),
+    ...resettable('bgFps', storage.getBgFps, storage.setBgFps, getBgFpsDefault()),
     ...resettable('bgFlowSpeed', storage.getBgFlowSpeed, storage.setBgFlowSpeed),
-    ...resettable('bgRenderScale', storage.getBgRenderScale, storage.setBgRenderScale),
+    ...resettable(
+      'bgRenderScale',
+      storage.getBgRenderScale,
+      storage.setBgRenderScale,
+      getBgRenderScaleDefault(),
+    ),
+    ...resettable('bgRenderer', storage.getBgRenderer, storage.setBgRenderer),
+    ...resettable('bgCssBackground', storage.getBgCssBackground, storage.setBgCssBackground),
     ...resettable('visualStage', storage.getVisualStage, storage.setVisualStage),
     ...resettable('visualQuality', storage.getVisualQuality, storage.setVisualQuality),
+    ...resettable('foliaFrameRate', storage.getFoliaFrameRate, storage.setFoliaFrameRate),
+    ...resettable('foliaVisualQuality', storage.getFoliaVisualQuality, storage.setFoliaVisualQuality),
     ...resettable('visualBloom', storage.getVisualBloom, storage.setVisualBloom),
     ...resettable('visualEdge', storage.getVisualEdge, storage.setVisualEdge),
+    ...resettable('stageConsoleAutoFade', storage.getStageConsoleAutoFade, storage.setStageConsoleAutoFade),
     ...resettable('lyricRenderer', storage.getLyricRenderer, storage.setLyricRenderer),
     ...resettable('lyricMotion', storage.getLyricMotion, storage.setLyricMotion),
     ...resettable('lyricDisplayMode3d', storage.getLyricDisplayMode3d, storage.setLyricDisplayMode3d),

@@ -277,7 +277,7 @@ export function useFoliaTheme(): Theme {
   const foreground = useCssVarColor('--foreground', '#f7f1e8')
   const secondaryRgb = useCssVarColor('--theme-secondary-rgb', '116 184 165')
   // 歌词字重（上游 `Theme.fontWeight`）：各模式读它决定字形的粗细分层。
-  const fontWeight = useSettingsStore((s) => s.lyricFontWeight)
+  const fontWeight = useSettingsStore((s) => s.foliaLyricFontWeight)
 
   return useMemo<Theme>(
     () => ({

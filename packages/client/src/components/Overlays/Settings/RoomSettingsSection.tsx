@@ -1,7 +1,8 @@
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Slider } from '@/components/ui/slider'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
@@ -9,25 +10,32 @@ import { storage } from '@/lib/storage'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
 import { useAccountStore } from '@/stores/accountStore'
-import type { AudioQuality, NeteaseRoamingMode, RoamingSource } from '@music-together/shared'
-import { LIMITS } from '@music-together/shared'
+import type { AudioQuality, NeteaseRoamingMode, RoamingSource, TransitionMode } from '@music-together/shared'
+import { CROSSFADE_DEFAULT_SEC, CROSSFADE_MAX_SEC, CROSSFADE_MIN_SEC, LIMITS, NETEASE_ROAMING_SCENES } from '@music-together/shared'
 import { Check, Copy, Lock, LockOpen, Pencil, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { SettingRow } from './SettingRow'
+import { SettingsSection } from './SettingsSection'
 import { getAudioQualityLabel, getAudioQualityOptions } from '@/lib/audioQuality'
 import { updateCurrentNickname } from '@/lib/profileApi'
 import { useAuth } from '@/hooks/useAuth'
 
-const ROAMING_MODE_OPTIONS: { value: NeteaseRoamingMode; label: string; description: string }[] = [
+const ROAMING_BASE_MODES: { value: string; label: string; description: string }[] = [
   { value: 'DEFAULT', label: '默认漫游', description: '综合听歌记录，常规个性化推荐' },
   { value: 'FAMILIAR', label: '熟悉模式', description: '多推收藏、常听与相似曲风' },
   { value: 'EXPLORE', label: '探索模式', description: '多推新歌、冷门歌，拓展曲库' },
-  { value: 'SCENE_RCMD:EXERCISE', label: '运动场景', description: '节奏明快，适合锻炼' },
-  { value: 'SCENE_RCMD:FOCUS', label: '专注场景', description: '适合工作、学习，偏轻音乐' },
-  { value: 'SCENE_RCMD:NIGHT_EMO', label: '深夜场景', description: '夜晚情绪向慢歌' },
+  { value: 'PUZZLE_MODE_RCMD', label: '拼图模式', description: '按听歌偏好拼合推荐' },
+  { value: 'SCENE_RCMD', label: '场景推荐', description: '按心情、活动、曲风或语言选场景' },
   { value: 'aidj', label: 'AI DJ', description: 'AI 串烧混剪，曲间带过渡衔接' },
 ]
+
+const SCENE_CATEGORY_LABELS: Record<string, string> = {
+  mood: '心情',
+  activity: '活动',
+  genre: '曲风',
+  language: '语言',
+}
 
 const ROAMING_SOURCE_LABELS: Record<RoamingSource, string> = {
   netease: '网易云音乐',
@@ -47,6 +55,10 @@ interface RoomSettingsSectionProps {
     allowTemporaryAdminQueueClear?: boolean
     removePlayedTracks?: boolean
     roamingEnabled?: boolean
+    automixEnabled?: boolean
+    transitionMode?: TransitionMode
+    crossfadeMaxSec?: number
+    automixPerformance?: boolean
     roamingSource?: RoamingSource
     roamingMode?: NeteaseRoamingMode
   }) => Promise<boolean>
@@ -60,6 +72,9 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
     return confirmed
   }
   const room = useRoomStore((s) => s.room)
+  const [crossfadeDraft, setCrossfadeDraft] = useState<number | null>(null)
+  const crossfadeMaxSec = crossfadeDraft ?? room?.crossfadeMaxSec ?? CROSSFADE_DEFAULT_SEC
+  const transitionMode = room?.transitionMode ?? 'automix'
   const currentUser = useRoomStore((s) => s.currentUser)
   const roomPassword = useRoomStore((s) => s.roomPassword)
   const syncDrift = usePlayerStore((s) => s.syncDrift)
@@ -70,7 +85,10 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
   const qualityOptions = useMemo(() => getAudioQualityOptions(platformStatus), [platformStatus])
   const roamingSource = room?.roamingSource ?? 'netease'
   const roamingMode = room?.roamingMode ?? 'DEFAULT'
-  const roamingModeOption = ROAMING_MODE_OPTIONS.find((option) => option.value === roamingMode) ?? ROAMING_MODE_OPTIONS[0]
+  const isSceneMode = roamingMode.startsWith('SCENE_RCMD:')
+  const roamingBaseMode = isSceneMode ? 'SCENE_RCMD' : roamingMode
+  const roamingScene = isSceneMode ? roamingMode.slice('SCENE_RCMD:'.length) : 'EXERCISE'
+  const roamingBaseOption = ROAMING_BASE_MODES.find((option) => option.value === roamingBaseMode)
   const creatorIsCurrentUser = currentUser?.id === room?.creatorId
   const creatorLoggedInToRoamingSource =
     creatorIsCurrentUser && myStatus.some((status) => status.platform === roamingSource && status.loggedIn)
@@ -292,6 +310,101 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
         </SettingRow>
       </div>
 
+      <SettingsSection
+        title="播放过渡"
+        description={isOwner ? '房间级设置，所有成员共享同一段过渡' : '房间级设置，所有成员共享同一段过渡；仅房主可以修改'}
+        badge="room"
+      >
+        <SettingRow
+          label="自动混音"
+          description={
+            room?.automixEnabled
+              ? '当前曲目结束前与下一首重叠过渡，落点由服务端按节拍与段落统一编排'
+              : '关闭时到点直接切歌，只有各设备的交叉淡化兜底'
+          }
+        >
+          <Switch
+            aria-label="自动混音"
+            checked={room?.automixEnabled ?? false}
+            disabled={!isOwner}
+            onCheckedChange={(automixEnabled) => {
+              void submitSettings(
+                { automixEnabled },
+                automixEnabled ? '已开启自动混音' : '已关闭自动混音',
+              )
+            }}
+          />
+        </SettingRow>
+
+        {room?.automixEnabled && (
+          <>
+            <SettingRow
+              label="过渡方式"
+              description="自动混音按节拍与段落规划落点；交叉淡化使用固定时长的等功率淡化"
+            >
+              <Select
+                value={transitionMode}
+                disabled={!isOwner}
+                onValueChange={(value) => {
+                  void submitSettings(
+                    { transitionMode: value as TransitionMode },
+                    value === 'automix' ? '已切换为自动混音' : '已切换为交叉淡化',
+                  )
+                }}
+              >
+                <SelectTrigger className="w-32" aria-label="过渡方式">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="automix">自动混音</SelectItem>
+                  <SelectItem value="crossfade">交叉淡化</SelectItem>
+                </SelectContent>
+              </Select>
+            </SettingRow>
+
+            {transitionMode === 'crossfade' ? (
+              <SettingRow label="淡化时长" description={`固定 ${crossfadeMaxSec} 秒等功率交叉淡化`}>
+                <div className="flex w-52 items-center gap-3">
+                  <Slider
+                    aria-label="交叉淡化时长"
+                    min={CROSSFADE_MIN_SEC}
+                    max={CROSSFADE_MAX_SEC}
+                    step={1}
+                    disabled={!isOwner}
+                    value={[crossfadeMaxSec]}
+                    onValueChange={([next]) => setCrossfadeDraft(next ?? CROSSFADE_DEFAULT_SEC)}
+                    onValueCommit={([next]) => {
+                      setCrossfadeDraft(null)
+                      void submitSettings(
+                        { crossfadeMaxSec: next ?? CROSSFADE_DEFAULT_SEC },
+                        `交叉淡化已设为 ${next ?? CROSSFADE_DEFAULT_SEC} 秒`,
+                      )
+                    }}
+                  />
+                  <span className="w-12 text-right text-xs tabular-nums text-muted-foreground">
+                    {crossfadeMaxSec} 秒
+                  </span>
+                </div>
+              </SettingRow>
+            ) : (
+              <SettingRow label="表演模式" description="在鼓组换手前做 build-up，让过渡被听见">
+                <Switch
+                  aria-label="表演模式"
+                  checked={room?.automixPerformance ?? false}
+                  disabled={!isOwner}
+                  onCheckedChange={(automixPerformance) => {
+                    void submitSettings(
+                      { automixPerformance },
+                      automixPerformance ? '已开启表演模式' : '已关闭表演模式',
+                    )
+                  }}
+                />
+              </SettingRow>
+            )}
+          </>
+        )}
+      </SettingsSection>
+
       {isOwner && (
         <div>
           <h3 className="text-base font-semibold">房主设置</h3>
@@ -394,18 +507,24 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
 
           <SettingRow
             label="漫游模式"
-            description={roamingSource === 'netease' ? roamingModeOption.description : '该平台目前固定使用默认推荐'}
+            description={roamingSource === 'netease' ? (roamingBaseOption?.description ?? '') : '该平台目前固定使用默认推荐'}
           >
             <Select
-              value={roamingSource === 'netease' ? roamingMode : 'DEFAULT'}
+              value={roamingSource === 'netease' ? roamingBaseMode : 'DEFAULT'}
               disabled={roamingSource !== 'netease'}
-              onValueChange={(value) => onUpdateSettings({ roamingMode: value as NeteaseRoamingMode })}
+              onValueChange={(value) =>
+                onUpdateSettings({
+                  roamingMode: (value === 'SCENE_RCMD'
+                    ? `SCENE_RCMD:${roamingScene}`
+                    : value) as NeteaseRoamingMode,
+                })
+              }
             >
               <SelectTrigger size="sm" className="w-[150px] max-w-[46vw]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {ROAMING_MODE_OPTIONS.map((option) => (
+                {ROAMING_BASE_MODES.map((option) => (
                   <SelectItem key={option.value} value={option.value}>
                     {option.label}
                   </SelectItem>
@@ -413,6 +532,33 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
               </SelectContent>
             </Select>
           </SettingRow>
+
+          {roamingSource === 'netease' && roamingBaseMode === 'SCENE_RCMD' && (
+            <SettingRow label="场景" description="按心情、活动、曲风或语言挑选推荐场景">
+              <Select
+                value={roamingScene}
+                onValueChange={(value) =>
+                  onUpdateSettings({ roamingMode: `SCENE_RCMD:${value}` as NeteaseRoamingMode })
+                }
+              >
+                <SelectTrigger size="sm" className="w-[150px] max-w-[46vw]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {['mood', 'activity', 'genre', 'language'].map((category) => (
+                    <SelectGroup key={category}>
+                      <SelectLabel>{SCENE_CATEGORY_LABELS[category] ?? category}</SelectLabel>
+                      {NETEASE_ROAMING_SCENES.filter((scene) => scene.category === category).map((scene) => (
+                        <SelectItem key={scene.id} value={scene.id}>
+                          {scene.label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  ))}
+                </SelectContent>
+              </Select>
+            </SettingRow>
+          )}
 
           {passwordEnabled && (
             <div className="flex gap-2 pb-2">

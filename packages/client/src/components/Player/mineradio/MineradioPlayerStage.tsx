@@ -1,3 +1,6 @@
+import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Settings2 } from 'lucide-react'
 import { getProxiedCoverUrl } from '@/lib/cover'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -33,6 +36,8 @@ interface MineradioPlayerStageProps {
   onPrev: () => void
   onOpenChat: () => void
   onOpenQueue: () => void
+  /** 打开设置面板的「播放器」页（3D 族） */
+  onOpenSettings?: () => void
   chatUnreadCount: number
   activeVote: VoteState | null
   onCastVote: (approve: boolean) => void
@@ -63,9 +68,8 @@ export function MineradioPlayerStage({
   onLyricSeek,
   onNext,
   onPrev,
-  onOpenChat,
   onOpenQueue,
-  chatUnreadCount,
+  onOpenSettings,
   activeVote,
   onCastVote,
   onStartVote,
@@ -240,6 +244,27 @@ export function MineradioPlayerStage({
         }}
       />
 
+      {/* 舞台内设置入口：与经典舞台右上角的齿轮同位置 */}
+      {onOpenSettings && (
+        <div className="mt-mineradio-settings absolute top-4 z-30">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9 text-white/75 hover:bg-white/10 hover:text-white"
+                onClick={onOpenSettings}
+                aria-label="播放器设置"
+              >
+                <Settings2 className="h-5 w-5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>播放器设置</TooltipContent>
+          </Tooltip>
+        </div>
+      )}
+
       {/* 环境底色层：置于画布之下，避免整个舞台退化成纯黑。
           画布本身是透明的，因此这一层负责提供色彩与封面氛围。 */}
       <AmbientBackdrop accent={cover?.accent ?? null} lowQuality={policy.lowPower} />
@@ -293,9 +318,7 @@ export function MineradioPlayerStage({
         onSeek={onSeek}
         onNext={onNext}
         onPrev={onPrev}
-        onOpenChat={onOpenChat}
         onOpenQueue={onOpenQueue}
-        chatUnreadCount={chatUnreadCount}
         activeVote={activeVote}
         onCastVote={onCastVote}
         onStartVote={onStartVote}

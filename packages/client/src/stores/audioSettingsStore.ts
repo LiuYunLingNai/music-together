@@ -30,6 +30,19 @@ export interface AudioSettingsState {
   highPrecisionStems: boolean
   /** 播放结束前提前解析并缓冲下一首，减少切歌空档。 */
   preloadNextTrack: boolean
+  /** 用 Cache Storage 持久缓存已校验的整曲音频。 */
+  mediaCacheEnabled: boolean
+  /** 媒体缓存容量上限（MB）；0 表示不缓存。 */
+  mediaCacheLimitMb: number
+}
+
+/** 触屏/移动设备给更保守的默认值，避免首次就把配额吃满。 */
+const defaultMediaCacheLimitMb = (): number => {
+  try {
+    return window.matchMedia?.('(pointer: coarse)').matches ? 100 : 300
+  } catch {
+    return 300
+  }
 }
 
 export const DEFAULT_AUDIO_SETTINGS: AudioSettingsState = {
@@ -41,6 +54,8 @@ export const DEFAULT_AUDIO_SETTINGS: AudioSettingsState = {
   highPrecisionBeats: false,
   highPrecisionStems: false,
   preloadNextTrack: true,
+  mediaCacheEnabled: true,
+  mediaCacheLimitMb: defaultMediaCacheLimitMb(),
 }
 
 const STORAGE_KEY = 'mt-audio-settings'
@@ -121,6 +136,11 @@ const resolveStored = (value: StoredAudioSettings | null | undefined): AudioSett
     highPrecisionBeats: value?.highPrecisionBeats === true,
     highPrecisionStems: value?.highPrecisionStems === true,
     preloadNextTrack: value?.preloadNextTrack !== false,
+    mediaCacheEnabled: value?.mediaCacheEnabled !== false,
+    mediaCacheLimitMb:
+      typeof value?.mediaCacheLimitMb === 'number' && Number.isFinite(value.mediaCacheLimitMb)
+        ? clamp(Math.round(value.mediaCacheLimitMb), 0, 5000)
+        : defaultMediaCacheLimitMb(),
   }
 }
 
@@ -156,6 +176,8 @@ interface AudioSettingsStore extends AudioSettingsState {
   setHighPrecisionBeats: (enabled: boolean) => void
   setHighPrecisionStems: (enabled: boolean) => void
   setPreloadNextTrack: (enabled: boolean) => void
+  setMediaCacheEnabled: (enabled: boolean) => void
+  setMediaCacheLimitMb: (limitMb: number) => void
 }
 
 const initial = read()
@@ -171,6 +193,8 @@ export const useAudioSettingsStore = create<AudioSettingsStore>((set, get) => {
       highPrecisionBeats: patch.highPrecisionBeats ?? get().highPrecisionBeats,
       highPrecisionStems: patch.highPrecisionStems ?? get().highPrecisionStems,
       preloadNextTrack: patch.preloadNextTrack ?? get().preloadNextTrack,
+      mediaCacheEnabled: patch.mediaCacheEnabled ?? get().mediaCacheEnabled,
+      mediaCacheLimitMb: clamp(patch.mediaCacheLimitMb ?? get().mediaCacheLimitMb, 0, 5000),
     }
     persist(next)
     set(next)
@@ -203,5 +227,7 @@ export const useAudioSettingsStore = create<AudioSettingsStore>((set, get) => {
     setHighPrecisionBeats: (highPrecisionBeats) => update({ highPrecisionBeats }),
     setHighPrecisionStems: (highPrecisionStems) => update({ highPrecisionStems }),
     setPreloadNextTrack: (preloadNextTrack) => update({ preloadNextTrack }),
+    setMediaCacheEnabled: (mediaCacheEnabled) => update({ mediaCacheEnabled }),
+    setMediaCacheLimitMb: (mediaCacheLimitMb) => update({ mediaCacheLimitMb }),
   }
 })

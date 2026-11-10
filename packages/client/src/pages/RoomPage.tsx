@@ -7,7 +7,6 @@ import { Loader2, PanelLeftOpen, PanelRightOpen } from 'lucide-react'
 import { InteractionGate } from '@/components/InteractionGate'
 import { GlobalBackground } from '@/components/GlobalBackground'
 import { AudioPlayer } from '@/components/Player/AudioPlayer'
-import { MiniPlayerBar } from '@/components/Player/MiniPlayerBar'
 import { ChatPanel } from '@/components/Chat/ChatPanel'
 import { HotSongsPanel } from '@/components/Room/HotSongsPanel'
 import { RoomHeader } from '@/components/Room/RoomHeader'
@@ -250,7 +249,7 @@ export default function RoomPage() {
   const { roomId } = useParams<{ roomId: string }>()
   const navigate = useNavigate()
   const { socket, isConnected } = useSocketContext()
-  const { leaveRoom, updateSettings, setUserRole } = useRoom()
+  const { leaveRoom, updateSettings, setUserRole, kickUser, unbanUser } = useRoom()
   const { play, pause, seek, requestSeek, next, prev } = usePlayer()
   const { addTrack, insertAfterCurrent, removeTrack, reorderTracks, updateBilibiliMetadata, clearQueue } = useQueue()
   // folia 舞台激活时播放列表走浮岛（浮岛本体在 FoliaPlayerStage 内渲染，
@@ -283,7 +282,6 @@ export default function RoomPage() {
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab | undefined>(undefined)
   const [hotSongsOpen, setHotSongsOpen] = useState(true)
   const [hotSongsMobileOpen, setHotSongsMobileOpen] = useState(false)
-  const [playerView, setPlayerView] = useState<'player' | 'playlist'>('player')
   const { activeVote, startVote, castVote } = useVote()
   const hotSongsPanelVisible = showDesktopHotSongs && hotSongsOpen
   const chatPanelVisible = showDesktopChat && chatOpen
@@ -520,6 +518,11 @@ export default function RoomPage() {
     setSettingsOpen(true)
   }, [])
 
+  const handleOpenPlayerSettings = useCallback(() => {
+    setSettingsInitialTab('player')
+    setSettingsOpen(true)
+  }, [])
+
   const handleLeaveRoom = useCallback(() => {
     isLeavingRef.current = true
     leaveRoom()
@@ -563,7 +566,7 @@ export default function RoomPage() {
     <AbilityProvider>
       <ClockSyncRunner />
       <PlaybackSpaceShortcut
-        enabled={supportsDesktopShortcuts && playerView === 'player'}
+        enabled={supportsDesktopShortcuts}
         blocked={
           searchOpen ||
           queueOpen ||
@@ -609,11 +612,10 @@ export default function RoomPage() {
                     onPrev={prev}
                     onOpenChat={toggleChat}
                     onOpenQueue={() => setQueueOpen(true)}
+                    onOpenSettings={handleOpenPlayerSettings}
                     queueOpen={queueOpen}
                     onQueueOpenChange={setQueueOpen}
                     chatUnreadCount={chatUnreadCount}
-                    view={playerView}
-                    onToggleView={() => setPlayerView((view) => (view === 'player' ? 'playlist' : 'player'))}
                     activeVote={activeVote}
                     onCastVote={castVote}
                     onStartVote={startVote}
@@ -683,17 +685,6 @@ export default function RoomPage() {
                   </Tooltip>
                 ) : null}
               </div>
-
-              {playerView === 'playlist' && (
-                <MiniPlayerBar
-                  onPlay={play}
-                  onPause={pause}
-                  onNext={next}
-                  onPrev={prev}
-                  onStartVote={startVote}
-                  onOpenPlaylist={() => setQueueOpen(true)}
-                />
-              )}
             </div>
           </div>
 
@@ -750,6 +741,8 @@ export default function RoomPage() {
             }}
             onUpdateSettings={updateSettings}
             onSetUserRole={setUserRole}
+            onKickUser={kickUser}
+            onUnbanUser={unbanUser}
             initialTab={settingsInitialTab}
           />
           <AddToPlaylistDialog />

@@ -13,7 +13,7 @@ import type { AudioBands } from '../types'
 
 // One driver per active stage; only MotionValues change on a frame, never React state.
 export function useFoliaAudio(paused: boolean) {
-  const fps = useSettingsStore((s) => s.bgFps)
+  const fps = useSettingsStore((s) => s.foliaFrameRate)
   const signals = useMemo(
     () => ({
       audioPower: motionValue(0),

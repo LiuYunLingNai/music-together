@@ -43,8 +43,8 @@ describe('音频分析接线契约', () => {
     // 丢失"（第二十轮修复的回归再引入）。
     const anchorIdx = src.indexOf('return createController(existing)')
     expect(anchorIdx).toBeGreaterThan(-1)
-    // 取 anchor 之前 600 字符的窗口：重发布必须落在紧邻 return 之前
-    const beforeAnchor = src.slice(Math.max(0, anchorIdx - 600), anchorIdx)
+    // 取 anchor 之前 2000 字符的窗口：重发布必须落在复用分支里、return 之前。
+    const beforeAnchor = src.slice(Math.max(0, anchorIdx - 2000), anchorIdx)
     expect(beforeAnchor).toMatch(/publishStretchAnalyser\s*\(\s*existing\.analyser\s*\)/)
     // failed 只代表变速回退；直通 source 上的 analyser 仍可用，不能阻止发布。
     expect(beforeAnchor).not.toMatch(/!existing\.failed/)
@@ -84,10 +84,18 @@ describe('音频分析接线契约', () => {
 
   it('用户音量 √v 拆分 + 静音地板（上游 Mineradio writeAudioOutputGain 同款）', () => {
     const src = stripComments(read('timeStretch.ts'))
-    // 1. 成功图：soundtouch → EQ → volumeGain → destination，分析线在 gain 之前
-    //    （analyser 卡在元素 √v 与图内 √v 之间 —— 上游拓扑；EQ 在 analyser 上游）
-    expect(src).toMatch(/connectEqualizer\(\s*stretchNode/)
+    // 1. 默认图：element →(变速开启时) worklet → mute → sourceOut → replayGain
+    //    → trim → transition → volumeGain。分析线从 sourceOut 取样，且在音量之前。
+    expect(src).toMatch(/muteGain\.connect\(sourceOut\)/)
+    expect(src).toMatch(/externalInput\.connect\(sourceOut\)/)
+    expect(src).toMatch(/tail\.connect\(graph\.replayGainNode/)
+    expect(src).toMatch(/trimGain\.connect\(transitionGain\)/)
+    expect(src).toMatch(/transitionGain\.connect\(volumeGain\)/)
     expect(src).toMatch(/volumeGain\.connect\(context\.destination\)/)
+    // 默认不建 EQ/效果链；只有 settings.enabled 时才把对应节点接进前缀。
+    expect(src).toMatch(/if \(settings\.enabled\) \{/)
+    expect(src).not.toMatch(/trimGain\.connect\(muteGain\)/)
+    expect(src).not.toMatch(/muteGain\.connect\(mixInput\)/)
     // 2. 音量分支走感知平方根 + 地板（跟随音量 + 静音不丢节拍）
     expect(src).toMatch(/function splitVolumeGain/)
     expect(src).toMatch(/Math\.sqrt\(volume\)/)
@@ -104,13 +112,16 @@ describe('音频分析接线契约', () => {
     expect(src).toMatch(/export function isPlaybackVolumeAtFloor/)
   })
 
-  it('分析节点挂在效果链出口，旁路切换不摘掉它', () => {
+  it('分析节点挂在默认汇合点，重建前缀时不丢 tap', () => {
     const src = stripComments(read('timeStretch.ts'))
-    // 链路：source → soundtouch → EQ → chainInput → 效果链 → chainOutput → analyser
+    // 默认链路：sourceOut → replayGain → trim → transition → volumeGain。
+    // 分析节点从 sourceOut 取样，重建前缀会先断开再立即挂回。
+    expect(src).toMatch(/sourceOut\.connect\(graph\.analyser\)/)
+    expect(src.indexOf('sourceOut.disconnect()')).toBeLessThan(
+      src.indexOf('sourceOut.connect(graph.analyser)'),
+    )
+    // 效果链仍然只有在开启时才创建/接入。
     expect(src).toMatch(/createAudioEffectChain\s*\(/)
-    expect(src).toMatch(/chainOutput\.connect\(analyser\)/)
-    // 旁路/恢复只改均衡器接法，效果链出口必须保持连接
-    expect(src).not.toMatch(/chainOutput\.disconnect/)
     const matches = src.match(/graph\.chainInput/g) ?? []
     expect(matches.length).toBeGreaterThanOrEqual(2)
   })

@@ -2,15 +2,23 @@ import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Slider } from '@/components/ui/slider'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { MarqueeText } from '@/components/ui/marquee-text'
+import { useSongHandoff } from '@/hooks/useSongHandoff'
+import { useTrackLike } from '@/hooks/useTrackLike'
 import { usePlayerStore } from '@/stores/playerStore'
-import { MessageSquare, Volume2, VolumeX } from 'lucide-react'
+import { useRoomStore } from '@/stores/roomStore'
+import { Heart, MessageSquare, Volume2, VolumeX } from 'lucide-react'
 import { motion } from 'motion/react'
-import { memo, useCallback, useLayoutEffect, useRef, useState } from 'react'
+import { memo, useCallback, useRef, useState } from 'react'
 import { SONG_INFO_TRANSITION } from './constants'
+import { QualityBadge } from './QualityBadge'
+import { SongTextCrossfade } from './SongTextCrossfade'
 
-/** Must match PlayerControls.DESIGN_WIDTH so zoom factors are identical */
-const DESIGN_WIDTH = 300
+/**
+ * 与 PlayerControls 的 300px 设计宽度同一套比例，改用容器查询单位换算：
+ * 内层不再使用 CSS `zoom`，文字共享元素才能在同一坐标系里形变。
+ * 基准字号 16 * W / 300，其余尺寸一律用 em 派生。
+ */
+const ROW_FONT_SIZE = '5.333cqw'
 
 /**
  * 音量控制组件：解决 Tooltip + Popover 共享 trigger 时 tooltip 闪现的问题。
@@ -35,10 +43,10 @@ function VolumeControl({
             <Button
               variant="ghost"
               size="icon"
-              className="h-9 w-9 text-primary/75 hover:bg-primary/10 hover:text-primary active:scale-90 transition-transform"
+              className="h-[2.25em] w-[2.25em] text-[1em] text-primary/75 hover:bg-primary/10 hover:text-primary active:scale-90 transition-transform"
               aria-label={volume === 0 ? '取消静音' : '调节音量'}
             >
-              {volume === 0 ? <VolumeX className="size-5" /> : <Volume2 className="size-5" />}
+              {volume === 0 ? <VolumeX className="size-[1.25em]" /> : <Volume2 className="size-[1.25em]" />}
             </Button>
           </PopoverTrigger>
         </TooltipTrigger>
@@ -58,15 +66,22 @@ function VolumeControl({
 interface SongInfoBarProps {
   onOpenChat: () => void
   chatUnreadCount: number
+  /** 竖屏顶部已有聊天入口，信息栏里的重复按钮关掉。 */
+  showChat?: boolean
 }
 
-export const SongInfoBar = memo(function SongInfoBar({ onOpenChat, chatUnreadCount }: SongInfoBarProps) {
+export const SongInfoBar = memo(function SongInfoBar({
+  onOpenChat,
+  chatUnreadCount,
+  showChat = true,
+}: SongInfoBarProps) {
+  const handoff = useSongHandoff()
   const currentTrack = usePlayerStore((s) => s.currentTrack)
+  const roomQuality = useRoomStore((s) => s.room?.audioQuality)
+  const like = useTrackLike(currentTrack)
   const volume = usePlayerStore((s) => s.volume)
   const setVolume = usePlayerStore((s) => s.setVolume)
   const prevVolumeRef = useRef(0.8)
-  const wrapperRef = useRef<HTMLDivElement>(null)
-  const innerRef = useRef<HTMLDivElement>(null)
 
   const toggleMute = useCallback(() => {
     if (volume === 0) {
@@ -77,61 +92,82 @@ export const SongInfoBar = memo(function SongInfoBar({ onOpenChat, chatUnreadCou
     }
   }, [volume, setVolume])
 
-  // Zoom scaling — identical to PlayerControls
-  useLayoutEffect(() => {
-    const wrapper = wrapperRef.current
-    const inner = innerRef.current
-    if (!wrapper || !inner) return
-    const update = () => {
-      inner.style.setProperty('zoom', String(wrapper.clientWidth / DESIGN_WIDTH))
-    }
-    update()
-    const ro = new ResizeObserver(() => update())
-    ro.observe(wrapper)
-    return () => ro.disconnect()
-  }, [])
-
   return (
-    <div ref={wrapperRef} className="w-full">
-      <div ref={innerRef} className="flex w-full items-end gap-2" style={{ width: DESIGN_WIDTH }}>
-        {/* Left: song title + artist — layoutId pairs with NowPlaying compact for shared animation */}
-        <motion.div
-          layoutId="song-info"
-          transition={SONG_INFO_TRANSITION}
-          className="min-w-0 flex-1 will-change-transform"
-        >
-          <motion.div className="text-xl font-bold leading-tight text-white/90">
-            <MarqueeText>{currentTrack?.title ?? '暂无歌曲'}</MarqueeText>
-          </motion.div>
-          <motion.div className="text-sm text-white/50">
-            <MarqueeText>{currentTrack ? currentTrack.artist.join(' / ') : '点击搜索添加歌曲到队列'}</MarqueeText>
-          </motion.div>
+    <div className="w-full" style={{ containerType: 'inline-size' }}>
+      <div className="flex w-full items-end gap-[0.5em]" style={{ fontSize: ROW_FONT_SIZE }}>
+        {/* Left: song title + artist — layoutId 与竖屏歌词页头部共享形变 */}
+        <motion.div layoutId="song-info" transition={SONG_INFO_TRANSITION} className="min-w-0 flex-1">
+          <div className="text-[1.25em] font-bold leading-tight text-white/90">
+            <SongTextCrossfade
+              text={handoff.to?.title ?? '暂无歌曲'}
+              from={handoff.from?.title ?? null}
+              token={handoff.token}
+            />
+          </div>
+          <div className="flex min-w-0 items-center gap-[0.4em] text-[0.875em] text-white/50">
+            <div className="min-w-0">
+              <SongTextCrossfade
+                text={handoff.to ? handoff.to.artist.join(' / ') : '点击搜索添加歌曲到队列'}
+                from={handoff.from ? handoff.from.artist.join(' / ') : null}
+                token={handoff.token}
+              />
+            </div>
+            <QualityBadge
+              quality={currentTrack?.audioQuality}
+              bitrate={currentTrack?.audioBitrate}
+              downgraded={currentTrack?.qualityDowngraded}
+              requested={roomQuality}
+              className="text-[0.62em] leading-[1.5]"
+            />
+          </div>
         </motion.div>
 
         {/* Right-bottom: volume + chat buttons (always visible, aligned to bottom) */}
         <div className="flex shrink-0 items-center">
+          {like.available && (
+            <Tooltip delayDuration={300}>
+              <TooltipTrigger asChild>
+                <motion.div whileTap={{ scale: 0.9 }}>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-[2.25em] w-[2.25em] text-[1em] text-primary/75 hover:bg-primary/10 hover:text-primary"
+                    onClick={() => void like.toggle()}
+                    disabled={like.busy}
+                    aria-label={like.liked ? '取消喜欢' : '喜欢'}
+                    aria-pressed={like.liked}
+                  >
+                    <Heart className="size-[1.25em]" fill={like.liked ? 'currentColor' : 'none'} />
+                  </Button>
+                </motion.div>
+              </TooltipTrigger>
+              <TooltipContent>{like.liked ? '取消喜欢' : '喜欢到网易云'}</TooltipContent>
+            </Tooltip>
+          )}
           <VolumeControl volume={volume} setVolume={setVolume} toggleMute={toggleMute} />
-          <Tooltip delayDuration={300}>
-            <TooltipTrigger asChild>
-              <motion.div whileTap={{ scale: 0.9 }}>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="relative h-9 w-9 text-primary/75 hover:bg-primary/10 hover:text-primary"
-                  onClick={onOpenChat}
-                  aria-label="聊天"
-                >
-                  <MessageSquare className="size-5" />
-                  {chatUnreadCount > 0 && (
-                    <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-white/90 px-1 text-[10px] font-semibold leading-none text-black">
-                      {chatUnreadCount > 99 ? '99+' : chatUnreadCount}
-                    </span>
-                  )}
-                </Button>
-              </motion.div>
-            </TooltipTrigger>
-            <TooltipContent>聊天</TooltipContent>
-          </Tooltip>
+          {showChat && (
+            <Tooltip delayDuration={300}>
+              <TooltipTrigger asChild>
+                <motion.div whileTap={{ scale: 0.9 }}>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="relative h-[2.25em] w-[2.25em] text-[1em] text-primary/75 hover:bg-primary/10 hover:text-primary"
+                    onClick={onOpenChat}
+                    aria-label="聊天"
+                  >
+                    <MessageSquare className="size-[1.25em]" />
+                    {chatUnreadCount > 0 && (
+                      <span className="absolute -right-[0.4em] -top-[0.4em] flex h-[1.6em] min-w-[1.6em] items-center justify-center rounded-full bg-white/90 px-[0.4em] text-[0.625em] font-semibold leading-none text-black">
+                        {chatUnreadCount > 99 ? '99+' : chatUnreadCount}
+                      </span>
+                    )}
+                  </Button>
+                </motion.div>
+              </TooltipTrigger>
+              <TooltipContent>聊天</TooltipContent>
+            </Tooltip>
+          )}
         </div>
       </div>
     </div>

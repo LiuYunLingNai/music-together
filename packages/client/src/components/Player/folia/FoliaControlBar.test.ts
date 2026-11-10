@@ -111,6 +111,13 @@ function click(label: string) {
   act(() => button!.click())
 }
 
+/** 宽版胶囊收起时只有迷你进度条；点一下展开后才渲染播放/切歌/槽位。 */
+function expand() {
+  const capsule = container.querySelector<HTMLElement>('.folia-console__inner')
+  expect(capsule).not.toBeNull()
+  act(() => capsule!.click())
+}
+
 describe('Folia 播放栏行为', () => {
   it('手动隐藏只能用恢复按钮恢复，不被鼠标、键盘或暂停唤醒', () => {
     useSettingsStore.getState().setFoliaSettings({ autoHide: true })
@@ -180,6 +187,7 @@ describe('Folia 播放栏行为', () => {
   })
   it('房主直接播放、切歌与切模式，使用现有房间权限', () => {
     const props = mount('owner')
+    expand()
     click('播放')
     click('下一首')
     click('顺序播放')
@@ -190,6 +198,7 @@ describe('Folia 播放栏行为', () => {
   })
   it('普通成员播放、切歌与切模式均走投票，进度条不可拖动', () => {
     const props = mount('member')
+    expand()
     click('播放')
     click('下一首')
     click('顺序播放')
@@ -199,20 +208,22 @@ describe('Folia 播放栏行为', () => {
     expect(props.emit).not.toHaveBeenCalled()
     expect(container.querySelector('[aria-label="播放进度"]')?.hasAttribute('data-disabled')).toBe(true)
   })
-  it('隐藏进度条后保留播放、队列与聊天入口', () => {
+  it('隐藏进度条后保留播放与队列入口', () => {
     useSettingsStore.getState().setFoliaSettings({ showProgress: false, barOffset: 80 })
     const props = mount('owner')
     expect(container.querySelector('[aria-label="播放进度"]')).toBeNull()
     expect(
       (container.querySelector('.folia-console') as HTMLElement).style.getPropertyValue('--folia-bar-offset'),
     ).toBe('80px')
+    expand()
+    click('播放')
     click('播放列表')
-    click('聊天')
     expect(props.onOpenQueue).toHaveBeenCalledOnce()
-    expect(props.onOpenChat).toHaveBeenCalledOnce()
+    expect(props.onPlay).toHaveBeenCalledOnce()
   })
   it('底栏设置按钮打开歌词样式窗口', () => {
     mount('owner')
+    expand()
     expect(useFoliaStyleWindowStore.getState().open).toBe(false)
     click('Folia 播放器设置')
     // 窗口由舞台之外的宿主渲染（切样式不再带着它重挂），这里只断言开关被打开。
@@ -222,6 +233,7 @@ describe('Folia 播放栏行为', () => {
     useSettingsStore.getState().setFoliaSettings({ autoHide: true })
     usePlayerStore.getState().setIsPlaying(true)
     mount('owner')
+    expand()
     const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Folia 播放器设置"]')!
     act(() => trigger.dispatchEvent(new Event('pointerdown', { bubbles: true })))
     click('Folia 播放器设置')
@@ -238,6 +250,7 @@ describe('Folia 播放栏行为', () => {
     useSettingsStore.getState().setFoliaSettings({ autoHide: true })
     usePlayerStore.getState().setIsPlaying(true)
     mount('owner')
+    expand()
     const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="调节音量"]')!
     act(() => {
       trigger.dispatchEvent(new Event('pointerdown', { bubbles: true }))

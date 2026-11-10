@@ -9,12 +9,14 @@ import {
   ResponsiveDialogTitle,
 } from '@/components/ui/responsive-dialog'
 import { usePlatformDiagnostics } from '@/hooks/usePlatformDiagnostics'
+import { getPlaybackDiagnostics } from '@/lib/playbackDiagnostics'
+import { getMediaCacheStats } from '@/lib/mediaCache'
 import { PLATFORM_LABELS } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 import { useRoomStore } from '@/stores/roomStore'
 import type { PlatformDiagnostic } from '@music-together/shared'
 import { Activity, AlertTriangle, CheckCircle2, Copy, Loader2, RefreshCw, XCircle } from 'lucide-react'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
 function statusOf(item: PlatformDiagnostic): {
@@ -44,10 +46,18 @@ export function PlatformDiagnosticsDialog({
 }) {
   const roomId = useRoomStore((state) => state.room?.id)
   const { report, loading, error, run } = usePlatformDiagnostics(roomId)
+  // 计数是模块级累计值，打开面板时的渲染就能读到最新值。
+  const playbackStats = getPlaybackDiagnostics()
+  const [cacheStats, setCacheStats] = useState<{ entries: number; bytes: number } | null>(null)
 
   useEffect(() => {
     if (open && !report && !loading) void run()
   }, [open, report, loading, run])
+
+  useEffect(() => {
+    if (!open) return
+    void getMediaCacheStats().then(setCacheStats)
+  }, [open])
 
   const copyReport = async () => {
     if (!report) return
@@ -113,6 +123,53 @@ export function PlatformDiagnosticsDialog({
                   </div>
                 )
               })}
+              <div className="mt-3 rounded-lg border bg-muted/20 px-3 py-2.5">
+                <p className="text-sm font-medium">本机播放缓存</p>
+                <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                  <div className="flex justify-between">
+                    <dt>内存命中</dt>
+                    <dd className="tabular-nums text-foreground">{playbackStats.memoryHits}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt>磁盘命中</dt>
+                    <dd className="tabular-nums text-foreground">{playbackStats.persistentHits}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt>网络取数</dt>
+                    <dd className="tabular-nums text-foreground">{playbackStats.networkLoads}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt>取数失败</dt>
+                    <dd className="tabular-nums text-foreground">{playbackStats.networkFailures}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt>预取命中</dt>
+                    <dd className="tabular-nums text-foreground">{playbackStats.prefetchHits}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt>预取请求</dt>
+                    <dd className="tabular-nums text-foreground">{playbackStats.prefetchRequests}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt>缓存写入</dt>
+                    <dd className="tabular-nums text-foreground">{playbackStats.cacheWrites}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt>写入跳过</dt>
+                    <dd className="tabular-nums text-foreground">{playbackStats.cacheWriteSkips}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt>Blob 预热</dt>
+                    <dd className="tabular-nums text-foreground">{playbackStats.blobPreloads}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt>磁盘占用</dt>
+                    <dd className="tabular-nums text-foreground">
+                      {cacheStats ? `${cacheStats.entries} 首 · ${(cacheStats.bytes / 1024 / 1024).toFixed(1)} MB` : '—'}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
               <p className="pt-1 text-[11px] leading-relaxed text-muted-foreground">
                 提示：诊断只验证账号与平台接口；播放地址仍受版权、地区与音质权限影响。
               </p>

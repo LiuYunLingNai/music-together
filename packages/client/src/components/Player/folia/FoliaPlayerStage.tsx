@@ -1,5 +1,5 @@
-import { Suspense, lazy, useEffect, useMemo, type CSSProperties } from 'react'
-import { MotionConfig } from 'motion/react'
+import { Suspense, lazy, useEffect, useMemo, useSyncExternalStore, type CSSProperties } from 'react'
+import { MotionConfig, useMotionValue } from 'motion/react'
 import { useShallow } from 'zustand/react/shallow'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -24,6 +24,12 @@ import { createFoliaTuningResolver } from './stage/foliaTunings'
 import { useFoliaAssetStore } from './stage/foliaAssetStore'
 import { getRecentCompletedLine, getUpcomingLine } from './upstream/components/visualizer/runtime'
 import { getLineRenderEndTime } from './upstream/utils/lyrics/renderHints'
+import {
+  getActiveTransitionCue,
+  getTransitionHandoffProgress,
+  subscribeTransitionCue,
+  transitionElapsedSec,
+} from '@/lib/automix/transitionCue'
 
 // 播放列表浮岛：folia 舞台的队列外壳。惰性加载 —— 只在第一次打开时拉代码，
 // 且不进主 chunk（与模式的懒加载同红线）。
@@ -75,9 +81,7 @@ export function FoliaPlayerStage({
   onLyricSeek,
   onNext,
   onPrev,
-  onOpenChat,
   onOpenQueue,
-  chatUnreadCount,
   activeVote,
   onCastVote,
   onStartVote,
@@ -87,7 +91,7 @@ export function FoliaPlayerStage({
   const currentTrack = usePlayerStore((s) => s.currentTrack)
   const lyricOffsetPreview = usePlayerStore((s) => s.lyricOffsetPreview)
   const lyricOffsets = useSettingsStore((s) => s.lyricOffsets)
-  const lyricFontSize = useSettingsStore((s) => s.lyricFontSize)
+  const lyricFontSize = useSettingsStore((s) => s.foliaLyricFontSize)
   const lyricTranslationFontSize = useSettingsStore((s) => s.lyricTranslationFontSize)
   const settings = useSettingsStore((s) => s.foliaSettings)
   const setFoliaSettings = useSettingsStore((s) => s.setFoliaSettings)
@@ -157,6 +161,23 @@ export function FoliaPlayerStage({
     [sourceLines, settings.showTranslation, settings.showRomanization],
   )
   const theme = useFoliaTheme()
+
+  // 换歌交接：音频层写入 cue，这里按服务端时间推进进度，音频交叉点对应视觉 50%。
+  const handoff = useSyncExternalStore(subscribeTransitionCue, getActiveTransitionCue, getActiveTransitionCue)
+  const handoffProgress = useMotionValue(0)
+  useEffect(() => {
+    if (!handoff) {
+      handoffProgress.set(0)
+      return
+    }
+    let frame = 0
+    const tick = (): void => {
+      handoffProgress.set(getTransitionHandoffProgress(handoff))
+      if (transitionElapsedSec(handoff) < handoff.seconds) frame = requestAnimationFrame(tick)
+    }
+    tick()
+    return () => cancelAnimationFrame(frame)
+  }, [handoff, handoffProgress])
 
   // ---- 歌词偏移：校准预览优先，否则用持久化值（与 LyricDisplay 同判据）----
   const lyricOffsetKey = getLyricOffsetKey(currentTrack)
@@ -247,6 +268,20 @@ export function FoliaPlayerStage({
     // 同一首歌每次进入都得到同一份布局 / 同一批头像：种子优先用曲目身份，
     // 缺失时回退到标题（与 cappella 上游的 `seed ?? titleText` 一致）。
     seed: currentTrack?.lyricId ?? songTitle ?? 'folia',
+    songHandoff: handoff?.incoming
+      ? {
+          progress: handoffProgress,
+          seed: handoff.incoming.lyricId ?? handoff.incoming.title ?? 'folia',
+          songTitle: handoff.incoming.title ?? null,
+          songArtist: handoff.incoming.artist?.filter(Boolean).join(' / ') ?? null,
+          songAlbum: handoff.incoming.album ?? null,
+          coverUrl: handoff.incoming.cover ? getProxiedCoverUrl(handoff.incoming.cover) : null,
+          theme,
+          lines: [],
+          currentTime,
+          currentLineIndex: 0,
+        }
+      : null,
     cappellaCustomEmojiImages: cappellaEmojiImages,
     cappellaCustomAvatarImages: cappellaAvatarImages,
     monetPortraitImage,
@@ -311,9 +346,7 @@ export function FoliaPlayerStage({
         onSeek={onSeek}
         onNext={onNext}
         onPrev={onPrev}
-        onOpenChat={onOpenChat}
         onOpenQueue={onOpenQueue}
-        chatUnreadCount={chatUnreadCount}
         activeVote={activeVote}
         onCastVote={onCastVote}
         onStartVote={onStartVote}

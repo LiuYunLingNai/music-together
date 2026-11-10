@@ -1,5 +1,6 @@
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
 import { getVipDisplayLabel } from '@/lib/platform'
 import type { MusicSource, MyPlatformAuth, PlatformAuthStatus } from '@music-together/shared'
 import { Crown, Gift, KeyRound, Loader2, LogOut, ScanLine } from 'lucide-react'
@@ -13,6 +14,10 @@ interface LoginSectionProps {
   onQrLogin: () => void
   onCookieLogin: () => void
   onLogout: () => void
+  /** 账号主切换是否把该平台权益共享给房间。 */
+  onToggleSharing?: (shareWithRoom: boolean) => void
+  /** 账号主切换听歌打卡（仅网易云）。 */
+  onToggleReporting?: (reportListening: boolean) => void
   compactLabel?: string
   onClaimConceptVip?: () => void
   isClaimingConceptVip?: boolean
@@ -26,6 +31,8 @@ export function LoginSection({
   onQrLogin,
   onCookieLogin,
   onLogout,
+  onToggleSharing,
+  onToggleReporting,
   compactLabel,
   onClaimConceptVip,
   isClaimingConceptVip,
@@ -41,7 +48,8 @@ export function LoginSection({
   )
 
   return (
-    <div className="flex items-center justify-between gap-2 overflow-hidden rounded-lg border p-3">
+    <div className="space-y-2 overflow-hidden rounded-lg border p-3">
+      <div className="flex items-center justify-between gap-2">
       <div className="min-w-0 flex-1 space-y-0.5">
         <div className="flex min-w-0 items-center gap-2">
           {compactLabel && <span className="text-muted-foreground shrink-0 text-xs">{compactLabel}</span>}
@@ -108,6 +116,33 @@ export function LoginSection({
           </>
         ) : null}
       </div>
+      </div>
+      {isMyLoggedIn && (
+        <label className="flex items-center justify-between gap-2 border-t pt-2 text-xs">
+          <span className="text-muted-foreground">
+            {myStatus?.shareWithRoom === false
+              ? '仅自己可用；离开房间自动撤出'
+              : '成员都能使用此账号权益；离开房间自动撤出'}
+          </span>
+          <Switch
+            checked={myStatus?.shareWithRoom !== false}
+            onCheckedChange={(checked) => onToggleSharing?.(checked)}
+            aria-label="共享给房间"
+          />
+        </label>
+      )}
+      {isMyLoggedIn && platform === 'netease' && (
+        <label className="flex items-center justify-between gap-2 border-t pt-2 text-xs">
+          <span className="text-muted-foreground">
+            听歌打卡：完整播放 ≥30 秒后写入该账号的网易云播放记录；仅账号主在线时生效
+          </span>
+          <Switch
+            checked={myStatus?.reportListening === true}
+            onCheckedChange={(checked) => onToggleReporting?.(checked)}
+            aria-label="听歌打卡"
+          />
+        </label>
+      )}
     </div>
   )
 }

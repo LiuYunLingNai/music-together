@@ -144,6 +144,8 @@ export function PlatformHub() {
                 onQrLogin={() => handleQrLogin(p)}
                 onCookieLogin={() => handleCookieLogin(p)}
                 onLogout={() => auth.logout(p)}
+                onToggleSharing={(share) => auth.setSharing(p, share)}
+                onToggleReporting={(report) => auth.setReporting(p, report)}
                 compactLabel={p === 'kugou' ? '标准版' : undefined}
               />
 
@@ -156,6 +158,7 @@ export function PlatformHub() {
                   onQrLogin={() => handleQrLogin('kugou_concept')}
                   onCookieLogin={() => handleCookieLogin('kugou_concept')}
                   onLogout={() => auth.logout('kugou_concept')}
+                  onToggleSharing={(share) => auth.setSharing('kugou_concept', share)}
                   compactLabel="概念版"
                   onClaimConceptVip={auth.claimKugouConceptVip}
                   isClaimingConceptVip={auth.isClaimingKugouConceptVip}

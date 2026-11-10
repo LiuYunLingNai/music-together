@@ -2,15 +2,22 @@ import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { formatTime } from '@/lib/format'
+import {
+  getActiveTransitionCue,
+  shouldDrawCue,
+  subscribeTransitionCue,
+} from '@/lib/automix/transitionCue'
 import { AbilityContext } from '@/providers/ability-context'
 import { useSocketContext } from '@/providers/socket-context'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import type { PlayMode, VoteAction } from '@music-together/shared'
 import { EVENTS, TIMING } from '@music-together/shared'
 import { ArrowRightToLine, ListMusic, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import { memo, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { memo, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import type { CSSProperties } from 'react'
 
 /** Design-time width (px) at which the controls are laid out — CSS zoom scales from this baseline */
 const DESIGN_WIDTH = 300
@@ -40,35 +47,88 @@ interface ProgressControlProps {
   onSeek: (time: number) => void
 }
 
+/** 波纹的名义周期；每个过渡切成整数趟，最后一趟正好在过渡结束时走完。 */
+const WAVE_NOMINAL_SEC = 2.8
+
 /** Keep the 10 Hz playback clock isolated from the buttons and tooltips. */
 const ProgressControl = memo(function ProgressControl({ disabled, canSeek, onSeek }: ProgressControlProps) {
   const currentTime = usePlayerStore((s) => s.currentTime)
   const duration = usePlayerStore((s) => s.duration)
   const [isSeeking, setIsSeeking] = useState(false)
   const [seekTime, setSeekTime] = useState(0)
+  /**
+   * 过渡提示：交叉淡化期间进度条亮起辉光、时间行中间显示「过渡」。
+   *
+   * 订阅是事件驱动的 —— 一次过渡只在开场/收场各多出两次渲染；呼吸、波纹与
+   * 淡入淡出全部交给 CSS（只动 opacity / transform），这里不跑 rAF、不读时钟。
+   */
+  const cue = useSyncExternalStore(subscribeTransitionCue, getActiveTransitionCue, getActiveTransitionCue)
+  const cueEnabled = useSettingsStore((s) => s.transitionCueEnabled)
+  const showRemainingTime = useSettingsStore((s) => s.showRemainingTime)
+  const setShowRemainingTime = useSettingsStore((s) => s.setShowRemainingTime)
+  const position = isSeeking ? seekTime : currentTime
+  const transitioning = cue !== null && shouldDrawCue(cue, cueEnabled)
+  // 与出歌速度同步呼吸：四拍一个来回；没测到 BPM 时用固定的 2.4 秒。
+  const pulseSec = Math.min(3.2, Math.max(1.4, (cue?.periodSec ?? 0.6) * 4))
+
+  /**
+   * 波纹的周期按过渡时长均分：过渡结束时最后一趟刚好走完、柔光带停在条外，
+   * 收场因此不会出现波到一半突然消失。周期改变时重挂节点，从条首重新出发。
+   */
+  const cueSeconds = cue?.seconds ?? WAVE_NOMINAL_SEC
+  const waveSec = cueSeconds / Math.max(1, Math.round(cueSeconds / WAVE_NOMINAL_SEC))
 
   return (
-    <div className="flex w-full flex-col gap-1">
-      <Slider
-        value={[duration > 0 ? ((isSeeking ? seekTime : currentTime) / duration) * 100 : 0]}
-        max={100}
-        step={0.1}
-        alignRangeWithThumb
-        disabled={disabled || !canSeek}
-        onValueChange={(value) => {
-          if (duration > 0) {
-            setIsSeeking(true)
-            setSeekTime((value[0] / 100) * duration)
-          }
-        }}
-        onValueCommit={(value) => {
-          if (duration > 0) onSeek((value[0] / 100) * duration)
-          setIsSeeking(false)
-        }}
-        className="w-full"
-      />
-      <div className="flex w-full justify-between">
-        <span className="text-xs tabular-nums text-white/50">{formatTime(isSeeking ? seekTime : currentTime)}</span>
+    <div
+      className="mt-progress flex w-full flex-col gap-1"
+      data-transition={transitioning ? 'true' : undefined}
+      style={
+        {
+          '--mt-transition-pulse': `${pulseSec}s`,
+          '--mt-transition-wave': `${waveSec}s`,
+        } as CSSProperties
+      }
+    >
+      <div className="relative">
+        <span aria-hidden="true" className="mt-transition-glow">
+          <span className="mt-transition-glow-inner" />
+          <span className="mt-transition-glow-wave">
+            <span key={cue?.startsAt ?? 0} className="mt-transition-glow-wave-band" />
+          </span>
+        </span>
+        <Slider
+          value={[duration > 0 ? ((isSeeking ? seekTime : currentTime) / duration) * 100 : 0]}
+          max={100}
+          step={0.1}
+          alignRangeWithThumb
+          disabled={disabled || !canSeek}
+          onValueChange={(value) => {
+            if (duration > 0) {
+              setIsSeeking(true)
+              setSeekTime((value[0] / 100) * duration)
+            }
+          }}
+          onValueCommit={(value) => {
+            if (duration > 0) onSeek((value[0] / 100) * duration)
+            setIsSeeking(false)
+          }}
+          className="w-full"
+        />
+      </div>
+      <div className="relative flex w-full justify-between">
+        <button
+          type="button"
+          onClick={() => setShowRemainingTime(!showRemainingTime)}
+          className="text-xs tabular-nums text-white/50 transition-colors hover:text-white/80"
+          aria-label={showRemainingTime ? '显示已播放时间' : '显示剩余时间'}
+        >
+          {showRemainingTime
+            ? `-${formatTime(Math.max(0, duration - position))}`
+            : formatTime(position)}
+        </button>
+        <span aria-hidden={!transitioning} className="mt-transition-label">
+          <span className="mt-transition-label-inner">过渡</span>
+        </span>
         <span className="text-xs tabular-nums text-white/50">{formatTime(duration)}</span>
       </div>
     </div>

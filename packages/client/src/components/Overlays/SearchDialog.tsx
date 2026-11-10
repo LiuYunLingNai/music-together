@@ -45,7 +45,7 @@ import { BilibiliMetadataDialog } from './BilibiliMetadataDialog'
 
 const EMPTY_QUEUE: Track[] = []
 type BilibiliQueueAction = 'add' | 'insert'
-type SearchMode = 'song' | 'album' | 'playlist' | 'recommend'
+type SearchMode = 'song' | 'album' | 'playlist' | 'artist' | 'recommend'
 type TencentRecommendationView = 'radar' | 'playlists'
 
 type SearchSource = MusicSource | 'all'
@@ -602,6 +602,9 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                       ) {
                         setSearchType('song')
                       }
+                      if (s.id === 'bilibili' && searchType === 'artist') {
+                        setSearchType('song')
+                      }
                       resetState()
                       resetUnified()
                       setAddedIds(new Set())
@@ -662,6 +665,11 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                         歌单
                       </TabsTrigger>
                     </>
+                  )}
+                  {source !== 'all' && source !== 'bilibili' && (
+                    <TabsTrigger value="artist" className="flex-1 text-xs sm:text-sm">
+                      歌手
+                    </TabsTrigger>
                   )}
                 </TabsList>
               </Tabs>
@@ -808,6 +816,50 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                       )}
                     </TabsContent>
                   </Tabs>
+                ) : (source === 'netease' || (source === 'all' && activeRecommendation?.platform === 'netease')) &&
+                  ((activeRecommendation?.tracks?.length ?? 0) > 0 ||
+                    (activeRecommendation?.playlists?.length ?? 0) > 0) ? (
+                  <Tabs defaultValue="songs" className="flex min-h-0 flex-1 flex-col">
+                    <TabsList className="w-full">
+                      <TabsTrigger value="songs" className="flex-1 gap-1 text-xs sm:text-sm">
+                        <Sparkles className="h-3.5 w-3.5" />
+                        每日推荐
+                      </TabsTrigger>
+                      <TabsTrigger value="playlists" className="flex-1 gap-1 text-xs sm:text-sm">
+                        <ListMusic />
+                        推荐歌单
+                      </TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="songs" className="flex min-h-0 flex-1 flex-col">
+                      <VirtualTrackList
+                        ref={listRef}
+                        tracks={activeRecommendation?.tracks ?? []}
+                        loading={false}
+                        hasMore={false}
+                        loadingMore={false}
+                        onLoadMore={() => undefined}
+                        isTrackAdded={isTrackAdded}
+                        onAddTrack={handleAdd}
+                        onInsertAfterCurrent={handleInsertAfterCurrent}
+                        onAddToPlaylist={onAddToPlaylist}
+                        onArtistClick={(artist) => {
+                          setSearchType('song')
+                          handleSearch(artist)
+                        }}
+                        emptyIcon={<Sparkles className="h-8 w-8" />}
+                        emptyMessage="每日推荐暂时没有返回歌曲"
+                      />
+                    </TabsContent>
+                    <TabsContent value="playlists" className="flex min-h-0 flex-1 flex-col">
+                      <PlaylistList
+                        playlists={activeRecommendation?.playlists ?? []}
+                        onSelect={(playlist) => handleSelectAlbum(playlist, 'playlist')}
+                        hasMore={activeRecommendation?.pagination?.playlists?.hasMore ?? false}
+                        loadingMore={recommendationsLoadingMore}
+                        onLoadMore={() => loadMoreRecommendations('netease')}
+                      />
+                    </TabsContent>
+                  </Tabs>
                 ) : (activeRecommendation?.playlists?.length ?? 0) > 0 ? (
                   <PlaylistList
                     playlists={activeRecommendation?.playlists ?? []}
@@ -872,7 +924,39 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                   </div>
                 )
               ) : hasSearched ? (
-                searchType === 'song' ? (
+                searchType === 'artist' ? (
+                  loading && results.length === 0 ? (
+                    <div className="flex min-h-0 flex-1 items-center justify-center rounded-md border">
+                      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : results.length === 0 ? (
+                    <div className="flex min-h-0 flex-1 items-center justify-center rounded-md border">
+                      <div className="flex h-48 flex-col items-center justify-center gap-2 text-muted-foreground">
+                        <Music2 className="h-8 w-8" />
+                        <span className="text-sm">暂无歌手结果，换个关键词试试</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <PlaylistList
+                      playlists={(results as Track[]).map((track) => ({
+                        id: track.urlId,
+                        name: track.title,
+                        cover: track.cover,
+                        trackCount: 0,
+                        source: track.source,
+                      }))}
+                      onSelect={(artist) => {
+                        setSearchType('song')
+                        setKeyword(artist.name)
+                        setAddedIds(new Set())
+                        search(artist.name, 'song')
+                      }}
+                      hasMore={hasMore}
+                      loadingMore={loadingMore}
+                      onLoadMore={loadMore}
+                    />
+                  )
+                ) : searchType === 'song' ? (
                   <VirtualTrackList
                     ref={listRef}
                     tracks={results as Track[]}

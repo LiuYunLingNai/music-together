@@ -11,7 +11,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { RoomSettingsSection } from './Settings/RoomSettingsSection'
 import { MembersSection } from './Settings/MembersSection'
 import { MyPlaylistsSection } from './Settings/MyPlaylistsSection'
-import { AppearanceSection } from './Settings/AppearanceSection'
+import { PlayerSettingsSection } from './Settings/PlayerSettingsSection'
 import { LyricsSection } from './Settings/LyricsSection'
 import { PlatformHub } from './Settings/PlatformHub'
 import { AccountSection } from './Settings/AccountSection'
@@ -30,7 +30,7 @@ export type SettingsTab =
   | 'playlists'
   | 'account'
   | 'accounts'
-  | 'appearance'
+  | 'player'
   | 'lyrics'
   | 'admin'
 
@@ -47,10 +47,16 @@ interface SettingsDialogProps {
     allowTemporaryAdminQueueClear?: boolean
     removePlayedTracks?: boolean
     roamingEnabled?: boolean
+    automixEnabled?: boolean
+    transitionMode?: import('@music-together/shared').TransitionMode
+    crossfadeMaxSec?: number
+    automixPerformance?: boolean
     roamingSource?: import('@music-together/shared').RoamingSource
     roamingMode?: import('@music-together/shared').NeteaseRoamingMode
   }) => Promise<boolean>
   onSetUserRole?: (userId: string, role: 'admin' | 'member') => void
+  onKickUser?: (userId: string, ban: boolean) => void
+  onUnbanUser?: (userId: string) => void
   initialTab?: SettingsTab
 }
 
@@ -93,11 +99,11 @@ const BASE_TABS: { id: SettingsTab; icon: LucideIcon; label: string }[] = [
   { id: 'room', icon: Settings2, label: '房间' },
   { id: 'members', icon: Users, label: '成员' },
   { id: 'playback', icon: Gauge, label: '播放' },
+  { id: 'player', icon: Palette, label: '播放器' },
+  { id: 'lyrics', icon: Type, label: '歌词' },
   { id: 'playlists', icon: ListMusic, label: '我的歌单' },
   { id: 'account', icon: UserRound, label: '账号' },
   { id: 'accounts', icon: Disc3, label: '音源账号' },
-  { id: 'appearance', icon: Palette, label: '外观' },
-  { id: 'lyrics', icon: Type, label: '歌词' },
 ]
 
 // ---------------------------------------------------------------------------
@@ -109,6 +115,8 @@ export function SettingsDialog({
   onOpenChange,
   onUpdateSettings,
   onSetUserRole,
+  onKickUser,
+  onUnbanUser,
   initialTab,
 }: SettingsDialogProps) {
   const [tab, setTab] = useState<SettingsTab>('room')
@@ -178,13 +186,19 @@ export function SettingsDialog({
             <ScrollArea className="min-h-0 flex-1">
               <div className="p-4 sm:p-6">
                 {tab === 'room' && <RoomSettingsSection onUpdateSettings={onUpdateSettings} />}
-                {tab === 'members' && <MembersSection onSetUserRole={onSetUserRole} />}
-                {tab === 'playback' && <PlaybackSection />}
+                {tab === 'members' && (
+                  <MembersSection
+                    onSetUserRole={onSetUserRole}
+                    onKickUser={onKickUser}
+                    onUnbanUser={onUnbanUser}
+                  />
+                )}
+                {tab === 'playback' && <PlaybackSection onOpenRoomSettings={() => setTab('room')} />}
                 {tab === 'playlists' && <MyPlaylistsSection onNavigate={setTab} />}
                 {tab === 'account' && <AccountSection />}
                 {tab === 'admin' && isServerAdmin && <AdminSection />}
                 {tab === 'lyrics' && <LyricsSection />}
-                {tab === 'appearance' && <AppearanceSection />}
+                {tab === 'player' && <PlayerSettingsSection />}
               </div>
             </ScrollArea>
           )}

@@ -83,13 +83,13 @@ export function StageSwitcher({ mode, onSelect }: StageSwitcherProps) {
               aria-pressed={active}
               aria-label={`切换到${family === 'classic' ? '经典播放器' : family === 'mineradio' ? '3D 视觉' : 'Folia 歌词'}${active ? '（当前）' : ''}`}
               className={cn(
-                'h-8 gap-1.5 rounded-full px-3 text-xs text-primary/75 hover:text-primary',
+                'h-8 gap-1.5 rounded-full px-3 text-xs text-primary/75 hover:text-primary portrait:gap-0 portrait:px-2.5',
                 active && 'bg-primary/15 text-primary',
               )}
               onClick={() => handleSegmentClick(family)}
             >
               <Icon className="size-3.5" />
-              <span>{label}</span>
+              <span className="portrait:hidden">{label}</span>
             </Button>
           )
           return family === 'folia' ? (
