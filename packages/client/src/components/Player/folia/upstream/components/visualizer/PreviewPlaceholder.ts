@@ -1,7 +1,7 @@
 import { type Line, type VisualizerMode } from '../../types';
 import { getLineRenderEndTime } from '../../utils/lyrics/renderHints';
-import placeholderCoverUrl from '../../assets/placeholder_cover.jpg';
-import placeholderCover2Url from '../../assets/placeholder_cover-2.jpg';
+import placeholderCoverUrl from '../../assets/placeholder_cover.webp';
+import placeholderCover2Url from '../../assets/placeholder_cover-2.webp';
 import { getVisualizerRegistryEntry } from './windowRegistry';
 const getVisualizerPreviewStartOffset = (mode: string, loop: number) =>
     loop <= 0 ? 0 : getVisualizerRegistryEntry(mode as never).previewStartOffset % loop;

@@ -1,5 +1,5 @@
 import { FOG_DIV, NEBBIA_FIXED } from './nebbiaConstants';
-import raindropSpriteUrl from './nebbiaRaindrop.png';
+import raindropSpriteUrl from './nebbiaRaindrop.webp';
 import { BLD_FILL_UNIFORMS, NebbiaBuildingCache, type NebbiaBuildingState } from './nebbiaBuildingCache';
 import { NebbiaFogGl } from './nebbiaFogGl';
 import { NebbiaNoiseTex } from './nebbiaNoiseTex';
