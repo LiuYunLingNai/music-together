@@ -1,0 +1,37 @@
+name: Docker build check
+
+# 生产镜像只在合并后由 build.yml 构建。这里提前在 PR 上验证 Dockerfile 与
+# 依赖清单仍然能构建成功，避免合并后才发现镜像打不出来。
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - packages/*/package.json
+      - scripts/prepare-production.mjs
+      - .github/workflows/docker-check.yml
+
+concurrency:
+  group: docker-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

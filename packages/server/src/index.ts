@@ -1,4 +1,5 @@
 import type { ClientToServerEvents, ServerToClientEvents } from '@music-together/shared'
+import compression from 'compression'
 import cors from 'cors'
 import express from 'express'
 import fs from 'node:fs'
@@ -22,14 +23,27 @@ import settingsRoutes from './routes/settings.js'
 import { clearAllTimers } from './services/roomLifecycleService.js'
 import * as playerService from './services/playerService.js'
 import {
-  startTencentCredentialRefreshScheduler,
-  stopTencentCredentialRefreshScheduler,
+  startCredentialRefreshScheduler,
+  stopCredentialRefreshScheduler,
 } from './services/tencentCredentialRefreshService.js'
 import { startBackupScheduler, stopBackupScheduler } from './services/backupService.js'
 import { logger } from './utils/logger.js'
-import { databasePath } from './repositories/database.js'
+import { databasePath, db } from './repositories/database.js'
 
 const app = express()
+app.disable('x-powered-by')
+// 自托管部署没有 CDN 在前面兜底：JS/JSON 走 gzip/br 后体积通常只剩三成，
+// 首次进房要加载的歌词、字典和静态资源都受益。音频与图片不可压缩，由
+// compression 的 compressible 判断自动跳过，流式响应不会被改写。
+app.use(compression())
+// 自托管没有平台层兜底，补三条零风险的基础响应头；CSP 与 HSTS 涉及部署形态，
+// 交给反代或运维按需开启。
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN')
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
+  next()
+})
 const httpServer = createServer(app)
 const io = new TypedServer<ClientToServerEvents, ServerToClientEvents, SocketData>(httpServer)
 
@@ -48,13 +62,6 @@ app.use(express.json({ limit: '9mb' }))
 app.use('/api', identityHttpMiddleware)
 app.use('/uploads/avatars', express.static(path.join(path.dirname(databasePath), 'avatars'), { maxAge: '1h' }))
 app.use('/uploads/backgrounds', express.static(path.join(path.dirname(databasePath), 'backgrounds'), { maxAge: '1h' }))
-// 客户端按需下载的分析模型（beat_this-wgsl.bin，约 41 MB）。运维把文件放进数据目录的
-// models/ 即可；文件名固定，长缓存且不可变。
-app.use(
-  '/models',
-  express.static(path.join(path.dirname(databasePath), 'models'), { maxAge: '30d', immutable: true, fallthrough: false }),
-)
-
 // REST API routes
 app.use('/api/auth', createAuthRoutes(io))
 app.use('/api/auth', createAccountRoutes(io))
@@ -143,7 +150,7 @@ initializeSocket(io)
 // Keep permanent-room playback position durable while a track is playing.
 const playbackPersistenceTimer = setInterval(() => playerService.persistPlaybackSnapshots(), 5_000)
 playbackPersistenceTimer.unref()
-const tencentCredentialRefreshTimer = startTencentCredentialRefreshScheduler()
+const credentialRefreshTimer = startCredentialRefreshScheduler()
 
 httpServer.on('error', (err: NodeJS.ErrnoException) => {
   if (err.code === 'EADDRINUSE') {
@@ -178,12 +185,13 @@ httpServer.listen(config.port, () => {
 function shutdown(signal: string) {
   logger.info(`收到 ${signal} 信号，正在安全关闭服务器……`)
   clearInterval(playbackPersistenceTimer)
-  stopTencentCredentialRefreshScheduler(tencentCredentialRefreshTimer)
+  stopCredentialRefreshScheduler(credentialRefreshTimer)
   stopBackupScheduler()
   playerService.persistPlaybackSnapshots()
   clearAllTimers()
   io.close(() => {
     httpServer.close(() => {
+      db.close()
       logger.info('服务器已关闭')
       process.exit(0)
     })

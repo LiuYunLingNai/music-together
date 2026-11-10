@@ -13,6 +13,13 @@ mkdirSync(path.dirname(dbPath), { recursive: true })
 
 export const db: BetterSqliteDatabase = new Database(dbPath)
 db.pragma('journal_mode = WAL')
+// WAL 下 synchronous=NORMAL 既保留崩溃一致性，又省掉每次提交的 fsync；
+// 其余参数针对自托管常见的低配机器，避免默认 2 MB 页缓存和磁盘临时表。
+db.pragma('synchronous = NORMAL')
+db.pragma('busy_timeout = 5000')
+db.pragma('cache_size = -16000')
+db.pragma('temp_store = MEMORY')
+db.pragma('mmap_size = 268435456')
 db.pragma('foreign_keys = ON')
 
 db.exec(`
@@ -39,6 +46,9 @@ db.exec(`
     updated_at INTEGER NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
+
+  -- 凭据读取全部按 user_id。
+  CREATE INDEX IF NOT EXISTS idx_platform_auth_user ON platform_auth(user_id);
 
   CREATE TABLE IF NOT EXISTS permanent_rooms (
     id TEXT PRIMARY KEY,
@@ -116,8 +126,15 @@ ensureColumn('platform_auth', 'vip_label', 'vip_label TEXT')
 ensureColumn('platform_auth', 'vip_level', 'vip_level INTEGER')
 ensureColumn('platform_auth', 'credential_refresh_attempted_at', 'credential_refresh_attempted_at INTEGER')
 ensureColumn('platform_auth', 'avatar_url', 'avatar_url TEXT')
+ensureColumn('platform_auth', 'share_with_room', 'share_with_room INTEGER NOT NULL DEFAULT 1')
+ensureColumn('platform_auth', 'report_listening', 'report_listening INTEGER NOT NULL DEFAULT 0')
 ensureColumn('permanent_rooms', 'chat_history_json', "chat_history_json TEXT NOT NULL DEFAULT '[]'")
 ensureColumn('permanent_room_members', 'client_json', 'client_json TEXT')
+
+// 腾讯凭据刷新按 platform + 刷新时间扫描；列由上面的 ensureColumn 补齐后才能建索引。
+db.exec(`CREATE INDEX IF NOT EXISTS idx_platform_auth_refresh ON
+  platform_auth(platform, credential_refresh_attempted_at)`)
+db.exec('CREATE INDEX IF NOT EXISTS idx_user_playlists_user ON user_playlists(user_id)')
 
 const findMigration = db.prepare<[string], { id: string }>('SELECT id FROM schema_migrations WHERE id = ?')
 const recordMigration = db.prepare('INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)')
