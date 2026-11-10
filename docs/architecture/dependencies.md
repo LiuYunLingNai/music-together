@@ -17,9 +17,10 @@
 | **路由**     | react-router-dom                                           | ^7.18.2  | 客户端路由                              |
 | **实时通信** | 浏览器原生 WebSocket                                       | —        | `/ws` JSON 事件协议                     |
 | **音频**     | howler                                                     | ^2.2.4   | 音频播放引擎                            |
-|              | @applemusic-like-lyrics/core                               | ^0.5.2   | 歌词渲染核心与逐词动画                  |
-|              | @applemusic-like-lyrics/lyric                              | ^1.0.2   | TTML/YRC/KRC/LRC 歌词解析               |
-|              | @applemusic-like-lyrics/react                              | ^0.5.2   | 歌词 React 组件                         |
+|              | @applemusic-like-lyrics/core                               | ^0.6.0   | 歌词渲染核心与逐词动画                  |
+|              | @applemusic-like-lyrics/lyric                              | ^1.1.0   | TTML/YRC/KRC/LRC 歌词解析               |
+|              | @applemusic-like-lyrics/react                              | ^0.6.0   | 歌词 React 组件                         |
+|              | @applemusic-like-lyrics/ttml                               | ^1.0.1   | TTML 解析与 AMLL 元数据                 |
 | **动画**     | motion                                                     | ^12.34.0 | Framer Motion 动画                      |
 |              | tw-animate-css                                             | ^1.4.0   | Tailwind 动画预设                       |
 | **图形渲染** | @pixi/app, core, display, sprite                           | ^7.4.3   | PixiJS（歌词背景渲染）                  |
@@ -66,6 +67,7 @@
 | zod                               | ^4.4.3   | 请求数据验证（配合 shared schemas）                                 |
 | pino                              | ^10.3.1  | 结构化日志                                                          |
 | rate-limiter-flexible             | ^9.1.1   | 聊天限流                                                            |
+| compression                       | ^1.8.2   | 静态资源与 API 响应的 gzip/br 压缩                                  |
 | @neteasecloudmusicapienhanced/api | ^4.40.0  | 网易云 QR 登录 / Cookie 验证 / 用户信息                             |
 | qrcode                            | ^1.5.4   | QR 码生成（酷狗扫码登录，API 仅返回 URL 需服务端转 base64 DataURL） |
 | escape-html                       | ^1.0.3   | HTML 转义（防注入）                                                 |

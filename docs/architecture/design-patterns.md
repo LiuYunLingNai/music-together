@@ -136,11 +136,11 @@ Folia 宿主只订阅由 10 Hz 进度推导的离散行上下文（激活行下�
 
 样式页预览只读宿主歌曲、歌词、封面和播放时钟，默认跟随当前歌曲，也可切到上游内置示例；没有实时歌词时回退示例。实时预览使用校准后的歌词时钟和未校准的媒体进度。暂停时保存歌曲/歌词快照，并用上游 `frozenPicture` 的 DOM/Canvas 复制保留画面、卸载预览运行时和释放其 WebGL 上下文，恢复后重新挂载；时间脉冲帮助逐词动画在静止时钟上重新对齐。预览错误只在自身边界内降级，不把主舞台回写为 classic。预览不调用播放、暂停或 Seek，也不接入 `useBeatFxTrack`。
 
-`lib/foliaSettings.ts` 定义默认值和持久化校验；`settingsStore.foliaSettings` 合并局部修改并通过 `storage` 保存，首次升级记住原来的 Folia 歌词模式。恢复默认仅影响 Folia 设置。`FoliaControlBar` 复用 `MineradioTransport` 的权限、投票、去重和进度预览行为，通过可选 `variant/showProgress/settingsButton` 参数组合不同外观，避免两套播放实现漂移。
+`lib/foliaSettings.ts` 定义默认值和持久化校验；`settingsStore.foliaSettings` 合并局部修改并通过 `storage` 保存，首次升级记住原来的 Folia 歌词模式。恢复默认仅影响 Folia 设置。底部控制条的行为（权限、投票、乐观播放、去重与进度预览）集中在 `stages/useTransportActions`，视觉部件（进度、核心键、音量、队列、曲目信息）在 `stages/Transport`；`MineradioControlBar` 与 `FoliaControlBar` 各自组合外壳，不再用 `variant` 参数在同一个组件里分叉。
 
 **设置窗口按上游原样移植。** `upstream/components/` 下新增 `modal/settings/kit`（设置套件 30 个组件）、`shared/StudioWindow`（工作窗口框架）、`visualizer/window`（VisPlayground 与五页签面板）、`visualizer/preview` 与各模式/背景的参数面板。宿主侧只保留一层适配：`upstream/adapters/hostStores.ts` 把上游那套 store 映射到 `settingsStore.foliaSettings`/`smartBeat`，`hostRuntime.ts` 提供 mod 注册表与播放信号的空实现，`windowRegistry.ts` 用宿主模式清单替代上游的 `import.meta.glob` 注册表，`windowRenderer.tsx` 把窗口的画面请求转给宿主已有的 `FoliaRenderer`。窗口通过 `createPortal` 挂到 body —— Folia 控制栏上的 `backdrop-blur` 祖先会建立包含块，让窗口的 `fixed` 定位退化。
 
-背景完整包含 common/monet/nomand/latent/sora/url 六类，均按需加载原生实现；保留柔焦/几何/纯色快捷项。Pixi v8 用于商籁/凝彩/绘光，Sora 保留上游 twgl 星尘，隐现与漫游使用 Paper shaders；文字布局使用上游 pretext。暂停、隐藏页面、节能画质及系统减少动态效果通过宿主静态状态停止背景运动。控制栏保留聊天、队列、音量及设置入口，键盘焦点、弹出面板与投票阻止自动隐藏；字幕基线跟随离底距离。
+背景完整包含 common/monet/nomand/latent/sora/url 六类，均按需加载原生实现；保留柔焦/几何/纯色快捷项。Pixi v8 用于商籁/凝彩/绘光，Sora 保留上游 twgl 星尘，隐现与漫游使用 Paper shaders；文字布局使用上游 pretext。暂停、隐藏页面、节能画质及系统减少动态效果通过宿主静态状态停止背景运动。控制栏常驻播放模式、上一首/播放/下一首、音量、队列与设置入口（聊天走顶部与侧栏）；键盘焦点、弹出面板与投票阻止自动隐藏；字幕基线跟随离底距离。
 
 
 ### 视觉舞台的构图（参照 Mineradio / OpenMusic）
@@ -229,8 +229,9 @@ grid-template-columns: minmax(0,1fr) max-content minmax(0,1fr);
 
 **不能用 `SongInfoBar` / `PlayerControls`**：它们内置 `zoom = clientWidth / 300` 的缩放，
 布局假设是经典播放器的**左右分栏窄列**，塞进横向胶囊必然比例失调 ——
-这正是"控制栏不和谐"的根因。因此 Mineradio 舞台使用自建的
-`mineradio/MineradioTransport.tsx`，但**播放、权限、投票仍沿用同一套 store 与 Ability**，
+这正是"控制栏不和谐"的根因。因此视觉舞台使用 `stages/useTransportActions`
+（行为）与 `stages/Transport`（共用部件），由 `mineradio/MineradioControlBar`
+和 `folia/FoliaControlBar` 各自组合外壳；**播放、权限、投票仍沿用同一套 store 与 Ability**，
 语义与经典播放器一致。
 
 WebGL 歌词点击只绑定在画布层；控制栏、投票条和 AMLL 回退层与画布是兄弟节点，
