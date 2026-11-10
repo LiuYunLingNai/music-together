@@ -16,6 +16,7 @@
     "@neteasecloudmusicapienhanced/api": "^4.40.0",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.11.1",
+    "compression": "^1.8.2",
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
     "escape-html": "^1.0.3",
@@ -33,6 +34,7 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
+    "@types/compression": "^1.8.1",
     "@types/cors": "^2.8.17",
     "@types/escape-html": "^1.0.4",
     "@types/express": "^5.0.0",
