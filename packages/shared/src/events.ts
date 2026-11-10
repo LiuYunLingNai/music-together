@@ -31,6 +31,7 @@ export const EVENTS = {
   PLAYER_SYNC_REQUEST: 'player:sync_request',
   PLAYER_SYNC_RESPONSE: 'player:sync_response',
   PLAYER_SET_MODE: 'player:set_mode',
+  PLAYER_AUTOMIX_PLAN: 'player:automix_plan',
   PLAYER_TRACK_METADATA_UPDATED: 'player:track_metadata_updated',
   PLAYER_REFRESH_STREAM: 'player:refresh_stream',
   PLAYER_STREAM_REFRESHED: 'player:stream_refreshed',
@@ -39,6 +40,9 @@ export const EVENTS = {
   PLAYER_REQUEST_SOURCE_FALLBACK: 'player:request_source_fallback',
   PLAYER_PLAYBACK_FAILURE: 'player:playback_failure',
   PLAYER_RETRY_TRACK: 'player:retry_track',
+  /** 客户端离线分析完成后上报曲目画像（过渡用）。 */
+  PLAYER_TRACK_PROFILE: 'player:track_profile',
+  PLAYER_TRACK_LINES: 'player:track_lines',
 
   // Queue management
   QUEUE_ADD: 'queue:add',
@@ -46,6 +50,7 @@ export const EVENTS = {
   QUEUE_REORDER: 'queue:reorder',
   QUEUE_UPDATE_METADATA: 'queue:update_metadata',
   QUEUE_CLEAR: 'queue:clear',
+  QUEUE_REMOVE_PLAYED: 'queue:remove_played',
   QUEUE_UPDATED: 'queue:updated',
 
   // Chat
@@ -54,6 +59,10 @@ export const EVENTS = {
 
   // Role management
   ROOM_SET_ROLE: 'room:set_role',
+  /** 房主移出成员（可选本房封禁）。 */
+  ROOM_KICK: 'room:kick',
+  /** 房主解除本房封禁。 */
+  ROOM_UNBAN: 'room:unban',
   ROOM_ROLE_CHANGED: 'room:role_changed',
 
   // Voting
@@ -77,6 +86,12 @@ export const EVENTS = {
   AUTH_STATUS_UPDATE: 'auth:status_update',
   AUTH_MY_STATUS: 'auth:my_status',
   AUTH_GET_STATUS: 'auth:get_status',
+  /** 账号主切换“共享给房间”；旧客户端忽略。 */
+  AUTH_SET_SHARING: 'auth:set_sharing',
+  AUTH_SHARING_RESULT: 'auth:sharing_result',
+  /** 账号主切换“听歌打卡”；旧客户端忽略。 */
+  AUTH_SET_REPORTING: 'auth:set_reporting',
+  AUTH_REPORTING_RESULT: 'auth:reporting_result',
   AUTH_CLAIM_KUGOU_CONCEPT_VIP: 'auth:claim_kugou_concept_vip',
   AUTH_CLAIM_KUGOU_CONCEPT_VIP_RESULT: 'auth:claim_kugou_concept_vip_result',
   /** 使用已保存的账号直接登录（免扫码）。 */
