@@ -21,9 +21,16 @@ export function parseNeteaseTrack(song: Record<string, unknown>): Track {
       : data.artist
         ? [data.artist]
         : []
-  const artists = rawArtists
-    .map((artist: unknown) => String(asRecord(artist)?.name ?? '').trim())
-    .filter(Boolean)
+  const credited = rawArtists
+    .map((artist: unknown) => ({
+      name: String(asRecord(artist)?.name ?? '').trim(),
+      id: String(asRecord(artist)?.id ?? '').trim(),
+    }))
+    .filter((artist: { name: string }) => artist.name)
+  const artists: string[] = credited.map((artist: { name: string }) => artist.name)
+  const artistIds = credited.every((artist: { id: string }) => /^[1-9]\d{0,19}$/.test(artist.id))
+    ? credited.map((artist: { id: string }) => artist.id)
+    : undefined
   const sourceId = String(data.id ?? root.resourceId ?? '').trim()
   const rawDuration = Number(data.dt ?? data.duration ?? data.hMusic?.playTime ?? 0)
   const duration = Number.isFinite(rawDuration) && rawDuration > 0
@@ -35,6 +42,7 @@ export function parseNeteaseTrack(song: Record<string, unknown>): Track {
     id: nanoid(),
     title: String(data.name ?? root.name ?? 'Unknown'),
     artist: artists.length > 0 ? artists : ['Unknown'],
+    ...(artistIds && artistIds.length > 0 ? { artistIds } : {}),
     album: String(album.name ?? ''),
     duration,
     cover,

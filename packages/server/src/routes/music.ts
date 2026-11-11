@@ -17,6 +17,9 @@ import {
   playlistQuerySchema,
   recommendationsQuerySchema,
   hotSongsQuerySchema,
+  artistQuerySchema,
+  artistPageQuerySchema,
+  discoverQuerySchema,
   type Track,
   type MusicSource,
   type PlatformRecommendation,
@@ -53,6 +56,9 @@ import { createHotSongsService, hotSongsPlaylistId } from '../services/hotSongsS
 import { LyricSupplementService } from '../services/lyricSupplementService.js'
 import { getTtml, TtmlProxyError } from '../services/ttmlProxyService.js'
 import { getAmllTtml, searchAmllCandidates, searchAmllTtml } from '../services/amllLyricsService.js'
+import { artistService } from '../services/artistService.js'
+import { discoverService } from '../services/discoverService.js'
+import { CatalogError } from '../services/catalogUtils.js'
 
 const router: RouterType = Router()
 const hotSongsService = createHotSongsService(musicProvider)
@@ -214,6 +220,50 @@ router.get(
       res.json({ recommendations })
     },
   ),
+)
+
+/** 目录类接口（歌手、发现）：校验参数，CatalogError 以脱敏的状态码与固定错误码返回，结果可公共缓存。 */
+function catalogRoute<T>(
+  schema: ZodSchema<T>,
+  label: string,
+  maxAgeSeconds: number,
+  load: (data: T) => Promise<unknown>,
+) {
+  return validated(schema, label, async (data, _req, res) => {
+    try {
+      const body = await load(data)
+      res.setHeader('Cache-Control', `public, max-age=${maxAgeSeconds}`)
+      res.json(body)
+    } catch (error) {
+      if (!(error instanceof CatalogError)) throw error
+      res.status(error.status).json({ error: error.code })
+    }
+  })
+}
+
+router.get(
+  '/artist',
+  musicMetadataRateLimit,
+  catalogRoute(artistQuerySchema, 'Get artist', 300, ({ source, id }) => artistService.getArtist(source, id)),
+)
+router.get(
+  '/artist/songs',
+  musicMetadataRateLimit,
+  catalogRoute(artistPageQuerySchema, 'Get artist songs', 300, ({ source, id, offset, limit }) =>
+    artistService.getSongs(source, id, offset, limit),
+  ),
+)
+router.get(
+  '/artist/albums',
+  musicMetadataRateLimit,
+  catalogRoute(artistPageQuerySchema, 'Get artist albums', 300, ({ source, id, offset, limit }) =>
+    artistService.getAlbums(source, id, offset, limit),
+  ),
+)
+router.get(
+  '/discover/home',
+  musicMetadataRateLimit,
+  catalogRoute(discoverQuerySchema, 'Get discover home', 600, ({ source }) => discoverService.getHome(source)),
 )
 
 router.get(

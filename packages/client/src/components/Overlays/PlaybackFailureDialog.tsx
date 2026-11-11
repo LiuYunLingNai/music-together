@@ -59,11 +59,11 @@ function formatWait(ms?: number): string | null {
 
 function FailureContent({
   failure,
-  onOpenSettings,
+  onOpenAccounts,
   onClose,
 }: {
   failure: PlaybackFailureEvent
-  onOpenSettings: (tab: 'accounts') => void
+  onOpenAccounts: () => void
   onClose: () => void
 }) {
   const { socket } = useSocketContext()
@@ -97,7 +97,7 @@ function FailureContent({
     onClose()
   }
   const login = () => {
-    onOpenSettings('accounts')
+    onOpenAccounts()
     onClose()
   }
 
@@ -240,7 +240,7 @@ function FailureContent({
   )
 }
 
-export function PlaybackFailureDialog({ onOpenSettings }: { onOpenSettings: (tab: 'accounts') => void }) {
+export function PlaybackFailureDialog({ onOpenAccounts }: { onOpenAccounts: () => void }) {
   const failure = usePlaybackFailureStore((state) => state.failure)
   const dismiss = usePlaybackFailureStore((state) => state.dismiss)
   const currentTrackId = useRoomStore((state) => state.room?.currentTrack?.id)
@@ -255,7 +255,7 @@ export function PlaybackFailureDialog({ onOpenSettings }: { onOpenSettings: (tab
     <FailureContent
       key={`${failure.trackId}:${failure.failure.reason}:${failure.failure.providerCode ?? ''}`}
       failure={failure}
-      onOpenSettings={onOpenSettings}
+      onOpenAccounts={onOpenAccounts}
       onClose={dismiss}
     />
   )

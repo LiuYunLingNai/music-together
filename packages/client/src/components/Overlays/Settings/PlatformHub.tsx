@@ -5,8 +5,10 @@ import { useAuth } from '@/hooks/useAuth'
 import { usePlaylist } from '@/hooks/usePlaylist'
 import { PLATFORM_SHORT_LABELS, PLATFORM_COLORS, getPlatformStatus, getMyPlatformStatus } from '@/lib/platform'
 import { storage } from '@/lib/storage'
-import type { MusicSource, Playlist } from '@music-together/shared'
-import { useState, useCallback, useMemo } from 'react'
+import { useRecommendations } from '@/hooks/useRecommendations'
+import { useRoomStore } from '@/stores/roomStore'
+import type { MusicSource, Playlist, Track } from '@music-together/shared'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import { Activity } from 'lucide-react'
 import { LoginSection } from './LoginSection'
 import { ManualCookieDialog } from './ManualCookieDialog'
@@ -14,8 +16,13 @@ import { QrLoginDialog } from './QrLoginDialog'
 import { PlaylistDetail } from './PlaylistDetail'
 import { PlaylistSection } from './PlaylistSection'
 import { PlatformDiagnosticsDialog } from './PlatformDiagnosticsDialog'
+import { AccountDiscover } from './AccountDiscover'
 
-type ViewState = { type: 'list' } | { type: 'detail'; playlist: Playlist; source: MusicSource }
+type ViewState =
+  | { type: 'list' }
+  | { type: 'detail'; playlist: Playlist; source: MusicSource; tracks?: Track[] }
+
+const noop = () => undefined
 
 export function PlatformHub() {
   const auth = useAuth()
@@ -27,6 +34,9 @@ export function PlatformHub() {
   const [cookieDialogPlatform, setCookieDialogPlatform] = useState<MusicSource>('netease')
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
   const [viewState, setViewState] = useState<ViewState>({ type: 'list' })
+  const roomId = useRoomStore((s) => s.room?.id)
+  const recommendations = useRecommendations(roomId)
+  const { load: loadRecommendations } = recommendations
 
   // 概念版账户入口放在“酷狗”标签内，避免额外增加一个平台板块。
   const platforms: MusicSource[] = ['netease', 'tencent', 'kugou', 'bilibili']
@@ -68,12 +78,40 @@ export function PlatformHub() {
   )
 
   const handleSelectPlaylist = useCallback(
-    (pl: Playlist) => {
+    (pl: Playlist, type: 'playlist' | 'album' = 'playlist') => {
       setViewState({ type: 'detail', playlist: pl, source: pl.source })
-      playlist.fetchPlaylistTracks(pl.source, pl.id, pl.trackCount)
+      playlist.fetchPlaylistTracks(pl.source, pl.id, pl.trackCount, type)
     },
     [playlist],
   )
+
+  const handleOpenTracks = useCallback((title: string, tracks: Track[]) => {
+    const first = tracks[0]
+    setViewState({
+      type: 'detail',
+      source: first?.source ?? 'netease',
+      tracks,
+      playlist: {
+        id: `feed:${title}`,
+        name: title,
+        cover: first?.cover ?? '',
+        thumbnailCover: first?.thumbnailCover,
+        trackCount: tracks.length,
+        source: first?.source ?? 'netease',
+      },
+    })
+  }, [])
+
+  const loggedInKey = auth.statusLoaded
+    ? allAccountPlatforms.filter((p) => getMyPlatformStatus(p, auth.myStatus)?.loggedIn).join(',')
+    : null
+  useEffect(() => {
+    if (loggedInKey === null) return
+    const frame = requestAnimationFrame(loadRecommendations)
+    return () => cancelAnimationFrame(frame)
+  }, [loggedInKey, loadRecommendations])
+
+  const recommendationFor = (p: MusicSource) => recommendations.recommendations.find((item) => item.platform === p)
 
   const handleBack = useCallback(() => {
     setViewState({ type: 'list' })
@@ -81,22 +119,23 @@ export function PlatformHub() {
 
   // Detail view — flex-1 min-h-0 so PlaylistDetail gets proper height for virtual scroll
   if (viewState.type === 'detail') {
+    const staticTracks = viewState.tracks
     return (
       <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <PlaylistDetail
             playlist={viewState.playlist}
-            tracks={playlist.playlistTracks}
-            loading={playlist.tracksLoading}
-            loadingMore={playlist.loadingMore}
-            hasMore={playlist.hasMoreTracks}
-            total={playlist.playlistTotal}
+            tracks={staticTracks ?? playlist.playlistTracks}
+            loading={staticTracks ? false : playlist.tracksLoading}
+            loadingMore={staticTracks ? false : playlist.loadingMore}
+            hasMore={staticTracks ? false : playlist.hasMoreTracks}
+            total={staticTracks ? staticTracks.length : playlist.playlistTotal}
             onBack={handleBack}
             onAddTrack={playlist.addTrackToQueue}
             onInsertAfterCurrent={playlist.insertTrackAfterCurrent}
             onAddAll={playlist.addBatchToQueue}
-            onLoadAll={playlist.fetchAllPlaylistTracks}
-            onLoadMore={playlist.loadMoreTracks}
+            onLoadAll={staticTracks ? async () => staticTracks : playlist.fetchAllPlaylistTracks}
+            onLoadMore={staticTracks ? noop : playlist.loadMoreTracks}
           />
         </div>
       </div>
@@ -110,7 +149,7 @@ export function PlatformHub() {
         <div className="mb-3 flex items-start justify-between gap-3 pr-8">
           <div>
             <h3 className="text-base font-semibold">平台账号 & 歌单</h3>
-            <p className="text-muted-foreground text-xs">登录后可浏览和管理您的所有平台个人歌单。</p>
+            <p className="text-muted-foreground text-xs">登录后可浏览个人歌单、平台推荐与发现内容。</p>
           </div>
           <Button size="sm" variant="outline" className="shrink-0" onClick={() => setDiagnosticsOpen(true)}>
             <Activity className="mr-1.5 h-3.5 w-3.5" />
@@ -192,6 +231,33 @@ export function PlatformHub() {
                     title="概念版歌单"
                   />
                 </>
+              )}
+
+              <Separator />
+
+              <AccountDiscover
+                platform={p}
+                active={activePlatform === p}
+                loggedIn={Boolean(getMyPlatformStatus(p, auth.myStatus)?.loggedIn)}
+                recommendation={recommendationFor(p)}
+                recommendationsLoading={recommendations.loading}
+                onReloadRecommendations={loadRecommendations}
+                onOpenPlaylist={handleSelectPlaylist}
+                onOpenTracks={handleOpenTracks}
+              />
+
+              {p === 'kugou' && getMyPlatformStatus('kugou_concept', auth.myStatus)?.loggedIn && (
+                <AccountDiscover
+                  platform="kugou_concept"
+                  active={false}
+                  loggedIn
+                  recommendation={recommendationFor('kugou_concept')}
+                  recommendationsLoading={recommendations.loading}
+                  onReloadRecommendations={loadRecommendations}
+                  onOpenPlaylist={handleSelectPlaylist}
+                  onOpenTracks={handleOpenTracks}
+                  titlePrefix="概念版 · "
+                />
               )}
             </TabsContent>
           ))}

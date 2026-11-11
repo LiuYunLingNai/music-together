@@ -1,6 +1,7 @@
 import { Router, type Router as RouterType } from 'express'
 import { roomShareQrQuerySchema } from '@music-together/shared'
 import { roomRepo } from '../repositories/roomRepository.js'
+import { roomCheckRateLimit } from '../middleware/httpRateLimiter.js'
 import { isRoomInviteLink, renderRoomInviteQr } from '../services/roomShareService.js'
 
 const router: RouterType = Router()
@@ -17,7 +18,7 @@ function isValidRoomId(roomId: string): boolean {
  *   - Non-existent rooms redirect immediately (no pointless gate click)
  *   - Password-protected rooms show a password field inside the gate
  */
-router.get('/:roomId/check', (req, res) => {
+router.get<{ roomId: string }>('/:roomId/check', roomCheckRateLimit, (req, res) => {
   const { roomId } = req.params
   if (!isValidRoomId(roomId)) {
     res.status(400).json({ error: 'Invalid room ID' })
@@ -44,7 +45,7 @@ router.get('/:roomId/check', (req, res) => {
  * 服务端已有 qrcode 依赖，因此不给前端新增二维码库；
  * 同时只接受指向该房间的 http(s) 邀请链接，避免渲染任意内容。
  */
-router.get('/:roomId/share/qr', async (req, res) => {
+router.get<{ roomId: string }>('/:roomId/share/qr', roomCheckRateLimit, async (req, res) => {
   const { roomId } = req.params
   if (!isValidRoomId(roomId)) {
     res.status(400).json({ error: 'Invalid room ID' })

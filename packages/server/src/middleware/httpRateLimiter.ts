@@ -48,6 +48,14 @@ export const audioProxyRateLimit = createHttpRateLimit({
   suffix: 'audio-proxy',
 })
 
+/** 房间预检与分享二维码可匿名查到房名和人数，限流防止枚举房间号。 */
+export const roomCheckRateLimit = createHttpRateLimit({
+  points: 60,
+  durationSeconds: 60,
+  message: '房间查询过于频繁，请稍后再试',
+  suffix: 'room-check',
+})
+
 /** Password hashing admission must not be bypassed by minting another identity. */
 export const passwordWorkRateLimit = createHttpRateLimit({
   points: 10,

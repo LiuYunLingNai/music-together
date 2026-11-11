@@ -132,10 +132,12 @@ export function addCookie(
   // 账号主的共享偏好跨登录保留：关闭共享后重新登录不会悄悄把权益放回房间。
   const share = shareWithRoom ?? platformAuthRepo.loadUser(userId).find((e) => e.platform === platform)?.shareWithRoom ?? true
   const entries = getPlatformEntries(roomId, platform)
-  // Dedup by cookie value (same account) or by userId (same socket)
-  const idx = entries.findIndex((e) => e.cookie === cookie || e.userId === userId)
-  const previousCookie = idx === -1 ? null : entries[idx]?.cookie
-  if (idx !== -1) entries.splice(idx, 1)
+  // 同账号（cookie）与同用户可能命中不同条目，两者都要替换，否则池里留下重复账号。
+  const previousCookie =
+    entries.find((e) => e.userId === userId)?.cookie ?? entries.find((e) => e.cookie === cookie)?.cookie ?? null
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (entries[i]!.cookie === cookie || entries[i]!.userId === userId) entries.splice(i, 1)
+  }
   // 只把共享中的账号放进房间池；关闭共享的账号仍持久化，供本人使用。
   if (share) entries.push({ cookie, userId, nickname, vipType, vipLabel, vipLevel, avatarUrl })
   if (persist) {

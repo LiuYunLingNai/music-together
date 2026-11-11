@@ -584,10 +584,6 @@ export function kickUserFromRoom(
 // Public API — Read / Settings / Roles
 // ---------------------------------------------------------------------------
 
-export function getRoom(roomId: string): RoomData | undefined {
-  return roomRepo.get(roomId)
-}
-
 export function listPublicRooms(): RoomListItem[] {
   return roomRepo.getPublicLobbyList()
 }
@@ -809,22 +805,6 @@ function broadcastState(room: RoomData, io: TypedServer): void {
           : toPublicRoomState(room)
     socket.emit(EVENTS.ROOM_STATE, state)
   }
-}
-
-export function getUserBySocket(socketId: string): User | null {
-  const mapping = roomRepo.getSocketMapping(socketId)
-  if (!mapping) return null
-  const room = roomRepo.get(mapping.roomId)
-  if (!room) return null
-  return room.users.find((u) => u.id === mapping.userId) ?? null
-}
-
-export function getRoomBySocket(socketId: string): { roomId: string; room: RoomData } | null {
-  const mapping = roomRepo.getSocketMapping(socketId)
-  if (!mapping) return null
-  const room = roomRepo.get(mapping.roomId)
-  if (!room) return null
-  return { roomId: mapping.roomId, room }
 }
 
 // ---------------------------------------------------------------------------

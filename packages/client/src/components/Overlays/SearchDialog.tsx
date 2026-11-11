@@ -14,11 +14,14 @@ import { PLATFORM_ACTIVE, PLATFORM_LABELS, PLATFORM_SHORT_LABELS, PLATFORM_TEXT 
 import { formatDuration } from '@/lib/format'
 import { cn, trackKey } from '@/lib/utils'
 import { useRoomStore } from '@/stores/roomStore'
+import { openArtistPage } from '@/stores/artistPageStore'
+import { hasArtistPages } from '@/lib/artistLink'
 import { useSearch } from '@/hooks/useSearch'
 import { useUnifiedSearch } from '@/hooks/useUnifiedSearch'
 import { useRecommendations } from '@/hooks/useRecommendations'
 import { usePlaylist } from '@/hooks/usePlaylist'
 import { useAddToPlaylist } from '@/hooks/useAddToPlaylist'
+import { useQueueMembership } from '@/hooks/useQueueMembership'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useSocketContext } from '@/providers/socket-context'
 import { EVENTS, LIMITS } from '@music-together/shared'
@@ -43,7 +46,6 @@ import { PlaylistDetail } from './Settings/PlaylistDetail'
 import { BilibiliCollectionDialog } from './BilibiliCollectionDialog'
 import { BilibiliMetadataDialog } from './BilibiliMetadataDialog'
 
-const EMPTY_QUEUE: Track[] = []
 type BilibiliQueueAction = 'add' | 'insert'
 type SearchMode = 'song' | 'album' | 'playlist' | 'artist' | 'recommend'
 type TencentRecommendationView = 'radar' | 'playlists'
@@ -267,16 +269,14 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
     action: BilibiliQueueAction
   } | null>(null)
   const [keyword, setKeyword] = useState('')
-  const [addedIds, setAddedIds] = useState<Set<string>>(new Set())
   const { addToPlaylist, canUse: canAddToPlaylist } = useAddToPlaylist()
   const onAddToPlaylist = canAddToPlaylist ? (track: Track) => addToPlaylist(track, track.title) : undefined
   const listRef = useRef<VirtualTrackListRef>(null)
   const dialogContentRef = useRef<HTMLDivElement>(null)
   const sourceContainerRef = useRef<HTMLDivElement>(null)
   const [pillStyle, setPillStyle] = useState({ left: 0, width: 0 })
-  const queue = useRoomStore((s) => s.room?.queue ?? EMPTY_QUEUE)
   const roomId = useRoomStore((s) => s.room?.id)
-  const queueKeys = useMemo(() => new Set(queue.map(trackKey)), [queue])
+  const { queueKeys, pending, isAdded: isTrackAdded, markPending } = useQueueMembership()
   const { socket } = useSocketContext()
   const isMobile = useIsMobile()
 
@@ -423,7 +423,6 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
     const searchKeyword = (overrideKeyword ?? keyword).trim()
     if (!searchKeyword) return
     if (overrideKeyword !== undefined) setKeyword(overrideKeyword)
-    setAddedIds(new Set())
     if (source === 'all') searchUnified(searchKeyword)
     else search(searchKeyword)
     if (searchType === 'song') {
@@ -474,10 +473,10 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
       } else {
         onAddToQueue(track)
       }
-      setAddedIds((prev) => new Set(prev).add(trackKey(track)))
+      markPending([track])
       setBilibiliMatch(null)
     },
-    [bilibiliMatch, onAddToQueue, onInsertAfterCurrent],
+    [bilibiliMatch, onAddToQueue, onInsertAfterCurrent, markPending],
   )
 
   const skipBilibiliMetadataMatch = useCallback(() => {
@@ -487,14 +486,14 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
     } else {
       onAddToQueue(bilibiliMatch.track)
     }
-    setAddedIds((prev) => new Set(prev).add(trackKey(bilibiliMatch.track)))
+    markPending([bilibiliMatch.track])
     setBilibiliMatch(null)
-  }, [bilibiliMatch, onAddToQueue, onInsertAfterCurrent])
+  }, [bilibiliMatch, onAddToQueue, onInsertAfterCurrent, markPending])
 
   const handleAdd = useCallback(
     (track: Track) => {
       const key = trackKey(track)
-      if (queueKeys.has(key) || addedIds.has(key)) {
+      if (queueKeys.has(key) || pending.has(key)) {
         toast.info(`「${track.title}」已在队列中`)
         return
       }
@@ -503,17 +502,17 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
         return
       }
       onAddToQueue(track)
-      setAddedIds((prev) => new Set(prev).add(key))
+      markPending([track])
       // Removed duplicate toast.success since onAddToQueue (from useQueue) usually already handles it
       // or the UI handles feedback.
     },
-    [onAddToQueue, queueKeys, addedIds, beginBilibiliCollectionMatch],
+    [onAddToQueue, queueKeys, pending, beginBilibiliCollectionMatch, markPending],
   )
 
   const handleInsertAfterCurrent = useCallback(
     (track: Track) => {
       const key = trackKey(track)
-      if (queueKeys.has(key) || addedIds.has(key)) {
+      if (queueKeys.has(key) || pending.has(key)) {
         toast.info(`「${track.title}」已在队列中`)
         return
       }
@@ -522,10 +521,10 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
         return
       }
       onInsertAfterCurrent(track)
-      setAddedIds((prev) => new Set(prev).add(key))
+      markPending([track])
       // Removed duplicate toast.success
     },
-    [onInsertAfterCurrent, queueKeys, addedIds, beginBilibiliCollectionMatch],
+    [onInsertAfterCurrent, queueKeys, pending, beginBilibiliCollectionMatch, markPending],
   )
 
   const handleAddBatch = useCallback(
@@ -537,22 +536,10 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
           playlistName,
         })
       }
-      setAddedIds((prev) => {
-        const next = new Set(prev)
-        for (const t of tracks) next.add(trackKey(t))
-        return next
-      })
+      markPending(tracks)
       toast.success(`已添加 ${tracks.length} 首歌曲`)
     },
-    [socket],
-  )
-
-  const isTrackAdded = useCallback(
-    (track: Track) => {
-      const key = trackKey(track)
-      return addedIds.has(key) || queueKeys.has(key)
-    },
-    [addedIds, queueKeys],
+    [socket, markPending],
   )
 
   const handleSelectAlbum = (playlist: Playlist, type?: 'album' | 'playlist') => {
@@ -607,7 +594,6 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                       }
                       resetState()
                       resetUnified()
-                      setAddedIds(new Set())
                     }}
                   >
                     {s.label}
@@ -643,7 +629,6 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                   if (value === 'recommend' && source === 'all') setSource('netease')
                   resetState()
                   resetUnified()
-                  setAddedIds(new Set())
                 }}
               >
                 <TabsList className="w-full">
@@ -702,7 +687,9 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                             ? '搜索歌曲、歌手...'
                             : searchType === 'album'
                               ? '搜索专辑...'
-                              : '搜索歌单...'
+                              : searchType === 'artist'
+                                ? '搜索歌手...'
+                                : '搜索歌单...'
                     }
                     value={keyword}
                     onChange={(e) => setKeyword(e.target.value)}
@@ -727,7 +714,7 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                   <div className="flex min-h-0 flex-1 items-center justify-center rounded-md border">
                     <div className="text-muted-foreground flex h-48 flex-col items-center justify-center gap-2 px-6 text-center">
                       <Sparkles className="h-8 w-8" />
-                      <span className="text-sm">请先在设置中登录音乐平台，再查看平台推荐</span>
+                      <span className="text-sm">请先在「音乐账号」中登录音乐平台，再查看平台推荐</span>
                     </div>
                   </div>
                 ) : source === 'bilibili' ? (
@@ -917,7 +904,6 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                         setSource('netease')
                         setSearchType('song')
                         setKeyword(artist)
-                        setAddedIds(new Set())
                         search(artist)
                       }}
                     />
@@ -946,9 +932,12 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                         source: track.source,
                       }))}
                       onSelect={(artist) => {
+                        if (hasArtistPages(artist.source)) {
+                          openArtistPage({ source: artist.source, id: artist.id, name: artist.name })
+                          return
+                        }
                         setSearchType('song')
                         setKeyword(artist.name)
-                        setAddedIds(new Set())
                         search(artist.name, 'song')
                       }}
                       hasMore={hasMore}

@@ -1,4 +1,11 @@
-import { EVENTS, QR_STATUS } from '@music-together/shared'
+import {
+  authCheckQrSchema,
+  authSetCookieSchema,
+  authSetSharingSchema,
+  EVENTS,
+  platformEventSchema,
+  QR_STATUS,
+} from '@music-together/shared'
 import type { MusicSource, SavedAccountSummary } from '@music-together/shared'
 import * as authService from '../services/authService.js'
 import { AUTH_PROVIDERS } from '../services/authProvider.js'
@@ -17,12 +24,6 @@ import * as roomService from '../services/roomService.js'
 function getSocketMapping(socketId: string) {
   return roomRepo.getSocketMapping(socketId) ?? null
 }
-
-/** 支持 QR 扫码登录的平台集合 */
-const QR_PLATFORMS = new Set<MusicSource>(['netease', 'kugou', 'kugou_concept', 'tencent', 'bilibili'])
-
-/** 支持 Cookie 登录的平台集合 */
-const VALID_PLATFORMS = new Set<MusicSource>(['netease', 'tencent', 'kugou', 'kugou_concept', 'bilibili'])
 
 /**
  * 判断某个对端地址是否与**服务端所在机器**相同。
@@ -94,11 +95,12 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
     qrCheckInFlight = false
     const requestVersion = ++qrRequestVersion
     try {
-      const platform = data?.platform as MusicSource
-      if (!platform || !QR_PLATFORMS.has(platform)) {
+      const parsed = platformEventSchema.safeParse(data)
+      if (!parsed.success) {
         socket.emit(EVENTS.AUTH_QR_STATUS, { status: QR_STATUS.EXPIRED, message: '暂不支持该平台扫码登录' })
         return
       }
+      const { platform } = parsed.data
 
       const provider = AUTH_PROVIDERS[platform]
       const authorization = captureAuthorization(platform)
@@ -129,18 +131,14 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
     if (!(await checkAuthRateLimit(socket))) return
     const requestVersion = qrRequestVersion
     try {
-      if (!data?.key) {
-        socket.emit(EVENTS.AUTH_QR_STATUS, { status: QR_STATUS.EXPIRED, message: '缺少二维码 key' })
+      const parsed = authCheckQrSchema.safeParse(data)
+      if (!parsed.success) {
+        socket.emit(EVENTS.AUTH_QR_STATUS, { status: QR_STATUS.EXPIRED, message: '二维码信息无效' })
         return
       }
+      const { key, platform } = parsed.data
 
-      const platform = data.platform as MusicSource
-      if (!platform || !QR_PLATFORMS.has(platform)) {
-        logger.warn('AUTH_CHECK_QR: invalid or missing platform', { platform })
-        return
-      }
-
-      if (!activeQr || activeQr.key !== data.key || activeQr.platform !== platform) {
+      if (!activeQr || activeQr.key !== key || activeQr.platform !== platform) {
         logger.debug('AUTH_CHECK_QR: ignoring stale QR session', { platform })
         return
       }
@@ -154,7 +152,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
       qrCheckInFlight = true
 
       const provider = AUTH_PROVIDERS[platform]
-      const result = await provider.checkQrStatus(data.key)
+      const result = await provider.checkQrStatus(key)
       if (activeQr !== session || requestVersion !== qrRequestVersion) return
       if (!session.authorization.current()) {
         activeQr = null
@@ -171,7 +169,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
       }
       if (result.status !== QR_STATUS.SUCCESS) {
         qrCheckInFlight = false
-        socket.emit(EVENTS.AUTH_QR_STATUS, { status: result.status, message: result.message, key: data.key })
+        socket.emit(EVENTS.AUTH_QR_STATUS, { status: result.status, message: result.message, key: key })
         return
       }
       if (!result.cookie) {
@@ -180,7 +178,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
         socket.emit(EVENTS.AUTH_QR_STATUS, {
           status: QR_STATUS.EXPIRED,
           message: '登录成功但未获取到凭据，请重新获取二维码',
-          key: data.key,
+          key: key,
         })
         return
       }
@@ -196,7 +194,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
         socket.emit(EVENTS.AUTH_QR_STATUS, {
           status: QR_STATUS.EXPIRED,
           message: '未获取到刷新凭证，请重新获取二维码',
-          key: data.key,
+          key: key,
         })
         return
       }
@@ -243,7 +241,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
             nickname: userInfo.nickname,
             avatarUrl: userInfo.avatarUrl,
           })
-          socket.emit(EVENTS.AUTH_QR_STATUS, { status: QR_STATUS.SUCCESS, message: '登录成功', key: data.key })
+          socket.emit(EVENTS.AUTH_QR_STATUS, { status: QR_STATUS.SUCCESS, message: '登录成功', key: key })
           logger.info(`${platform} 扫码登录成功：${userInfo.nickname}`, {
             event: 'auth.qr_login_succeeded',
             platform,
@@ -260,7 +258,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
           socket.emit(EVENTS.AUTH_QR_STATUS, {
             status: QR_STATUS.EXPIRED,
             message: '登录凭据验证失败，请重新获取二维码',
-            key: data.key,
+            key: key,
           })
         }
       }
@@ -286,8 +284,8 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
   socket.on(EVENTS.AUTH_QUICK_LOGIN, async (data) => {
     if (!(await checkAuthRateLimit(socket))) return
     try {
-      const platform = data?.platform as MusicSource
-      if (!platform || !VALID_PLATFORMS.has(platform)) {
+      const parsed = platformEventSchema.safeParse(data)
+      if (!parsed.success) {
         socket.emit(EVENTS.AUTH_QUICK_LOGIN_RESULT, {
           success: false,
           message: '参数不完整',
@@ -295,6 +293,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
         })
         return
       }
+      const { platform } = parsed.data
 
       const mapping = getSocketMapping(socket.id)
       if (!mapping) {
@@ -517,13 +516,8 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
   socket.on(EVENTS.AUTH_SET_COOKIE, async (data) => {
     if (!(await checkAuthRateLimit(socket))) return
     try {
-      if (
-        !data?.platform ||
-        !VALID_PLATFORMS.has(data.platform) ||
-        !data?.cookie ||
-        typeof data.cookie !== 'string' ||
-        data.cookie.length > 8000
-      ) {
+      const parsed = authSetCookieSchema.safeParse(data)
+      if (!parsed.success) {
         socket.emit(EVENTS.AUTH_SET_COOKIE_RESULT, {
           success: false,
           message: '参数不完整',
@@ -533,7 +527,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
 
       // 用户常常直接粘贴 DevTools 的「Copy as cURL」结果或带 `Cookie:` 前缀，
       // 这里统一归一化成纯 Cookie 串再往下走。
-      const cookie = normalizeCookieInput(data.cookie)
+      const cookie = normalizeCookieInput(parsed.data.cookie)
       if (!cookie) {
         socket.emit(EVENTS.AUTH_SET_COOKIE_RESULT, {
           success: false,
@@ -542,7 +536,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
         return
       }
 
-      const platform = data.platform as MusicSource
+      const { platform } = parsed.data
       const authorization = captureAuthorization(platform)
       const mapping = authorization.mapping
       const roomId = mapping?.roomId ?? null
@@ -842,20 +836,22 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
 
   socket.on(EVENTS.AUTH_LOGOUT, (data) => {
     try {
-      if (!data?.platform || !VALID_PLATFORMS.has(data.platform)) return
-      if (activeQr?.platform === data.platform) {
+      const parsed = platformEventSchema.safeParse(data)
+      if (!parsed.success) return
+      const { platform } = parsed.data
+      if (activeQr?.platform === platform) {
         activeQr = null
         qrRequestVersion++
         qrCheckInFlight = false
       }
       const mapping = getSocketMapping(socket.id)
       if (mapping) {
-        authService.removeCookie(mapping.roomId, data.platform, mapping.userId)
+        authService.removeCookie(mapping.roomId, platform, mapping.userId)
         const room = roomRepo.get(mapping.roomId)
         if (
           room?.roamingEnabled &&
           room.creatorId === mapping.userId &&
-          room.roamingSource === data.platform &&
+          room.roamingSource === platform &&
           !authService.getUserCookie(room.creatorId, room.roamingSource, room.id)
         ) {
           room.roamingEnabled = false
@@ -877,15 +873,16 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
 
   socket.on(EVENTS.AUTH_SET_SHARING, (data) => {
     try {
-      const platform = data?.platform as MusicSource | undefined
-      const shareWithRoom = data?.shareWithRoom
+      const parsed = authSetSharingSchema.safeParse(data)
       const mapping = getSocketMapping(socket.id)
-      if (!mapping || !platform || !VALID_PLATFORMS.has(platform) || typeof shareWithRoom !== 'boolean') {
-        if (platform && VALID_PLATFORMS.has(platform)) {
-          socket.emit(EVENTS.AUTH_SHARING_RESULT, { platform, shareWithRoom: false, ok: false })
+      if (!mapping || !parsed.success) {
+        const named = platformEventSchema.safeParse(data)
+        if (named.success) {
+          socket.emit(EVENTS.AUTH_SHARING_RESULT, { platform: named.data.platform, shareWithRoom: false, ok: false })
         }
         return
       }
+      const { platform, shareWithRoom } = parsed.data
 
       const ok = authService.setShareWithRoom(mapping.userId, platform, shareWithRoom)
       // 重新开启后把该用户其余共享账号一并恢复到当前房间；关闭只撤出房间池，

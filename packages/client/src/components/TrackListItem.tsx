@@ -1,3 +1,4 @@
+import { ArtistNames } from '@/components/ArtistNames'
 import { Button } from '@/components/ui/button'
 import { QueueTrackCover } from '@/components/Room/QueueTrackCover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -56,23 +57,7 @@ export const TrackListItem = memo(function TrackListItem({
           )}
         </p>
         <p className="truncate text-xs text-muted-foreground">
-          {onArtistClick
-            ? track.artist.map((a, ai) => (
-                <span key={ai}>
-                  {ai > 0 && ' / '}
-                  <button
-                    type="button"
-                    className="hover:text-foreground hover:underline"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onArtistClick(a)
-                    }}
-                  >
-                    {a}
-                  </button>
-                </span>
-              ))
-            : track.artist.join(' / ')}
+          <ArtistNames track={track} onUnsupportedClick={onArtistClick} />
           {track.album ? ` · ${track.album}` : ''}
         </p>
       </div>

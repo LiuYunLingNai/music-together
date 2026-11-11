@@ -1,4 +1,5 @@
 import {
+  CircleUserRound,
   Copy,
   Download,
   Ellipsis,
@@ -35,6 +36,7 @@ interface RoomHeaderProps {
   onOpenSearch: () => void
   onOpenChat: () => void
   onOpenSettings: () => void
+  onOpenAccounts: () => void
   onOpenMembers: () => void
   onOpenHotSongs: () => void
   onLeaveRoom: () => void
@@ -45,6 +47,7 @@ export function RoomHeader({
   onOpenSearch,
   onOpenChat,
   onOpenSettings,
+  onOpenAccounts,
   onOpenMembers,
   onOpenHotSongs,
   onLeaveRoom,
@@ -246,6 +249,21 @@ export function RoomHeader({
               variant="ghost"
               size="icon"
               className="hidden h-8 w-8 min-h-11 min-w-11 sm:flex sm:min-h-0 sm:min-w-0"
+              onClick={onOpenAccounts}
+              aria-label="音乐账号"
+            >
+              <CircleUserRound className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>音乐账号</TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="hidden h-8 w-8 min-h-11 min-w-11 sm:flex sm:min-h-0 sm:min-w-0"
               onClick={onOpenSettings}
               aria-label="设置"
             >
@@ -295,6 +313,10 @@ export function RoomHeader({
               热歌榜
             </DropdownMenuItem>
             <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={onOpenAccounts}>
+              <CircleUserRound className="mr-2 h-4 w-4" />
+              音乐账号
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={onOpenSettings}>
               <Settings className="mr-2 h-4 w-4" />
               设置

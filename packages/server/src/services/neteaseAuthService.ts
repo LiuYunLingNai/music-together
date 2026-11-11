@@ -194,7 +194,7 @@ export async function getUserInfo(cookie: string): Promise<GetUserInfoResult> {
     const profile = res?.body?.data?.profile
 
     if (!profile) {
-      logger.warn('Netease cookie validation: no profile in response', { responseData: res?.body?.data })
+      logger.warn('Netease cookie validation: no profile in response', { code: res?.body?.code })
       return { ok: false, reason: 'expired' }
     }
 

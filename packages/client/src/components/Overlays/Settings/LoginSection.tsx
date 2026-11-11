@@ -1,9 +1,9 @@
-import { Badge } from '@/components/ui/badge'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
-import { getVipDisplayLabel } from '@/lib/platform'
+import { VipBadge } from '@/components/VipBadge'
 import type { MusicSource, MyPlatformAuth, PlatformAuthStatus } from '@music-together/shared'
-import { Crown, Gift, KeyRound, Loader2, LogOut, ScanLine } from 'lucide-react'
+import { Gift, KeyRound, Loader2, LogOut, ScanLine, UserRound } from 'lucide-react'
 
 interface LoginSectionProps {
   platform: MusicSource
@@ -42,14 +42,19 @@ export function LoginSection({
   const maxVipType = status?.maxVipType ?? 0
   const isMyLoggedIn = myStatus?.loggedIn ?? false
   const displayedVipType = isMyLoggedIn ? (myStatus?.vipType ?? 0) : maxVipType
-  const displayedVipLabel = getVipDisplayLabel(
-    displayedVipType,
-    isMyLoggedIn ? myStatus?.vipLabel : status?.maxVipLabel,
-  )
+  const displayedVipLabel = isMyLoggedIn ? myStatus?.vipLabel : status?.maxVipLabel
 
   return (
     <div className="space-y-2 overflow-hidden rounded-lg border p-3">
       <div className="flex items-center justify-between gap-2">
+      <Avatar className="size-9 shrink-0">
+        {isMyLoggedIn && myStatus?.avatarUrl ? (
+          <AvatarImage src={myStatus.avatarUrl} alt={myStatus.nickname} referrerPolicy="no-referrer" />
+        ) : null}
+        <AvatarFallback>
+          <UserRound className="text-muted-foreground size-4" />
+        </AvatarFallback>
+      </Avatar>
       <div className="min-w-0 flex-1 space-y-0.5">
         <div className="flex min-w-0 items-center gap-2">
           {compactLabel && <span className="text-muted-foreground shrink-0 text-xs">{compactLabel}</span>}
@@ -63,12 +68,7 @@ export function LoginSection({
           ) : (
             <span className="text-muted-foreground shrink-0 text-sm">未登录</span>
           )}
-          {displayedVipType > 0 && (
-            <Badge variant="secondary" className="shrink-0 gap-1 text-xs">
-              <Crown className="h-3 w-3" />
-              {displayedVipLabel}
-            </Badge>
-          )}
+          <VipBadge vipType={displayedVipType} label={displayedVipLabel} />
         </div>
         <p className="text-muted-foreground truncate text-xs">
           {loggedInCount > 0 ? `房间内 ${loggedInCount} 人已登录${hasVip ? '，VIP 可用' : ''}` : '房间暂无人登录此平台'}

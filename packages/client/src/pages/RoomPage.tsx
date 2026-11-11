@@ -13,6 +13,9 @@ import { RoomHeader } from '@/components/Room/RoomHeader'
 import { SearchDialog } from '@/components/Overlays/SearchDialog'
 import { QueueDrawer } from '@/components/Overlays/QueueDrawer'
 import { SettingsDialog, type SettingsTab } from '@/components/Overlays/SettingsDialog'
+import { AccountDialog } from '@/components/Overlays/AccountDialog'
+import { ArtistDialog } from '@/components/Overlays/ArtistDialog'
+import { useArtistPageStore } from '@/stores/artistPageStore'
 import { AddToPlaylistDialog } from '@/components/Overlays/AddToPlaylistDialog'
 import { ManualFallbackDialog } from '@/components/Overlays/ManualFallbackDialog'
 import { PlaybackFailureDialog } from '@/components/Overlays/PlaybackFailureDialog'
@@ -279,6 +282,8 @@ export default function RoomPage() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [queueOpen, setQueueOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [accountsOpen, setAccountsOpen] = useState(false)
+  const artistPageOpen = useArtistPageStore((s) => s.target !== null)
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab | undefined>(undefined)
   const [hotSongsOpen, setHotSongsOpen] = useState(true)
   const [hotSongsMobileOpen, setHotSongsMobileOpen] = useState(false)
@@ -571,6 +576,8 @@ export default function RoomPage() {
           searchOpen ||
           queueOpen ||
           settingsOpen ||
+          accountsOpen ||
+          artistPageOpen ||
           passwordNeeded ||
           activeVote !== null ||
           hotSongsMobileOpen ||
@@ -593,6 +600,7 @@ export default function RoomPage() {
             onOpenSearch={() => setSearchOpen(true)}
             onOpenChat={openChat}
             onOpenSettings={() => setSettingsOpen(true)}
+            onOpenAccounts={() => setAccountsOpen(true)}
             onOpenMembers={handleOpenMembers}
             onOpenHotSongs={openHotSongs}
             onLeaveRoom={handleLeaveRoom}
@@ -745,14 +753,11 @@ export default function RoomPage() {
             onUnbanUser={unbanUser}
             initialTab={settingsInitialTab}
           />
+          <AccountDialog open={accountsOpen} onOpenChange={setAccountsOpen} />
+          <ArtistDialog />
           <AddToPlaylistDialog />
           <ManualFallbackDialog />
-          <PlaybackFailureDialog
-            onOpenSettings={(tab) => {
-              setSettingsInitialTab(tab)
-              setSettingsOpen(true)
-            }}
-          />
+          <PlaybackFailureDialog onOpenAccounts={() => setAccountsOpen(true)} />
         </div>
 
         {/* Fallback password dialog for edge cases (password changed after pre-check) */}

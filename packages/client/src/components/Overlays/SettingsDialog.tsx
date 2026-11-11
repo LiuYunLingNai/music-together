@@ -6,14 +6,13 @@ import {
 } from '@/components/ui/responsive-dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
-import { Disc3, Gauge, ListMusic, Palette, Settings2, Shield, Type, UserRound, Users, type LucideIcon } from 'lucide-react'
+import { Gauge, ListMusic, Palette, Settings2, Shield, Type, UserRound, Users, type LucideIcon } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { RoomSettingsSection } from './Settings/RoomSettingsSection'
 import { MembersSection } from './Settings/MembersSection'
 import { MyPlaylistsSection } from './Settings/MyPlaylistsSection'
 import { PlayerSettingsSection } from './Settings/PlayerSettingsSection'
 import { LyricsSection } from './Settings/LyricsSection'
-import { PlatformHub } from './Settings/PlatformHub'
 import { AccountSection } from './Settings/AccountSection'
 import { AdminSection } from './Settings/AdminSection'
 import { PlaybackSection } from './Settings/PlaybackSection'
@@ -29,7 +28,6 @@ export type SettingsTab =
   | 'playback'
   | 'playlists'
   | 'account'
-  | 'accounts'
   | 'player'
   | 'lyrics'
   | 'admin'
@@ -103,7 +101,6 @@ const BASE_TABS: { id: SettingsTab; icon: LucideIcon; label: string }[] = [
   { id: 'lyrics', icon: Type, label: '歌词' },
   { id: 'playlists', icon: ListMusic, label: '我的歌单' },
   { id: 'account', icon: UserRound, label: '账号' },
-  { id: 'accounts', icon: Disc3, label: '音源账号' },
 ]
 
 // ---------------------------------------------------------------------------
@@ -177,13 +174,7 @@ export function SettingsDialog({
             </div>
           </nav>
 
-          {/* Content area — accounts tab uses its own scroll management for virtual list */}
-          {tab === 'accounts' ? (
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-4 sm:p-6">
-              <PlatformHub />
-            </div>
-          ) : (
-            <ScrollArea className="min-h-0 flex-1">
+          <ScrollArea className="min-h-0 flex-1">
               <div className="p-4 sm:p-6">
                 {tab === 'room' && <RoomSettingsSection onUpdateSettings={onUpdateSettings} />}
                 {tab === 'members' && (
@@ -201,7 +192,6 @@ export function SettingsDialog({
                 {tab === 'player' && <PlayerSettingsSection />}
               </div>
             </ScrollArea>
-          )}
         </div>
       </ResponsiveDialogContent>
     </ResponsiveDialog>

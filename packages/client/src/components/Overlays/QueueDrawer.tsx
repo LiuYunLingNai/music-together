@@ -1,3 +1,4 @@
+import { ArtistNames } from '@/components/ArtistNames'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Drawer, DrawerContent } from '@/components/ui/drawer'
@@ -156,7 +157,9 @@ const QueueRow = memo(function QueueRow({
       <div className="min-w-0 flex-1">
         <div className={cn('truncate text-sm', isCurrent && 'font-medium text-primary')}>{track.title}</div>
         <div className="flex min-w-0 items-center gap-1">
-          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{track.artist.join(' / ')}</span>
+          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+            <ArtistNames track={track} />
+          </span>
           <QualityBadge
             quality={quality}
             bitrate={qualityBitrate}
