@@ -8,14 +8,14 @@ import {
     BEATS_PER_PHRASE,
     type Grid,
     type TempoRelation,
-} from './musicalTime';
+} from './musicalTime.js';
 import {
     chooseTransitionStyle,
     CUT_LEAD_SEC,
     HEAD_BUDGET_SEC,
     type KeyRelation,
     type TransitionStyle,
-} from './transitionChooser';
+} from './transitionChooser.js';
 import type { AutomixTrackProfile as TrackProfile } from '../types.js';
 
 // src/services/automix/transitionPlanner.ts

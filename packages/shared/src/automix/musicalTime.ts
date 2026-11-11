@@ -1,4 +1,4 @@
-import { BEATS_PER_BAR } from './signalAnalysis';
+import { BEATS_PER_BAR } from './signalAnalysis.js';
 
 // src/services/automix/musicalTime.ts
 // The units music is actually built in - beats, bars, phrases - and the one relationship between

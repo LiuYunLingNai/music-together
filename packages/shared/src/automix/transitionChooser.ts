@@ -1,5 +1,5 @@
-import { settledBpm, tempoMatch, TEMPO_LENGTH_SCALE, type TempoMatch } from './musicalTime';
-import { toneTilt } from './signalAnalysis';
+import { settledBpm, tempoMatch, TEMPO_LENGTH_SCALE, type TempoMatch } from './musicalTime.js';
+import { toneTilt } from './signalAnalysis.js';
 import type { AutomixKeyEstimate as KeyEstimate, AutomixTrackProfile as TrackProfile } from '../types.js';
 
 // src/services/automix/transitionChooser.ts

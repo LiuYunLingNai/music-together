@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { defineAbilityFor } from './abilities'
+import { defineAbilityFor } from './abilities.js'
 
 describe('defineAbilityFor', () => {
   it('grants owners full access', () => {

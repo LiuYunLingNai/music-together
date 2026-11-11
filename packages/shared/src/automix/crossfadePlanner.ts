@@ -6,7 +6,7 @@ import {
     hardCut,
     type TransitionPlan,
     type TransitionTrack,
-} from './transitionPlanner';
+} from './transitionPlanner.js';
 
 // src/services/automix/crossfadePlanner.ts
 // The plain crossfade: the length the listener asked for, the same shape every time.
