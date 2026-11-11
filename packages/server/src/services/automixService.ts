@@ -32,6 +32,12 @@ export { AUTOMIX_DEFAULT_OVERLAP_SEC, AUTOMIX_MAX_OVERLAP_SEC, AUTOMIX_MIN_OVERL
 
 const timers = new Map<string, ReturnType<typeof setTimeout>>()
 
+/**
+ * 上游 `AUTOMIX_ARM_LEAD_SEC`：提前 1 秒推进换歌，解析与下发都落在这段里；
+ * 实际开混仍按 `dueAt` 对准 outStart，而不是推进那一刻。
+ */
+export const AUTOMIX_ARM_LEAD_MS = 1000
+
 /** 每房间最多保留的曲目画像；过渡只关心当前与下一首。 */
 const PROFILE_CAP_PER_ROOM = 32
 const profilesByRoom = new Map<string, Map<string, AutomixTrackProfile>>()
@@ -92,6 +98,8 @@ export interface AutomixDecision {
   overlapSec: number
   /** 距离开始过渡的时间。由 plan 的 outStart 反推，而不是简单的「时长 - 重叠」。 */
   delayMs: number
+  /** 出歌到达 outStart 的服务端时刻；排定时写入。 */
+  dueAt?: number
   /** 出歌开始混合的媒体时间。 */
   outStartSec: number
   style: TransitionStyle
@@ -291,6 +299,7 @@ export function scheduleAutomix(
   const trackId = room.currentTrack?.id
   if (!trackId) return
   if (nextTrack) onScheduled?.(decision, trackId, nextTrack.id)
+  const dueAt = Date.now() + decision.delayMs
 
   const timer = setTimeout(() => {
     timers.delete(roomId)
@@ -299,8 +308,8 @@ export function scheduleAutomix(
     if (!current || !current.automixEnabled) return
     if (!current.playState.isPlaying) return
     if (current.currentTrack?.id !== trackId) return
-    advance(decision, trackId)
-  }, decision.delayMs)
+    advance({ ...decision, dueAt }, trackId)
+  }, Math.max(0, decision.delayMs - AUTOMIX_ARM_LEAD_MS))
   // 不阻止进程退出。
   timer.unref?.()
   timers.set(roomId, timer)

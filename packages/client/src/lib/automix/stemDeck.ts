@@ -42,6 +42,8 @@ export const stemPrepLeadSec = (): number =>
   Math.min(180, Math.max(STEM_TRANSITION_PREP_LEAD_SEC, Math.ceil(lastPrepareSec * 2)))
 /** 分轨总线与媒体元素交接的交叉长度，与上游 `SPLICE_SEC` 一致。 */
 const STEM_HANDOFF_SEC = 0.008
+/** 服务端在 outStart 才下发换歌，开混实际会晚到；缓冲多留这段，让分轨仍能从元素真实位置接上。 */
+export const STEM_WINDOW_SPARE_SEC = 2.5
 
 interface StemBuffers {
   drums: AudioBuffer
@@ -219,7 +221,7 @@ async function prepare(
 } | null> {
   const context = Howler.ctx
   if (!context) return null
-  const windowSec = overlapSec + 0.5
+  const windowSec = overlapSec + STEM_WINDOW_SPARE_SEC
   // 串行解码：两首整曲同时解会在一瞬间占掉数百 MB，低配机器直接卡死。
   const outgoingWindow = await loadWindow(
     outgoingUrl,
@@ -456,6 +458,8 @@ export function startStemTransition(
   /** 出歌/入歌 deck 的分轨接入点；缺省时退回 Howler 总线。 */
   outDestination?: AudioNode | null,
   inDestination?: AudioNode | null,
+  /** 过渡窗口已走过的时长，决定曲线从哪里开始；缓冲偏移另由上面两项给出。 */
+  windowElapsedSec = inElapsedSec,
 ): () => void {
   const context = Howler.ctx
   if (!context) return () => {}
@@ -509,17 +513,30 @@ export function startStemTransition(
   const outGains = add(plan.outgoing, false, outElapsedSec, outBus.input)
   const inGains = add(plan.incoming, true, inElapsedSec, inBus.input)
 
-  // build-up 是渲染好的独立缓冲，接在总线输入上，并在 mask 区间内把原 stem 静音。
+  // 上游 automixSession：曲线形状按窗口进度走，缓冲按元素真实位置偏移；
+  // build-up 也要从缓冲实际起播处取材，否则会重复窗口外的素材。
+  const progress = windowElapsedSec
+  const outShift = outElapsedSec - progress
   const expansionSources: AudioBufferSourceNode[] = []
   if (plan.expansion) {
     const build = plan.expansion
     const buildLength = build.to - build.from
-    const when = startAt + Math.max(0, build.from - outElapsedSec)
-    const offset = Math.max(0, outElapsedSec - build.from)
-    if (outElapsedSec < build.to && offset < buildLength) {
+    const when = startAt + Math.max(0, build.from - progress)
+    const offset = Math.max(0, progress - build.from)
+    if (progress < build.to && offset < buildLength) {
       for (const name of build.stems) {
-        const buffer = plan.expansionBuffers[name]
+        let buffer = plan.expansionBuffers[name]
         if (!buffer) continue
+        if (Math.abs(outShift) > 0.002) {
+          const stem = plan.outgoing[name]
+          const shift = Math.max(0, Math.round(outShift * stem.sampleRate))
+          const rendered = renderExpansion(
+            [stem.getChannelData(0).subarray(shift), stem.getChannelData(1).subarray(shift)],
+            build,
+            stem.sampleRate,
+          )
+          buffer = toBuffer(context, { left: rendered[0]!, right: rendered[1]! })
+        }
         const source = context.createBufferSource()
         source.buffer = buffer
         source.connect(outBus.input)
@@ -540,8 +557,8 @@ export function startStemTransition(
       const length = Math.min(outCurve.length, mask.length)
       for (let i = 0; i < length; i += 1) outCurve[i]! *= mask[i]!
     }
-    scheduleCurve(outGains[name]!.gain, outCurve, startAt, plan.overlapSec, outElapsedSec)
-    scheduleCurve(inGains[name]!.gain, inCurves[name], startAt, plan.overlapSec, inElapsedSec)
+    scheduleCurve(outGains[name]!.gain, outCurve, startAt, plan.overlapSec, progress)
+    scheduleCurve(inGains[name]!.gain, inCurves[name], startAt, plan.overlapSec, progress)
   }
 
   return () => {

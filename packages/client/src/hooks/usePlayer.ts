@@ -148,6 +148,7 @@ export function usePlayer() {
     preloadTrack,
     disposePreloaded,
     schedulePlayback,
+    retargetScheduledPlayback,
     cancelScheduledPlayback,
     pausePlayback,
     stopPlayback,
@@ -164,7 +165,15 @@ export function usePlayer() {
   useSleepTimer(howlRef, pausePlayback)
 
   // Connect sync (handles SEEK, PAUSE, RESUME + conductor reporting)
-  usePlayerSync(howlRef, soundIdRef, schedulePlayback, cancelScheduledPlayback, pausePlayback, setPlaybackTempo)
+  usePlayerSync(
+    howlRef,
+    soundIdRef,
+    schedulePlayback,
+    cancelScheduledPlayback,
+    pausePlayback,
+    setPlaybackTempo,
+    retargetScheduledPlayback,
+  )
 
   // 服务端排好的过渡落点：供分轨准备与执行按同一组参数工作。
   useEffect(() => {
@@ -476,7 +485,14 @@ export function usePlayer() {
     socket.emit(EVENTS.PLAYER_PAUSE)
   }, [socket])
 
-  const requestSeek = useCallback((time: number) => socket.emit(EVENTS.PLAYER_SEEK, { currentTime: time }), [socket])
+  const requestSeek = useCallback(
+    (time: number) =>
+      socket.emit(EVENTS.PLAYER_SEEK, {
+        currentTime: time,
+        trackId: usePlayerStore.getState().currentTrack?.id,
+      }),
+    [socket],
+  )
 
   const seek = useCallback(
     (time: number) => {

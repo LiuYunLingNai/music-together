@@ -236,7 +236,7 @@ export interface ClientToServerEvents {
 
   [EVENTS.PLAYER_PLAY]: (data?: { track?: Track }) => void
   [EVENTS.PLAYER_PAUSE]: () => void
-  [EVENTS.PLAYER_SEEK]: (data: { currentTime: number }) => void
+  [EVENTS.PLAYER_SEEK]: (data: { currentTime: number; trackId?: string }) => void
   /**
    * `trackId` 可选：带上时服务端只在它仍是当前曲目时才切歌，避免歌曲已经
    * 自然播完后，排队中的请求把新歌也跳掉。旧客户端不带这个字段，退回原有防抖。

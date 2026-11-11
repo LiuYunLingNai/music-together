@@ -1,4 +1,13 @@
-import type { AudioQuality } from './types.js'
+import type { AudioQuality, MusicSource } from './types.js'
+
+/** 平台未署名时 `artist` 中的占位名，不应链接到歌手页。 */
+export const UNKNOWN_ARTIST = 'Unknown'
+
+/** 提供歌手主页的平台。 */
+export const ARTIST_SOURCES: readonly MusicSource[] = ['netease']
+
+/** 账号主页提供雷达、推荐歌手与新碟的平台。 */
+export const DISCOVER_SOURCES: readonly MusicSource[] = ['netease']
 
 export const LIMITS = {
   ROOM_PASSWORD_MAX_LENGTH: 32,

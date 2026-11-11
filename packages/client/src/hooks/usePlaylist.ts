@@ -112,6 +112,9 @@ export function usePlaylist() {
   const currentPlaylistRef = useRef<{ source: MusicSource; id: string; type?: 'playlist' | 'album' } | null>(null)
   const offsetRef = useRef(0)
   const loadingMoreRef = useRef(false)
+  const abortRef = useRef<AbortController | null>(null)
+
+  useEffect(() => () => abortRef.current?.abort(), [])
 
   useEffect(() => {
     const onMyList = (data: { platform: MusicSource; playlists: Playlist[] }) => {
@@ -179,9 +182,14 @@ export function usePlaylist() {
       setLoadingMore(false)
       loadingMoreRef.current = false
 
-      // Track current context for stale response detection
-      currentPlaylistRef.current = { source, id: playlistId, type }
+      // 每次请求一个新上下文对象，按引用判断是否仍是当前列表；新列表会中止旧请求。
+      abortRef.current?.abort()
+      const controller = new AbortController()
+      abortRef.current = controller
+      const context = { source, id: playlistId, type }
+      currentPlaylistRef.current = context
       offsetRef.current = 0
+      const isCurrent = () => currentPlaylistRef.current === context
 
       try {
         const url = buildPlaylistUrl(source, playlistId, PAGE_SIZE, 0, {
@@ -189,17 +197,16 @@ export function usePlaylist() {
           roomId: useRoomStore.getState().room?.id,
           type,
         })
-        const res = await fetch(url, { credentials: 'include' })
+        const res = await fetch(url, { credentials: 'include', signal: controller.signal })
+        // 旧列表迟到的失败不能结束新列表的加载态。
+        if (!isCurrent()) return []
         if (!res.ok) {
           setTracksLoading(false)
           return []
         }
 
-        // Stale response guard
-        const ctx = currentPlaylistRef.current
-        if (!ctx || ctx.source !== source || ctx.id !== playlistId) return []
-
         const data = await res.json()
+        if (!isCurrent()) return []
         const tracks: Track[] = data.tracks ?? []
         const total: number = data.total ?? tracks.length
 
@@ -210,11 +217,7 @@ export function usePlaylist() {
         setTracksLoading(false)
         return tracks
       } catch {
-        // Only update state if this is still the active playlist
-        const ctx = currentPlaylistRef.current
-        if (ctx && ctx.source === source && ctx.id === playlistId) {
-          setTracksLoading(false)
-        }
+        if (isCurrent()) setTracksLoading(false)
         return []
       }
     },
@@ -240,14 +243,11 @@ export function usePlaylist() {
         roomId: useRoomStore.getState().room?.id,
         type: ctx.type,
       })
-      const res = await fetch(url, { credentials: 'include' })
-      if (!res.ok) return
-
-      // Stale response guard — context might have changed while we were fetching
-      const currentCtx = currentPlaylistRef.current
-      if (!currentCtx || currentCtx.source !== ctx.source || currentCtx.id !== ctx.id) return
+      const res = await fetch(url, { credentials: 'include', signal: abortRef.current?.signal })
+      if (!res.ok || currentPlaylistRef.current !== ctx) return
 
       const data = await res.json()
+      if (currentPlaylistRef.current !== ctx) return
       const newTracks: Track[] = data.tracks ?? []
 
       setPlaylistTracks((prev) => [...prev, ...newTracks])

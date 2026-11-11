@@ -58,6 +58,8 @@ interface StretchGraph {
   node: SoundTouchNode
   context: AudioContext
   bypassed: boolean
+  /** 同步变速开关：只用元素原生速率，音频不再经过 SoundTouch worklet。 */
+  tempoEnabled: boolean
   failed: boolean
   /** AudioWorklet 注册尚未完成；此时歌曲可能已被快速切走。 */
   initializing: boolean
@@ -333,6 +335,7 @@ function createDisabledGraph(context: AudioContext, audio: HTMLMediaElement): St
     node: dummyNode,
     context,
     bypassed: true,
+    tempoEnabled: false,
     failed: true,
     initializing: true,
     cancelled: false,
@@ -419,6 +422,17 @@ export function prepareDirectStreamForTimeStretch(streamUrl: string): boolean {
 function getAudioElement(howl: Howl): HTMLMediaElement | null {
   const sound = (howl as InternalHowl)._sounds?.[0]
   return sound?._node ?? null
+}
+
+/**
+ * 在图的 muteGain 上做一次极短淡出，供定位前消除波形断点（爆音）。
+ * 图不可用或已被其他流程静音（分轨交接）时返回 false，调用方应直接定位。
+ */
+export function duckHowlGraph(howl: Howl, rampSec: number): boolean {
+  const graph = graphOf(howl)
+  const gain = graph?.muteGain
+  if (!graph || !gain || gain.gain.value < 0.5) return false
+  return setHowlGraphMuted(howl, true, rampSec)
 }
 
 function graphOf(howl: Howl | null): StretchGraph | null {
@@ -861,23 +875,18 @@ function setStretchEnabled(graph: StretchGraph, enabled: boolean, failed = false
   if (failed) graph.failed = true
   // 占位禁用图（attach 失败的登记条目）没有真实节点，保持 no-op 即可
   if (!graph.source || !graph.sourceOut || !graph.node) return
-  if (enabled && graph.failed) return
+  // 同步变速（±0.5% 以内）只改元素原生速率，音频始终直通、不进 SoundTouch worklet：
+  // worklet 一旦 underrun 就是咔哒/顿挫，而这个幅度的重采样音高偏移小于约 9 音分。
   const elementOutput = graph.muteGain ?? graph.sourceOut
   graph.source.disconnect()
   graph.node.disconnect()
-  if (enabled) {
+  graph.source.connect(elementOutput)
+  graph.bypassed = true
+  graph.tempoEnabled = enabled && !graph.failed
+  if (graph.tempoEnabled) {
     resumeContext(graph)
-    graph.source.connect(graph.node)
-    graph.node.connect(elementOutput)
-    graph.bypassed = false
-    graph.metricsSnapshots = 0
-    graph.lastBlockCount = graph.node.metrics?.blockCount ?? 0
-    graph.lastUnderrunCount = graph.node.metrics?.underrunCount ?? 0
   } else {
-    graph.source.connect(elementOutput)
-    graph.node.playbackRate.setValueAtTime(1, graph.context.currentTime)
     graph.audio.playbackRate = 1
-    graph.bypassed = true
   }
 }
 
@@ -1087,7 +1096,8 @@ export async function attachTimeStretch(
       source,
       node: stretchNode,
       context,
-      bypassed: false,
+      bypassed: true,
+      tempoEnabled: false,
       failed: false,
       initializing: false,
       cancelled: false,
@@ -1221,21 +1231,21 @@ export async function attachTimeStretch(
 function createController(graph: StretchGraph): TimeStretchController {
   return {
     get enabled() {
-      return !graph.bypassed
+      return graph.tempoEnabled
     },
     setEnabled: (enabled) => {
       setStretchEnabled(graph, enabled)
     },
     setTempo: (tempo) => {
-      if (graph.bypassed) return
+      if (!graph.tempoEnabled) return
       resumeContext(graph)
       const clamped = Math.max(MIN_TEMPO, Math.min(MAX_TEMPO, tempo))
-      graph.audio.playbackRate = clamped
-      graph.node.playbackRate.setValueAtTime(clamped, graph.context.currentTime)
+      // 值没变就不写：重复赋值可能触发 ratechange / 重置音频管线，造成可闻的小顿挫。
+      if (graph.audio.preservesPitch) graph.audio.preservesPitch = false
+      if (graph.audio.playbackRate !== clamped) graph.audio.playbackRate = clamped
     },
     reset: () => {
-      graph.audio.playbackRate = 1
-      graph.node.playbackRate.setValueAtTime(1, graph.context.currentTime)
+      if (graph.audio.playbackRate !== 1) graph.audio.playbackRate = 1
     },
   }
 }

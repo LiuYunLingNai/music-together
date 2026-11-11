@@ -63,7 +63,7 @@ export function registerPlayerController(io: TypedServer, socket: TypedSocket) {
     withPermission('seek', 'Player', (ctx, data) => {
       const parsed = playerSeekSchema.safeParse(data)
       if (!parsed.success) return
-      playerService.seekTrack(ctx.io, ctx.roomId, parsed.data.currentTime, ctx.socket)
+      playerService.seekTrack(ctx.io, ctx.roomId, parsed.data.currentTime, ctx.socket, parsed.data.trackId)
     }),
   )
 

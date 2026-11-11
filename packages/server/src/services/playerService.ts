@@ -28,6 +28,7 @@ import * as listeningReportService from './listeningReportService.js'
 import { isRoamingTrack, roamingService, shouldPreferRoamingForNext } from './roamingService.js'
 import * as automixService from './automixService.js'
 import { shouldRemovePlayedTrackAfterAdvance } from './queueNavigation.js'
+import { isStreamUrlExpired } from './streamUrlLifetime.js'
 import {
   recordAutoFallbackAttempt,
   recordAutoFallbackFailed,
@@ -98,6 +99,9 @@ function withPlayMutex<T>(roomId: string, fn: () => Promise<T>): Promise<T> {
  * Compute the future server-time at which all clients should execute an
  * action, based on the P90 RTT in the room.
  */
+/** 上游 `MAX_ALIGN_HOLD_SEC`：为对准计划开混点最多等待的时长。 */
+const AUTOMIX_MAX_ALIGN_HOLD_MS = 1000
+
 function getScheduleTime(roomId: string): number {
   const maxRTT = roomRepo.getP90RTT(roomId)
   const delay = Math.min(Math.max(maxRTT * 1.5 + 100, NTP.MIN_SCHEDULE_DELAY_MS), NTP.MAX_SCHEDULE_DELAY_MS)
@@ -389,6 +393,7 @@ function rescheduleAutomix(io: TypedServer, roomId: string): void {
         automixIncomingLeadInSec: decision.incomingLeadInSec,
         automixExpansion: decision.expansion,
         automixOutgoingBeatsPerBar: decision.outgoingBeatsPerBar,
+        automixDueAt: decision.dueAt,
       })
     },
     (decision, fromTrackId, toTrackId) => {
@@ -483,6 +488,8 @@ async function _playTrackInRoom(
   roomId: string,
   track: Track,
   transition?: AutomixTransition,
+  /** 自动混音的计划开混时刻；不早于房间最小下发提前量，最多等 1 秒（上游 MAX_ALIGN_HOLD_SEC）。 */
+  alignAt?: number,
 ): Promise<boolean> {
   const room = roomRepo.get(roomId)
   if (!room) return false
@@ -703,7 +710,11 @@ async function _playTrackInRoom(
   // so estimateCurrentTime() is accurate from the first scheduled frame.
   room.currentTrack = resolved
   lastStreamUrlRefreshAt.set(roomId, Date.now())
-  const scheduleTime = getScheduleTime(roomId)
+  const minimumScheduleTime = getScheduleTime(roomId)
+  const scheduleTime =
+    transition && alignAt
+      ? Math.max(minimumScheduleTime, Math.min(alignAt, Date.now() + AUTOMIX_MAX_ALIGN_HOLD_MS))
+      : minimumScheduleTime
   room.playState = {
     isPlaying: true,
     // 过渡时从上游 planner 给的 inStart 进入，跳过前奏静音；普通播放从 0 开始。
@@ -823,9 +834,20 @@ export function pauseTrack(io: TypedServer, roomId: string, _initiatorSocket?: T
   automixService.cancelAutomix(roomId)
 }
 
-export function seekTrack(io: TypedServer, roomId: string, currentTime: number, _initiatorSocket?: TypedSocket): void {
+export function seekTrack(
+  io: TypedServer,
+  roomId: string,
+  requestedTime: number,
+  _initiatorSocket?: TypedSocket,
+  expectedTrackId?: string,
+): void {
   const room = roomRepo.get(roomId)
-  if (!room) return
+  if (!room || !room.currentTrack) return
+  if (expectedTrackId !== undefined && expectedTrackId !== room.currentTrack.id) {
+    logger.debug('忽略切歌竞态中的迟到 seek', { event: 'player.seek_stale_track', roomId, expectedTrackId })
+    return
+  }
+  const currentTime = clampPlaybackPosition(requestedTime, room.currentTrack.duration)
 
   const scheduleTime = getScheduleTime(roomId)
   // When playing, align serverTimestamp with scheduled time so estimateCurrentTime() is accurate
@@ -957,6 +979,8 @@ export function playNextTrackInRoom(
     automixIncomingLeadInSec?: number | null
     automixExpansion?: number | null
     automixOutgoingBeatsPerBar?: number | null
+    /** 出歌到达 outStart 的服务端时刻；新曲按它排定开播。 */
+    automixDueAt?: number
   },
 ): Promise<void> {
   return withPlayMutex(roomId, async () => {
@@ -1116,7 +1140,7 @@ export function playNextTrackInRoom(
           outgoingBeatsPerBar: options.automixOutgoingBeatsPerBar ?? null,
         }
       : undefined
-    let success = await _playTrackInRoom(io, roomId, nextTrack, transition)
+    let success = await _playTrackInRoom(io, roomId, nextTrack, transition, options?.automixDueAt)
     let attemptedTrackId = nextTrack.id
     for (let attempt = 1; !success && attempt < MAX_ADVANCE_ATTEMPTS; attempt += 1) {
       const retryMode = playMode === 'loop-one' ? 'sequential' : playMode
@@ -1186,14 +1210,17 @@ export function refreshStreamUrlForJoin(roomId: string): Promise<boolean> {
   return withPlayMutex(roomId, async () => {
     const room = roomRepo.get(roomId)
     const track = room?.currentTrack
-    if (!room?.permanent || !track) return false
+    if (!room || !track) return false
+    // 上游 3da604b：网易云链接已按 CDN 时间戳过期时，任何房间都立即刷新，不受节流限制。
+    const expired = !!track.streamUrl && isStreamUrlExpired(track.source, track.streamUrl)
+    if (!room.permanent && !expired) return false
 
     const now = Date.now()
     const lastRefreshAt = lastStreamUrlRefreshAt.get(roomId) ?? 0
     const refreshInterval = track.streamUrl
       ? TIMING.STREAM_URL_REFRESH_INTERVAL_MS
       : TIMING.STREAM_URL_REFRESH_RETRY_INTERVAL_MS
-    if (now - lastRefreshAt < refreshInterval) return false
+    if (!expired && now - lastRefreshAt < refreshInterval) return false
 
     // Record the attempt up front so failed upstream requests are also throttled.
     lastStreamUrlRefreshAt.set(roomId, now)
@@ -1541,6 +1568,10 @@ const lastSkipTimestamp = new Map<string, { action: 'next' | 'prev'; timestamp: 
 
 /** Remove per-room entries for a deleted room */
 export function cleanupRoom(roomId: string): void {
+  // 冷却条目只在下次查询时过期删除；房间销毁后不会再查，需要在这里清掉。
+  for (const key of autoFallbackCooldown.keys()) {
+    if (key.startsWith(`${roomId}:`)) autoFallbackCooldown.delete(key)
+  }
   lastSkipTimestamp.delete(roomId)
   lastStreamUrlRefreshAt.delete(roomId)
   playMutexes.delete(roomId)

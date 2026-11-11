@@ -199,6 +199,8 @@ export const roomAutoFallbackSchema = z.object({
 
 export const playerSeekSchema = z.object({
   currentTime: z.number().finite().nonnegative(),
+  /** 发起 seek 时客户端看到的曲目；与房间当前曲目不一致说明切歌竞态，服务端丢弃。旧客户端可不传。 */
+  trackId: z.string().max(200).optional(),
 })
 
 export const playerSyncSchema = z.object({
@@ -225,6 +227,7 @@ const trackSchema = z.object({
   id: z.string().max(200),
   title: z.string().max(500),
   artist: z.array(z.string().max(200)).max(20),
+  artistIds: z.array(z.string().max(32)).max(20).optional(),
   album: z.string().max(500),
   duration: z.number().finite().nonnegative(),
   cover: z.string().max(2000),
@@ -350,6 +353,38 @@ export const recommendationsQuerySchema = z.object({
   radarPage: z.coerce.number().int().min(1).max(10_000).default(1),
   playlistOffset: z.coerce.number().int().min(0).max(1_000_000).default(0),
   neteasePlaylistOffset: z.coerce.number().int().min(0).max(1_000_000).default(0),
+})
+
+/** AUTH_REQUEST_QR / AUTH_QUICK_LOGIN / AUTH_LOGOUT / PLAYLIST_GET_MY：只带平台。 */
+export const platformEventSchema = z.object({ platform: musicSourceSchema })
+
+export const authCheckQrSchema = z.object({
+  key: z.string().min(1).max(500),
+  platform: musicSourceSchema,
+})
+
+export const authSetCookieSchema = z.object({
+  platform: musicSourceSchema,
+  cookie: z.string().min(1).max(8000),
+})
+
+export const authSetSharingSchema = z.object({
+  platform: musicSourceSchema,
+  shareWithRoom: z.boolean(),
+})
+
+export const artistQuerySchema = z.object({
+  source: musicSourceSchema,
+  id: z.string().regex(/^\d{1,20}$/),
+})
+
+export const artistPageQuerySchema = artistQuerySchema.extend({
+  offset: z.coerce.number().int().min(0).max(5000).default(0),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+})
+
+export const discoverQuerySchema = z.object({
+  source: musicSourceSchema,
 })
 
 export const hotSongsQuerySchema = z.object({

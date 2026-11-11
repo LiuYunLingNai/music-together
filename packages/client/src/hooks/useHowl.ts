@@ -368,6 +368,20 @@ export function useHowl(
     [cancelScheduledPlayback],
   )
 
+  /**
+   * 尚未真正开播（仍在加载或等待排定时刻）时收到新的时间线，只改写待开播的目标，
+   * 保留原来的提交回调；返回 false 表示没有待开播的实例，由调用方直接定位。
+   */
+  const retargetScheduledPlayback = useCallback(
+    (targetTime: number, executeAt: number): boolean => {
+      const pending = scheduledStartRef.current
+      if (!pending || pending.howl !== howlRef.current) return false
+      schedulePlayback(targetTime, executeAt, pending.onCommit)
+      return true
+    },
+    [schedulePlayback],
+  )
+
   const handleHowlLoad = useCallback((howl: Howl, seekTo: number | undefined, deferCommit: boolean) => {
     if (howlRef.current !== howl) return // Stale instance guard
     if (loadTimerRef.current) {
@@ -478,24 +492,34 @@ export function useHowl(
             0,
             Math.min(1, (getServerTime() - scheduledStart.executeAt) / 1000),
           )
-          if (stemPlan && Howler.ctx && serverElapsed <= 0.5) {
-            // 媒体元素的 currentTime 才是真值；服务端时钟只用来判断是否已经开播。
-            const inEl = mediaElementOf(howl)
-            const outEl = mediaElementOf(outgoing)
-            const usable = (value: number): boolean =>
-              Number.isFinite(value) && value >= -0.05 && value <= 0.5
-            const inMediaElapsed = inEl
-              ? inEl.currentTime - stemPlan.incomingStartSec
+          // 上游 automixSession：分轨缓冲必须对准两侧元素在 startAt 时的真实位置。
+          // 服务端在 outStart 才下发换歌，出歌此时早已越过计划起点；拿计划值兜底
+          // 会把刚播过的一段重放一遍。对不上缓冲范围就放弃分轨，走普通混音。
+          const stemCtx = Howler.ctx
+          const stemStartAt = stemCtx ? stemCtx.currentTime + 0.01 : 0
+          const projectedOffset = (el: HTMLMediaElement | null, startSec: number): number =>
+            el && stemCtx
+              ? el.currentTime + (stemStartAt - stemCtx.currentTime) * (el.playbackRate || 1) - startSec
               : Number.NaN
-            const outMediaElapsed = outEl
-              ? outEl.currentTime - stemPlan.outgoingStartSec
-              : Number.NaN
-            const inElapsed = usable(inMediaElapsed)
-              ? Math.max(0, inMediaElapsed)
-              : serverElapsed
-            const outElapsed = usable(outMediaElapsed)
-              ? Math.max(0, outMediaElapsed)
-              : serverElapsed
+          const inOffset = stemPlan ? projectedOffset(mediaElementOf(howl), stemPlan.incomingStartSec) : Number.NaN
+          const outOffset = stemPlan ? projectedOffset(mediaElementOf(outgoing), stemPlan.outgoingStartSec) : Number.NaN
+          const windowProgress =
+            Number.isFinite(inOffset) && inOffset >= -0.05 && inOffset <= 0.5 ? Math.max(0, inOffset) : serverElapsed
+          const fitsBuffer = (offset: number, buffer: AudioBuffer | undefined): boolean =>
+            Number.isFinite(offset) &&
+            offset >= -0.05 &&
+            !!buffer &&
+            Math.max(0, offset) + (stemPlan!.overlapSec - windowProgress) <= buffer.duration - 0.02
+          const stemAligned =
+            !!stemPlan &&
+            fitsBuffer(outOffset, stemPlan.outgoing.drums) &&
+            fitsBuffer(inOffset, stemPlan.incoming.drums)
+          if (stemPlan && !stemAligned) {
+            diagMark(`stem skipped: offsets out ${outOffset.toFixed(2)}s, in ${inOffset.toFixed(2)}s`)
+          }
+          if (stemPlan && stemCtx && stemAligned && serverElapsed <= 0.5) {
+            const outElapsed = Math.max(0, outOffset)
+            const inElapsed = Math.max(0, inOffset)
             const windowMs = transitionMs ?? 0
             const incomingMuted = setHowlGraphMuted(howl, true, STEM_SPLICE_SEC)
             const outgoingMuted = incomingMuted && setHowlGraphMuted(outgoing, true, STEM_SPLICE_SEC)
@@ -506,11 +530,12 @@ export function useHowl(
               try {
                 stopped = startStemTransition(
                   stemPlan,
-                  Howler.ctx.currentTime + 0.01,
+                  stemStartAt,
                   outElapsed,
                   inElapsed,
                   getStemInput(outgoing),
                   getStemInput(howl),
+                  windowProgress,
                 )
               } catch (error) {
                 console.warn('分轨交接失败，回退普通淡化', error)
@@ -1030,6 +1055,7 @@ export function useHowl(
     preloadTrack,
     disposePreloaded,
     schedulePlayback,
+    retargetScheduledPlayback,
     cancelScheduledPlayback,
     pausePlayback,
     stopPlayback,

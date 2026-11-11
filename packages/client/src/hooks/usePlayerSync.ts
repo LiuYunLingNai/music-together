@@ -3,6 +3,9 @@ import {
   DRIFT_SEEK_THRESHOLD_MS,
   DRIFT_DEAD_ZONE_MS,
   DRIFT_TEMPO_KP,
+  TEMPO_ENGAGE_MS,
+  TEMPO_RELEASE_MS,
+  TEMPO_SLEW_PER_SYNC,
   MAX_TEMPO_ADJUSTMENT,
   DRIFT_SMOOTH_ALPHA,
   MAX_NETWORK_DELAY_S,
@@ -24,7 +27,7 @@ import {
   getSyncRequestIntervalMs,
   isDriftSettled,
 } from '@/lib/playbackSync'
-import { setHowlPosition } from '@/lib/howlPosition'
+import { setHowlPositionSmooth } from '@/lib/howlSeek'
 import { lyricPlayerBridge } from '@/lib/lyricPlayerBridge'
 
 // ---------------------------------------------------------------------------
@@ -67,6 +70,7 @@ export function usePlayerSync(
   cancelScheduledPlayback: () => void,
   pausePlayback: (position: number) => void,
   setPlaybackTempo: (tempo: number) => void,
+  retargetScheduledPlayback: (targetTime: number, executeAt: number) => boolean = () => false,
 ) {
   const { socket } = useSocketContext()
   const setCurrentTime = usePlayerStore((s) => s.setCurrentTime)
@@ -87,7 +91,40 @@ export function usePlayerSync(
   const lowDriftStreakRef = useRef(0)
   const rearmSyncTimerRef = useRef<(() => void) | null>(null)
 
+  // 自动变速：迟滞 + 斜率限制，速度只做小台阶渐变，避免 ±1% 两端跳变造成顿挫/破音。
+  const tempoAdjustmentRef = useRef(0)
+  const tempoActiveRef = useRef(false)
+  const resetTempo = () => {
+    tempoAdjustmentRef.current = 0
+    tempoActiveRef.current = false
+    setPlaybackTempo(1)
+  }
+  const stepTempo = (smoothedDrift: number) => {
+    const abs = Math.abs(smoothedDrift)
+    const threshold = (tempoActiveRef.current ? TEMPO_RELEASE_MS : TEMPO_ENGAGE_MS) / 1000
+    tempoActiveRef.current = abs > threshold
+    const desired = tempoActiveRef.current ? clamp(smoothedDrift * DRIFT_TEMPO_KP, MAX_TEMPO_ADJUSTMENT) : 0
+    const current = tempoAdjustmentRef.current
+    const next = current + clamp(desired - current, TEMPO_SLEW_PER_SYNC)
+    if (next === current) return
+    tempoAdjustmentRef.current = next
+    setPlaybackTempo(1 - next)
+  }
+
+  // seek 独立计时：暂停/恢复的待执行定时器不能被后到的 seek 取消，否则暂停会被吞掉。
+  const seekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const seekActionIdRef = useRef(0)
+
+  const clearSeek = () => {
+    if (seekTimerRef.current) {
+      clearTimeout(seekTimerRef.current)
+      seekTimerRef.current = null
+    }
+    seekActionIdRef.current++
+  }
+
   const clearScheduled = () => {
+    clearSeek()
     if (scheduledTimerRef.current) {
       clearTimeout(scheduledTimerRef.current)
       scheduledTimerRef.current = null
@@ -102,12 +139,17 @@ export function usePlayerSync(
     const onSeek = (data: { playState: ScheduledPlayState }) => {
       const roomPlayState = useRoomStore.getState().room?.playState
       if (roomPlayState && isStalePlaybackAction(data.playState, roomPlayState)) return
-      clearScheduled()
-      const id = ++actionIdRef.current
+      clearSeek()
+      const id = seekActionIdRef.current
       const delay = scheduleDelay(data.playState.serverTimeToExecute)
+      // 上游 0145b90：仍在加载/待开播时收到 seek，改写待开播目标，否则开播会按旧时间线对齐。
+      const retargeted =
+        data.playState.isPlaying &&
+        retargetScheduledPlayback(data.playState.currentTime, data.playState.serverTimeToExecute)
 
-      scheduledTimerRef.current = setTimeout(() => {
-        if (actionIdRef.current !== id) return // stale callback
+      seekTimerRef.current = setTimeout(() => {
+        if (seekActionIdRef.current !== id) return // stale callback
+        seekTimerRef.current = null
         if (howlRef.current) {
           const targetTime = data.playState.isPlaying
             ? getScheduledPlaybackPosition(
@@ -116,11 +158,11 @@ export function usePlayerSync(
                 getServerTime(),
               )
             : data.playState.currentTime
-          setHowlPosition(howlRef.current, targetTime, soundIdRef.current)
+          if (!retargeted) setHowlPositionSmooth(howlRef.current, targetTime, soundIdRef.current)
           setCurrentTime(targetTime)
           lyricPlayerBridge.seek(targetTime)
         }
-        setPlaybackTempo(1)
+        resetTempo()
         smoothedDriftRef.current = 0
         emaColdStartRef.current = true
         // Keep roomStore.playState in sync for recovery effect
@@ -155,7 +197,7 @@ export function usePlayerSync(
         smoothedDriftRef.current = 0
         emaColdStartRef.current = true
         usePlayerStore.getState().setSyncDrift(0)
-        setPlaybackTempo(1)
+        resetTempo()
         // Keep roomStore.playState in sync for recovery effect
         useRoomStore.getState().updateRoom({
           playState: {
@@ -185,7 +227,7 @@ export function usePlayerSync(
         if (!howlRef.current) return
         smoothedDriftRef.current = 0
         emaColdStartRef.current = true
-        setPlaybackTempo(1)
+        resetTempo()
         // Keep roomStore.playState in sync for recovery effect
         useRoomStore.getState().updateRoom({
           playState: {
@@ -210,7 +252,7 @@ export function usePlayerSync(
       lowDriftStreakRef.current = 0
       smoothedDriftRef.current = 0
       emaColdStartRef.current = true
-      setPlaybackTempo(1)
+      resetTempo()
     }
 
     // -- SYNC RESPONSE (proportional drift correction + EMA smoothing) ------
@@ -270,7 +312,7 @@ export function usePlayerSync(
       if (absDrift > hardSeekThreshold) {
         if (!hardSeekEnabled) {
           hardSeekCountRef.current = 0
-          setPlaybackTempo(1)
+          resetTempo()
           return
         }
         // Require HARD_SEEK_CONFIRM_COUNT consecutive triggers to avoid
@@ -282,31 +324,24 @@ export function usePlayerSync(
         const howl = howlRef.current
         const soundId = soundIdRef.current
         const restoreVolume = usePlayerStore.getState().volume
-        setPlaybackTempo(1)
+        resetTempo()
 
         // Howler's HTML5 seek briefly pauses and asynchronously restarts the
         // media element. Pre-seek fading can therefore strand the sound at
         // volume 0 when playback is temporarily reported as paused or the
         // callback is cancelled. Seek directly and always restore the latest
         // user volume so a correction can never leave the track muted.
-        setHowlPosition(howl, expectedTime, soundId)
+        setHowlPositionSmooth(howl, expectedTime, soundId)
         if (soundId === undefined) howl.volume(restoreVolume)
         else howl.volume(restoreVolume, soundId)
         setCurrentTime(expectedTime)
         lyricPlayerBridge.seek(expectedTime)
         smoothedDriftRef.current = 0
         emaColdStartRef.current = true
-      } else if (absDrift > DRIFT_DEAD_ZONE_MS / 1000) {
-        hardSeekCountRef.current = 0
-        if (playbackTempoSyncEnabled) {
-          const adjustment = clamp(sd * DRIFT_TEMPO_KP, MAX_TEMPO_ADJUSTMENT)
-          setPlaybackTempo(1 - adjustment)
-        } else {
-          setPlaybackTempo(1)
-        }
       } else {
         hardSeekCountRef.current = 0
-        setPlaybackTempo(1)
+        if (playbackTempoSyncEnabled) stepTempo(sd)
+        else resetTempo()
       }
     }
 

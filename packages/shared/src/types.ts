@@ -181,6 +181,8 @@ export interface Track {
   id: string
   title: string
   artist: string[]
+  /** 与 `artist` 下标对齐的平台歌手 ID（目前仅网易云提供），用于直接打开歌手主页；旧客户端忽略。 */
+  artistIds?: string[]
   album: string
   duration: number
   cover: string
@@ -459,6 +461,42 @@ export interface Playlist {
   source: MusicSource
   creator?: string
   description?: string
+}
+
+/** 歌手元数据（歌手主页头部、推荐歌手） */
+export interface Artist {
+  id: string
+  name: string
+  cover: string
+  thumbnailCover?: string
+  source: MusicSource
+  albumCount?: number
+  songCount?: number
+  /** 简介，仅歌手主页提供 */
+  description?: string
+}
+
+export interface ArtistPage<T> {
+  items: T[]
+  hasMore: boolean
+  total?: number
+}
+
+/** `/api/music/artist` 的响应：资料、热门歌曲首页与专辑首页 */
+export interface ArtistHome {
+  artist: Artist
+  songs: ArtistPage<Track>
+  albums: ArtistPage<Playlist>
+}
+
+export type DiscoverHomeBlock = 'radar' | 'artists' | 'albums'
+
+/** `/api/music/discover/home` 的响应：雷达歌单、热门歌手、新碟；`failed` 列出加载失败的区块 */
+export interface DiscoverHome {
+  radar: Playlist[]
+  artists: Artist[]
+  albums: Playlist[]
+  failed: DiscoverHomeBlock[]
 }
 
 /**
