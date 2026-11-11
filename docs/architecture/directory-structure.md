@@ -50,15 +50,18 @@ src/
 │   ├── Overlays/
 │   │   ├── QueueDrawer.tsx     #     播放队列抽屉（vaul Drawer，移动端底部/桌面端右侧；登录账号可逐曲/整队"加入我的歌单"）
 │   │   ├── AddToPlaylistDialog.tsx #  加入本地歌单选择器（accountPlaylistStore 驱动，内联新建 + 选择目标歌单，RoomPage 挂载一次）
+│   │   ├── AccountDialog.tsx   #     「音乐账号」弹窗（房间头部入口），承载 PlatformHub
+│   │   ├── ArtistDialog.tsx    #     全局歌手页（artistPageStore 打开；ArtistDetail 热门歌曲/专辑），所有歌手名经 ArtistNames 链接
 │   │   ├── SearchDialog.tsx    #     音乐搜索弹窗（VirtualTrackList 虚拟滚动 + 自动无限加载 + AbortController 竞态防护）
-│   │   ├── SettingsDialog.tsx  #     设置弹窗（壳，Tab 导航：房间/成员/播放/播放器/歌词/我的歌单/账号/音源账号，移动端 nav scrollbar-hide）
+│   │   ├── SettingsDialog.tsx  #     设置弹窗（壳，Tab 导航：房间/成员/播放/播放器/歌词/我的歌单/账号，平台账号已拆到 AccountDialog，移动端 nav scrollbar-hide）
 │   │   └── Settings/
 │   │       ├── SettingRow.tsx              # 设置行共享组件
 │   │       ├── RoomSettingsSection.tsx     # 房间设置（名称、密码）
 │   │       ├── MembersSection.tsx          # 成员列表（角色管理；名册成员 + 在线访客合并展示，访客加徽标且角色下拉隐藏）
 │   │       ├── MyPlaylistsSection.tsx       # 我的歌单（本地账户歌单：增删改 + 详情 + 添加到房间/队列；访客显示设置密码引导）
 │   │       ├── PlatformAuthSection.tsx     # 平台账号认证（VIP Cookie，旧版，已被 PlatformHub 替代）
-│   │       ├── PlatformHub.tsx            # 平台中心（登录 + 歌单浏览 + 导入，替代 PlatformAuthSection）
+│   │       ├── PlatformHub.tsx            # 平台中心（登录 + 歌单浏览 + 导入 + 推荐与发现，挂在 AccountDialog）
+│   │       ├── AccountDiscover.tsx        # 账号主页推荐（复用 /recommendations）与网易云雷达/热门歌手/新碟区块
 │   │       ├── LoginSection.tsx           # 精简版平台登录区域（PlatformHub 子组件）
 │   │       ├── PlaylistSection.tsx        # 歌单列表 + 手动输入（PlatformHub 子组件）
 │   │       ├── PlaylistDetail.tsx         # 歌单详情（header + VirtualTrackList + queueKeys/addedIds 去重 + 动态全部添加过滤重复）
@@ -226,6 +229,12 @@ src/
 │   ├── queueNavigation.ts      #   无仓储副作用的队列导航算法
 │   ├── chatService.ts          #   聊天消息处理 + HTML 转义（含系统消息）
 │   ├── syncService.ts          #   播放位置估算工具（estimateCurrentTime）
+│   ├── artistService.ts        #   网易云歌手主页（artists/artist_songs/artist_album，10 秒超时、共享 TTL 缓存、CatalogError 脱敏）
+│   ├── discoverService.ts      #   账号主页公共发现区块（雷达歌单、热门歌手、新碟，区块独立失败）
+│   ├── catalogUtils.ts         #   目录类服务共用：CatalogError、网易云实体映射、sharedCache、withDeadline
+│   ├── catalogSearch.ts        #   专辑/歌单/歌手搜索（从 musicProvider 拆出，musicProvider 保留同名委托方法）
+│   ├── lyricFetch.ts           #   各平台歌词拉取（网易云 YRC、酷狗 KRC、QQ QRC 与译文），缓存仍由 musicProvider 负责
+│   ├── trackMapping.ts         #   各平台原始歌曲数据 → Track 映射（rawToTrack、kugouSongToTrack）
 │   ├── musicProvider.ts        #   音乐数据聚合（3 层引用式 LRU 缓存 + 外部 API 超时保护 + 歌单分页获取；Netease 歌单使用 ncmApi.playlist_track_all 分块请求突破 1000 首限制，Kugou 用户歌单使用原生 API (get_other_list_file_nofilt) + Meting fallback，Tencent 使用 Meting 原始模式保留 VIP/时长字段）
 │   ├── coverArtwork.ts         #   高分辨率封面规范化与列表缩略图派生
 │   ├── kugouLyricService.ts    #   基于原生 fetch/zlib 的 KRC 获取、解密与逐字解析

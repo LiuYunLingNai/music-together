@@ -352,6 +352,10 @@ B站没有与房间 128K、320K 完全对应的普通 DASH 音轨，因此分别
 | `/api/music/cover-proxy`             | GET    | 代理受信音乐 CDN 封面；兼容升级白名单主机的旧 HTTP 地址，逐跳校验 HTTPS 重定向、图片类型和 10 MiB 上限                                                           |
 | `/api/music/playlist`                | GET    | 获取歌单曲目列表（`source` + `id` + `limit` + `offset`），分页返回 `{ tracks, total, offset, hasMore }`                                                          |
 | `/api/music/hot`                     | GET    | 获取房间内可见的官方热歌榜；校验 HTTP 身份和房间成员身份，支持 `source=netease                                                                                   | tencent | kugou`及`limit`/`offset` 分页，服务端分别缓存网易云热歌榜、QQ 热歌榜和酷狗热歌榜，`refresh=true` 可强制刷新 |
+| `/api/music/artist`                  | GET    | 网易云歌手主页（`source` + `id`）：资料、热门歌曲首页与专辑首页；其他平台 400，上游失败 503（脱敏错误码），共享 TTL 缓存并合并并发请求                            |
+| `/api/music/artist/songs`            | GET    | 歌手热门歌曲分页（`offset` + `limit`）                                                                                                                           |
+| `/api/music/artist/albums`           | GET    | 歌手专辑分页（`offset` + `limit`）                                                                                                                               |
+| `/api/music/discover/home`           | GET    | 账号主页公共发现区块（网易云雷达歌单、热门歌手、新碟）；区块独立失败并在 `failed` 中列出；个性化推荐仍走 `/api/music/recommendations`                             |
 | `/api/rooms/:roomId/check`           | GET    | 房间预检（存在性 + 是否需要密码），用于分享链接直接访问时的前置校验                                                                                              |
 | `/api/rooms/:roomId/share/qr`        | GET    | 校验并生成当前浏览器访问域名下的 `/join?ROMMid=...` 房间分享二维码                                                                                               |
 | `/api/playlists`                     | GET    | 列出当前账号的本地歌单（元信息 + 派生封面 + 曲目数）；仅对已设置密码的账号开放，访客返回 403                                                                     |
