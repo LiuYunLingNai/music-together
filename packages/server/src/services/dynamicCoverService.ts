@@ -32,17 +32,21 @@ export interface DynamicCoverMeta {
   artists?: string[]
   duration?: number
   album?: string
+  /** 房间内共享的网易云登录态；动态封面接口未登录会返回 301。 */
+  neteaseCookie?: string | null
 }
+
 
 interface SongDynamicCoverApi {
   song_dynamic_cover(params: {
     id: string | number
     crypto?: string
+    cookie?: string
   }): Promise<{ body?: { data?: { videoPlayUrl?: string } } }>
 }
 
 const cache = new LRUCache<string, string>({ max: 500, ttl: CACHE_TTL_MS })
-/** 同一首歌被房间里多个客户端同时请求时只跑一次上游链路。 */
+/** 同一首歌 + 同一登录态被房间里多个客户端同时请求时只跑一次上游链路。 */
 const inflight = new Map<string, Promise<string | null>>()
 
 function normalizeVideoCoverUrl(value: unknown, allowedHost: string): string | null {
@@ -69,8 +73,14 @@ function fetchJson(url: string, headers?: Record<string, string>): Promise<Recor
 // 网易云
 // ---------------------------------------------------------------------------
 
-async function getNeteaseDynamicCoverUrl(id: string): Promise<string | null> {
-  const response = await (ncmApi as unknown as SongDynamicCoverApi).song_dynamic_cover({ id, crypto: 'eapi' })
+async function getNeteaseDynamicCoverUrl(id: string, cookie: string | null | undefined): Promise<string | null> {
+  // 该接口需要真实 MUSIC_U；匿名 MUSIC_A 会稳定返回 301，直接跳过避免噪声和无谓请求。
+  if (!cookie) return null
+  const response = await (ncmApi as unknown as SongDynamicCoverApi).song_dynamic_cover({
+    id,
+    crypto: 'eapi',
+    cookie,
+  })
   return normalizeVideoCoverUrl(response.body?.data?.videoPlayUrl, NETEASE_VIDEO_HOST)
 }
 
@@ -169,21 +179,21 @@ async function resolveDynamicCover(source: MusicSource, id: string, meta: Dynami
     const direct = await getKugouDynamicCoverUrl(id)
     if (direct) return direct
     const netease = await findMatchedTrack(source, id, meta, 'netease')
-    return netease ? getNeteaseDynamicCoverUrl(netease.urlId) : null
+    return netease ? getNeteaseDynamicCoverUrl(netease.urlId, meta.neteaseCookie) : null
   }
 
   if (source === 'netease') {
     const kugou = await findMatchedTrack(source, id, meta, 'kugou')
     const kugouUrl = kugou ? await getKugouDynamicCoverUrl(kugou.urlId) : null
     if (kugouUrl) return kugouUrl
-    return getNeteaseDynamicCoverUrl(id)
+    return getNeteaseDynamicCoverUrl(id, meta.neteaseCookie)
   }
 
   const kugou = await findMatchedTrack(source, id, meta, 'kugou')
   const kugouUrl = kugou ? await getKugouDynamicCoverUrl(kugou.urlId) : null
   if (kugouUrl) return kugouUrl
   const netease = await findMatchedTrack(source, id, meta, 'netease')
-  return netease ? getNeteaseDynamicCoverUrl(netease.urlId) : null
+  return netease ? getNeteaseDynamicCoverUrl(netease.urlId, meta.neteaseCookie) : null
 }
 
 /** 动态封面地址；无封面或解析失败返回 null。空结果同样缓存，避免反复打上游。 */
@@ -192,7 +202,12 @@ export async function getDynamicCoverUrl(
   id: string,
   meta: DynamicCoverMeta = {},
 ): Promise<string | null> {
-  const key = `${source}:${id}`
+  // 登录态决定网易云回退能否取到结果；把凭据指纹算进键，避免「无账号时缓存空结果」
+  // 让后来有账号的房间白白等满 10 分钟，也不让跨房间命中别的账号解析出的地址。
+  const credentialScope = meta.neteaseCookie
+    ? createHash('sha256').update(meta.neteaseCookie).digest('base64url').slice(0, 16)
+    : 'anonymous'
+  const key = `${source}:${id}:${credentialScope}`
   const cached = cache.get(key)
   if (cached !== undefined) return cached || null
 
@@ -201,7 +216,13 @@ export async function getDynamicCoverUrl(
 
   const task = resolveDynamicCover(source, id, meta)
     .catch((err) => {
-      logger.warn('Dynamic cover lookup failed', { source, id, err })
+      // 登录态过期/无权限等价于「本曲没有动态封面」，按空结果缓存；其它异常仍留一条线索。
+      const providerCode = typeof err === 'object' && err !== null && 'status' in err
+        ? Number((err as { status?: unknown }).status)
+        : 0
+      if (![301, 401, 403].includes(providerCode)) {
+        logger.warn('Dynamic cover lookup failed', { source, id, err })
+      }
       return null
     })
     .then((url) => {

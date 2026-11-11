@@ -1,6 +1,7 @@
 import { SERVER_URL } from '@/lib/config'
 import type { Track } from '@music-together/shared'
 import { useEffect, useState } from 'react'
+import { useRoomStore } from '@/stores/roomStore'
 
 interface DynamicCoverState {
   key: string
@@ -20,6 +21,7 @@ const ARTIST_SEPARATOR = '\u0001'
 export function useDynamicCover(track: Track | null | undefined, enabled = true): string | null {
   const source = track?.source
   const id = track?.urlId
+  const roomId = useRoomStore((state) => state.room?.id)
   const title = track?.title ?? ''
   const artists = track?.artist.join(ARTIST_SEPARATOR) ?? ''
   const album = track?.album ?? ''
@@ -33,6 +35,7 @@ export function useDynamicCover(track: Track | null | undefined, enabled = true)
 
     const controller = new AbortController()
     const params = new URLSearchParams({ source, id })
+    if (roomId) params.set('roomId', roomId)
     if (title) params.set('title', title)
     for (const artist of artists ? artists.split(ARTIST_SEPARATOR) : []) params.append('artists', artist)
     if (album) params.set('album', album)
@@ -55,7 +58,7 @@ export function useDynamicCover(track: Track | null | undefined, enabled = true)
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [enabled, key, source, id, title, artists, album, duration])
+  }, [enabled, key, source, id, roomId, title, artists, album, duration])
 
   // 换歌后旧结果不能沿用，等新歌的查询落地再显示。
   return enabled && key && state?.key === key ? state.url : null

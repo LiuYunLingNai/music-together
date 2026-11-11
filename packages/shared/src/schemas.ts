@@ -491,6 +491,8 @@ export const coverQuerySchema = z.object({
 export const dynamicCoverQuerySchema = z.object({
   source: musicSourceSchema,
   id: z.string().min(1).max(200),
+  /** 只用于读取房间共享的网易云登录态；缺省时跳过需要登录的网易云动态封面。 */
+  roomId: z.string().min(1).max(10).optional(),
   title: z.string().trim().min(1).max(500).optional(),
   artists: z.preprocess(
     (value) => (value === undefined ? undefined : Array.isArray(value) ? value : [value]),

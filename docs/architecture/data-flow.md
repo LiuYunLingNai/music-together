@@ -350,6 +350,7 @@ B站没有与房间 128K、320K 完全对应的普通 DASH 音轨，因此分别
 | `/api/music/amll-ttml`               | GET    | 按 `ncmMusicId`/`qqMusicId` 精确查询 AMLL 官方 TTML API；固定上游域名、5 秒超时、2 MiB 上限、24 小时缓存与 ETag                                                  |
 | `/api/music/cover`                   | GET    | 获取封面图                                                                                                                                                       |
 | `/api/music/cover-proxy`             | GET    | 代理受信音乐 CDN 封面；兼容升级白名单主机的旧 HTTP 地址，逐跳校验 HTTPS 重定向、图片类型和 10 MiB 上限                                                           |
+| `/api/music/dynamic-cover`           | GET    | 换歌 350ms 后旁路查询视频封面；酷狗优先，网易云回退只在带 `roomId` 且请求者是该房成员时使用房间共享的最高档登录态，未登录直接返回空；结果按「曲目 + 登录态指纹」缓存 10 分钟，301/401/403 按空结果静默缓存 |
 | `/api/music/playlist`                | GET    | 获取歌单曲目列表（`source` + `id` + `limit` + `offset`），分页返回 `{ tracks, total, offset, hasMore }`                                                          |
 | `/api/music/hot`                     | GET    | 获取房间内可见的官方热歌榜；校验 HTTP 身份和房间成员身份，支持 `source=netease                                                                                   | tencent | kugou`及`limit`/`offset` 分页，服务端分别缓存网易云热歌榜、QQ 热歌榜和酷狗热歌榜，`refresh=true` 可强制刷新 |
 | `/api/music/artist`                  | GET    | 网易云歌手主页（`source` + `id`）：资料、热门歌曲首页与专辑首页；其他平台 400，上游失败 503（脱敏错误码），共享 TTL 缓存并合并并发请求                            |

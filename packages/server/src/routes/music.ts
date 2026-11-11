@@ -594,8 +594,14 @@ router.get(
   '/dynamic-cover',
   musicMetadataRateLimit,
   validated(dynamicCoverQuerySchema, 'Get dynamic cover', async (data, _req, res) => {
-    const { source, id, title, artists, duration, album } = data
-    const url = await getDynamicCoverUrl(source, id, { title, artists, duration, album })
+    const { source, id, roomId, title, artists, duration, album } = data
+    // 只读动态封面用房间里最高档的共享网易云登录态，既不暴露凭据，也不碰账号歌单。
+    const identityUserId = _req.identityUserId
+    const neteaseCookie =
+      roomId && identityUserId && roomRepo.get(roomId)?.users.some((user) => user.id === identityUserId)
+        ? authService.getBestAuth('netease', roomId)?.cookie ?? null
+        : null
+    const url = await getDynamicCoverUrl(source, id, { title, artists, duration, album, neteaseCookie })
     res.setHeader('Cache-Control', 'no-store')
     res.json({ url })
   }),
