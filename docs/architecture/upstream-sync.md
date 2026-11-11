@@ -1,6 +1,6 @@
 # 上游同步策略
 
-当前同步基线：`Yueby/music-together@39e87b4`（2026-08-14）。本 fork 采用“迁移能力和修复、保留本地架构”的方式同步，不直接合并覆盖。
+当前同步基线：`Yueby/music-together@d2b2d06`（已通过 `git merge -s ours` 记入历史，`git log HEAD..upstream/main` 只显示基线之后的新提交）。本 fork 采用“迁移能力和修复、保留本地架构”的方式同步，不直接合并覆盖。
 
 ## 已吸收的上游能力
 
@@ -27,3 +27,12 @@
 以下上游变更主要是工具链或 API 大版本迁移，并非功能修复，当前不纳入同一批同步：Node 24/26、pnpm 11、Express 5、React Router 8 包迁移、Vite 8、TypeScript 6/7、ESLint 10、CASL 7、Lucide 1 和 Nano ID 6。
 
 原因是现网和 Docker 基于 Node 22，原生客户端依赖当前协议，且这些升级会扩大回归面而不直接改善用户功能。安全补丁继续通过同主版本升级、`pnpm audit` 和 overrides 获取；后续若迁移，应独立建批次并同时验证非 Docker 部署、Docker、Web、Android 与 Windows。
+
+
+## 基线 d2b2d06 的取舍记录
+
+已移植：歌手主页与独立「音乐账号」对话框（含发现首页、头像与会员徽章）、网易云播放链接有效期与 v1 授权取流、账号事件 schema 校验、房间预检限流、日志去敏、musicProvider 拆分、已添加状态跟随队列。
+
+未同步，后续按需评估：Discourse 迷你应用（`packages/mapp`、沙箱认证通道、宿主 API 表）、设置对话框改用 ui Tabs 与 Textarea、搜索失败与无结果的区分、平台认证服务与 `useAuth`/`useSearch` 的测试补充、依赖大版本批量升级、`.pi/` 忽略项。
+
+后续同步流程：`git fetch upstream` → `git log HEAD..upstream/main` 查看新提交 → 按上文策略移植 → 在同一提交或独立提交中 `git merge -s ours upstream/main` 并更新本节基线。
