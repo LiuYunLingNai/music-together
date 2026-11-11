@@ -19,7 +19,7 @@
 
 ## 构建
 
-需要 JDK 21（推荐兼容版本的 Android Studio 内置 JBR）与 Android SDK 37.0。应用输出字节码仍以 JVM 17 为目标，`targetSdk` 仍为 36：
+需要 JDK 21（推荐兼容版本的 Android Studio 内置 JBR）与 Android SDK 37.0。应用输出字节码以 JVM 21 为目标（miuix-nav 的内联 API 以 JVM 21 编译，Android 端由 D8 脱糖，不提高运行门槛），`targetSdk` 仍为 36：
 
 ```powershell
 cd packages/android-client

@@ -1,5 +1,7 @@
 package io.github.yueby.musictogether.ui.designsystem
 
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -62,15 +64,29 @@ fun AppTextField(
     label: String,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    readOnly: Boolean = false,
+    singleLine: Boolean = false,
+    maxLines: Int = if (singleLine) 1 else Int.MAX_VALUE,
+    useLabelAsPlaceholder: Boolean = false,
     visualTransformation: VisualTransformation = VisualTransformation.None,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    keyboardActions: KeyboardActions = KeyboardActions.Default,
+    trailingIcon: (@Composable () -> Unit)? = null,
 ) {
     MiuixTextField(
         value = value,
         onValueChange = onValueChange,
         modifier = modifier.padding(vertical = 2.dp),
         enabled = enabled,
+        readOnly = readOnly,
         label = label,
+        useLabelAsPlaceholder = useLabelAsPlaceholder,
+        singleLine = singleLine,
+        maxLines = maxLines,
         visualTransformation = visualTransformation,
+        keyboardOptions = keyboardOptions,
+        keyboardActions = keyboardActions,
+        trailingIcon = trailingIcon,
     )
 }
 

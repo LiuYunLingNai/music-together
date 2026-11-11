@@ -112,7 +112,7 @@
 
 ## 5. 本地验证
 
-构建需要 JDK 21 和 Android SDK 37.0。应用输出字节码仍以 JVM 17 为目标，并继续以 Android 16（API 36）为目标版本；JDK 21 用于加载 MIUIX 构建依赖和运行 JVM 单元测试，不会提高应用运行门槛。常用命令如下：
+构建需要 JDK 21 和 Android SDK 37.0。应用输出字节码以 JVM 21 为目标（miuix-nav 的内联 API 以 JVM 21 编译，Android 端由 D8 脱糖，不提高运行门槛），并继续以 Android 16（API 36）为目标版本；JDK 21 用于加载 MIUIX 构建依赖和运行 JVM 单元测试，不会提高应用运行门槛。常用命令如下：
 
 ```powershell
 cd packages/android-client

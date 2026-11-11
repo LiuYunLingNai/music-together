@@ -1,16 +1,8 @@
 package io.github.yueby.musictogether.ui.designsystem
 
 import android.app.Activity
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Typography
-import androidx.compose.material3.LocalContentColor as MaterialLocalContentColor
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -65,15 +57,6 @@ fun MusicTogetherTheme(
         ThemeMode.Light -> false
         ThemeMode.Dark, ThemeMode.Amoled -> true
     }
-    // Material 3 stays available as a typography/icon host for the few components
-    // that have no MIUIX equivalent; its palette mirrors the MIUIX scheme below.
-    val materialColors = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-        darkTheme -> darkColorScheme()
-        else -> lightColorScheme()
-    }
     val miuixMode = when {
         dynamicColor && themeMode == ThemeMode.System -> ColorSchemeMode.MonetSystem
         dynamicColor && !darkTheme -> ColorSchemeMode.MonetLight
@@ -108,61 +91,12 @@ fun MusicTogetherTheme(
                 darkTheme = darkTheme,
                 pureBlackBackground = pureBlackBackground,
             )
-            val effectiveMaterialColors = materialColors.copy(
-                primary = MiuixTheme.colorScheme.primary,
-                onPrimary = MiuixTheme.colorScheme.onPrimary,
-                primaryContainer = MiuixTheme.colorScheme.primaryContainer,
-                onPrimaryContainer = MiuixTheme.colorScheme.onPrimaryContainer,
-                secondary = MiuixTheme.colorScheme.secondary,
-                onSecondary = MiuixTheme.colorScheme.onSecondary,
-                secondaryContainer = MiuixTheme.colorScheme.secondaryContainer,
-                onSecondaryContainer = MiuixTheme.colorScheme.onSecondaryContainer,
-                background = pageBackground,
-                onBackground = MiuixTheme.colorScheme.onBackground,
-                surface = MiuixTheme.colorScheme.surface,
-                onSurface = MiuixTheme.colorScheme.onSurface,
-                surfaceVariant = MiuixTheme.colorScheme.surfaceVariant,
-                onSurfaceVariant = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                surfaceContainer = MiuixTheme.colorScheme.surfaceContainer,
-                surfaceContainerHigh = MiuixTheme.colorScheme.surfaceContainerHigh,
-                surfaceContainerHighest = MiuixTheme.colorScheme.surfaceContainerHighest,
-                outline = MiuixTheme.colorScheme.outline,
-                outlineVariant = MiuixTheme.colorScheme.dividerLine,
-                error = MiuixTheme.colorScheme.error,
-                onError = MiuixTheme.colorScheme.onError,
-                errorContainer = MiuixTheme.colorScheme.errorContainer,
-                onErrorContainer = MiuixTheme.colorScheme.onErrorContainer,
+            val sharedContentColor = MiuixTheme.colorScheme.onBackground
+            CompositionLocalProvider(
+                LocalAppPageBackground provides pageBackground,
+                MiuixLocalContentColor provides sharedContentColor,
+                content = content,
             )
-            val effectiveMaterialTypography = Typography(
-                displayLarge = MiuixTheme.textStyles.title1,
-                displayMedium = MiuixTheme.textStyles.title1,
-                displaySmall = MiuixTheme.textStyles.title1,
-                headlineLarge = MiuixTheme.textStyles.headline1,
-                headlineMedium = MiuixTheme.textStyles.headline1,
-                headlineSmall = MiuixTheme.textStyles.headline2,
-                titleLarge = MiuixTheme.textStyles.title2,
-                titleMedium = MiuixTheme.textStyles.title3,
-                titleSmall = MiuixTheme.textStyles.title4,
-                bodyLarge = MiuixTheme.textStyles.body1,
-                bodyMedium = MiuixTheme.textStyles.body2,
-                bodySmall = MiuixTheme.textStyles.paragraph,
-                labelLarge = MiuixTheme.textStyles.button,
-                labelMedium = MiuixTheme.textStyles.footnote1,
-                labelSmall = MiuixTheme.textStyles.footnote2,
-            )
-            CompositionLocalProvider(LocalAppPageBackground provides pageBackground) {
-                MaterialTheme(
-                    colorScheme = effectiveMaterialColors,
-                    typography = effectiveMaterialTypography,
-                ) {
-                    val sharedContentColor = MiuixTheme.colorScheme.onBackground
-                    CompositionLocalProvider(
-                        MaterialLocalContentColor provides sharedContentColor,
-                        MiuixLocalContentColor provides sharedContentColor,
-                        content = content,
-                    )
-                }
-            }
         }
     }
 }
