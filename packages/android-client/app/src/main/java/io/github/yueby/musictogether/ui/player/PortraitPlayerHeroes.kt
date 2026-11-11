@@ -1,23 +1,11 @@
 package io.github.yueby.musictogether.ui.player
 
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.AnimatedVisibilityScope
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.SharedTransitionScope
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -34,9 +22,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,10 +33,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.yueby.musictogether.lyrics.lyricOffsetKey
@@ -58,67 +43,6 @@ import io.github.yueby.musictogether.model.Track
 import io.github.yueby.musictogether.player.PlayerUiState
 import kotlin.math.roundToInt
 
-@OptIn(ExperimentalSharedTransitionApi::class)
-@Composable
-internal fun MobileCoverHero(
-    track: Track?,
-    onShowLyrics: () -> Unit,
-    sharedTransitionScope: SharedTransitionScope,
-    animatedVisibilityScope: AnimatedVisibilityScope,
-    modifier: Modifier = Modifier,
-) {
-    val coverInteraction = remember { MutableInteractionSource() }
-    val coverPressed by coverInteraction.collectIsPressedAsState()
-    val coverScale by animateFloatAsState(
-        targetValue = if (coverPressed) 0.96f else 1f,
-        animationSpec = spring(dampingRatio = 0.78f, stiffness = 420f),
-        label = "cover-press-scale",
-    )
-    BoxWithConstraints(
-        modifier = modifier,
-        contentAlignment = Alignment.Center,
-    ) {
-        val artworkSize = minOf(maxWidth, maxHeight).coerceAtMost(430.dp)
-        val cornerRadius by animateDpAsState(
-            targetValue = 24.dp,
-            animationSpec = spring(dampingRatio = 0.86f, stiffness = 260f),
-            label = "cover-corner",
-        )
-        PlayerArtwork(
-            track = track,
-            cornerRadius = cornerRadius,
-            placeholderIconSize = 72.dp,
-            contentDescription = if (track == null) null else "打开歌词",
-            modifier = with(sharedTransitionScope) {
-                Modifier
-                    .size(artworkSize)
-                    .sharedElement(
-                        sharedContentState =
-                            rememberSharedContentState("player-cover-${track?.id ?: "empty"}"),
-                        animatedVisibilityScope = animatedVisibilityScope,
-                        boundsTransform = { _, _ ->
-                            spring(dampingRatio = 0.82f, stiffness = 180f)
-                        },
-                    )
-            }
-                .graphicsLayer {
-                    shadowElevation = 18.dp.toPx()
-                    shape = RoundedCornerShape(cornerRadius)
-                    clip = true
-                    scaleX = coverScale
-                    scaleY = coverScale
-                }
-                .clickable(
-                    enabled = track != null,
-                    interactionSource = coverInteraction,
-                    indication = null,
-                    onClick = onShowLyrics,
-                ),
-        )
-    }
-}
-
-@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 internal fun MobileLyricsHero(
     track: Track,
@@ -126,72 +50,26 @@ internal fun MobileLyricsHero(
     lyricOffsetMs: Int,
     player: PlayerUiState,
     chatUnreadCount: Int,
-    onShowCover: () -> Unit,
     onOpenChat: () -> Unit,
     onSeek: (Double) -> Unit,
     onSetLyricOffset: (Int) -> Unit,
-    sharedTransitionScope: SharedTransitionScope,
-    animatedVisibilityScope: AnimatedVisibilityScope,
+    coverSlot: Modifier,
 ) {
     var lyricOffsetPanelVisible by remember(track.id) { mutableStateOf(false) }
-    val coverInteraction = remember { MutableInteractionSource() }
-    val coverPressed by coverInteraction.collectIsPressedAsState()
-    val coverScale by animateFloatAsState(
-        targetValue = if (coverPressed) 0.92f else 1f,
-        animationSpec = spring(dampingRatio = 0.78f, stiffness = 480f),
-        label = "compact-cover-press-scale",
-    )
     Column(Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            PlayerArtwork(
-                track = track,
-                cornerRadius = 9.dp,
-                placeholderIconSize = 24.dp,
-                contentDescription = "返回封面",
-                modifier = with(sharedTransitionScope) {
-                    Modifier
-                        .size(56.dp)
-                        .sharedElement(
-                            sharedContentState = rememberSharedContentState("player-cover-${track.id}"),
-                            animatedVisibilityScope = animatedVisibilityScope,
-                            boundsTransform = { _, _ ->
-                                spring(dampingRatio = 0.82f, stiffness = 180f)
-                            },
-                        )
-                }
-                    .graphicsLayer {
-                        shadowElevation = 8.dp.toPx()
-                        shape = RoundedCornerShape(9.dp)
-                        clip = true
-                        scaleX = coverScale
-                        scaleY = coverScale
-                    }
-                    .clickable(
-                        interactionSource = coverInteraction,
-                        indication = null,
-                        onClick = onShowCover,
-                    ),
-            )
-            Crossfade(
-                targetState = PortraitTrackText(
+            Box(coverSlot.size(56.dp))
+            SongHandoff(
+                target = PortraitTrackText(
                     trackId = track.id,
                     title = track.title,
                     subtitle = track.artist.joinToString(" / "),
                 ),
-                animationSpec = tween(280),
-                modifier = with(sharedTransitionScope) {
-                    Modifier
-                        .weight(1f)
-                        .sharedElement(
-                            sharedContentState = rememberSharedContentState("player-info-${track.id}"),
-                            animatedVisibilityScope = animatedVisibilityScope,
-                        )
-                },
-                label = "compact-track-text-crossfade",
+                modifier = Modifier.weight(1f),
             ) { label ->
                 Column {
                     Text(
@@ -232,7 +110,8 @@ internal fun MobileLyricsHero(
         Box(
             modifier = Modifier
                 .weight(1f)
-                .fillMaxWidth(),
+                .fillMaxWidth()
+                .lyricFadeMask(),
         ) {
             LyricsPanel(
                 lyrics = lyrics,
@@ -334,11 +213,11 @@ internal fun LyricOffsetPanel(
                 Column(Modifier.weight(1f)) {
                     Text(
                         text = "歌词时间校正",
-                        style = MaterialTheme.typography.labelLarge,
+                        style = MiuixTheme.textStyles.button,
                     )
                     Text(
                         text = lyricOffsetDescription(offsetMs),
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MiuixTheme.textStyles.paragraph,
                         color = Color.White.copy(alpha = 0.72f),
                     )
                 }

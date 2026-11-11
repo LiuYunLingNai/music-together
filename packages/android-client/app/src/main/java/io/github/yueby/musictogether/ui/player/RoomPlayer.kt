@@ -1,6 +1,13 @@
 package io.github.yueby.musictogether.ui.player
 
-import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.drawBehind
+import io.github.yueby.musictogether.TrackLikeState
+import io.github.yueby.musictogether.ui.designsystem.LocalPlayerDisplaySettings
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -8,18 +15,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -31,6 +33,7 @@ import io.github.yueby.musictogether.model.RoomState
 import io.github.yueby.musictogether.model.Track
 import io.github.yueby.musictogether.model.VoteState
 import io.github.yueby.musictogether.player.PlayerUiState
+
 @Composable
 internal fun PlayerPane(
     room: RoomState,
@@ -42,18 +45,32 @@ internal fun PlayerPane(
     visualMotionEnabled: Boolean,
     viewModel: MusicTogetherViewModel,
     immersiveLandscape: Boolean,
-    landscapeChromeVisible: Boolean,
     safeContentPadding: PaddingValues,
     onSurfaceTap: () -> Unit,
     onOpenQueue: () -> Unit,
     onOpenChat: () -> Unit,
+    onOpenArtist: (source: String, id: String) -> Unit,
 ) {
     val player by viewModel.playerState.collectAsStateWithLifecycle()
+    val like by viewModel.likeState.collectAsStateWithLifecycle()
     val track = player.track ?: room.currentTrack
     val lyricOffsetMs = lyricOffsetKey(track)?.let { lyricOffsets[it] } ?: 0
     // Player visual is a room-level preference. Changing tracks must not force
     // users out of the lyrics view.
     var lyricsExpanded by remember(room.id) { mutableStateOf(false) }
+    LaunchedEffect(track?.id, room.id) { viewModel.refreshLike(track) }
+    val immersiveCover = LocalPlayerDisplaySettings.current.immersiveCover
+    var autoExpanded by remember(room.id) { mutableStateOf(false) }
+    LaunchedEffect(immersiveLandscape, immersiveCover) {
+        if (immersiveLandscape || autoExpanded) return@LaunchedEffect
+        if (immersiveCover) {
+            autoExpanded = true
+        } else {
+            kotlinx.coroutines.delay(900)
+            autoExpanded = true
+            lyricsExpanded = true
+        }
+    }
 
     MobilePlayerSurface(
         track = track,
@@ -67,13 +84,14 @@ internal fun PlayerPane(
         player = player,
         viewModel = viewModel,
         immersiveLandscape = immersiveLandscape,
-        landscapeChromeVisible = landscapeChromeVisible,
         safeContentPadding = safeContentPadding,
         onSurfaceTap = onSurfaceTap,
         lyricsExpanded = lyricsExpanded,
         onToggleLyrics = { lyricsExpanded = !lyricsExpanded },
         onOpenQueue = onOpenQueue,
         onOpenChat = onOpenChat,
+        onOpenArtist = onOpenArtist,
+        like = like,
     )
 }
 
@@ -86,7 +104,7 @@ internal data class PlayerLayoutMetrics(
     val controlsScale: Float,
 )
 
-private fun playerLayoutMetrics(width: Dp, height: Dp, portrait: Boolean): PlayerLayoutMetrics {
+internal fun playerLayoutMetrics(width: Dp, height: Dp, portrait: Boolean): PlayerLayoutMetrics {
     return if (portrait) {
         val scale = minOf(
             width.value / 400f,
@@ -135,7 +153,6 @@ internal fun portraitPlayerPrimaryContentWidth(
         .coerceAtLeast(0.dp)
 }
 
-@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun MobilePlayerSurface(
     track: Track?,
@@ -149,22 +166,28 @@ private fun MobilePlayerSurface(
     player: PlayerUiState,
     viewModel: MusicTogetherViewModel,
     immersiveLandscape: Boolean,
-    landscapeChromeVisible: Boolean,
     safeContentPadding: PaddingValues,
     onSurfaceTap: () -> Unit,
     lyricsExpanded: Boolean,
     onToggleLyrics: () -> Unit,
     onOpenQueue: () -> Unit,
     onOpenChat: () -> Unit,
+    onOpenArtist: (source: String, id: String) -> Unit,
+    like: TrackLikeState?,
 ) {
     val minimizeTransition = LocalPlayerMinimizeTransition.current
-    val playerShape = RoundedCornerShape(16.dp)
+    val immersiveCover = LocalPlayerDisplaySettings.current.immersiveCover
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
-            .padding(if (immersiveLandscape) 0.dp else 8.dp)
-            .clip(if (immersiveLandscape) RoundedCornerShape(0.dp) else playerShape)
-            .background(Color(0xFF111111)),
+            .background(Color(0xFF06090F))
+            .drawBehind {
+                val topLeft = Offset(size.width * 0.10f, size.height * 0.10f)
+                val ring = Size(size.width * 0.80f, size.height * 0.80f)
+                val radius = CornerRadius(ring.minDimension, ring.minDimension)
+                drawRoundRect(Color.White.copy(alpha = 0.012f), topLeft, ring, radius)
+                drawRoundRect(Color.White.copy(alpha = 0.06f), topLeft, ring, radius, style = Stroke(1.dp.toPx()))
+            },
     ) {
         PlayerBackdrop(
             coverUrl = track?.cover,
@@ -184,43 +207,12 @@ private fun MobilePlayerSurface(
                         onClick = onSurfaceTap,
                     ),
             )
-        }
-
-        BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(
-                    if (immersiveLandscape) safeContentPadding else PaddingValues(0.dp),
-                ),
-        ) {
-            val portrait = maxHeight >= maxWidth
-            val metrics = playerLayoutMetrics(maxWidth, maxHeight, portrait)
-            if (portrait) {
-                val contentWidth = portraitPlayerContentWidth(maxWidth)
-                val primaryContentWidth =
-                    portraitPlayerPrimaryContentWidth(contentWidth, maxHeight)
-                PortraitPlayerContent(
-                    track = track,
-                    room = room,
-                    lyrics = lyrics,
-                    lyricOffsetMs = lyricOffsetMs,
-                    player = player,
-                    viewModel = viewModel,
-                    activeVote = activeVote,
-                    userId = userId,
-                    chatUnreadCount = chatUnreadCount,
-                    lyricsExpanded = lyricsExpanded,
-                    onToggleLyrics = onToggleLyrics,
-                    onOpenQueue = onOpenQueue,
-                    onOpenChat = onOpenChat,
-                    metrics = metrics,
-                    primaryContentWidth = primaryContentWidth,
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .width(contentWidth),
-                )
-            } else {
-                LandscapePlayerContent(
+            BoxWithConstraints(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(safeContentPadding),
+            ) {
+                ClassicLandscapeStage(
                     track = track,
                     room = room,
                     lyrics = lyrics,
@@ -232,10 +224,33 @@ private fun MobilePlayerSurface(
                     viewModel = viewModel,
                     onOpenQueue = onOpenQueue,
                     onOpenChat = onOpenChat,
-                    chromeVisible = landscapeChromeVisible,
-                    metrics = metrics,
+                    onOpenArtist = onOpenArtist,
+                    like = like,
+                    onToggleLike = { track?.let(viewModel::toggleLike) },
+                    metrics = playerLayoutMetrics(maxWidth, maxHeight, portrait = false),
                 )
             }
+        } else {
+            ClassicPortraitStage(
+                track = track,
+                room = room,
+                lyrics = lyrics,
+                lyricOffsetMs = lyricOffsetMs,
+                player = player,
+                viewModel = viewModel,
+                activeVote = activeVote,
+                userId = userId,
+                chatUnreadCount = chatUnreadCount,
+                lyricsExpanded = lyricsExpanded,
+                immersive = immersiveCover,
+                onToggleLyrics = onToggleLyrics,
+                onOpenQueue = onOpenQueue,
+                onOpenChat = onOpenChat,
+                onOpenArtist = onOpenArtist,
+                like = like,
+                onToggleLike = { track?.let(viewModel::toggleLike) },
+                contentPadding = safeContentPadding,
+            )
         }
     }
 }

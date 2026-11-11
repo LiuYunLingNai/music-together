@@ -1,275 +1,165 @@
 package io.github.yueby.musictogether.ui
 
-import androidx.compose.foundation.background
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.Whatshot
+import io.github.yueby.musictogether.ui.player.DropdownMenuItem
+import io.github.yueby.musictogether.ui.player.DropdownMenu
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Logout
-import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.WifiOff
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import io.github.yueby.musictogether.ui.designsystem.AppModalBottomSheet
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import io.github.yueby.musictogether.BuildConfig
 import io.github.yueby.musictogether.MusicTogetherViewModel
-import io.github.yueby.musictogether.logging.AppLogger
-import io.github.yueby.musictogether.model.ChatMessage
 import io.github.yueby.musictogether.model.ConnectionStatus
 import io.github.yueby.musictogether.model.RoomState
-import top.yukonga.miuix.kmp.basic.HorizontalDivider as MiuixHorizontalDivider
-import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
-import top.yukonga.miuix.kmp.basic.SmallTitle as MiuixSmallTitle
-import top.yukonga.miuix.kmp.preference.ArrowPreference
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-@OptIn(ExperimentalMaterial3Api::class)
+internal val RoomHeaderHeight = 56.dp
+
 @Composable
 internal fun RoomHeader(
     room: RoomState,
-    immersive: Boolean,
-    safeContentPadding: PaddingValues = PaddingValues(0.dp),
+    safeContentPadding: PaddingValues,
     menuExpanded: Boolean,
     onMenuExpandedChange: (Boolean) -> Unit,
     connectionStatus: ConnectionStatus,
     pingMs: Long?,
     viewModel: MusicTogetherViewModel,
-    context: android.content.Context,
     onMinimizePlayer: (() -> Unit)? = null,
-    onOpenOverlay: (RoomOverlay) -> Unit,
+    onOpenMembers: () -> Unit,
+    onOpenRoute: (AppRoute) -> Unit,
 ) {
     val layoutDirection = LocalLayoutDirection.current
-    val safeTop = if (immersive) safeContentPadding.calculateTopPadding() else 0.dp
-    val safeStart =
-        if (immersive) safeContentPadding.calculateLeftPadding(layoutDirection) else 0.dp
-    val safeEnd =
-        if (immersive) safeContentPadding.calculateRightPadding(layoutDirection) else 0.dp
-    val contentColor =
-        if (immersive) Color.White.copy(alpha = 0.92f) else MaterialTheme.colorScheme.onSurface
-    val secondaryColor =
-        if (immersive) Color.White.copy(alpha = 0.74f) else MaterialTheme.colorScheme.onSurfaceVariant
+    val safeTop = safeContentPadding.calculateTopPadding()
+    val safeStart = safeContentPadding.calculateLeftPadding(layoutDirection)
+    val safeEnd = safeContentPadding.calculateRightPadding(layoutDirection)
+    val contentColor = Color.White.copy(alpha = 0.92f)
+    val secondaryColor = Color.White.copy(alpha = 0.74f)
     val connected = connectionStatus == ConnectionStatus.Connected
     val latencyColor = when {
-        !connected -> MaterialTheme.colorScheme.error
+        !connected -> MiuixTheme.colorScheme.error
         pingMs == null -> secondaryColor
-        pingMs < 100 -> if (immersive) Color(0xFF86EFAC) else Color(0xFF15803D)
-        pingMs < 300 -> if (immersive) Color(0xFFFDE68A) else Color(0xFFB45309)
-        else -> MaterialTheme.colorScheme.error
+        pingMs < 100 -> Color(0xFF86EFAC)
+        pingMs < 300 -> Color(0xFFFDE68A)
+        else -> MiuixTheme.colorScheme.error
     }
-    val dividerColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.50f)
-    val backgroundModifier =
-        if (immersive) {
-            Modifier.background(
-                Brush.verticalGradient(
-                    0f to Color.Black.copy(alpha = 0.70f),
-                    0.72f to Color.Black.copy(alpha = 0.34f),
-                    1f to Color.Transparent,
-                ),
-            )
-        } else {
-            Modifier
-                .background(MaterialTheme.colorScheme.background.copy(alpha = 0.95f))
-                .drawWithContent {
-                    drawContent()
-                    drawLine(
-                        color = dividerColor,
-                        start = androidx.compose.ui.geometry.Offset(0f, size.height - 1f),
-                        end = androidx.compose.ui.geometry.Offset(size.width, size.height - 1f),
-                        strokeWidth = 1f,
-                    )
-                }
-        }
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(if (immersive) 64.dp + safeTop else 56.dp)
-            .then(backgroundModifier)
-            .padding(
-                start = (if (immersive) 18.dp else 8.dp) + safeStart,
-                top = safeTop,
-                end = (if (immersive) 24.dp else 8.dp) + safeEnd,
-            ),
+            .height(RoomHeaderHeight + safeTop)
+            .padding(start = 4.dp + safeStart, top = safeTop, end = 4.dp + safeEnd),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = room.name,
-            modifier = Modifier.weight(1f),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            fontSize = if (immersive) 16.sp else 14.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = contentColor,
-        )
-        Row(
+        onMinimizePlayer?.let { minimize ->
+            IconButton(onClick = minimize) {
+                Icon(Icons.Default.KeyboardArrowDown, "返回主页", Modifier.size(28.dp), tint = contentColor)
+            }
+        }
+        Column(
             modifier = Modifier
-                .clip(RoundedCornerShape(10.dp))
-                .clickable { onOpenOverlay(RoomOverlay.Members) }
-                .padding(horizontal = 6.dp, vertical = 5.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                .weight(1f)
+                .clip(RoundedCornerShape(12.dp))
+                .clickable(onClick = onOpenMembers)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
         ) {
-            Icon(
-                Icons.Default.Groups,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-                tint = secondaryColor,
-            )
             Text(
-                room.users.size.toString(),
-                fontSize = 12.sp,
-                color = secondaryColor,
+                text = room.name,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = contentColor,
             )
-            if (room.hasPassword) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Icon(Icons.Default.Groups, contentDescription = null, modifier = Modifier.size(13.dp), tint = secondaryColor)
+                Text(room.users.size.toString(), fontSize = 11.sp, color = secondaryColor)
+                if (room.hasPassword) {
+                    Icon(Icons.Default.Lock, contentDescription = "密码房间", modifier = Modifier.size(12.dp), tint = secondaryColor)
+                }
+                Spacer(Modifier.size(4.dp))
                 Icon(
-                    Icons.Default.Lock,
-                    contentDescription = "密码房间",
-                    modifier = Modifier.size(14.dp),
-                    tint = secondaryColor,
+                    if (connected) Icons.Default.Wifi else Icons.Default.WifiOff,
+                    contentDescription = if (connected) "网络延迟" else "连接已断开",
+                    modifier = Modifier.size(13.dp),
+                    tint = latencyColor,
+                )
+                Text(
+                    text = if (connected) pingMs?.let { "${it}ms" } ?: "--ms" else "--",
+                    color = latencyColor,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    maxLines = 1,
                 )
             }
         }
-        Spacer(Modifier.size(6.dp))
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(3.dp),
-        ) {
-            Icon(
-                if (connected) Icons.Default.Wifi else Icons.Default.WifiOff,
-                contentDescription = if (connected) "网络延迟" else "连接已断开",
-                modifier = Modifier.size(16.dp),
-                tint = latencyColor,
-            )
-            Text(
-                text = if (connected) pingMs?.let { "${it}ms" } ?: "--ms" else "--",
-                color = latencyColor,
-                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                fontSize = 11.sp,
-                maxLines = 1,
-            )
-        }
-        Spacer(Modifier.size(2.dp))
         if (connected) {
-            IconButton(onClick = { onOpenOverlay(RoomOverlay.Recommendations) }) {
+            IconButton(onClick = { onOpenRoute(AppRoute.Recommendations) }) {
                 Icon(Icons.Default.AutoAwesome, "推荐点歌", Modifier.size(20.dp), tint = contentColor)
             }
         }
-        IconButton(onClick = { onOpenOverlay(RoomOverlay.Search) }) {
+        IconButton(onClick = { onOpenRoute(AppRoute.Search) }) {
             Icon(Icons.Default.Search, "搜索点歌", Modifier.size(20.dp), tint = contentColor)
         }
-        onMinimizePlayer?.let { minimize ->
-            IconButton(onClick = minimize) {
-                Icon(Icons.Default.KeyboardArrowDown, "返回主页", Modifier.size(24.dp), tint = contentColor)
+        Box {
+            IconButton(onClick = { onMenuExpandedChange(true) }) {
+                Icon(Icons.Default.MoreVert, "更多操作", Modifier.size(20.dp), tint = contentColor)
             }
-        }
-        IconButton(onClick = { onMenuExpandedChange(true) }) {
-            Icon(Icons.Default.MoreVert, "更多操作", Modifier.size(20.dp), tint = contentColor)
-        }
-    }
-
-    if (menuExpanded) {
-        AppModalBottomSheet(
-            onDismissRequest = { onMenuExpandedChange(false) },
-            title = "更多操作",
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 16.dp),
-            ) {
-                RoomMenuAction(Icons.Default.AccountCircle, "个人账号") {
+            DropdownMenu(expanded = menuExpanded, onDismissRequest = { onMenuExpandedChange(false) }) {
+                fun act(block: () -> Unit) {
                     onMenuExpandedChange(false)
-                    onOpenOverlay(RoomOverlay.AccountSettings)
+                    block()
                 }
-                RoomMenuAction(Icons.Default.Settings, "房间与音质") {
-                    onMenuExpandedChange(false)
-                    onOpenOverlay(RoomOverlay.RoomSettings)
-                }
-                RoomMenuAction(Icons.Default.Share, "分享房间") {
-                    onMenuExpandedChange(false)
-                    viewModel.openRoomShare()
-                }
-                RoomMenuAction(Icons.Default.ContentCopy, "复制房间链接") {
-                    onMenuExpandedChange(false)
-                    viewModel.copyRoomLink()
-                }
-                RoomMenuAction(Icons.Default.MusicNote, "音源账号与歌单") {
-                    onMenuExpandedChange(false)
-                    onOpenOverlay(RoomOverlay.Accounts)
-                }
+                RoomMenuItem(Icons.AutoMirrored.Filled.QueueMusic, "播放队列") { act { onOpenRoute(AppRoute.Queue) } }
+                RoomMenuItem(Icons.Default.Whatshot, "热歌榜") { act { onOpenRoute(AppRoute.HotSongs) } }
+                RoomMenuItem(Icons.Default.Settings, "房间与同步") { act { onOpenRoute(AppRoute.RoomInfo) } }
+                RoomMenuItem(Icons.Default.Share, "分享房间") { act(viewModel::openRoomShare) }
+                RoomMenuItem(Icons.Default.ContentCopy, "复制房间链接") { act(viewModel::copyRoomLink) }
+                RoomMenuItem(Icons.Default.MusicNote, "音乐平台账号") { act { onOpenRoute(AppRoute.PlatformAccounts) } }
                 if (room.currentTrack != null) {
-                    RoomMenuAction(Icons.Default.Download, "下载当前歌曲") {
-                        onMenuExpandedChange(false)
-                        onOpenOverlay(RoomOverlay.Download)
-                    }
+                    RoomMenuItem(Icons.Default.Download, "下载当前歌曲") { act { onOpenRoute(AppRoute.Download) } }
                 }
-                if (BuildConfig.DEBUG) {
-                    RoomMenuDivider()
-                    RoomMenuSectionTitle("调试")
-                    RoomMenuAction(Icons.Default.BugReport, "导出日志") {
-                        onMenuExpandedChange(false)
-                        AppLogger.export(context)
-                    }
-                    RoomMenuAction(Icons.Default.BugReport, "清空日志") {
-                        onMenuExpandedChange(false)
-                        viewModel.clearLogs()
-                    }
-                }
-                RoomMenuDivider()
-                RoomMenuAction(
-                    icon = Icons.AutoMirrored.Filled.Logout,
-                    label = "离开房间",
-                    color = MiuixTheme.colorScheme.error,
-                ) {
-                    onMenuExpandedChange(false)
-                    viewModel.leaveRoom()
+                RoomMenuItem(Icons.AutoMirrored.Filled.Logout, "离开房间", MiuixTheme.colorScheme.error) {
+                    act(viewModel::leaveRoom)
                 }
             }
         }
@@ -277,89 +167,10 @@ internal fun RoomHeader(
 }
 
 @Composable
-private fun RoomMenuAction(
-    icon: ImageVector,
-    label: String,
-    color: Color? = null,
-    onClick: () -> Unit,
-) {
-    val resolvedColor = color ?: MiuixTheme.colorScheme.onSurface
-    ArrowPreference(
-        title = label,
-        startAction = {
-            MiuixIcon(icon, contentDescription = null, tint = resolvedColor)
-        },
+private fun RoomMenuItem(icon: ImageVector, label: String, color: Color? = null, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(label, color = color ?: MiuixTheme.colorScheme.onSurface) },
+        leadingIcon = { Icon(icon, null, tint = color ?: MiuixTheme.colorScheme.onSurface) },
         onClick = onClick,
     )
-}
-
-@Composable
-private fun RoomMenuDivider() {
-    MiuixHorizontalDivider(Modifier.padding(vertical = 6.dp))
-}
-
-@Composable
-private fun RoomMenuSectionTitle(title: String) {
-    MiuixSmallTitle(text = title)
-}
-
-@Composable
-internal fun LandscapeRoomSidePanel(
-    overlay: RoomOverlay,
-    room: RoomState,
-    messages: List<ChatMessage>,
-    viewModel: MusicTogetherViewModel,
-    safeContentPadding: PaddingValues,
-    onDismiss: () -> Unit,
-    onOpenDownload: () -> Unit,
-) {
-    val layoutDirection = LocalLayoutDirection.current
-    val safeTop = safeContentPadding.calculateTopPadding()
-    val safeBottom = safeContentPadding.calculateBottomPadding()
-    val safeEnd = safeContentPadding.calculateRightPadding(layoutDirection)
-    val panelInteraction = remember { MutableInteractionSource() }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.34f))
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onDismiss,
-            ),
-    ) {
-        Surface(
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .fillMaxWidth(0.48f)
-                .widthIn(min = 320.dp, max = 460.dp)
-                .fillMaxHeight()
-                .padding(
-                    top = safeTop + 8.dp,
-                    end = safeEnd + 8.dp,
-                    bottom = safeBottom + 8.dp,
-                )
-                .clickable(
-                    interactionSource = panelInteraction,
-                    indication = null,
-                    onClick = {},
-                ),
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f),
-            tonalElevation = 8.dp,
-            shadowElevation = 18.dp,
-        ) {
-            when (overlay) {
-                RoomOverlay.Queue -> QueuePane(
-                    room = room,
-                    viewModel = viewModel,
-                    onClose = onDismiss,
-                    onDownloadCurrent = onOpenDownload,
-                )
-                RoomOverlay.Chat -> ChatPane(messages, viewModel, onClose = onDismiss)
-                else -> Unit
-            }
-        }
-    }
 }

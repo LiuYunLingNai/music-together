@@ -10,7 +10,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LibraryMusic
-import androidx.compose.material3.Icon
+import top.yukonga.miuix.kmp.basic.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +41,7 @@ internal fun PlayerArtwork(
     placeholderIconSize: Dp,
     contentDescription: String? = null,
     modifier: Modifier = Modifier,
+    decodeSize: Int? = null,
 ) {
     val target = ArtworkTarget(
         trackId = track?.id,
@@ -67,7 +68,7 @@ internal fun PlayerArtwork(
             ) {
                 if (artwork.coverUrl != null && !failed) {
                     AsyncImage(
-                        model = rememberCoverImageRequest(artwork.coverUrl),
+                        model = rememberCoverImageRequest(artwork.coverUrl, decodeSize),
                         contentDescription = contentDescription,
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop,

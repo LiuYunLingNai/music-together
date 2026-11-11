@@ -1,11 +1,11 @@
 package io.github.yueby.musictogether.ui.player
 
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.Spring
+import io.github.yueby.musictogether.ui.designsystem.LocalPlayerDisplaySettings
+import io.github.yueby.musictogether.TrackLikeState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -26,9 +26,8 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Text
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -43,7 +42,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.yueby.musictogether.MusicTogetherViewModel
@@ -55,26 +53,28 @@ import io.github.yueby.musictogether.player.PlayerUiState
 internal fun MobileSongInfo(
     track: Track?,
     error: String?,
-    chatUnreadCount: Int,
-    onOpenChat: () -> Unit,
+    modifier: Modifier = Modifier,
     layoutScale: Float = 1f,
+    onOpenArtist: (() -> Unit)? = null,
+    like: TrackLikeState? = null,
+    onToggleLike: () -> Unit = {},
+    chatUnreadCount: Int = 0,
+    onOpenChat: (() -> Unit)? = null,
 ) {
-    val scale = layoutScale.coerceIn(0.52f, 1.08f)
+    val scale = layoutScale.coerceIn(0.5f, 2.2f)
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.Bottom,
-        horizontalArrangement = Arrangement.spacedBy((8f * scale).dp),
+        horizontalArrangement = Arrangement.spacedBy((4f * scale).dp),
     ) {
-        Crossfade(
-            targetState = PortraitTrackText(
+        SongHandoff(
+            target = PortraitTrackText(
                 trackId = track?.id,
                 title = track?.title ?: "暂无歌曲",
                 subtitle = error ?: track?.artist?.joinToString(" / ") ?: "点击搜索添加歌曲到队列",
                 isError = error != null,
             ),
-            animationSpec = tween(280),
             modifier = Modifier.weight(1f),
-            label = "track-text-crossfade",
         ) { label ->
             Column {
                 Text(
@@ -82,29 +82,48 @@ internal fun MobileSongInfo(
                     modifier = Modifier.basicMarquee(),
                     color = Color.White.copy(alpha = 0.94f),
                     fontSize = (20f * scale).sp,
+                    lineHeight = (25f * scale).sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Clip,
                 )
-                Text(
-                    text = label.subtitle,
-                    modifier = Modifier.basicMarquee(),
-                    color = if (label.isError) Color(0xFFFF8A80) else Color.White.copy(alpha = 0.52f),
-                    fontSize = (14f * scale).sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Clip,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = label.subtitle,
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .basicMarquee()
+                            .then(
+                                if (onOpenArtist != null && !label.isError) {
+                                    Modifier.clickable(onClick = onOpenArtist)
+                                } else {
+                                    Modifier
+                                },
+                            ),
+                        color = if (label.isError) Color(0xFFFF8A80) else Color.White.copy(alpha = 0.52f),
+                        fontSize = (14f * scale).sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Clip,
+                    )
+                    if (!label.isError) QualityBadge(track)
+                }
             }
         }
-        PlayerChatButton(
-            unreadCount = chatUnreadCount,
-            onClick = onOpenChat,
-            modifier = Modifier.size((40f * scale).dp),
+        LikeButton(
+            like = like,
+            onToggle = onToggleLike,
+            size = (20f * scale).dp,
+            modifier = Modifier.size((36f * scale).dp),
         )
+        if (onOpenChat != null) {
+            PlayerChatButton(
+                unreadCount = chatUnreadCount,
+                onClick = onOpenChat,
+                modifier = Modifier.size((36f * scale).dp),
+            )
+        }
     }
 }
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun MobilePlayerControls(
     track: Track?,
@@ -115,7 +134,7 @@ internal fun MobilePlayerControls(
     layoutScale: Float = 1f,
     modifier: Modifier = Modifier,
 ) {
-    val scale = layoutScale.coerceIn(0.52f, 1.08f)
+    val scale = layoutScale.coerceIn(0.5f, 2.2f)
     var seeking by remember(track?.id) { mutableStateOf(false) }
     var seekPosition by remember(track?.id) { mutableDoubleStateOf(player.positionSeconds) }
     LaunchedEffect(player.positionSeconds) {
@@ -138,6 +157,8 @@ internal fun MobilePlayerControls(
         }
     }
     val transportEnabled = track != null && !transportCoolingDown
+    val displaySettings = LocalPlayerDisplaySettings.current
+    val shownPosition = if (track == null) 0.0 else seekPosition
 
     Column(modifier.fillMaxWidth()) {
         PlayerProgressSlider(
@@ -159,9 +180,19 @@ internal fun MobilePlayerControls(
         )
         Row(Modifier.fillMaxWidth()) {
             Text(
-                formatPlayerTime(if (track == null) 0.0 else seekPosition),
+                if (displaySettings.showRemainingTime) {
+                    "-" + formatPlayerTime((reportedDuration - shownPosition).coerceAtLeast(0.0))
+                } else {
+                    formatPlayerTime(shownPosition)
+                },
+                modifier = Modifier.clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) {
+                    viewModel.updatePlayerDisplaySettings { it.copy(showRemainingTime = !it.showRemainingTime) }
+                },
                 color = Color.White.copy(alpha = 0.52f),
-                fontSize = (11f * scale).sp,
+                fontSize = (12f * scale).sp,
             )
             Spacer(Modifier.weight(1f))
             Text(
@@ -170,7 +201,13 @@ internal fun MobilePlayerControls(
                 fontSize = (11f * scale).sp,
             )
         }
-        Spacer(Modifier.height((16f * scale).dp))
+        ControlsSpectrum(
+            visible = displaySettings.controlsSpectrum,
+            playing = player.playing,
+            height = (48f * scale).dp,
+            modifier = Modifier.padding(top = (10f * scale).dp),
+        )
+        Spacer(Modifier.height((24f * scale).dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -193,12 +230,12 @@ internal fun MobilePlayerControls(
                         viewModel.previous()
                     },
                     enabled = transportEnabled,
-                    modifier = Modifier.size((42f * scale).dp),
+                    modifier = Modifier.size((36f * scale).dp),
                 ) {
                     Icon(
                         Icons.Default.SkipPrevious,
                         contentDescription = "上一首",
-                        modifier = Modifier.size((24f * scale).dp),
+                        modifier = Modifier.size((20f * scale).dp),
                         tint = Color.White.copy(alpha = if (transportEnabled) 0.84f else 0.28f),
                     )
                 }
@@ -221,7 +258,7 @@ internal fun MobilePlayerControls(
                     Icon(
                         if (player.playing) Icons.Default.Pause else Icons.Default.PlayArrow,
                         contentDescription = if (player.playing) "暂停" else "播放",
-                        modifier = Modifier.size((30f * scale).dp),
+                        modifier = Modifier.size((28f * scale).dp),
                         tint = Color.White.copy(alpha = if (transportEnabled) 0.94f else 0.28f),
                     )
                 }
@@ -231,12 +268,12 @@ internal fun MobilePlayerControls(
                         viewModel.next()
                     },
                     enabled = transportEnabled,
-                    modifier = Modifier.size((42f * scale).dp),
+                    modifier = Modifier.size((36f * scale).dp),
                 ) {
                     Icon(
                         Icons.Default.SkipNext,
                         contentDescription = "下一首",
-                        modifier = Modifier.size((24f * scale).dp),
+                        modifier = Modifier.size((20f * scale).dp),
                         tint = Color.White.copy(alpha = if (transportEnabled) 0.84f else 0.28f),
                     )
                 }
@@ -244,7 +281,7 @@ internal fun MobilePlayerControls(
             Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
                 IconButton(
                     onClick = onOpenQueue,
-                    modifier = Modifier.size((42f * scale).dp),
+                    modifier = Modifier.size((36f * scale).dp),
                 ) {
                     Box(Modifier.size((30f * scale).dp)) {
                         Icon(
