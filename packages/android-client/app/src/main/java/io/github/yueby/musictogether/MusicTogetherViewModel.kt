@@ -1,5 +1,11 @@
 package io.github.yueby.musictogether
 
+import kotlinx.coroutines.flow.update
+import io.github.yueby.musictogether.catalog.HotSongsState
+import io.github.yueby.musictogether.catalog.HotSongsCoordinator
+import io.github.yueby.musictogether.model.UserPlaylistsState
+import io.github.yueby.musictogether.library.UserPlaylistOwner
+import io.github.yueby.musictogether.library.UserPlaylistCoordinator
 import android.app.Application
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -15,6 +21,8 @@ import io.github.yueby.musictogether.lyrics.enrichLyricLines
 import io.github.yueby.musictogether.lyrics.lyricOffsetKey
 import io.github.yueby.musictogether.lyrics.needsLyricSupplement
 import io.github.yueby.musictogether.lyrics.preferLyricCandidate
+import io.github.yueby.musictogether.catalog.CatalogCoordinator
+import io.github.yueby.musictogether.model.CatalogState
 import io.github.yueby.musictogether.model.AppState
 import io.github.yueby.musictogether.model.AudioProxyPolicy
 import io.github.yueby.musictogether.model.BilibiliMetadataMatchState
@@ -126,7 +134,7 @@ import java.util.concurrent.TimeUnit
 
 class MusicTogetherViewModel(application: Application) : AndroidViewModel(application), SocketEvents {
     private data class PendingRoomCreation(val name: String, val password: String)
-    private data class PlaylistContext(val source: String, val id: String, val roomId: String)
+    private data class PlaylistContext(val source: String, val id: String, val roomId: String?)
 
     private companion object {
         const val QR_EXPIRED = 800
@@ -254,6 +262,33 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         setError = ::setError,
     )
     val playerState: StateFlow<PlayerUiState> = nativePlayer.state
+    private val catalog = CatalogCoordinator(api, viewModelScope) { activeServer }
+    val catalogState: StateFlow<CatalogState> = catalog.state
+    private val userPlaylists = UserPlaylistCoordinator(
+        api = api,
+        scope = viewModelScope,
+        owner = {
+            val server = activeServer
+            val userId = _state.value.userId
+            if (server == null || userId == null) {
+                null
+            } else {
+                val hasPassword = _state.value.accountProfile?.hasPassword == true
+                UserPlaylistOwner(server, "${server.displayUrl}|$userId|$hasPassword", hasPassword)
+            }
+        },
+        notify = { message, isError -> setNotice(message, isError) },
+    )
+    val userPlaylistState: StateFlow<UserPlaylistsState> = userPlaylists.state
+    private val hotSongs = HotSongsCoordinator(api, viewModelScope) {
+        val server = activeServer
+        val roomId = _state.value.room?.id
+        if (server == null || roomId == null) null else server to roomId
+    }
+    val hotSongsState: StateFlow<HotSongsState> = hotSongs.state
+    private val _likeState = MutableStateFlow<TrackLikeState?>(null)
+    val likeState: StateFlow<TrackLikeState?> = _likeState.asStateFlow()
+    private var likeJob: Job? = null
 
     private var activeServer: ServerAddress? = null
     private val offlineDownloadJobs = mutableMapOf<String, Job>()
@@ -1125,12 +1160,115 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         }
     }
 
-    fun openPlaylist(playlist: Playlist) {
+    fun openArtist(source: String, id: String) = catalog.openArtist(source, id)
+
+    fun closeArtist() = catalog.closeArtist()
+
+    fun loadMoreArtistSongs() = catalog.loadMoreArtistSongs()
+
+    fun loadMoreArtistAlbums() = catalog.loadMoreArtistAlbums()
+
+    fun loadDiscover(force: Boolean = false) = catalog.loadDiscover(force)
+
+    fun loadUserPlaylists(force: Boolean = false) = userPlaylists.ensureLoaded(force)
+
+    fun createUserPlaylist(name: String, initialTracks: List<Track> = emptyList()) =
+        userPlaylists.create(name) { created ->
+            if (initialTracks.isNotEmpty()) userPlaylists.addTracks(created.id, initialTracks)
+        }
+
+    fun renameUserPlaylist(id: String, name: String) = userPlaylists.rename(id, name)
+
+    fun deleteUserPlaylist(id: String, onDeleted: () -> Unit = {}) = userPlaylists.delete(id, onDeleted)
+
+    fun addToUserPlaylist(id: String, tracks: List<Track>) = userPlaylists.addTracks(id, tracks)
+
+    fun removeFromUserPlaylist(id: String, track: Track) = userPlaylists.removeTrack(id, track)
+
+    fun openUserPlaylist(id: String) = userPlaylists.openDetail(id)
+
+    fun closeUserPlaylist() = userPlaylists.closeDetail()
+
+    fun addTracksToQueue(tracks: List<Track>, label: String) {
+        if (_state.value.room == null) return
+        submitTracksToQueue(tracks, label)
+    }
+
+    fun loadHotSongs(source: String? = null, refresh: Boolean = false) =
+        if (source == null) hotSongs.load(refresh = refresh) else hotSongs.load(source, refresh)
+
+    fun loadMoreHotSongs() = hotSongs.loadMore()
+
+    fun refreshLike(track: Track?) {
+        val room = _state.value.room
+        val server = activeServer
+        if (track == null || track.source != "netease" || room == null || server == null) {
+            likeJob?.cancel()
+            _likeState.value = null
+            return
+        }
+        val key = trackLikeKey(track)
+        if (_likeState.value?.key == key) return
+        likeJob?.cancel()
+        _likeState.value = TrackLikeState(key, liked = false, busy = true)
+        likeJob = viewModelScope.launch {
+            runCatching { api.isLiked(server, track, room.id) }
+                .onFailure {
+                    if (it is CancellationException) throw it
+                    _likeState.update { state -> if (state?.key == key) null else state }
+                }
+                .onSuccess { liked ->
+                    _likeState.update { state -> if (state?.key == key) state.copy(liked = liked, busy = false) else state }
+                }
+        }
+    }
+
+    fun toggleLike(track: Track) {
         val room = _state.value.room ?: return
+        val server = activeServer ?: return
+        val key = trackLikeKey(track)
+        val current = _likeState.value?.takeIf { it.key == key && !it.busy } ?: return
+        val target = !current.liked
+        _likeState.value = current.copy(liked = target, busy = true)
+        likeJob = viewModelScope.launch {
+            runCatching { api.setLiked(server, track, room.id, target) }
+                .onFailure {
+                    if (it is CancellationException) throw it
+                    _likeState.update { state -> if (state?.key == key) state.copy(liked = !target, busy = false) else state }
+                    setNotice(it.message ?: "操作失败", isError = true)
+                }
+                .onSuccess { liked ->
+                    _likeState.update { state -> if (state?.key == key) state.copy(liked = liked, busy = false) else state }
+                }
+        }
+    }
+
+    private fun trackLikeKey(track: Track): String = "${track.source}:${track.sourceId.ifBlank { track.id }}"
+
+    fun likeTrack(track: Track) {
+        val room = _state.value.room ?: return setNotice("加入房间后才能收藏到网易云", isError = true)
+        val server = activeServer ?: return
+        if (track.source != "netease") return
+        viewModelScope.launch {
+            runCatching { api.setLiked(server, track, room.id, liked = true) }
+                .onFailure {
+                    if (it is CancellationException) throw it
+                    setNotice(it.message ?: "收藏失败", isError = true)
+                }
+                .onSuccess { liked ->
+                    val key = trackLikeKey(track)
+                    _likeState.update { state -> if (state?.key == key) state.copy(liked = liked) else state }
+                    setNotice(if (liked) "已收藏到网易云「我喜欢的音乐」" else "收藏失败", isError = !liked)
+                }
+        }
+    }
+
+    fun openPlaylist(playlist: Playlist) {
+        val roomId = _state.value.room?.id
         val server = activeServer ?: return
         playlistJob?.cancel()
         playlistAddAllJob?.cancel()
-        playlistContext = PlaylistContext(playlist.source, playlist.id, room.id)
+        playlistContext = PlaylistContext(playlist.source, playlist.id, roomId)
         _state.value = _state.value.copy(
             platformHub = _state.value.platformHub.copy(
                 selectedPlaylist = playlist,
@@ -1143,7 +1281,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 playlistError = null,
             ),
         )
-        requestPlaylistPage(server, playlist, room.id, offset = 0, append = false)
+        requestPlaylistPage(server, playlist, roomId, offset = 0, append = false)
     }
 
     fun closePlaylist() {
@@ -1199,6 +1337,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                             roomId = room.id,
                             offset = offset,
                             total = knownTotal,
+                            album = playlist.isAlbum,
                         )
                     },
                     onPageLoaded = { tracks, total, hasMore ->
@@ -1220,62 +1359,10 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 .onFailure { if (it is CancellationException) throw it }
                 .onSuccess { allTracks ->
                     if (playlistContext != expected || _state.value.room?.id != room.id) return@onSuccess
-                    val currentRoom = _state.value.room ?: return@onSuccess
-                    val queueKeys = currentRoom.queue.mapTo(hashSetOf()) { it.queueIdentity() }
-                    val pendingKeys = queueActions.reservedKeys(queueKeys)
-                    val plan = planPlaylistQueueBatches(
-                        tracks = allTracks,
-                        queueKeys = queueKeys,
-                        pendingKeys = pendingKeys,
-                        queueSize = currentRoom.queue.size,
-                        maxQueueSize = MAX_QUEUE_SIZE,
-                        maxBatchSize = MAX_QUEUE_BATCH_SIZE,
-                    )
-                    if (plan.batches.isEmpty()) {
-                        val queueFull = currentRoom.queue.size + pendingKeys.size >= MAX_QUEUE_SIZE
-                        _state.value = _state.value.copy(
-                            platformHub = _state.value.platformHub.copy(playlistAddingAll = false),
-                        )
-                        setNotice(if (queueFull) "播放队列已满" else "歌单中的歌曲已全部在队列或待确认列表中")
-                        return@onSuccess
-                    }
-
-                    var sentCount = 0
-                    var allSent = true
-                    for (batch in plan.batches) {
-                        val sent = socket.emit(
-                            Events.QUEUE_ADD_BATCH,
-                            JSONObject()
-                                .put("tracks", JSONArray(batch.map { it.toJson() }))
-                                .put("playlistName", playlist.name),
-                        )
-                        if (!sent) {
-                            allSent = false
-                            break
-                        }
-                        queueActions.reserveAll(batch.map { it.queueIdentity() })
-                        sentCount += batch.size
-                    }
                     _state.value = _state.value.copy(
                         platformHub = _state.value.platformHub.copy(playlistAddingAll = false),
                     )
-                    AppLogger.info(
-                        "Queue",
-                        "playlist all=${allTracks.size} sent=$sentCount source=${playlist.source} success=$allSent",
-                    )
-                    val capacitySuffix = if (plan.skippedForCapacity > 0) {
-                        "，队列容量不足，另有 ${plan.skippedForCapacity} 首未提交"
-                    } else {
-                        ""
-                    }
-                    setNotice(
-                        if (allSent) {
-                            "已提交 $sentCount 首歌曲到播放队列$capacitySuffix"
-                        } else {
-                            "已提交 $sentCount 首，后续批次发送失败，请检查连接"
-                        },
-                        isError = !allSent,
-                    )
+                    submitTracksToQueue(allTracks, playlist.name)
                 }
                 .onFailure { error ->
                     if (playlistContext != expected) return@onFailure
@@ -1289,6 +1376,59 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     setNotice(error.message ?: "完整歌单加载失败，请重试", isError = true)
                 }
         }
+    }
+
+    private fun submitTracksToQueue(allTracks: List<Track>, label: String) {
+        val currentRoom = _state.value.room ?: return
+        val queueKeys = currentRoom.queue.mapTo(hashSetOf()) { it.queueIdentity() }
+        val pendingKeys = queueActions.reservedKeys(queueKeys)
+        val plan = planPlaylistQueueBatches(
+            tracks = allTracks,
+            queueKeys = queueKeys,
+            pendingKeys = pendingKeys,
+            queueSize = currentRoom.queue.size,
+            maxQueueSize = MAX_QUEUE_SIZE,
+            maxBatchSize = MAX_QUEUE_BATCH_SIZE,
+        )
+        if (plan.batches.isEmpty()) {
+            val queueFull = currentRoom.queue.size + pendingKeys.size >= MAX_QUEUE_SIZE
+            setNotice(if (queueFull) "播放队列已满" else "歌单中的歌曲已全部在队列或待确认列表中")
+            return
+        }
+
+        var sentCount = 0
+        var allSent = true
+        for (batch in plan.batches) {
+            val sent = socket.emit(
+                Events.QUEUE_ADD_BATCH,
+                JSONObject()
+                    .put("tracks", JSONArray(batch.map { it.toJson() }))
+                    .put("playlistName", label),
+            )
+            if (!sent) {
+                allSent = false
+                break
+            }
+            queueActions.reserveAll(batch.map { it.queueIdentity() })
+            sentCount += batch.size
+        }
+        AppLogger.info(
+            "Queue",
+            "batch all=${allTracks.size} sent=$sentCount label=$label success=$allSent",
+        )
+        val capacitySuffix = if (plan.skippedForCapacity > 0) {
+            "，队列容量不足，另有 ${plan.skippedForCapacity} 首未提交"
+        } else {
+            ""
+        }
+        setNotice(
+            if (allSent) {
+                "已提交 $sentCount 首歌曲到播放队列$capacitySuffix"
+            } else {
+                "已提交 $sentCount 首，后续批次发送失败，请检查连接"
+            },
+            isError = !allSent,
+        )
     }
 
     fun playTrack(track: Track) {
@@ -2435,7 +2575,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private fun requestPlaylistPage(
         server: ServerAddress,
         playlist: Playlist,
-        roomId: String,
+        roomId: String?,
         offset: Int,
         append: Boolean,
     ) {
@@ -2457,6 +2597,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     roomId = roomId,
                     offset = offset,
                     total = playlist.trackCount.takeIf { it > 0 },
+                    album = playlist.isAlbum,
                 )
             }
                 .onFailure { if (it is CancellationException) throw it }
@@ -2505,6 +2646,10 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         recommendationsJob?.cancel()
         downloadOptionsJob?.cancel()
         musicDownloadJob?.cancel()
+        catalog.reset()
+        hotSongs.reset()
+        likeJob?.cancel()
+        _likeState.value = null
         playlistContext = null
         restoredAuthRoomId = null
         autoRestoringPlatforms.clear()
@@ -3267,3 +3412,5 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         else -> "未达到通过条件"
     }
 }
+
+data class TrackLikeState(val key: String, val liked: Boolean, val busy: Boolean)

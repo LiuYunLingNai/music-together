@@ -39,3 +39,38 @@ fun audioQualityLabel(value: String): String =
         .firstOrNull { it.value == value }
         ?.label
         ?: value
+
+private val shortQualityLabels = mapOf(
+    "128" to "128K",
+    "192" to "192K",
+    "320" to "320K",
+    "999" to "SQ",
+    "netease_hires" to "Hi-Res",
+    "netease_jyeffect" to "臻音",
+    "netease_spatial" to "环绕",
+    "netease_master" to "母带",
+    "netease_dolby" to "杜比",
+    "tencent_flac" to "无损",
+    "tencent_master" to "母带",
+    "kugou_hires" to "Hi-Res",
+    "kugou_master" to "母带",
+    "bilibili_64" to "64K",
+    "bilibili_132" to "132K",
+    "bilibili_192" to "192K",
+    "bilibili_hires" to "Hi-Res",
+)
+
+private val losslessQualities = setOf(
+    "999", "netease_hires", "netease_master", "netease_dolby", "netease_jyeffect", "netease_spatial",
+    "tencent_flac", "tencent_master", "kugou_hires", "kugou_master", "bilibili_hires",
+)
+
+fun shortAudioQualityLabel(quality: String?, bitrate: Int?): String? = when {
+    quality != null && quality in shortQualityLabels -> shortQualityLabels.getValue(quality)
+    bitrate != null && bitrate > 0 -> "${bitrate}K"
+    quality != null -> audioQualityLabel(quality)
+    else -> null
+}
+
+fun isLosslessAudioQuality(quality: String?, bitrate: Int?): Boolean =
+    (quality != null && quality in losslessQualities) || (bitrate ?: 0) >= 900

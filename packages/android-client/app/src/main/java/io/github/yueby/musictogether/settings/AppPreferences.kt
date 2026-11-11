@@ -195,6 +195,9 @@ internal class AppPreferences(context: Context) {
         lyricBlurEffect = preferences.getBoolean(LYRIC_BLUR_KEY, false),
         backgroundMotion = preferences.getBoolean(BACKGROUND_MOTION_KEY, true),
         backgroundMotionStrength = preferences.getFloat(BACKGROUND_MOTION_STRENGTH_KEY, 1f).coerceIn(0.5f, 1.5f),
+        showRemainingTime = preferences.getBoolean(SHOW_REMAINING_TIME_KEY, false),
+        controlsSpectrum = preferences.getBoolean(CONTROLS_SPECTRUM_KEY, false),
+        immersiveCover = preferences.getBoolean(IMMERSIVE_COVER_KEY, true),
     )
 
     fun setPlayerDisplaySettings(settings: PlayerDisplaySettings) {
@@ -209,6 +212,9 @@ internal class AppPreferences(context: Context) {
             .putBoolean(LYRIC_BLUR_KEY, settings.lyricBlurEffect)
             .putBoolean(BACKGROUND_MOTION_KEY, settings.backgroundMotion)
             .putFloat(BACKGROUND_MOTION_STRENGTH_KEY, settings.backgroundMotionStrength.coerceIn(0.5f, 1.5f))
+            .putBoolean(SHOW_REMAINING_TIME_KEY, settings.showRemainingTime)
+            .putBoolean(CONTROLS_SPECTRUM_KEY, settings.controlsSpectrum)
+            .putBoolean(IMMERSIVE_COVER_KEY, settings.immersiveCover)
             .apply()
     }
 
@@ -313,6 +319,9 @@ internal class AppPreferences(context: Context) {
         const val LYRIC_BLUR_KEY = "player_lyric_blur"
         const val BACKGROUND_MOTION_KEY = "player_background_motion"
         const val BACKGROUND_MOTION_STRENGTH_KEY = "player_background_motion_strength"
+        const val SHOW_REMAINING_TIME_KEY = "player_show_remaining_time"
+        const val CONTROLS_SPECTRUM_KEY = "player_controls_spectrum"
+        const val IMMERSIVE_COVER_KEY = "player_immersive_cover"
         const val PLAYBACK_SETTINGS_SCHEMA_KEY = "playback_settings_schema_version"
         const val PLAYBACK_SETTINGS_SCHEMA_VERSION = 2
         const val SYNC_PACKET_INTERVAL_KEY = "sync_packet_interval_seconds"

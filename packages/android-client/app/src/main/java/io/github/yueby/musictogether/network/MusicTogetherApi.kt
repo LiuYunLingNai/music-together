@@ -1,6 +1,12 @@
 package io.github.yueby.musictogether.network
 
+import io.github.yueby.musictogether.model.UserPlaylistDetail
+import io.github.yueby.musictogether.model.UserPlaylist
 import io.github.yueby.musictogether.logging.AppLogger
+import io.github.yueby.musictogether.model.ArtistHome
+import io.github.yueby.musictogether.model.CatalogPage
+import io.github.yueby.musictogether.model.Playlist
+import io.github.yueby.musictogether.model.DiscoverHome
 import io.github.yueby.musictogether.model.AccountProfile
 import io.github.yueby.musictogether.model.AdminRoom
 import io.github.yueby.musictogether.model.AdminUser
@@ -35,6 +41,12 @@ data class SearchPage(
 data class BilibiliCollectionPage(
     val title: String,
     val tracks: List<Track>,
+)
+
+data class HotSongsPage(
+    val name: String,
+    val tracks: List<Track>,
+    val hasMore: Boolean,
 )
 
 data class PlaylistPage(
@@ -299,6 +311,131 @@ class MusicTogetherApi(private val client: OkHttpClient) {
         parsePlatformRecommendations(executeJson(url, "recommendations"))
     }
 
+    suspend fun artistHome(server: ServerAddress, source: String, id: String): ArtistHome = withContext(Dispatchers.IO) {
+        val url = server.api("music", "artist").newBuilder()
+            .addQueryParameter("source", source)
+            .addQueryParameter("id", id)
+            .build()
+        parseArtistHome(executeJson(url, "artist:$source"))
+    }
+
+    suspend fun artistSongs(server: ServerAddress, source: String, id: String, offset: Int, limit: Int): CatalogPage<Track> =
+        withContext(Dispatchers.IO) {
+            val url = server.api("music", "artist", "songs").newBuilder()
+                .addQueryParameter("source", source)
+                .addQueryParameter("id", id)
+                .addQueryParameter("offset", offset.toString())
+                .addQueryParameter("limit", limit.toString())
+                .build()
+            parseArtistSongs(executeJson(url, "artist-songs:$source"))
+        }
+
+    suspend fun artistAlbums(server: ServerAddress, source: String, id: String, offset: Int, limit: Int): CatalogPage<Playlist> =
+        withContext(Dispatchers.IO) {
+            val url = server.api("music", "artist", "albums").newBuilder()
+                .addQueryParameter("source", source)
+                .addQueryParameter("id", id)
+                .addQueryParameter("offset", offset.toString())
+                .addQueryParameter("limit", limit.toString())
+                .build()
+            parseArtistAlbums(executeJson(url, "artist-albums:$source"))
+        }
+
+    suspend fun discoverHome(server: ServerAddress, source: String): DiscoverHome = withContext(Dispatchers.IO) {
+        val url = server.api("music", "discover", "home").newBuilder()
+            .addQueryParameter("source", source)
+            .build()
+        parseDiscoverHome(executeJson(url, "discover:$source"))
+    }
+
+    suspend fun userPlaylists(server: ServerAddress): List<UserPlaylist> = withContext(Dispatchers.IO) {
+        parseUserPlaylists(requireNotNull(jsonRequest(server, listOf("playlists"), "GET", null, "user playlists")))
+    }
+
+    suspend fun userPlaylist(server: ServerAddress, id: String): UserPlaylistDetail = withContext(Dispatchers.IO) {
+        requireNotNull(jsonRequest(server, listOf("playlists", id), "GET", null, "user playlist"))
+            .getJSONObject("playlist")
+            .toUserPlaylistDetail()
+    }
+
+    suspend fun createUserPlaylist(server: ServerAddress, name: String): UserPlaylist = withContext(Dispatchers.IO) {
+        requireNotNull(jsonRequest(server, listOf("playlists"), "POST", JSONObject().put("name", name), "create user playlist"))
+            .getJSONObject("playlist")
+            .toUserPlaylist()
+    }
+
+    suspend fun renameUserPlaylist(server: ServerAddress, id: String, name: String): UserPlaylist =
+        withContext(Dispatchers.IO) {
+            requireNotNull(
+                jsonRequest(server, listOf("playlists", id), "PATCH", JSONObject().put("name", name), "rename user playlist"),
+            ).getJSONObject("playlist").toUserPlaylist()
+        }
+
+    suspend fun deleteUserPlaylist(server: ServerAddress, id: String) = withContext(Dispatchers.IO) {
+        jsonRequest(server, listOf("playlists", id), "DELETE", null, "delete user playlist", allowNoContent = true)
+    }
+
+    suspend fun addUserPlaylistTracks(server: ServerAddress, id: String, tracks: List<Track>): Int =
+        withContext(Dispatchers.IO) {
+            val body = JSONObject().put("tracks", JSONArray(tracks.map { it.toJson() }))
+            requireNotNull(jsonRequest(server, listOf("playlists", id, "tracks"), "POST", body, "add user playlist tracks"))
+                .optInt("added")
+        }
+
+    suspend fun removeUserPlaylistTrack(server: ServerAddress, id: String, trackId: String) = withContext(Dispatchers.IO) {
+        jsonRequest(
+            server,
+            listOf("playlists", id, "tracks", trackId),
+            "DELETE",
+            null,
+            "remove user playlist track",
+            allowNoContent = true,
+        )
+    }
+
+    suspend fun hotSongs(
+        server: ServerAddress,
+        roomId: String,
+        source: String,
+        offset: Int,
+        refresh: Boolean,
+        limit: Int = 30,
+    ): HotSongsPage = withContext(Dispatchers.IO) {
+        val url = server.api("music", "hot").newBuilder()
+            .addQueryParameter("roomId", roomId)
+            .addQueryParameter("source", source)
+            .addQueryParameter("limit", limit.toString())
+            .addQueryParameter("offset", offset.toString())
+            .apply { if (refresh) addQueryParameter("refresh", "true") }
+            .build()
+        val json = executeJson(url, "hot:$source")
+        val tracks = json.optJSONArray("tracks")?.let { array -> List(array.length()) { array.getJSONObject(it).toTrack() } }.orEmpty()
+        HotSongsPage(
+            name = json.optString("name", "热歌榜"),
+            tracks = tracks,
+            hasMore = json.optBoolean("hasMore", false),
+        )
+    }
+
+    suspend fun isLiked(server: ServerAddress, track: Track, roomId: String): Boolean = withContext(Dispatchers.IO) {
+        val url = server.api("music", "liked").newBuilder()
+            .addQueryParameter("source", track.source)
+            .addQueryParameter("id", track.sourceId.ifBlank { track.id })
+            .addQueryParameter("roomId", roomId)
+            .build()
+        executeJson(url, "liked").optBoolean("liked", false)
+    }
+
+    suspend fun setLiked(server: ServerAddress, track: Track, roomId: String, liked: Boolean): Boolean =
+        withContext(Dispatchers.IO) {
+            val body = JSONObject()
+                .put("source", track.source)
+                .put("id", track.sourceId.ifBlank { track.id })
+                .put("roomId", roomId)
+                .put("liked", liked)
+            requireNotNull(jsonRequest(server, listOf("music", "liked"), "POST", body, "set liked")).optBoolean("liked", liked)
+        }
+
     suspend fun lyrics(server: ServerAddress, track: Track): JSONObject? = withContext(Dispatchers.IO) {
         val lyricId = track.lyricId?.takeIf { it.isNotBlank() } ?: return@withContext null
         val source = track.metadataSource ?: track.source
@@ -325,18 +462,19 @@ class MusicTogetherApi(private val client: OkHttpClient) {
         server: ServerAddress,
         source: String,
         id: String,
-        roomId: String,
+        roomId: String?,
         offset: Int,
         total: Int?,
         limit: Int = 100,
+        album: Boolean = false,
     ): PlaylistPage = withContext(Dispatchers.IO) {
         val url = server.api("music", "playlist").newBuilder()
             .addQueryParameter("source", source)
             .addQueryParameter("id", id)
             .addQueryParameter("limit", limit.toString())
             .addQueryParameter("offset", offset.toString())
-            .addQueryParameter("roomId", roomId)
-            .addQueryParameter("type", "playlist")
+            .apply { roomId?.takeIf { it.isNotBlank() }?.let { addQueryParameter("roomId", it) } }
+            .addQueryParameter("type", if (album) "album" else "playlist")
             .apply { total?.takeIf { it > 0 }?.let { addQueryParameter("total", it.toString()) } }
             .build()
         val json = executeJson(url, "playlist:$source")

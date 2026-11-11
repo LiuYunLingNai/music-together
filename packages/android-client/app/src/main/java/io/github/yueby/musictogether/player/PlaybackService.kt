@@ -1,5 +1,10 @@
 package io.github.yueby.musictogether.player
 
+import androidx.media3.exoplayer.audio.TeeAudioProcessor
+import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.DefaultRenderersFactory
+import android.content.Context
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -39,7 +44,18 @@ class PlaybackService : MediaSessionService() {
                 dataSpec
             }
         }
-        player = ExoPlayer.Builder(this)
+        val renderersFactory = object : DefaultRenderersFactory(this) {
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioTrackPlaybackParams: Boolean,
+            ): AudioSink = DefaultAudioSink.Builder(context)
+                .setEnableFloatOutput(enableFloatOutput)
+                .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                .setAudioProcessors(arrayOf(TeeAudioProcessor(AudioSpectrum.sink)))
+                .build()
+        }
+        player = ExoPlayer.Builder(this, renderersFactory)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
             .build()
         configureAudioFocus(PlaybackCommandBridge.audioFocusEnabled)

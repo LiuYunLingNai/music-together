@@ -56,6 +56,12 @@ internal fun JSONObject.toTrack(): Track {
         streamFormat = stringOrNull("streamFormat"),
         vip = optBoolean("vip", false),
         requestedBy = stringOrNull("requestedBy"),
+        artistIds = optJSONArray("artistIds")?.let { ids ->
+            List(ids.length()) { ids.optString(it) }.filter { it.isNotBlank() }
+        }.orEmpty(),
+        audioQuality = if (has("audioQuality") && !isNull("audioQuality")) audioQuality("audioQuality") else null,
+        audioBitrate = if (has("audioBitrate") && !isNull("audioBitrate")) optInt("audioBitrate").takeIf { it > 0 } else null,
+        qualityDowngraded = optBoolean("qualityDowngraded", false),
     )
 }
 

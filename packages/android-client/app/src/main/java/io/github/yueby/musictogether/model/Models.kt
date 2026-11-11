@@ -71,6 +71,9 @@ data class PlayerDisplaySettings(
     val lyricBlurEffect: Boolean = false,
     val backgroundMotion: Boolean = true,
     val backgroundMotionStrength: Float = 1f,
+    val showRemainingTime: Boolean = false,
+    val controlsSpectrum: Boolean = false,
+    val immersiveCover: Boolean = true,
 )
 
 fun PlayerDisplaySettings.normalized(): PlayerDisplaySettings = copy(
@@ -170,6 +173,10 @@ data class Track(
     val streamFormat: String? = null,
     val vip: Boolean = false,
     val requestedBy: String? = null,
+    val artistIds: List<String> = emptyList(),
+    val audioQuality: String? = null,
+    val audioBitrate: Int? = null,
+    val qualityDowngraded: Boolean = false,
 )
 
 @Immutable
@@ -364,6 +371,7 @@ data class Playlist(
     val source: String,
     val creator: String? = null,
     val description: String? = null,
+    val isAlbum: Boolean = false,
 )
 
 @Immutable
