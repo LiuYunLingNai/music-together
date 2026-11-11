@@ -17,6 +17,8 @@ object Events {
     const val ROOM_SETTINGS = "room:settings"
     const val ROOM_SET_ROLE = "room:set_role"
     const val ROOM_ROLE_CHANGED = "room:role_changed"
+    const val ROOM_KICK = "room:kick"
+    const val ROOM_UNBAN = "room:unban"
 
     const val PLAYER_PLAY = "player:play"
     const val PLAYER_PAUSE = "player:pause"
@@ -29,6 +31,12 @@ object Events {
     const val PLAYER_SYNC_RESPONSE = "player:sync_response"
     const val PLAYER_SET_MODE = "player:set_mode"
     const val PLAYER_TRACK_METADATA_UPDATED = "player:track_metadata_updated"
+    const val PLAYER_REFRESH_STREAM = "player:refresh_stream"
+    const val PLAYER_STREAM_REFRESHED = "player:stream_refreshed"
+    const val PLAYER_SOURCE_SWITCHED = "player:source_switched"
+    const val PLAYER_REQUEST_SOURCE_FALLBACK = "player:request_source_fallback"
+    const val PLAYER_PLAYBACK_FAILURE = "player:playback_failure"
+    const val PLAYER_RETRY_TRACK = "player:retry_track"
 
     const val QUEUE_ADD = "queue:add"
     const val QUEUE_INSERT_AFTER_CURRENT = "queue:insert_after_current"
@@ -56,6 +64,10 @@ object Events {
     const val AUTH_STATUS_UPDATE = "auth:status_update"
     const val AUTH_MY_STATUS = "auth:my_status"
     const val AUTH_GET_STATUS = "auth:get_status"
+    const val AUTH_SET_SHARING = "auth:set_sharing"
+    const val AUTH_SHARING_RESULT = "auth:sharing_result"
+    const val AUTH_SET_REPORTING = "auth:set_reporting"
+    const val AUTH_REPORTING_RESULT = "auth:reporting_result"
     const val AUTH_CLAIM_KUGOU_CONCEPT_VIP = "auth:claim_kugou_concept_vip"
     const val AUTH_CLAIM_KUGOU_CONCEPT_VIP_RESULT = "auth:claim_kugou_concept_vip_result"
 

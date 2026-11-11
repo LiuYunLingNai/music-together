@@ -125,4 +125,17 @@ fun MusicTogetherApp(viewModel: MusicTogetherViewModel) {
             }
         }
     }
+
+    state.playbackFailure?.takeIf { it.visible && state.room != null }?.let { failure ->
+        PlaybackFailureDialog(
+            state = failure,
+            canRetry = viewModel.canControl() || failure.localOnly || state.room?.playState?.isPlaying == true,
+            canControl = viewModel.canControl(),
+            onDismiss = viewModel::dismissPlaybackFailure,
+            onRetry = { viewModel.retryPlaybackFailure() },
+            onDegrade = { viewModel.retryPlaybackFailure(degrade = true) },
+            onSwitchSource = viewModel::switchFailedPlaybackSource,
+            onSkip = viewModel::skipPlaybackFailure,
+        )
+    }
 }

@@ -8,6 +8,7 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.yueby.musictogether.account.AccountCoordinator
+import io.github.yueby.musictogether.account.PlatformPreferenceCoordinator
 import io.github.yueby.musictogether.logging.AppLogger
 import io.github.yueby.musictogether.lyrics.LyricsParser
 import io.github.yueby.musictogether.lyrics.enrichLyricLines
@@ -31,7 +32,13 @@ import io.github.yueby.musictogether.model.PlayerDisplaySettings
 import io.github.yueby.musictogether.model.Playlist
 import io.github.yueby.musictogether.model.QrLoginState
 import io.github.yueby.musictogether.model.PlayState
+import io.github.yueby.musictogether.model.PlaybackFailureEvent
+import io.github.yueby.musictogether.model.PlaybackFailure
+import io.github.yueby.musictogether.model.PlaybackFailureState
 import io.github.yueby.musictogether.model.RoomMember
+import io.github.yueby.musictogether.model.canModerateRoom
+import io.github.yueby.musictogether.model.canKickRoomMember
+import io.github.yueby.musictogether.model.visibleRoomMembers
 import io.github.yueby.musictogether.model.RoomShareState
 import io.github.yueby.musictogether.model.ShareCardSettings
 import io.github.yueby.musictogether.model.ServerConnection
@@ -68,6 +75,7 @@ import io.github.yueby.musictogether.network.shouldRemoveStoredPlatformCredentia
 import io.github.yueby.musictogether.network.suggestedMusicFileName
 import io.github.yueby.musictogether.network.toChatMessage
 import io.github.yueby.musictogether.network.toPlayState
+import io.github.yueby.musictogether.network.toPlaybackFailureEvent
 import io.github.yueby.musictogether.network.toPlaylist
 import io.github.yueby.musictogether.network.toPlatformAuthStatus
 import io.github.yueby.musictogether.network.toMyPlatformAuth
@@ -83,6 +91,11 @@ import io.github.yueby.musictogether.notifications.MusicDownloadNotificationMana
 import io.github.yueby.musictogether.player.ClockSync
 import io.github.yueby.musictogether.player.NativePlayer
 import io.github.yueby.musictogether.player.PlaybackCommandBridge
+import io.github.yueby.musictogether.player.PlaybackRecoveryCoordinator
+import io.github.yueby.musictogether.player.PlaybackRecoveryContext
+import io.github.yueby.musictogether.player.PlaybackRecoveryKey
+import io.github.yueby.musictogether.player.isStalePlaybackAction
+import io.github.yueby.musictogether.player.canApplyPlaybackSync
 import io.github.yueby.musictogether.player.PlayerUiState
 import io.github.yueby.musictogether.queue.QueueActionTracker
 import io.github.yueby.musictogether.queue.loadCompletePlaylist
@@ -189,6 +202,13 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         ),
     )
     val state: StateFlow<AppState> = _state.asStateFlow()
+    private val platformPreferences = PlatformPreferenceCoordinator(
+        scope = viewModelScope,
+        state = { _state.value },
+        updateState = { transform -> _state.value = transform(_state.value) },
+        emit = socket::emit,
+        notice = { setNotice(it, isError = true) },
+    )
     private val appUpdates = AppUpdateCoordinator(
         application = application,
         service = AppUpdateService(okHttp),
@@ -197,13 +217,21 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         updateState = { transform -> _state.value = transform(_state.value) },
         showNotice = ::showNotice,
     )
-    private val nativePlayer = NativePlayer(
+    private val playbackRecovery = PlaybackRecoveryCoordinator(
+        scope = viewModelScope,
+        context = ::playbackRecoveryContext,
+        emit = socket::emit,
+        onFailure = ::showLocalPlaybackFailure,
+    )
+    private val nativePlayer: NativePlayer = NativePlayer(
         application,
         viewModelScope,
         clock,
         _state.value.playbackTempoSyncEnabled,
         _state.value.playbackHardSeekSyncEnabled,
         ::onTrackEnded,
+        ::onNativePlaybackFailure,
+        ::onNativePlaybackReady,
     )
     private val accounts = AccountCoordinator(
         application = application,
@@ -266,6 +294,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private var lastRtt: Long? = null
     private var waitingForJoinRoomState = false
     private var recoveredTrackId: String? = null
+    private var pendingPlaybackFailure: PlaybackFailureEvent? = null
     private val queueActions = QueueActionTracker()
     private val autoRestoringPlatforms = mutableSetOf<String>()
     private val loadedPlaylistPlatforms = mutableSetOf<String>()
@@ -372,6 +401,26 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 .put("userId", userId)
                 .put("role", role),
         )
+    }
+
+    fun kickRoomMember(userId: String, ban: Boolean) {
+        val current = _state.value
+        val room = current.room ?: return
+        val target = visibleRoomMembers(room).firstOrNull { it.id == userId } ?: return
+        if (!canKickRoomMember(room, current.userId, target, current.accountProfile?.role == "admin")) return
+        if (!socket.emit(Events.ROOM_KICK, JSONObject().put("userId", userId).put("ban", ban))) {
+            setNotice("移出请求未发送，请检查连接", isError = true)
+        }
+    }
+
+    fun unbanRoomMember(userId: String) {
+        val current = _state.value
+        val room = current.room ?: return
+        if (!canModerateRoom(room, current.userId, current.accountProfile?.role == "admin")) return
+        if (room.bannedMembers?.none { it.id == userId } != false) return
+        if (!socket.emit(Events.ROOM_UNBAN, JSONObject().put("userId", userId))) {
+            setNotice("解封请求未发送，请检查连接", isError = true)
+        }
     }
 
     fun updatePlaybackTempoSync(enabled: Boolean) {
@@ -616,6 +665,8 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         if (resetReconnectAttempts) reconnectBackoff.reset()
         AppLogger.info("Connection", "connect server=${parsed.displayUrl}")
         shouldReconnect = true
+        clearPlaybackRecovery()
+        platformPreferences.cancel()
         reconnectJob?.cancel()
         reconnectJob = null
         socketServerUrl = null
@@ -756,6 +807,10 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
 
     fun leaveRoom() {
         socket.emit(Events.ROOM_LEAVE)
+        clearRoomSession()
+    }
+
+    private fun clearRoomSession() {
         desiredRoomId = null
         desiredRoomPassword = null
         nativePlayer.stop()
@@ -765,9 +820,16 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         chatNotifications.clear()
         dismissBilibiliMetadata()
         resetPlatformRoomState()
+        lyricJob?.cancel()
+        searchJob?.cancel()
+        shareCardJob?.cancel()
+        bilibiliCollectionJob?.cancel()
         waitingForJoinRoomState = false
         _state.value = _state.value.copy(
             room = null,
+            lyrics = LyricsState(),
+            roomShare = RoomShareState(),
+            bilibiliCollection = BilibiliCollectionState(),
             messages = emptyList(),
             chatUnreadCount = 0,
             activeVote = null,
@@ -788,6 +850,8 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             searchSource = source,
             searchError = null,
             searchResults = emptyList(),
+            unifiedSearchGroups = emptyList(),
+            searchFailedSources = emptyList(),
         )
         requestSearchPage(query, source, page = 1, append = false)
     }
@@ -1009,6 +1073,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
 
     fun logoutPlatform(platform: String) {
         if (platform !in supportedPlatforms) return
+        platformPreferences.cancel(platform)
         appPreferences.removePlatformCookie(activeServer?.displayUrl.orEmpty(), platform)
         loadedPlaylistPlatforms.remove(platform)
         socket.emit(Events.AUTH_LOGOUT, JSONObject().put("platform", platform))
@@ -1022,6 +1087,10 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         )
         AppLogger.info("Auth", "logout platform=$platform")
     }
+
+    fun setPlatformSharing(platform: String, enabled: Boolean) = platformPreferences.set(platform, false, enabled)
+
+    fun setListeningReport(enabled: Boolean) = platformPreferences.set("netease", true, enabled)
 
     fun claimKugouConceptVip() {
         val hub = _state.value.platformHub
@@ -1360,6 +1429,10 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             nativePlayer.toggleLocalPlayback()
             return
         }
+        _state.value.playbackFailure?.takeIf { it.event.trackId == _state.value.room?.currentTrack?.id }?.let {
+            _state.value = _state.value.copy(playbackFailure = it.copy(visible = true))
+            return
+        }
         val action = if (nativePlayer.state.value.playing) "pause" else "resume"
         if (canControl()) {
             socket.emit(if (action == "pause") Events.PLAYER_PAUSE else Events.PLAYER_PLAY)
@@ -1370,6 +1443,36 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
 
     fun next() {
         if (!nativePlayer.state.value.localPlayback) controlOrVote(Events.PLAYER_NEXT, "next")
+    }
+
+    fun dismissPlaybackFailure() {
+        _state.value = _state.value.copy(playbackFailure = _state.value.playbackFailure?.copy(visible = false))
+    }
+
+    fun retryPlaybackFailure(degrade: Boolean = false) {
+        val issue = _state.value.playbackFailure ?: return
+        val room = _state.value.room ?: return
+        if (issue.busy || issue.event.trackId != room.currentTrack?.id) return
+        val sent = playbackRecovery.retry(degrade, roomStopped = !issue.localOnly && !room.playState.isPlaying)
+        if (sent) {
+            _state.value = _state.value.copy(playbackFailure = issue.copy(busy = true, message = "正在重新解析音频…"))
+        }
+    }
+
+    fun switchFailedPlaybackSource() {
+        val issue = _state.value.playbackFailure ?: return
+        if (issue.busy || issue.event.trackId != _state.value.room?.currentTrack?.id || !canControl()) return
+        if (playbackRecovery.requestFallback()) {
+            _state.value = _state.value.copy(playbackFailure = issue.copy(busy = true, message = "正在寻找替代音源…"))
+        }
+    }
+
+    fun skipPlaybackFailure() {
+        val issue = _state.value.playbackFailure ?: return
+        if (issue.event.trackId != _state.value.room?.currentTrack?.id) return
+        clearPlaybackRecovery()
+        dismissPlaybackFailure()
+        next()
     }
 
     fun previous() {
@@ -1700,6 +1803,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         viewModelScope.launch {
             if (disconnectedServerUrl != activeServer?.displayUrl) return@launch
             AppLogger.warn("WebSocket", "disconnected reason=${reason.orEmpty()}")
+            clearPlaybackRecovery()
             stopPeriodicJobs()
             clock.reset()
             lastRtt = null
@@ -1756,15 +1860,26 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 refreshAccount(showError = false)
             }
             Events.ROOM_STATE -> {
-                val room = (data as? JSONObject)?.toRoomState()?.let(::resolveRoomAvatarUrls) ?: return
+                val parsedRoom = (data as? JSONObject)?.toRoomState()?.let(::resolveRoomAvatarUrls) ?: return
+                val previousRoom = _state.value.room
+                val room = if (parsedRoom.bannedMembers == null && previousRoom?.id == parsedRoom.id &&
+                    canModerateRoom(parsedRoom, _state.value.userId, _state.value.accountProfile?.role == "admin")
+                ) parsedRoom.copy(bannedMembers = previousRoom.bannedMembers) else parsedRoom
                 handleCurrentTrackChanged(room.currentTrack?.id)
                 val isJoinSnapshot = waitingForJoinRoomState
                 waitingForJoinRoomState = false
                 desiredRoomId = room.id
+                if (_state.value.room?.id != room.id || _state.value.room?.currentTrack?.id != room.currentTrack?.id) {
+                    clearPlaybackRecovery()
+                }
                 _state.value = _state.value.copy(
                     room = room,
+                    playbackFailure = pendingPlaybackFailure?.takeIf { it.trackId == room.currentTrack?.id }
+                        ?.let { PlaybackFailureState(it) }
+                        ?: _state.value.playbackFailure?.takeIf { it.event.trackId == room.currentTrack?.id },
                     chatUnreadCount = if (isJoinSnapshot) 0 else _state.value.chatUnreadCount,
                 )
+                pendingPlaybackFailure = null
                 if (_state.value.accountProfile == null) refreshAccount(showError = false)
                 restorePlatformAccounts(room.id)
                 if (room.currentTrack == null) {
@@ -1773,6 +1888,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     _state.value = _state.value.copy(lyrics = LyricsState())
                     nativePlayer.stop()
                 } else {
+                    if (room.currentTrack.streamUrl == null) nativePlayer.showUnavailableTrack(room.currentTrack)
                     val needsRecovery = room.currentTrack.streamUrl != null &&
                         nativePlayer.state.value.track?.id != room.currentTrack.id
                     if (needsRecovery) {
@@ -1852,6 +1968,8 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                                 member
                             }
                         }
+                    } else if (room.hasMemberRoster) {
+                        members
                     } else {
                         members + RoomMember(
                             id = user.id,
@@ -1901,6 +2019,19 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 val wasJoining = waitingForJoinRoomState
                 waitingForJoinRoomState = false
                 val message = (data as? JSONObject)?.optString("message") ?: "房间操作失败"
+                val code = (data as? JSONObject)?.optString("code")
+                if (code == "KICKED_FROM_ROOM" || code == "BANNED_FROM_ROOM") {
+                    val affectedRoom = if (wasJoining) desiredRoomId else _state.value.room?.id
+                    affectedRoom?.let { appPreferences.clearRoomRejoin(activeServer?.displayUrl.orEmpty(), it) }
+                    if (code == "KICKED_FROM_ROOM" || affectedRoom == _state.value.room?.id) {
+                        clearRoomSession()
+                    } else {
+                        desiredRoomId = _state.value.room?.id
+                        desiredRoomPassword = null
+                    }
+                    setError(message)
+                    return
+                }
                 if (wasJoining) {
                     val failedRoomId = desiredRoomId
                     AppLogger.warn(
@@ -1944,7 +2075,12 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 val value = data as? JSONObject ?: return
                 val track = value.optJSONObject("track")?.toTrack() ?: return
                 val playState = value.optJSONObject("playState")?.toPlayState() ?: PlayState()
+                val currentRoom = _state.value.room ?: return
+                if (isStalePlaybackAction(playState, currentRoom.playState)) return
+                pendingPlaybackFailure = null
+                clearPlaybackRecovery()
                 handleCurrentTrackChanged(track.id)
+                _state.value = _state.value.copy(playbackFailure = null)
                 updateRoom { it.copy(currentTrack = track, playState = playState) }
                 _state.value = _state.value.copy(syncDriftSeconds = 0.0)
                 if (_state.value.lyrics.trackId != track.id) loadLyrics(track)
@@ -1961,13 +2097,71 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 nativePlayer.updateTrackMetadata(track)
                 loadLyrics(track)
             }
-            Events.PLAYER_PAUSE -> handleScheduledState(data) { nativePlayer.pause(it) }
+            Events.PLAYER_STREAM_REFRESHED -> {
+                val track = (data as? JSONObject)?.optJSONObject("track")?.toTrack() ?: return
+                val room = _state.value.room ?: return
+                if (room.currentTrack?.id != track.id || track.streamUrl.isNullOrBlank()) return
+                if (room.currentTrack.source != track.source || room.currentTrack.urlId != track.urlId) return
+                val wasRecovering = playbackRecovery.onStreamRefreshed(track)
+                updateRoom { current ->
+                    current.copy(
+                        currentTrack = track,
+                        queue = current.queue.map { item -> if (item.id == track.id) track else item },
+                    )
+                }
+                if (wasRecovering) {
+                    loadTrack(track, room.playState)
+                } else {
+                    nativePlayer.updateTrackMetadata(track)
+                }
+            }
+            Events.PLAYER_SOURCE_SWITCHED -> {
+                val value = data as? JSONObject ?: return
+                val track = value.optJSONObject("track")?.toTrack() ?: return
+                val room = _state.value.room ?: return
+                if (room.currentTrack?.id != track.id || track.streamUrl.isNullOrBlank()) return
+                _state.value = _state.value.copy(playbackFailure = null)
+                val currentTime = value.optDouble("currentTime", room.playState.currentTime)
+                val isPlaying = value.optBoolean("isPlaying", room.playState.isPlaying)
+                val playState = PlayState(
+                    isPlaying = isPlaying,
+                    currentTime = currentTime,
+                    serverTimestamp = clock.serverTime(),
+                    serverTimeToExecute = clock.serverTime(),
+                    revision = room.playState.revision,
+                )
+                updateRoom { current ->
+                    current.copy(
+                        currentTrack = track,
+                        queue = current.queue.map { item -> if (item.id == track.id) track else item },
+                        playState = playState,
+                    )
+                }
+                playbackRecoveryContext()?.let(playbackRecovery::onSourceSwitched)
+                loadTrack(track, playState)
+                loadLyrics(track)
+                setNotice("已切换到可用音源")
+            }
+            Events.PLAYER_PLAYBACK_FAILURE -> {
+                val failure = (data as? JSONObject)?.toPlaybackFailureEvent() ?: return
+                handlePlaybackFailure(failure)
+            }
+            Events.PLAYER_PAUSE -> handleScheduledState(data) {
+                playbackRecovery.cancelPending()
+                _state.value = _state.value.copy(playbackFailure = _state.value.playbackFailure?.copy(busy = false))
+                nativePlayer.pause(it)
+            }
             Events.PLAYER_RESUME -> handleScheduledState(data) { nativePlayer.resume(it) }
             Events.PLAYER_SEEK -> handleScheduledState(data) { nativePlayer.seek(it) }
             Events.PLAYER_SYNC_RESPONSE -> {
                 val value = data as? JSONObject ?: return
                 if (!clock.calibrated) return
                 val serverTimestamp = value.optLong("serverTimestamp")
+                val room = _state.value.room ?: return
+                if (!canApplyPlaybackSync(
+                    value.has("trackId"), value.stringOrNull("trackId"), room.currentTrack?.id,
+                    nativePlayer.state.value.track?.id, serverTimestamp, room.playState,
+                )) return
                 val networkDelay = ((clock.serverTime() - serverTimestamp) / 1000.0).coerceIn(0.0, 5.0)
                 val expected = value.optDouble("currentTime") + if (value.optBoolean("isPlaying")) networkDelay else 0.0
                 nativePlayer.correctDrift(expected, value.optBoolean("isPlaying"), clock.medianRtt)?.let { drift ->
@@ -2120,6 +2314,8 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 )
                 if (!automatic || !success) setNotice(message, isError = !success)
             }
+            Events.AUTH_SHARING_RESULT -> (data as? JSONObject)?.let { platformPreferences.onResult(false, it) }
+            Events.AUTH_REPORTING_RESULT -> (data as? JSONObject)?.let { platformPreferences.onResult(true, it) }
             Events.AUTH_STATUS_UPDATE -> {
                 val array = data as? JSONArray ?: JSONArray()
                 val statuses = List(array.length()) { array.getJSONObject(it).toPlatformAuthStatus() }
@@ -2167,6 +2363,9 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     private fun emitJoin(roomId: String, password: String) {
+        clearPlaybackRecovery()
+        platformPreferences.cancel()
+        pendingPlaybackFailure = null
         val rejoin = appPreferences.roomRejoin(activeServer?.displayUrl.orEmpty(), roomId)
         val token = rejoin.token
         val expires = rejoin.expiresAt
@@ -2295,6 +2494,10 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     private fun resetPlatformRoomState() {
+        platformPreferences.cancel()
+        pendingPlaybackFailure = null
+        searchJob?.cancel()
+        clearPlaybackRecovery()
         qrPollJob?.cancel()
         qrCloseJob?.cancel()
         playlistJob?.cancel()
@@ -2308,6 +2511,15 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         loadedPlaylistPlatforms.clear()
         _state.value = _state.value.copy(
             platformHub = PlatformHubState(),
+            searchResults = emptyList(),
+            unifiedSearchGroups = emptyList(),
+            searchFailedSources = emptyList(),
+            searchLoading = false,
+            searchLoadingMore = false,
+            searchHasMore = false,
+            searchHasSearched = false,
+            searchError = null,
+            playbackFailure = null,
             recommendations = emptyList(),
             recommendationsLoading = false,
             recommendationsLoadingMore = false,
@@ -2337,6 +2549,63 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private fun setNotice(message: String, isError: Boolean = false) {
         _state.value = _state.value.copy(notice = UiNotice(text = message, isError = isError))
     }
+
+    private fun playbackRecoveryContext(): PlaybackRecoveryContext? {
+        val current = _state.value
+        val room = current.room ?: return null
+        val track = room.currentTrack ?: return null
+        val server = activeServer ?: return null
+        if (current.connectionStatus != ConnectionStatus.Connected || desiredRoomId != room.id) return null
+        return PlaybackRecoveryContext(
+            key = PlaybackRecoveryKey(server.displayUrl, room.id, track.id, track.source, track.urlId),
+            track = track,
+            canControl = canControl(),
+        )
+    }
+
+    private fun onNativePlaybackFailure(trackId: String, degrade: Boolean): Boolean {
+        if (_state.value.room?.playState?.isPlaying != true) return false
+        return playbackRecovery.onMediaFailure(trackId, degrade)
+    }
+
+    private fun onNativePlaybackReady(trackId: String) {
+        playbackRecovery.onReady(trackId)
+        val issue = _state.value.playbackFailure
+        if (issue?.event?.trackId == trackId && (issue.busy || issue.localOnly)) {
+            _state.value = _state.value.copy(playbackFailure = null)
+        }
+    }
+
+    private fun showLocalPlaybackFailure(message: String) {
+        val track = _state.value.room?.currentTrack ?: return
+        val previous = _state.value.playbackFailure
+        val issue = if (previous?.event?.trackId == track.id) {
+            previous.copy(busy = false, visible = true, message = message)
+        } else {
+            PlaybackFailureState(
+                event = PlaybackFailureEvent(
+                    track.id, track, PlaybackFailure(track.source, "unknown", retryable = true), "stop",
+                ),
+                localOnly = true,
+                message = message,
+            )
+        }
+        _state.value = _state.value.copy(playbackFailure = issue)
+        nativePlayer.setPlaybackError(track.id, message)
+    }
+
+    private fun handlePlaybackFailure(failure: PlaybackFailureEvent) {
+        val room = _state.value.room ?: return
+        // A failed direct-play/next track is published before its ROOM_STATE snapshot.
+        if (room.currentTrack?.id != failure.trackId) {
+            pendingPlaybackFailure = failure
+            return
+        }
+        clearPlaybackRecovery()
+        _state.value = _state.value.copy(playbackFailure = PlaybackFailureState(failure))
+    }
+
+    private fun clearPlaybackRecovery() = playbackRecovery.reset()
 
     private fun playModeDescription(mode: String): String = when (mode) {
         "sequential" -> "顺序播放，播完队列后停止"
@@ -2370,18 +2639,24 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             searchError = null,
         )
         AppLogger.info("Search", "start source=$source page=$page keywordLength=${keyword.length}")
+        val roomId = _state.value.room?.id
+        fun currentSearch() = activeServer?.displayUrl == server.displayUrl && _state.value.room?.id == roomId &&
+            _state.value.searchKeyword == keyword && _state.value.searchSource == source
         searchJob = viewModelScope.launch {
-            runCatching { api.search(server, keyword, source, _state.value.room?.id, page) }
+            runCatching { api.search(server, keyword, source, roomId, page) }
                 .onFailure { if (it is CancellationException) throw it }
                 .onSuccess { result ->
+                    if (!currentSearch()) return@onSuccess
                     val oldTracks = if (append) _state.value.searchResults else emptyList()
-                    val merged = (oldTracks + result.tracks).distinctBy { it.id }
+                    val merged = (oldTracks + result.tracks).distinctBy { it.queueIdentity() }
                     AppLogger.info(
                         "Search",
                         "complete source=$source page=${result.page} pageResults=${result.tracks.size} total=${merged.size} hasMore=${result.hasMore}",
                     )
                     _state.value = _state.value.copy(
                         searchResults = merged,
+                        unifiedSearchGroups = result.groups,
+                        searchFailedSources = result.failedSources,
                         searchLoading = false,
                         searchLoadingMore = false,
                         searchHasMore = result.hasMore,
@@ -2390,7 +2665,10 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     )
                 }
                 .onFailure {
-                    val message = it.message ?: "搜索失败"
+                    if (!currentSearch()) return@onFailure
+                    val message = if (source == "all" && it is ApiException && it.statusCode in setOf(404, 405)) {
+                        "当前服务端不支持跨音源搜索，请选择单个平台搜索"
+                    } else it.message ?: "搜索失败"
                     AppLogger.error("Search", "failed source=$source page=$page", it)
                     _state.value = _state.value.copy(
                         searchLoading = false,
@@ -2517,6 +2795,8 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
 
     private fun handleScheduledState(data: Any?, action: (PlayState) -> Unit) {
         val playState = (data as? JSONObject)?.optJSONObject("playState")?.toPlayState() ?: return
+        val room = _state.value.room ?: return
+        if (isStalePlaybackAction(playState, room.playState)) return
         updateRoom { it.copy(playState = playState) }
         if (!playState.isPlaying) _state.value = _state.value.copy(syncDriftSeconds = 0.0)
         action(playState)
@@ -2552,7 +2832,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             ?.let { return it }
         val server = activeServer ?: throw IOException("尚未连接服务器")
         val bitrate = _state.value.room?.audioQuality ?: "320"
-        val streamUrl = api.streamUrl(server, track, bitrate)
+        val streamUrl = api.streamUrl(server, track, bitrate, _state.value.room?.id)
             ?: throw IOException("该音源需要先在房间播放后才能下载")
         return track.copy(streamUrl = streamUrl)
     }
@@ -2596,7 +2876,12 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         activeServer?.let { api.resolveResource(it, avatarUrl) } ?: avatarUrl
 
     private fun controlOrVote(event: String, voteAction: String) {
-        if (canControl()) socket.emit(event) else startVote(voteAction)
+        if (canControl()) {
+            val data = if (event == Events.PLAYER_NEXT) {
+                _state.value.room?.currentTrack?.id?.let { JSONObject().put("trackId", it) }
+            } else null
+            socket.emit(event, data)
+        } else startVote(voteAction)
     }
 
     private fun emitQueueOrder(queue: List<Track>, successMessage: String) {
@@ -2688,7 +2973,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             coroutineScope {
                 val ttml = launch {
                     try {
-                        val xml = api.ttml(track)
+                        val xml = api.ttml(server, track)
                         val lines = withContext(Dispatchers.Default) { xml?.let(LyricsParser::parseTtml).orEmpty() }
                         ttmlLines = lines
                         publish(lines, "ttml")
@@ -2723,7 +3008,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     }
                     supplementCandidates.forEach { raw ->
                         val parsed = withContext(Dispatchers.Default) { LyricsParser.parseServerResponse(raw) }
-                        publish(parsed.first, "supplement:${raw.optString("source", parsed.second)}")
+                        publish(parsed.first, "supplement:${raw.optString("source")}:${parsed.second}")
                     }
                 } catch (error: Exception) {
                     if (error is CancellationException) throw error
@@ -2748,7 +3033,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             try {
                 coroutineScope {
                     val ttml = async {
-                        val xml = api.ttml(next)
+                        val xml = api.ttml(server, next)
                         withContext(Dispatchers.Default) { xml?.let(LyricsParser::parseTtml).orEmpty() }
                     }
                     val platform = async {
@@ -2774,7 +3059,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                             val parsed = withContext(Dispatchers.Default) { LyricsParser.parseServerResponse(raw) }
                             if (preferLyricCandidate(selectedLines, parsed.first, reference)) {
                                 selectedLines = parsed.first
-                                selectedSource = "supplement:${raw.optString("source", parsed.second)}"
+                                selectedSource = "supplement:${raw.optString("source")}:${parsed.second}"
                             }
                         }
                     }
@@ -2806,6 +3091,8 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             )
             return
         }
+        clearPlaybackRecovery()
+        platformPreferences.cancel()
         socket.disconnect()
         socketServerUrl = null
         _state.value = _state.value.copy(connectionStatus = ConnectionStatus.Connecting)
@@ -2814,6 +3101,9 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     private fun emitCreateRoom(creation: PendingRoomCreation) {
+        clearPlaybackRecovery()
+        platformPreferences.cancel()
+        pendingPlaybackFailure = null
         accounts.withPersistedNickname {
             AppLogger.info(
                 "Room",
@@ -2929,11 +3219,16 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
 
     private fun onTrackEnded() {
         val room = _state.value.room
-        if (room?.hostId == _state.value.userId) socket.emit(Events.PLAYER_NEXT)
+        val trackId = nativePlayer.state.value.track?.id ?: return
+        if (room != null && room.hostId == _state.value.userId && room.currentTrack?.id == trackId) {
+            socket.emit(Events.PLAYER_NEXT, JSONObject().put("trackId", trackId))
+        }
     }
 
     override fun onCleared() {
         shouldReconnect = false
+        platformPreferences.cancel()
+        clearPlaybackRecovery()
         lyricJob?.cancel()
         searchJob?.cancel()
         recommendationsJob?.cancel()

@@ -36,6 +36,14 @@ object LyricsParser {
         if (yrc.isNotEmpty()) {
             return mergeAuxiliary(yrc, translation, roman) to "yrc"
         }
+        val wordFormat = data.optString("wordFormat")
+        val structured = when (wordFormat) {
+            "qrc" -> parseQrcLyrics(data.optString("wordLyric"))
+            "yrc" -> parseYrc(data.optString("wordLyric"))
+            "ttml" -> runCatching { parseTtml(data.optString("wordLyric")) }.getOrDefault(emptyList())
+            else -> emptyList()
+        }
+        if (structured.isNotEmpty()) return mergeAuxiliary(structured, translation, roman) to wordFormat
         return mergeLrc(data.optString("lyric"), translation, roman) to "lrc"
     }
 
@@ -334,6 +342,7 @@ object LyricsParser {
 
     private fun parseLrcMap(value: String): List<Pair<Long, String>> =
         parseLrcTimeline(value).filter { it.text.isNotBlank() }.map { it.timeMs to it.text }
+            .ifEmpty { parseQrcLyrics(value).map { it.startTimeMs to it.text } }
 
     private fun nearest(values: List<Pair<Long, String>>, target: Long): String =
         values.minByOrNull { abs(it.first - target) }?.takeIf { abs(it.first - target) <= 500 }?.second.orEmpty()

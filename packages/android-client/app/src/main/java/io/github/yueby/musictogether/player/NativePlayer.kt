@@ -45,6 +45,8 @@ class NativePlayer(
     initialTempoSyncEnabled: Boolean,
     initialHardSeekSyncEnabled: Boolean,
     private val onTrackEnded: () -> Unit,
+    private val onPlaybackFailure: (trackId: String, degrade: Boolean) -> Boolean,
+    private val onPlaybackReady: (trackId: String) -> Unit,
 ) {
     private companion object {
         const val HARD_SEEK_FADE_MS = 60L
@@ -109,12 +111,22 @@ class NativePlayer(
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             publish()
-            if (playbackState == Player.STATE_READY) finishPendingLoad()
+            if (playbackState == Player.STATE_READY) {
+                finishPendingLoad()
+                _state.value = _state.value.copy(error = null)
+                player?.currentMediaItem?.mediaId?.let(onPlaybackReady)
+            }
             if (playbackState == Player.STATE_ENDED) onTrackEnded()
         }
 
         override fun onPlayerError(error: PlaybackException) {
             if (retryWithFallback(error)) return
+            val item = player?.currentMediaItem
+            val remote = item?.localConfiguration?.uri?.scheme in setOf("http", "https")
+            val degrade = isDegradePlaybackError(error)
+            if (remote && item != null && (degrade || isNetworkPlaybackError(error)) &&
+                onPlaybackFailure(item.mediaId, degrade)
+            ) return
             AppLogger.error(
                 "Player",
                 "playback failed code=${error.errorCodeName} status=${httpResponseCode(error) ?: "n/a"} " +
@@ -133,8 +145,8 @@ class NativePlayer(
         localPlayback: Boolean = false,
     ) {
         val streamUrl = playbackUrl ?: run {
-            fallbackPlaybackUrl = null
             AppLogger.warn("Player", "track has no stream URL id=${track.id}")
+            showUnavailableTrack(track)
             return
         }
         scheduledAction?.cancel()
@@ -190,21 +202,49 @@ class NativePlayer(
         _state.value = _state.value.copy(track = track)
     }
 
-    fun pause(playState: PlayState) = schedule(playState.serverTimeToExecute) {
-        resetPlaybackCorrection(it)
-        it.pause()
-        it.seekTo((playState.currentTime * 1000).toLong())
+    fun setPlaybackError(trackId: String, message: String) {
+        if (_state.value.track?.id == trackId) _state.value = _state.value.copy(error = message)
     }
 
-    fun resume(playState: PlayState) = schedule(playState.serverTimeToExecute) {
-        resetPlaybackCorrection(it)
-        it.seekTo(positionAtExecution(playState, advanceIfLate = true))
-        it.play()
+    fun showUnavailableTrack(track: Track) {
+        stop()
+        _state.value = _state.value.copy(track = track, error = "当前歌曲没有可用播放地址")
     }
 
-    fun seek(playState: PlayState) = schedule(playState.serverTimeToExecute) {
-        resetPlaybackCorrection(it)
-        it.seekTo(positionAtExecution(playState, advanceIfLate = playState.isPlaying))
+    fun pause(playState: PlayState) {
+        updatePendingPlayback(playState)
+        schedule(playState.serverTimeToExecute) {
+            resetPlaybackCorrection(it)
+            it.pause()
+            it.seekTo((playState.currentTime * 1000).toLong())
+        }
+    }
+
+    fun resume(playState: PlayState) {
+        updatePendingPlayback(playState)
+        schedule(playState.serverTimeToExecute) {
+            resetPlaybackCorrection(it)
+            it.seekTo(positionAtExecution(playState, advanceIfLate = true))
+            it.play()
+        }
+    }
+
+    fun seek(playState: PlayState) {
+        updatePendingPlayback(playState)
+        schedule(playState.serverTimeToExecute) {
+            resetPlaybackCorrection(it)
+            it.seekTo(positionAtExecution(playState, advanceIfLate = playState.isPlaying))
+        }
+    }
+
+    private fun updatePendingPlayback(playState: PlayState) {
+        // A pause/seek while buffering supersedes the original load intention.
+        pendingLoad = pendingLoad?.copy(
+            basePositionMs = (playState.currentTime * 1000).toLong().coerceAtLeast(0),
+            serverTimestamp = playState.serverTimestamp,
+            executeAt = playState.serverTimeToExecute,
+            autoPlay = playState.isPlaying,
+        )
     }
 
     fun toggleLocalPlayback() {
@@ -331,6 +371,26 @@ class NativePlayer(
         if (pendingLoad == null) controller.playWhenReady = shouldResume
         return true
     }
+
+    private fun isDegradePlaybackError(error: PlaybackException): Boolean =
+        error.errorCode in setOf(
+            PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+            PlaybackException.ERROR_CODE_DECODING_FAILED,
+            PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED,
+            PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES,
+            PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
+            PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED,
+        )
+
+    private fun isNetworkPlaybackError(error: PlaybackException): Boolean =
+        error.errorCode in setOf(
+            PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
+            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
+            PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
+            PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE,
+            PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND,
+        )
 
     private fun finishPendingLoad() {
         val pending = pendingLoad ?: return

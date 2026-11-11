@@ -7,6 +7,7 @@ import io.github.yueby.musictogether.model.AdminUser
 import io.github.yueby.musictogether.model.AudioProxyPolicy
 import io.github.yueby.musictogether.model.PlatformRecommendation
 import io.github.yueby.musictogether.model.Track
+import io.github.yueby.musictogether.model.UnifiedSearchGroup
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -27,6 +28,8 @@ data class SearchPage(
     val tracks: List<Track>,
     val page: Int,
     val hasMore: Boolean,
+    val groups: List<UnifiedSearchGroup> = emptyList(),
+    val failedSources: List<String> = emptyList(),
 )
 
 data class BilibiliCollectionPage(
@@ -229,19 +232,23 @@ class MusicTogetherApi(private val client: OkHttpClient) {
         }
     }
 
-    suspend fun streamUrl(server: ServerAddress, track: Track, bitrate: String): String? =
+    suspend fun streamUrl(server: ServerAddress, track: Track, bitrate: String, roomId: String? = null): String? =
         withContext(Dispatchers.IO) {
             if (track.urlId.isBlank()) return@withContext null
-            val url = server.api("music", "url").newBuilder()
-                .addQueryParameter("source", track.source)
-                .addQueryParameter("urlId", track.urlId)
-                .addQueryParameter("bitrate", bitrate)
-                .build()
+            val url = streamRequestUrl(server, track, bitrate, roomId)
             executeJson(url, "stream URL:${track.source}").stringOrNull("url")
         }
 
     suspend fun search(server: ServerAddress, keyword: String, source: String, roomId: String?, page: Int): SearchPage =
         withContext(Dispatchers.IO) {
+            if (source == "all") {
+                val url = server.api("music", "search-all").newBuilder()
+                    .addQueryParameter("keyword", normalizeSearchKeyword(keyword, source))
+                    .addQueryParameter("limit", "10")
+                    .apply { if (!roomId.isNullOrBlank()) addQueryParameter("roomId", roomId) }
+                    .build()
+                return@withContext parseUnifiedSearch(executeJson(url, "search:all"))
+            }
             val url = server.api("music", "search").newBuilder()
                 .addQueryParameter("source", source)
                 .addQueryParameter("keyword", keyword)
@@ -344,25 +351,18 @@ class MusicTogetherApi(private val client: OkHttpClient) {
         )
     }
 
-    suspend fun ttml(track: Track): String? = withContext(Dispatchers.IO) {
-        val source = track.metadataSource ?: track.source
-        val lyricTrackId = if (track.metadataSource != null) track.lyricId else track.sourceId
-        if (lyricTrackId.isNullOrBlank()) return@withContext null
-        val folder = when (source) {
-            "netease" -> "ncm-lyrics"
-            "tencent" -> "qq-lyrics"
-            else -> return@withContext null
-        }
-        val url = "https://amlldb.bikonoo.com/$folder/$lyricTrackId.ttml"
-        val request = Request.Builder().url(url).get().build()
+    suspend fun ttml(server: ServerAddress, track: Track): String? = withContext(Dispatchers.IO) {
         val ttmlClient = client.newBuilder().callTimeout(8, TimeUnit.SECONDS).build()
-        AppLogger.info("HTTP", "GET TTML source=$source sourceId=$lyricTrackId")
-        ttmlClient.newCall(request).readCancellable { response ->
-            if (!response.isSuccessful) {
-                AppLogger.warn("HTTP", "TTML status=${response.code}")
-                return@readCancellable null
+        loadTtmlWithFallback(ttmlFallbackUrls(server, track)) { url ->
+            val request = Request.Builder().url(url).get().build()
+            ttmlClient.newCall(request).readCancellable { response ->
+                if (!response.isSuccessful) return@readCancellable null
+                val source = response.body?.source() ?: return@readCancellable null
+                val maxBytes = 2 * 1024 * 1024L
+                source.request(maxBytes + 1)
+                if (source.buffer.size > maxBytes) return@readCancellable null
+                source.readUtf8()
             }
-            response.body?.string()?.takeIf { it.contains("<tt") }
         }
     }
 

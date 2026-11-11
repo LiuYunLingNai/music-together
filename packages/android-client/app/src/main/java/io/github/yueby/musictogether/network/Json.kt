@@ -3,10 +3,13 @@ package io.github.yueby.musictogether.network
 import io.github.yueby.musictogether.model.ChatMessage
 import io.github.yueby.musictogether.model.ClientInfo
 import io.github.yueby.musictogether.model.PlayState
+import io.github.yueby.musictogether.model.PlaybackFailure
+import io.github.yueby.musictogether.model.PlaybackFailureEvent
 import io.github.yueby.musictogether.model.Playlist
 import io.github.yueby.musictogether.model.PlatformAuthStatus
 import io.github.yueby.musictogether.model.MyPlatformAuth
 import io.github.yueby.musictogether.model.RoomMember
+import io.github.yueby.musictogether.model.RoomBan
 import io.github.yueby.musictogether.model.RoomListItem
 import io.github.yueby.musictogether.model.RoomState
 import io.github.yueby.musictogether.model.Track
@@ -56,6 +59,31 @@ internal fun JSONObject.toTrack(): Track {
     )
 }
 
+internal fun JSONObject.toPlaybackFailure(): PlaybackFailure = PlaybackFailure(
+    source = optString("source"),
+    reason = stringOrNull("reason") ?: "unknown",
+    retryable = optBoolean("retryable", false),
+    actionable = optBoolean("actionable", false),
+    providerCode = stringOrNull("providerCode"),
+    providerMessage = stringOrNull("providerMessage"),
+    httpStatus = if (has("httpStatus") && !isNull("httpStatus")) optInt("httpStatus") else null,
+    retryAfterMs = if (has("retryAfterMs") && !isNull("retryAfterMs")) optLong("retryAfterMs") else null,
+)
+
+internal fun JSONObject.toPlaybackFailureEvent(): PlaybackFailureEvent? {
+    val track = optJSONObject("track")?.toTrack() ?: return null
+    val failure = optJSONObject("failure")?.toPlaybackFailure() ?: return null
+    val trackId = stringOrNull("trackId") ?: track.id
+    if (trackId.isBlank() || track.id != trackId) return null
+    return PlaybackFailureEvent(
+        trackId = trackId,
+        track = track,
+        failure = failure,
+        nextAction = if (optString("nextAction") == "skip") "skip" else "stop",
+        autoActionInMs = if (has("autoActionInMs") && !isNull("autoActionInMs")) optLong("autoActionInMs") else null,
+    )
+}
+
 internal fun Track.toJson(): JSONObject = JSONObject().apply {
     put("id", id)
     put("title", title)
@@ -82,6 +110,9 @@ internal fun JSONObject.toPlayState(): PlayState = PlayState(
     currentTime = optDouble("currentTime", 0.0),
     serverTimestamp = optLong("serverTimestamp", 0L),
     serverTimeToExecute = if (has("serverTimeToExecute")) optLong("serverTimeToExecute") else null,
+    revision = (opt("revision") as? Number)?.toDouble()?.takeIf {
+        it.isFinite() && it >= 0 && it <= 9_007_199_254_740_991.0 && it == kotlin.math.floor(it)
+    }?.toLong(),
 )
 
 internal fun JSONObject.toUser(): User = User(
@@ -115,7 +146,7 @@ internal fun JSONObject.toRoomMember(): RoomMember = RoomMember(
     role = optString("role", "member"),
     avatarUrl = stringOrNull("avatarUrl"),
     isServerAdmin = optBoolean("isServerAdmin", false),
-    client = optJSONObject("client")?.toClientInfo(),
+    client = optJSONObject("client")?.toClientInfo() ?: optJSONObject("lastClient")?.toClientInfo(),
     clients = optJSONArray("clients")?.toClientInfos().orEmpty(),
     isOnline = optBoolean("isOnline", false),
     joinedAt = optLong("joinedAt", 0L),
@@ -159,6 +190,13 @@ internal fun JSONObject.toRoomState(): RoomState {
                 joinedAt = 0L,
             )
         },
+        bannedMembers = optJSONArray("bannedMembers")?.let { bans ->
+            List(bans.length()) { index ->
+                val ban = bans.getJSONObject(index)
+                RoomBan(ban.optString("id"), ban.optString("nickname"), ban.optLong("bannedAt"))
+            }
+        },
+        hasMemberRoster = membersJson != null,
         queue = List(queueJson.length()) { queueJson.getJSONObject(it).toTrack() },
         currentTrack = current?.toTrack(),
         playState = (optJSONObject("playState") ?: JSONObject()).toPlayState(),
@@ -220,6 +258,8 @@ internal fun JSONObject.toMyPlatformAuth(): MyPlatformAuth = MyPlatformAuth(
     vipType = optInt("vipType"),
     vipLabel = stringOrNull("vipLabel"),
     vipLevel = if (has("vipLevel") && !isNull("vipLevel")) optInt("vipLevel") else null,
+    shareWithRoom = opt("shareWithRoom") as? Boolean,
+    reportListening = opt("reportListening") as? Boolean,
 )
 
 internal fun JSONObject.toPlaylist(): Playlist = Playlist(

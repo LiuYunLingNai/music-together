@@ -28,6 +28,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,6 +47,12 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import io.github.yueby.musictogether.model.RoomMember
 import io.github.yueby.musictogether.model.RoomState
+import io.github.yueby.musictogether.model.visibleRoomMembers
+import io.github.yueby.musictogether.model.canKickRoomMember
+import io.github.yueby.musictogether.ui.designsystem.AppButton
+import io.github.yueby.musictogether.ui.designsystem.AppDialog
+
+private data class MemberAction(val userId: String, val nickname: String, val ban: Boolean?)
 
 @Composable
 internal fun MembersPane(
@@ -50,9 +60,12 @@ internal fun MembersPane(
     userId: String?,
     canManageRoles: Boolean,
     onSetRole: (String, String) -> Unit,
+    onKick: (String, Boolean) -> Unit,
+    onUnban: (String) -> Unit,
 ) {
+    var confirmation by remember(room.id) { mutableStateOf<MemberAction?>(null) }
     val roleOrder = mapOf("owner" to 0, "admin" to 1, "member" to 2)
-    val members = room.members.sortedWith(
+    val members = visibleRoomMembers(room).sortedWith(
         compareByDescending<RoomMember> { it.isServerAdmin }
             .thenBy { roleOrder[it.role] ?: 9 }
             .thenByDescending { it.isOnline },
@@ -76,7 +89,7 @@ internal fun MembersPane(
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            items(members, key = { it.id }) { member ->
+            items(members, key = { "member:${it.id}" }) { member ->
                 val canEditRole = canManageRoles &&
                     !member.isServerAdmin &&
                     member.role != "owner" &&
@@ -127,8 +140,44 @@ internal fun MembersPane(
                             MemberRoleLabel(member)
                         }
                     }
+                    if (canKickRoomMember(room, userId, member, canManageRoles)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            AppButton("移出", { confirmation = MemberAction(member.id, member.nickname, false) }, primary = false)
+                            AppButton("移出并封禁", { confirmation = MemberAction(member.id, member.nickname, true) }, primary = false)
+                        }
+                    }
                 }
             }
+            if (canManageRoles) {
+                if (room.bannedMembers == null) {
+                    item { Text("当前服务端未提供成员移出与封禁管理能力", Modifier.padding(12.dp)) }
+                } else if (room.bannedMembers.isNotEmpty()) {
+                    item { Text("已封禁成员", Modifier.padding(12.dp), fontWeight = FontWeight.SemiBold) }
+                    items(room.bannedMembers, key = { "ban:${it.id}" }) { ban ->
+                        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(ban.nickname, Modifier.weight(1f))
+                            AppButton("解封", { confirmation = MemberAction(ban.id, ban.nickname, null) }, primary = false)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    confirmation?.let { action ->
+        AppDialog(
+            title = if (action.ban == null) "解除封禁" else if (action.ban) "移出并封禁成员" else "移出成员",
+            onDismissRequest = { confirmation = null },
+            confirmText = "确认",
+            onConfirm = {
+                if (action.ban == null) onUnban(action.userId) else onKick(action.userId, action.ban)
+                confirmation = null
+            },
+        ) {
+            Text(when (action.ban) {
+                null -> "允许 ${action.nickname} 再次加入本房间？"
+                true -> "移出 ${action.nickname} 的所有连接，并禁止再次加入本房间？"
+                false -> "将 ${action.nickname} 移出本房间？对方仍可重新加入。"
+            })
         }
     }
 }

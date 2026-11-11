@@ -99,7 +99,7 @@ private fun PlatformAccountList(state: AppState, viewModel: MusicTogetherViewMod
             MiuixSmallTitle(text = "平台账号与歌单")
         }
         MiuixText(
-            "登录后可浏览个人歌单，并为房间提供 VIP 播放能力。",
+            "登录后可浏览个人歌单，并选择是否为房间共享 VIP 播放能力。",
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             style = MiuixTheme.textStyles.footnote1,
@@ -133,6 +133,10 @@ private fun PlatformAccountList(state: AppState, viewModel: MusicTogetherViewMod
                 )
             }
 
+            if (myAuth?.loggedIn == true) {
+                item { PlatformPrivacyPreferences(myAuth, hub.pendingPreferences, viewModel) }
+            }
+
             if (platform == "kugou") {
                 item {
                     PlatformLoginCard(
@@ -148,6 +152,10 @@ private fun PlatformAccountList(state: AppState, viewModel: MusicTogetherViewMod
                         isClaimingConceptVip = hub.claimingKugouConceptVip,
                     )
                 }
+            }
+
+            if (platform == "kugou" && conceptAuth?.loggedIn == true) {
+                item { PlatformPrivacyPreferences(conceptAuth, hub.pendingPreferences, viewModel) }
             }
 
             platformPlaylistItems(

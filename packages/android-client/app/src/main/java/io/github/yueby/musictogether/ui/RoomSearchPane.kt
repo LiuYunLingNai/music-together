@@ -69,8 +69,8 @@ import io.github.yueby.musictogether.ui.player.DropdownMenuItem as AppDropdownMe
 
 @Composable
 internal fun SearchPane(state: AppState, viewModel: MusicTogetherViewModel) {
-    var keyword by remember { mutableStateOf("") }
-    var source by remember { mutableStateOf("netease") }
+    var keyword by remember { mutableStateOf(state.searchKeyword) }
+    var source by remember { mutableStateOf(state.searchSource) }
     val listState = rememberLazyListState()
     val shouldLoadMore by remember(
         listState,
@@ -91,6 +91,7 @@ internal fun SearchPane(state: AppState, viewModel: MusicTogetherViewModel) {
         Text("搜索并点歌", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(8.dp))
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             listOf(
+                "all" to "全部音源",
                 "netease" to "网易云",
                 "tencent" to "QQ 音乐",
                 "kugou" to "酷狗",
@@ -124,6 +125,8 @@ internal fun SearchPane(state: AppState, viewModel: MusicTogetherViewModel) {
                 modifier = Modifier.padding(20.dp),
                 color = MaterialTheme.colorScheme.error,
             )
+        } else if (state.searchSource == "all" && state.searchHasSearched) {
+            UnifiedSearchResults(state, viewModel, Modifier.weight(1f))
         } else if (state.searchHasSearched && state.searchResults.isEmpty()) {
             Text(
                 if (state.searchSource == "bilibili") {

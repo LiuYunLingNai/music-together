@@ -198,9 +198,13 @@ MIUIX 设置二级页使用 MIUIX `Scaffold` 与 `SmallTopAppBar` 消费状态�
 
 房间用户和离线成员可携带可选的 `client` 信息，包括粗粒度客户端类型与不含版本号的可读标签；同一账号的多个活动连接还可通过 `clients` 列表聚合，相同标签带有可选连接数量。成员列表对在线成员显示当前设备或浏览器列表，对离线成员显示上次使用的客户端列表；旧服务端未下发该字段、字段不完整或出现未知客户端类型时安全回退，不影响成员和权限状态解析。Android 的 OkHttp 握手由服务端识别为 Android 客户端，不上传或展示原始 User-Agent。
 
+成员页合并 `users` 中的在线访客与 `members` 持久名册，访客离线后不留存。服务端下发 `bannedMembers` 后，房主和服务器管理员可确认移出、封禁或解封操作；本人、房主和服务器管理员不可被移出。封禁列表只在同房间且仍具备管理权限时保留，普通成员不显示管理入口。收到 `KICKED_FROM_ROOM` 时立即清理本机房间会话、停止音频并清除对应重进票据；`BANNED_FROM_ROOM` 清除被拒绝房间的票据，保留其他房间及平台 Cookie。
+
 房间分享链接使用当前房间所属服务端的 HTTPS 入口：`https://当前服务端/join?ROMMid=<房间号>`，不会强制跳转官方域名。Android 收到该链接后复用 `RoomJoinTargetParser` 和跨服务器加入流程；网页服务端的 `/join` 页面再调用 `musictogether://join` Scheme 唤起应用。旧版生成的 `musictogether://join`、`intent://` 以及带 `room`/`server` 参数的链接继续兼容。分享卡片二维码和系统分享文本均携带当前服务端链接；未安装应用时可回退到当前服务端的网页版房间。分享卡片背景可使用默认渐变、当前歌曲封面、复制到应用私有目录的本地图片或网络图片 URL，并可调整模糊、暗化以及封面、二维码和链接的显示；网络或本地背景不可用时继续生成渐变卡片。只有配置 Android App Links 时才需要对应服务端部署匹配签名的 `/.well-known/assetlinks.json`。
 
 `/api/music/recommendations` 按当前身份和房间返回已登录平台的原生推荐内容。请求携带 `roomId`、1 至 50 的 `limit`，并可使用 `radarPage` 与 `playlistOffset` 继续读取 QQ 雷达歌曲和推荐歌单；响应按平台提供 `tracks`、`playlists` 与独立的 `pagination` 游标。Android 按歌曲身份和 `source:id` 合并、去重分页结果；新增字段缺失时分别回退为空列表和无后续页。`unavailableReason` 区分空推荐与上游暂时不可用，旧服务端缺少接口时显示可重试错误，不影响搜索和点歌流程。
+
+搜索页的“全部音源”调用 `/api/music/search-all`，携带当前房间和最多 100 字符的关键词。结果沿用服务端 `groups` / `candidates` 的版本分组，用户选择平台后复用现有点歌与去重流程；`failedSources` 单独提示部分平台不可用。统一搜索每个平台取前 10 条且不使用分页，B 站继续走单源视频流程；旧服返回 404/405 时提示切回单源搜索。切换查询、房间或服务器会取消请求并拒绝旧结果。
 
 歌单详情继续按 100 首分页浏览。点击“添加全部”时，Android 从当前歌单第一页开始读取全部分页，按稳定歌曲身份去重，排除房间队列和本地待确认项，最多填充至 1000 首容量，并按每批 200 首发送 `queue:add_batch`。切换歌单或离开房间会取消未完成的全量读取。
 
@@ -236,6 +240,8 @@ MIUIX 设置二级页使用 MIUIX `Scaffold` 与 `SmallTopAppBar` 消费状态�
 
 应用还会保存平台登录 Cookie，并在加入房间后恢复平台认证。平台 Cookie 的生命周期与用户主动登录、退出操作保持一致；自动恢复失败默认保留凭据，只有 QQ 明确返回 `reauth_required` 时才删除当前服务器下对应 Cookie 并提示重新扫码，`expired` 和 `error` 仍留待下次进入房间重试。
 
+`PlatformPreferenceCoordinator` 处理账号共享与网易云听歌打卡开关，按服务器、房间和身份隔离待确认操作。`auth:sharing_result` / `auth:reporting_result` 成功后才更新对应设置，8 秒无响应恢复可操作状态；退出平台或离开房间取消请求。共享开关不清除平台 Cookie，打卡默认关闭且只提供网易云入口；旧服务端没有 `shareWithRoom` / `reportListening` 字段时显示不支持，不发送设置请求。
+
 ## 5. 播放同步
 
 播放模块将 Android 媒体能力与房间同步逻辑分开。
@@ -252,6 +258,7 @@ MIUIX 设置二级页使用 MIUIX `Scaffold` 与 `SmallTopAppBar` 消费状态�
 | `PlaybackDriftController.kt` | 选择变速修正或硬 Seek |
 | `PlaybackRequestHeaders.kt` | 按播放域名添加必要请求头 |
 | `PlaybackCommandBridge.kt` | 将系统媒体按钮转回房间操作 |
+| `PlaybackRecoveryCoordinator.kt` | 按服务器、房间与曲目隔离的有限恢复流程和可取消超时 |
 
 B站音频始终通过服务器代理播放，播放所需 Cookie 只保留在服务端。服务器管理员通过受保护的 HTTP API 控制酷狗是否强制代理，策略通过 `server:audio_proxy_policy` 实时下发，默认行为为强制代理。
 
@@ -269,9 +276,19 @@ B站音频始终通过服务器代理播放，播放所需 Cookie 只保留在�
 6. 开启自动变速时，小漂移通过保持音高的限幅变速修正
 7. 持续的大漂移可以独立启用淡出、Seek 和淡入修正
 
+可选的 `PlayState.revision` 用于丢弃过期播放、暂停、恢复和 Seek 动作；旧服未提供版本号时继续接受。同步响应若带 `trackId`，只应用到房间和本机正在持有的同一曲目，并拒绝早于最新播放动作的快照。媒体仍在缓冲时到达的暂停/Seek 会更新待加载意图，避免解码完成后执行旧的自动播放。
+
 自动变速和大偏差硬 Seek 默认关闭并分别持久化；升级到该设置架构时会执行一次迁移，之后保留用户选择。
 
 MediaSession 接收系统播放按钮。相关操作通过 `PlaybackCommandBridge` 返回 ViewModel，再根据房间角色直接发送控制事件或发起投票。
+
+### 播放故障恢复
+
+网络音频在原有直连转代理回退后仍失败时，`NativePlayer` 将网络或解码错误交给 `PlaybackRecoveryCoordinator`。协调器先请求 `player:refresh_stream`，仅解码/格式错误附带 `degrade`；8 秒无响应或重新加载仍失败时，有控制权限的成员再请求一次 `player:request_source_fallback`，普通成员保留本机重试入口。15 秒无换源结果即结束恢复，不因单台设备故障替房间自动跳歌。旧服务端不认识新事件时同样有界结束。
+
+`player:stream_refreshed` 是房间广播，只有正在等待刷新结果的本机重新加载，其他设备只更新曲目元数据。`player:source_switched` 保持队列 ID，以新音源和服务端进度重建音频并重载歌词；换源后的失败不重启无限循环。切歌、暂停、离房、断线、切换服务器和释放会取消恢复超时；自然播完和手动下一首携带 `trackId`，避免过期请求跳过新曲。
+
+`player:playback_failure` 按失败原因展示 MIUIX 弹窗，支持重试、降音质、换源和下一首/投票；服务端停止的曲目由有权限用户通过 `player:retry_track` 重试。普通成员仅能刷新本机地址或发起已有切歌投票，服务端 `nextAction` 决定自动跳过。网络恢复不作用于离线文件。待同步能力与验证进度见 [main 同步清单](ANDROID_MAIN_SYNC.md)。
 
 ## 6. 歌词系统
 
@@ -297,6 +314,7 @@ MusicTogetherApi
 - TTML 逐词歌词
 - 服务端逐词 JSON
 - 网易云 YRC
+- QQ 音乐 `wordLyric` / QRC（绝对毫秒逐字时间），以及 `wordFormat` 指定的 YRC/TTML
 - LRC 行级歌词
 - 翻译和音译合并
 - Ruby、背景人声和对唱标记
@@ -378,4 +396,4 @@ AMLL 纯算法按职责分布：
 
 TTML 与平台歌词并行请求，先展示可用结果，再按逐字动画、有效时间、正文完整度、重复副歌覆盖和背景人声/对唱结构综合选择。高质量逐字歌词缺少外语译文或正文、副歌不完整时，通过服务端多歌词源补全；译文和音译按全局顺序、正文相似度及稳定时间偏移对齐，只填空缺字段，不改写 Android AMLL 使用的行时间、逐字时间和已有背景/对唱标记。结构迁移仅在 TTML 与选中时间轴达到足够覆盖时启用。歌词解析和对齐在 Dispatchers.Default 执行；按服务器与音源标识隔离的缓存最多保留 30 首、有效期 30 分钟。当前歌词完成后以相同策略预取顺序或列表循环的下一曲，切歌与离开取消当前歌词任务及其预取。
 
-MusicTogetherApi 使用 OkHttp 异步回调读取响应，协程取消会取消底层 Call，响应体在回调线程内读取并关闭。TTML 总超时 8 秒，搜索和平台歌词 15 秒，其他现有普通请求保持 60 秒。
+MusicTogetherApi 使用 OkHttp 异步回调读取响应，协程取消会取消底层 Call，响应体在回调线程内读取并关闭。TTML 依次尝试当前服务端 `/api/music/ttml` 代理、`/api/music/amll-ttml`（精确平台 ID 及歌曲信息匹配）、旧版直连地址，整条链总超时 8 秒、单次最多 3 秒，正文限制为 2 MiB；旧服不支持时仍可直连。B 站绑定歌词使用选中歌曲的元数据来源和歌词 ID，不误用视频 ID。搜索和平台歌词 15 秒，其他现有普通请求保持 60 秒。跨源补词的格式标记独立保留，QRC/YRC 等逐字来源进入原有共享 AMLL 时间轴，LRC 继续整行高亮。

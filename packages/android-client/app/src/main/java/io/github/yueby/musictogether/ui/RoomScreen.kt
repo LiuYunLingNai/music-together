@@ -259,6 +259,8 @@ fun RoomScreen(
                                     user.role == "owner" || user.isServerAdmin
                                 } == true || appState.accountProfile?.role == "admin",
                                 onSetRole = viewModel::updateRoomMemberRole,
+                                onKick = viewModel::kickRoomMember,
+                                onUnban = viewModel::unbanRoomMember,
                             )
                             RoomOverlay.Accounts -> PlatformPane(appState, viewModel)
                             RoomOverlay.AccountSettings -> AccountSettingsPane(appState, viewModel)

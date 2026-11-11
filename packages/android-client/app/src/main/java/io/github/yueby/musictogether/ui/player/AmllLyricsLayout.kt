@@ -139,7 +139,7 @@ internal fun shouldRevealAmllBackground(
 ): Boolean = active || readingMode
 
 internal fun shouldUseAmllWordAnimation(source: String?): Boolean =
-    source in setOf("ttml", "wordByWord", "yrc")
+    source?.substringAfterLast(':') in setOf("ttml", "wordByWord", "yrc", "qrc")
 
 internal fun initialAmllListIndex(
     focusedListIndex: Int,

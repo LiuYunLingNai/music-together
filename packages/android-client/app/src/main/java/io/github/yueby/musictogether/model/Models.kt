@@ -224,6 +224,7 @@ data class PlayState(
     val currentTime: Double = 0.0,
     val serverTimestamp: Long = 0L,
     val serverTimeToExecute: Long? = null,
+    val revision: Long? = null,
 )
 
 @Immutable
@@ -244,6 +245,8 @@ data class RoomState(
     val audioQuality: String,
     val users: List<User>,
     val members: List<RoomMember> = emptyList(),
+    val bannedMembers: List<RoomBan>? = null,
+    val hasMemberRoster: Boolean = false,
     val queue: List<Track>,
     val currentTrack: Track?,
     val playState: PlayState,
@@ -348,6 +351,8 @@ data class MyPlatformAuth(
     val vipType: Int = 0,
     val vipLabel: String? = null,
     val vipLevel: Int? = null,
+    val shareWithRoom: Boolean? = null,
+    val reportListening: Boolean? = null,
 )
 
 @Immutable
@@ -419,6 +424,7 @@ data class QrLoginState(
 
 @Immutable
 data class PlatformHubState(
+    val pendingPreferences: Set<String> = emptySet(),
     val authStatus: List<PlatformAuthStatus> = emptyList(),
     val myAuth: List<MyPlatformAuth> = emptyList(),
     val statusLoaded: Boolean = false,
@@ -474,6 +480,7 @@ data class AppState(
     val connectionStatus: ConnectionStatus = ConnectionStatus.Disconnected,
     val rooms: List<RoomListItem> = emptyList(),
     val room: RoomState? = null,
+    val playbackFailure: PlaybackFailureState? = null,
     val userId: String? = null,
     val accountProfile: AccountProfile? = null,
     val accountLoading: Boolean = false,
@@ -486,6 +493,8 @@ data class AppState(
     val messages: List<ChatMessage> = emptyList(),
     val chatUnreadCount: Int = 0,
     val searchResults: List<Track> = emptyList(),
+    val unifiedSearchGroups: List<UnifiedSearchGroup> = emptyList(),
+    val searchFailedSources: List<String> = emptyList(),
     val searchLoading: Boolean = false,
     val searchLoadingMore: Boolean = false,
     val searchHasSearched: Boolean = false,
