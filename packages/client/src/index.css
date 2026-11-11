@@ -799,19 +799,18 @@ body[data-room-cover-tint='true'] {
     }
   }
 
-  /* 过渡提示：交叉淡化时进度条逐渐亮起辉光，时间行中央显示「过渡」。
-     入场/退场复用全局 SMOOTH_EASE 并刻意拉长；辉光从条面「涨」起来再收回去，
-     呼吸与波浪只动 opacity / transform，渐变与 blur 是静态的，落在合成层上。 */
+  /* 过渡提示：交叉淡化时进度条本体随出歌节拍缓慢呼吸，下垫一层很淡的呼吸柔光，
+     时间行中央「过渡」同拍明灭。只动 opacity / transform，渐变与 blur 是静态的。 */
   .mt-transition-glow {
     position: absolute;
     inset-inline: 0;
     top: 50%;
     display: block;
-    height: 14px;
+    height: 12px;
     border-radius: 999px;
     pointer-events: none;
     opacity: 0;
-    transform: translateY(-50%) scaleY(0.65);
+    transform: translateY(-50%) scaleY(0.7);
     transform-origin: center;
     transition:
       opacity 1100ms cubic-bezier(0.4, 0, 0.2, 1),
@@ -826,40 +825,12 @@ body[data-room-cover-tint='true'] {
     background: linear-gradient(
       90deg,
       transparent 0%,
-      color-mix(in oklab, var(--primary) 60%, transparent) 12%,
-      color-mix(in oklab, var(--primary) 30%, transparent) 76%,
+      color-mix(in oklab, var(--primary) 30%, transparent) 14%,
+      color-mix(in oklab, var(--primary) 16%, transparent) 76%,
       transparent 100%
     );
     filter: blur(7px);
     animation: mt-transition-breathe var(--mt-transition-pulse, 2.4s) ease-in-out infinite;
-    animation-play-state: paused;
-  }
-
-  /* 从左到右掠过的波纹：只平移一条柔光带。 */
-  .mt-transition-glow-wave {
-    position: absolute;
-    inset: 0;
-    overflow: hidden;
-    border-radius: inherit;
-  }
-
-  .mt-transition-glow-wave-band {
-    position: absolute;
-    inset-block: 1px;
-    left: 0;
-    width: 52%;
-    border-radius: 999px;
-    background: linear-gradient(
-      90deg,
-      transparent,
-      color-mix(in oklab, var(--foreground) 85%, transparent),
-      transparent
-    );
-    filter: blur(3px);
-    opacity: 0.9;
-    transform: translateX(-160%);
-    /* 周期由组件按过渡时长均分，收场时这一趟恰好走完、柔光带停在条外。 */
-    animation: mt-transition-wave var(--mt-transition-wave, 2.8s) linear infinite;
     animation-play-state: paused;
   }
 
@@ -871,9 +842,7 @@ body[data-room-cover-tint='true'] {
       transform 900ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
-  /* 过渡期间呼吸与波纹继续跑；收场时随属性一起暂停。 */
   .mt-progress[data-transition] .mt-transition-glow-inner,
-  .mt-progress[data-transition] .mt-transition-glow-wave-band,
   .mt-progress[data-transition] .mt-transition-label-inner {
     animation-play-state: running;
   }
@@ -911,7 +880,7 @@ body[data-room-cover-tint='true'] {
   @keyframes mt-transition-breathe {
     0%,
     100% {
-      opacity: 0.5;
+      opacity: 0.35;
     }
 
     50% {
@@ -922,22 +891,11 @@ body[data-room-cover-tint='true'] {
   @keyframes mt-transition-label-breathe {
     0%,
     100% {
-      opacity: 0.72;
+      opacity: 0.6;
     }
 
     50% {
       opacity: 1;
-    }
-  }
-
-  @keyframes mt-transition-wave {
-    0% {
-      transform: translateX(-160%);
-    }
-
-    52%,
-    100% {
-      transform: translateX(260%);
     }
   }
 
@@ -950,12 +908,7 @@ body[data-room-cover-tint='true'] {
 
     .mt-progress[data-transition] .mt-transition-glow-inner {
       animation: none;
-      opacity: 0.8;
-    }
-
-    .mt-progress[data-transition] .mt-transition-glow-wave-band {
-      animation: none;
-      opacity: 0;
+      opacity: 0.6;
     }
 
     .mt-progress[data-transition] .mt-transition-label-inner {

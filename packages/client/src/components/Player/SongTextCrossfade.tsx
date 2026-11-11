@@ -1,5 +1,5 @@
 import { animate, motion, useMotionValue, useTransform } from 'motion/react'
-import { useLayoutEffect, useRef } from 'react'
+import { useLayoutEffect, useRef, type ReactNode } from 'react'
 import { MarqueeText } from '@/components/ui/marquee-text'
 import { cn } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -13,10 +13,12 @@ interface SongTextCrossfadeProps {
   /** 同一行文字的上一条；null 表示首帧或无需交接。 */
   from: string | null
   token: number
+  /** 当前文字的可交互渲染（如可点击的歌手名）；交接动画的旧字仍用纯文本。 */
+  content?: ReactNode
   className?: string
 }
 
-export function SongTextCrossfade({ text, from, token, className }: SongTextCrossfadeProps) {
+export function SongTextCrossfade({ text, from, token, content, className }: SongTextCrossfadeProps) {
   const progress = useMotionValue(1)
   const incomingOpacity = progress
   const incomingY = useTransform(progress, (v) => (1 - v) * 6)
@@ -43,7 +45,7 @@ export function SongTextCrossfade({ text, from, token, className }: SongTextCros
   return (
     <div className={cn('relative min-w-0', className)}>
       <motion.div style={{ opacity: crossing ? incomingOpacity : 1, y: crossing ? incomingY : 0 }}>
-        <MarqueeText>{text}</MarqueeText>
+        <MarqueeText>{content ?? text}</MarqueeText>
       </motion.div>
       {crossing && (
         <motion.div

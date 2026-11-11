@@ -172,6 +172,24 @@ function ClassicSettings() {
         </SettingRow>
       </div>
 
+      <SettingRow
+        label="频谱替代控制按钮"
+        description="用音频频谱替换封面下方的播放控制行（AMLL 的 FFT 控制模式）。开启后界面上没有播放/切歌按钮，仍可用空格等快捷键操作。"
+        onReset={s.classicControlsFft !== s.classicControlsFftDefault ? s.resetClassicControlsFft : undefined}
+      >
+        <Switch checked={s.classicControlsFft} onCheckedChange={s.setClassicControlsFft} />
+      </SettingRow>
+
+      <SettingRow
+        label="歌词自动对齐封面"
+        description="横屏时歌词锚点跟随封面中心，竖屏时对齐到顶部歌曲信息下方（AMLL 默认行为）；关闭后使用下方的手动对齐设置。"
+        onReset={
+          s.classicLyricAutoAlign !== s.classicLyricAutoAlignDefault ? s.resetClassicLyricAutoAlign : undefined
+        }
+      >
+        <Switch checked={s.classicLyricAutoAlign} onCheckedChange={s.setClassicLyricAutoAlign} />
+      </SettingRow>
+
       <AmllLyricSettingsGroup family="classic" />
     </>
   )

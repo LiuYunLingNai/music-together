@@ -32,9 +32,11 @@ interface LyricDisplayProps {
   family?: 'classic' | 'mineradio'
   /** 宿主明确知道歌词不可见时传入，暂停 AMLL 内部动画。 */
   disabled?: boolean
+  /** 舞台按布局算出的对齐（AMLL 自动对齐）；传入时覆盖设置里的锚点与位置。 */
+  align?: { anchor: 'top' | 'center' | 'bottom'; position: number } | null
 }
 
-export function LyricDisplay({ onSeek, seekEnabled = true, family = 'classic', disabled = false }: LyricDisplayProps) {
+export function LyricDisplay({ onSeek, seekEnabled = true, family = 'classic', disabled = false, align = null }: LyricDisplayProps) {
   const mineradio = family === 'mineradio'
   const [documentVisible, setDocumentVisible] = useState(() => document.visibilityState !== 'hidden')
   useEffect(() => {
@@ -191,8 +193,8 @@ export function LyricDisplay({ onSeek, seekEnabled = true, family = 'classic', d
         lyricLines={displayLines}
         playing={isPlaying}
         disabled={disabled || !documentVisible}
-        alignAnchor={alignAnchor}
-        alignPosition={alignPosition}
+        alignAnchor={align?.anchor ?? alignAnchor}
+        alignPosition={align?.position ?? alignPosition}
         enableSpring={enableSpring}
         enableBlur={enableBlur}
         enableScale={enableScale}

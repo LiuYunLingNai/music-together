@@ -1,3 +1,4 @@
+import { ArtistNames } from '@/components/ArtistNames'
 import { useContainerPortrait } from '@/hooks/useContainerPortrait'
 import { useCoverWidth } from '@/hooks/useCoverWidth'
 import { useDynamicCover } from '@/hooks/useDynamicCover'
@@ -11,7 +12,7 @@ import { usePlayerStore } from '@/stores/playerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { AmllBackgroundRender } from './AmllBackgroundRender'
 import { VoteBanner } from '../../Vote/VoteBanner'
 import { SONG_INFO_TRANSITION } from '../constants'
@@ -43,6 +44,11 @@ const IMMERSIVE_MASK = {
 
 /** 上游 VerticalLayout 的封面形变弹簧。 */
 const COVER_SPRING = { type: 'spring' as const, stiffness: 200, damping: 30 }
+
+/** 上游 Cover 暂停缩小：仅「竖屏沉浸封面 + 静态图 + 暂停」时触发，比例 0.75。 */
+const PAUSE_SHRINK_SCALE = 0.75
+const COVER_PAUSE_TRANSITION = { duration: 0.6, ease: [0.4, 0.2, 0.1, 1] as const }
+const COVER_RESUME_TRANSITION = { duration: 0.5, ease: [0.3, 0.2, 0.2, 1.4] as const }
 
 const COMPACT_COVER_PX = 56
 
@@ -88,12 +94,14 @@ export function ClassicPlayerStage({
   onStartVote,
 }: ClassicPlayerStageProps) {
   const currentTrack = usePlayerStore((s) => s.currentTrack)
+  const isPlaying = usePlayerStore((s) => s.isPlaying)
   const bgFps = useSettingsStore((s) => s.bgFps)
   const bgFlowSpeed = useSettingsStore((s) => s.bgFlowSpeed)
   const bgRenderScale = useSettingsStore((s) => s.bgRenderScale)
   const bgRenderer = useSettingsStore((s) => s.bgRenderer)
   const bgCssBackground = useSettingsStore((s) => s.bgCssBackground)
   const immersiveCover = useSettingsStore((s) => s.classicImmersiveCover)
+  const autoAlign = useSettingsStore((s) => s.classicLyricAutoAlign)
   const dynamicCoverEnabled = useSettingsStore((s) => s.dynamicCoverEnabled)
   const { ref: playerRef, isPortrait } = useContainerPortrait()
   const [documentVisible, setDocumentVisible] = useState(() => document.visibilityState !== 'hidden')
@@ -155,8 +163,40 @@ export function ClassicPlayerStage({
 
   // 竖屏沉浸：上级设置强制开启，视频封面则自动进入（上游 Auto 模式）。
   const immersive = isPortrait && (immersiveCover || coverIsVideo) && !lyricExpanded
+  const pauseShrink = immersive && !isPlaying && !coverIsVideo
+  const desktopCoverRef = useRef<HTMLDivElement>(null)
+  const desktopLyricRef = useRef<HTMLDivElement>(null)
+  const [coverCenterRatio, setCoverCenterRatio] = useState<number | null>(null)
+  // 上游横向布局：歌词锚点取封面中心在歌词区内的相对高度；竖屏则贴顶（歌曲信息下方）。
+  useLayoutEffect(() => {
+    const cover = desktopCoverRef.current
+    const lyricBox = desktopLyricRef.current
+    if (isPortrait || !autoAlign || !cover || !lyricBox) return
+    const update = () => {
+      const c = cover.getBoundingClientRect()
+      const l = lyricBox.getBoundingClientRect()
+      if (l.height <= 0) return
+      setCoverCenterRatio(Math.min(1, Math.max(0, (c.top + c.height / 2 - l.top) / l.height)))
+    }
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(cover)
+    ro.observe(lyricBox)
+    return () => ro.disconnect()
+  }, [isPortrait, autoAlign])
+  const lyricAlign = !autoAlign
+    ? null
+    : isPortrait
+      ? ({ anchor: 'top', position: 0.1 } as const)
+      : coverCenterRatio === null
+        ? null
+        : ({ anchor: 'center', position: coverCenterRatio } as const)
   const stageColumnRef = useRef<HTMLDivElement>(null)
-  const { frame: coverFrame, bigSlotRef, smallSlotRef } = usePortraitCoverFrame({
+  const {
+    frame: coverFrame,
+    bigSlotRef,
+    smallSlotRef,
+  } = usePortraitCoverFrame({
     lyricExpanded,
     immersive,
     enabled: isPortrait,
@@ -233,13 +273,13 @@ export function ClassicPlayerStage({
       >
         <div
           ref={playerRef}
-            className={cn('flex h-full', isPortrait ? 'flex-col' : 'flex-row gap-[clamp(24px,3vw,48px)]')}
-          >
-            {/* ----------------------------------------------------------------- */}
-            {/* Mobile layout: dual-mode (cover view / lyric view)                */}
-            {/* ----------------------------------------------------------------- */}
-            {isPortrait ? (
-              <LayoutGroup>
+          className={cn('flex h-full', isPortrait ? 'flex-col' : 'flex-row gap-[clamp(24px,3vw,48px)]')}
+        >
+          {/* ----------------------------------------------------------------- */}
+          {/* Mobile layout: dual-mode (cover view / lyric view)                */}
+          {/* ----------------------------------------------------------------- */}
+          {isPortrait ? (
+            <LayoutGroup>
               <div
                 ref={stageColumnRef}
                 className={cn(
@@ -252,9 +292,12 @@ export function ClassicPlayerStage({
                 {coverFrame && (
                   <motion.div
                     className="absolute z-0 cursor-pointer overflow-hidden bg-secondary shadow-lg shadow-black/15 will-change-[left,top,width,height]"
-                    animate={coverFrame}
+                    animate={{ ...coverFrame, scale: pauseShrink ? PAUSE_SHRINK_SCALE : 1 }}
                     initial={false}
-                    transition={COVER_SPRING}
+                    transition={{
+                      ...COVER_SPRING,
+                      scale: pauseShrink ? COVER_PAUSE_TRANSITION : COVER_RESUME_TRANSITION,
+                    }}
                     onClick={toggleLyricView}
                     style={immersive && !lyricExpanded ? IMMERSIVE_MASK : undefined}
                   >
@@ -285,6 +328,7 @@ export function ClassicPlayerStage({
                             text={handoff.to ? handoff.to.artist.join(' / ') : '...'}
                             from={handoff.from ? handoff.from.artist.join(' / ') : null}
                             token={handoff.token}
+                            content={handoff.to ? <ArtistNames track={handoff.to} className="hover:text-white" /> : undefined}
                           />
                         </div>
                       </motion.div>
@@ -304,7 +348,7 @@ export function ClassicPlayerStage({
                       className="relative z-10 min-h-0 w-full flex-1 overflow-hidden"
                       style={LYRIC_MASK_STYLE}
                     >
-                      <LyricDisplay onSeek={onLyricSeek} />
+                      <LyricDisplay onSeek={onLyricSeek} align={lyricAlign} />
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -328,50 +372,51 @@ export function ClassicPlayerStage({
                   </div>
                 )}
               </div>
-              </LayoutGroup>
-            ) : (
-              // ---------------------------------------------------------------
-              // Desktop layout: left panel (cover + info + controls) + right lyrics
-              // ---------------------------------------------------------------
-              <>
-                <div className="relative flex w-[40%] flex-col items-center gap-[clamp(12px,3vh,32px)] transition-all duration-300">
-                  {/* 1. Cover — flex-1 fills remaining space, centered */}
+            </LayoutGroup>
+          ) : (
+            // ---------------------------------------------------------------
+            // Desktop layout: left panel (cover + info + controls) + right lyrics
+            // ---------------------------------------------------------------
+            <>
+              <div className="relative flex w-[40%] flex-col items-center gap-[clamp(12px,3vh,32px)] transition-all duration-300">
+                {/* 1. Cover — flex-1 fills remaining space, centered */}
+                <div
+                  ref={coverAreaRef}
+                  className="min-h-0 w-full flex-1 flex items-center justify-center"
+                  style={{ containerType: 'size' }}
+                >
                   <div
-                    ref={coverAreaRef}
-                    className="min-h-0 w-full flex-1 flex items-center justify-center"
-                    style={{ containerType: 'size' }}
+                    ref={desktopCoverRef}
+                    className="relative aspect-square overflow-hidden rounded-3xl shadow-lg shadow-black/15"
+                    style={{
+                      width: coverWidth ? `min(${coverWidth}px, 100cqw, 100cqh)` : 'min(100cqw, 100cqh)',
+                    }}
                   >
-                    <div
-                      className="relative aspect-square overflow-hidden rounded-3xl shadow-lg shadow-black/15"
-                      style={{
-                        width: coverWidth ? `min(${coverWidth}px, 100cqw, 100cqh)` : 'min(100cqw, 100cqh)',
-                      }}
-                    >
-                      <CoverArt track={currentTrack} videoUrl={videoCoverUrl} />
+                    <CoverArt track={currentTrack} videoUrl={videoCoverUrl} />
+                  </div>
+                </div>
+                {/* 2. Song info + action buttons */}
+                <div className="w-full shrink-0 mx-auto" style={desktopCoverMaxStyle}>
+                  <SongInfoBar {...songInfoProps} />
+                </div>
+                {/* 3. Controls */}
+                <div className="w-full shrink-0 mx-auto" style={desktopCoverMaxStyle}>
+                  <PlayerControls {...playerControlsProps} />
+                </div>
+                {activeVote && (
+                  <div className="absolute inset-x-0 bottom-0 z-20 flex justify-center px-2 pb-2">
+                    <div className="w-full">
+                      <VoteBanner vote={activeVote} onCastVote={onCastVote} />
                     </div>
                   </div>
-                  {/* 2. Song info + action buttons */}
-                  <div className="w-full shrink-0 mx-auto" style={desktopCoverMaxStyle}>
-                    <SongInfoBar {...songInfoProps} />
-                  </div>
-                  {/* 3. Controls */}
-                  <div className="w-full shrink-0 mx-auto" style={desktopCoverMaxStyle}>
-                    <PlayerControls {...playerControlsProps} />
-                  </div>
-                  {activeVote && (
-                    <div className="absolute inset-x-0 bottom-0 z-20 flex justify-center px-2 pb-2">
-                      <div className="w-full">
-                        <VoteBanner vote={activeVote} onCastVote={onCastVote} />
-                      </div>
-                    </div>
-                  )}
-                </div>
-                <div className="min-h-0 w-[60%] overflow-hidden" style={LYRIC_MASK_STYLE}>
-                  <LyricDisplay onSeek={onLyricSeek} />
-                </div>
-              </>
-            )}
-          </div>
+                )}
+              </div>
+              <div ref={desktopLyricRef} className="min-h-0 w-[60%] overflow-hidden" style={LYRIC_MASK_STYLE}>
+                <LyricDisplay onSeek={onLyricSeek} align={lyricAlign} />
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </div>
   )

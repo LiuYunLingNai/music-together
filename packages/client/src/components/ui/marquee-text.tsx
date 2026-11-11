@@ -33,7 +33,8 @@ export function MarqueeText({ children, className }: MarqueeTextProps) {
     ro.observe(text)
 
     return () => ro.disconnect()
-  }, [children])
+    // 同时观察容器与文字尺寸即可覆盖内容与宽度变化；元素型 children 每次渲染都是新对象，不能作为依赖。
+  }, [])
 
   const duration = overflow > 0 ? Math.max(5, 4 + overflow / 30) : 0
 

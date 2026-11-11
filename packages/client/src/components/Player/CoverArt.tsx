@@ -53,13 +53,16 @@ function LoopingVideo({ src, onReady, onError }: { src: string; onReady: () => v
       setActive(next)
       setPrevious(prev)
       // 淡出结束：旧视频降到最底层并停掉解码。
-      window.setTimeout(() => {
-        if (!mountedRef.current) return
-        const outgoing = videos.current[prev]
-        if (outgoing && activeRef.current !== prev) outgoing.pause()
-        previousRef.current = null
-        setPrevious(null)
-      }, SEAM_FADE_SEC * 1000 + 60)
+      window.setTimeout(
+        () => {
+          if (!mountedRef.current) return
+          const outgoing = videos.current[prev]
+          if (outgoing && activeRef.current !== prev) outgoing.pause()
+          previousRef.current = null
+          setPrevious(null)
+        },
+        SEAM_FADE_SEC * 1000 + 60,
+      )
     }
 
     try {
@@ -165,10 +168,7 @@ function LoopingVideo({ src, onReady, onError }: { src: string; onReady: () => v
               const video = videos.current[index]
               if (video) video.currentTime = 0
             }}
-            className={cn(
-              'absolute inset-0 h-full w-full object-cover',
-              isPrevious ? 'opacity-0' : 'opacity-100',
-            )}
+            className={cn('absolute inset-0 h-full w-full object-cover', isPrevious ? 'opacity-0' : 'opacity-100')}
             style={{
               transitionProperty: 'opacity',
               transitionTimingFunction: 'linear',
@@ -210,13 +210,11 @@ export function CoverArt({ track, videoUrl = null }: CoverArtProps) {
   const videoReady = videoUrl !== null && readyVideoUrl === videoUrl
   // 快速连续切歌时，上一张已经加载完成的封面可以直接当底层：
   // 不能等 0.5s 淡入结束才提升，否则会短暂露出更早的那张。
-  const latestLoadedSrc =
-    loadedSrc && loadedSrc !== src && failedSrc !== loadedSrc ? loadedSrc : null
+  const latestLoadedSrc = loadedSrc && loadedSrc !== src && failedSrc !== loadedSrc ? loadedSrc : null
   // 新曲无封面或封面加载失败时不能留着底层旧图，否则会一直显示上一首的封面。
   const visibleBaseSrc = src && failedSrc !== src ? (latestLoadedSrc ?? baseSrc) : null
 
-  const reducedMotion =
-    typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  const reducedMotion = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
   const fadeDuration = handoffEnabled && !reducedMotion ? CROSSFADE_SEC : 0
 
   const layerSrcs = [visibleBaseSrc, incomingSrc].filter(
@@ -265,10 +263,7 @@ export function CoverArt({ track, videoUrl = null }: CoverArtProps) {
 
       {videoUrl && (
         <div
-          className={cn(
-            'absolute inset-0 transition-opacity duration-500',
-            videoReady ? 'opacity-100' : 'opacity-0',
-          )}
+          className={cn('absolute inset-0 transition-opacity duration-500', videoReady ? 'opacity-100' : 'opacity-0')}
         >
           <LoopingVideo
             key={videoUrl}

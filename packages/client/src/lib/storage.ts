@@ -318,10 +318,12 @@ export function getBgRenderScaleDefault(): number {
 /** 所有持久化设置项的默认值 — 供 store 层的 resettable 工厂使用 */
 export const SETTING_DEFAULTS = {
   playbackTempoSyncEnabled: false,
-  playbackHardSeekSyncEnabled: false,
+  playbackHardSeekSyncEnabled: true,
   transitionCueEnabled: true,
   songHandoffAnimation: true,
   classicImmersiveCover: false,
+  classicLyricAutoAlign: true,
+  classicControlsFft: false,
   dynamicCoverEnabled: true,
   /** 进度时间显示剩余还是已播放（AMLL Player 同款点击切换）。 */
   showRemainingTime: true,
@@ -438,7 +440,7 @@ export const storage = {
   // Playback synchronization
   getPlaybackTempoSyncEnabled: () => safeGet('playbackTempoSyncEnabled') === 'true',
   setPlaybackTempoSyncEnabled: (v: boolean) => safeSet('playbackTempoSyncEnabled', String(v)),
-  getPlaybackHardSeekSyncEnabled: () => safeGet('playbackHardSeekSyncEnabled') === 'true',
+  getPlaybackHardSeekSyncEnabled: () => safeGet('playbackHardSeekSyncEnabled') !== 'false',
   setPlaybackHardSeekSyncEnabled: (v: boolean) => safeSet('playbackHardSeekSyncEnabled', String(v)),
   getTransitionCueEnabled: () => safeGet('transitionCueEnabled') !== 'false',
   setTransitionCueEnabled: (v: boolean) => safeSet('transitionCueEnabled', String(v)),
@@ -446,6 +448,10 @@ export const storage = {
   setSongHandoffAnimation: (v: boolean) => safeSet('songHandoffAnimation', String(v)),
   getClassicImmersiveCover: () => safeGet('classicImmersiveCover') === 'true',
   setClassicImmersiveCover: (v: boolean) => safeSet('classicImmersiveCover', String(v)),
+  getClassicLyricAutoAlign: () => safeGet('classicLyricAutoAlign') !== 'false',
+  setClassicLyricAutoAlign: (v: boolean) => safeSet('classicLyricAutoAlign', String(v)),
+  getClassicControlsFft: () => safeGet('classicControlsFft') === 'true',
+  setClassicControlsFft: (v: boolean) => safeSet('classicControlsFft', String(v)),
   getDynamicCoverEnabled: () => safeGet('dynamicCoverEnabled') !== 'false',
   setDynamicCoverEnabled: (v: boolean) => safeSet('dynamicCoverEnabled', String(v)),
   getShowRemainingTime: () => readBool('showRemainingTime', true),

@@ -1,23 +1,20 @@
 import { Button } from '@/components/ui/button'
-import { Slider } from '@/components/ui/slider'
+import { AudioFFTVisualizer } from './AudioFFTVisualizer'
+import { BouncingSlider } from './BouncingSlider'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { formatTime } from '@/lib/format'
-import {
-  getActiveTransitionCue,
-  shouldDrawCue,
-  subscribeTransitionCue,
-} from '@/lib/automix/transitionCue'
+import { getActiveTransitionCue, shouldDrawCue, subscribeTransitionCue } from '@/lib/automix/transitionCue'
 import { AbilityContext } from '@/providers/ability-context'
 import { useSocketContext } from '@/providers/socket-context'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
 import { useSettingsStore } from '@/stores/settingsStore'
+import type { CSSProperties } from 'react'
 import type { PlayMode, VoteAction } from '@music-together/shared'
 import { EVENTS, TIMING } from '@music-together/shared'
 import { ArrowRightToLine, ListMusic, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { memo, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
-import type { CSSProperties } from 'react'
 
 /** Design-time width (px) at which the controls are laid out — CSS zoom scales from this baseline */
 const DESIGN_WIDTH = 300
@@ -47,20 +44,17 @@ interface ProgressControlProps {
   onSeek: (time: number) => void
 }
 
-/** 波纹的名义周期；每个过渡切成整数趟，最后一趟正好在过渡结束时走完。 */
-const WAVE_NOMINAL_SEC = 2.8
-
 /** Keep the 10 Hz playback clock isolated from the buttons and tooltips. */
 const ProgressControl = memo(function ProgressControl({ disabled, canSeek, onSeek }: ProgressControlProps) {
   const currentTime = usePlayerStore((s) => s.currentTime)
+  const isPlaying = usePlayerStore((s) => s.isPlaying)
   const duration = usePlayerStore((s) => s.duration)
   const [isSeeking, setIsSeeking] = useState(false)
   const [seekTime, setSeekTime] = useState(0)
   /**
-   * 过渡提示：交叉淡化期间进度条亮起辉光、时间行中间显示「过渡」。
-   *
-   * 订阅是事件驱动的 —— 一次过渡只在开场/收场各多出两次渲染；呼吸、波纹与
-   * 淡入淡出全部交给 CSS（只动 opacity / transform），这里不跑 rAF、不读时钟。
+   * 过渡提示：交叉淡化期间进度条本体随出歌节拍缓慢呼吸（粗细与亮度），
+   * 下方垫一层很淡的呼吸柔光，时间行中央「过渡」同拍明灭。全部由 CSS 驱动，
+   * 只动 opacity / transform，这里不跑 rAF。
    */
   const cue = useSyncExternalStore(subscribeTransitionCue, getActiveTransitionCue, getActiveTransitionCue)
   const cueEnabled = useSettingsStore((s) => s.transitionCueEnabled)
@@ -71,48 +65,28 @@ const ProgressControl = memo(function ProgressControl({ disabled, canSeek, onSee
   // 与出歌速度同步呼吸：四拍一个来回；没测到 BPM 时用固定的 2.4 秒。
   const pulseSec = Math.min(3.2, Math.max(1.4, (cue?.periodSec ?? 0.6) * 4))
 
-  /**
-   * 波纹的周期按过渡时长均分：过渡结束时最后一趟刚好走完、柔光带停在条外，
-   * 收场因此不会出现波到一半突然消失。周期改变时重挂节点，从条首重新出发。
-   */
-  const cueSeconds = cue?.seconds ?? WAVE_NOMINAL_SEC
-  const waveSec = cueSeconds / Math.max(1, Math.round(cueSeconds / WAVE_NOMINAL_SEC))
-
   return (
     <div
       className="mt-progress flex w-full flex-col gap-1"
       data-transition={transitioning ? 'true' : undefined}
-      style={
-        {
-          '--mt-transition-pulse': `${pulseSec}s`,
-          '--mt-transition-wave': `${waveSec}s`,
-        } as CSSProperties
-      }
+      style={{ '--mt-transition-pulse': `${pulseSec}s` } as CSSProperties}
     >
       <div className="relative">
         <span aria-hidden="true" className="mt-transition-glow">
           <span className="mt-transition-glow-inner" />
-          <span className="mt-transition-glow-wave">
-            <span key={cue?.startsAt ?? 0} className="mt-transition-glow-wave-band" />
-          </span>
         </span>
-        <Slider
-          value={[duration > 0 ? ((isSeeking ? seekTime : currentTime) / duration) * 100 : 0]}
-          max={100}
-          step={0.1}
-          alignRangeWithThumb
+        <BouncingSlider
+          value={currentTime}
+          max={duration}
+          isPlaying={isPlaying}
+          breathing={transitioning}
+          breathPeriodSec={pulseSec}
           disabled={disabled || !canSeek}
-          onValueChange={(value) => {
-            if (duration > 0) {
-              setIsSeeking(true)
-              setSeekTime((value[0] / 100) * duration)
-            }
+          onPreview={setSeekTime}
+          onSeeking={setIsSeeking}
+          onCommit={(time) => {
+            if (duration > 0) onSeek(time)
           }}
-          onValueCommit={(value) => {
-            if (duration > 0) onSeek((value[0] / 100) * duration)
-            setIsSeeking(false)
-          }}
-          className="w-full"
         />
       </div>
       <div className="relative flex w-full justify-between">
@@ -122,9 +96,7 @@ const ProgressControl = memo(function ProgressControl({ disabled, canSeek, onSee
           className="text-xs tabular-nums text-white/50 transition-colors hover:text-white/80"
           aria-label={showRemainingTime ? '显示已播放时间' : '显示剩余时间'}
         >
-          {showRemainingTime
-            ? `-${formatTime(Math.max(0, duration - position))}`
-            : formatTime(position)}
+          {showRemainingTime ? `-${formatTime(Math.max(0, duration - position))}` : formatTime(position)}
         </button>
         <span aria-hidden={!transitioning} className="mt-transition-label">
           <span className="mt-transition-label-inner">过渡</span>
@@ -146,6 +118,7 @@ export const PlayerControls = memo(function PlayerControls({
 }: PlayerControlsProps) {
   const { socket } = useSocketContext()
   const isPlaying = usePlayerStore((s) => s.isPlaying)
+  const controlsFft = useSettingsStore((s) => s.classicControlsFft)
   const currentTrack = usePlayerStore((s) => s.currentTrack)
   const queueLength = useRoomStore((s) => s.room?.queue?.length ?? 0)
   const playMode = useRoomStore((s) => s.room?.playMode ?? 'sequential')
@@ -229,124 +202,128 @@ export const PlayerControls = memo(function PlayerControls({
         <ProgressControl disabled={disabled} canSeek={canSeek} onSeek={onSeek} />
 
         {/* 2. Controls row — left/right flex-1 keeps center truly centered */}
-        <div className="flex w-full items-center">
-          {/* Left: play mode */}
-          <div className="flex flex-1 items-center justify-start">
-            <Tooltip delayDuration={300}>
-              <TooltipTrigger asChild>
-                <motion.div whileTap={{ scale: 0.9 }}>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-9 w-9 text-primary/75 hover:bg-primary/10 hover:text-primary"
-                    onClick={handlePlayModeToggle}
-                    disabled={!canSetMode && !canVote}
-                    aria-label={modeConfig.label}
-                  >
-                    <AnimatePresence mode="wait" initial={false}>
-                      <motion.div
-                        key={playMode}
-                        initial={{ scale: 0.6, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        exit={{ scale: 0.6, opacity: 0 }}
-                        transition={{ duration: 0.15 }}
-                      >
-                        <ModeIcon className="size-5" />
-                      </motion.div>
-                    </AnimatePresence>
-                  </Button>
-                </motion.div>
-              </TooltipTrigger>
-              <TooltipContent>{modeConfig.label}</TooltipContent>
-            </Tooltip>
+        {controlsFft ? (
+          <AudioFFTVisualizer className="w-full" style={{ height: 48 }} />
+        ) : (
+          <div className="flex w-full items-center">
+            {/* Left: play mode */}
+            <div className="flex flex-1 items-center justify-start">
+              <Tooltip delayDuration={300}>
+                <TooltipTrigger asChild>
+                  <motion.div whileTap={{ scale: 0.9 }}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-9 w-9 text-primary/75 hover:bg-primary/10 hover:text-primary"
+                      onClick={handlePlayModeToggle}
+                      disabled={!canSetMode && !canVote}
+                      aria-label={modeConfig.label}
+                    >
+                      <AnimatePresence mode="wait" initial={false}>
+                        <motion.div
+                          key={playMode}
+                          initial={{ scale: 0.6, opacity: 0 }}
+                          animate={{ scale: 1, opacity: 1 }}
+                          exit={{ scale: 0.6, opacity: 0 }}
+                          transition={{ duration: 0.15 }}
+                        >
+                          <ModeIcon className="size-5" />
+                        </motion.div>
+                      </AnimatePresence>
+                    </Button>
+                  </motion.div>
+                </TooltipTrigger>
+                <TooltipContent>{modeConfig.label}</TooltipContent>
+              </Tooltip>
+            </div>
+
+            {/* Center: prev + play/pause + next */}
+            <div className="flex items-center gap-2">
+              <Tooltip delayDuration={300}>
+                <TooltipTrigger asChild>
+                  <motion.div whileTap={{ scale: 0.9 }}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-9 w-9 text-primary/75 hover:bg-primary/10 hover:text-primary"
+                      disabled={disabled || skipCooldown}
+                      onClick={() => handleSkip(onPrev, 'prev')}
+                      aria-label="上一首"
+                    >
+                      <SkipBack className="size-5" fill="currentColor" />
+                    </Button>
+                  </motion.div>
+                </TooltipTrigger>
+                <TooltipContent>上一首</TooltipContent>
+              </Tooltip>
+
+              <Tooltip delayDuration={300}>
+                <TooltipTrigger asChild>
+                  <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.92 }}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-14 w-14 rounded-full bg-primary/20 text-primary hover:bg-primary/30 hover:text-primary"
+                      disabled={disabled || playCooldown}
+                      onClick={handlePlayPause}
+                      aria-label={isPlaying ? '暂停' : '播放'}
+                    >
+                      {isPlaying ? (
+                        <Pause className="size-7" fill="currentColor" />
+                      ) : (
+                        <Play className="ml-0.5 size-7" fill="currentColor" />
+                      )}
+                    </Button>
+                  </motion.div>
+                </TooltipTrigger>
+                <TooltipContent>{isPlaying ? '暂停（空格）' : '播放（空格）'}</TooltipContent>
+              </Tooltip>
+
+              <Tooltip delayDuration={300}>
+                <TooltipTrigger asChild>
+                  <motion.div whileTap={{ scale: 0.9 }}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-9 w-9 text-primary/75 hover:bg-primary/10 hover:text-primary"
+                      disabled={disabled || skipCooldown}
+                      onClick={() => handleSkip(onNext, 'next')}
+                      aria-label="下一首"
+                    >
+                      <SkipForward className="size-5" fill="currentColor" />
+                    </Button>
+                  </motion.div>
+                </TooltipTrigger>
+                <TooltipContent>下一首</TooltipContent>
+              </Tooltip>
+            </div>
+
+            {/* Right: queue */}
+            <div className="flex flex-1 items-center justify-end">
+              <Tooltip delayDuration={300}>
+                <TooltipTrigger asChild>
+                  <motion.div whileTap={{ scale: 0.9 }}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="relative h-9 w-9 text-primary/75 hover:bg-primary/10 hover:text-primary"
+                      onClick={onOpenQueue}
+                      aria-label="播放列表"
+                    >
+                      <ListMusic className="size-5" />
+                      {queueLength > 0 && (
+                        <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-white/90 px-1 text-[10px] font-semibold leading-none text-black">
+                          {queueLength > 99 ? '99+' : queueLength}
+                        </span>
+                      )}
+                    </Button>
+                  </motion.div>
+                </TooltipTrigger>
+                <TooltipContent>播放列表</TooltipContent>
+              </Tooltip>
+            </div>
           </div>
-
-          {/* Center: prev + play/pause + next */}
-          <div className="flex items-center gap-2">
-            <Tooltip delayDuration={300}>
-              <TooltipTrigger asChild>
-                <motion.div whileTap={{ scale: 0.9 }}>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-9 w-9 text-primary/75 hover:bg-primary/10 hover:text-primary"
-                    disabled={disabled || skipCooldown}
-                    onClick={() => handleSkip(onPrev, 'prev')}
-                    aria-label="上一首"
-                  >
-                    <SkipBack className="size-5" fill="currentColor" />
-                  </Button>
-                </motion.div>
-              </TooltipTrigger>
-              <TooltipContent>上一首</TooltipContent>
-            </Tooltip>
-
-            <Tooltip delayDuration={300}>
-              <TooltipTrigger asChild>
-                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.92 }}>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-14 w-14 rounded-full bg-primary/20 text-primary hover:bg-primary/30 hover:text-primary"
-                    disabled={disabled || playCooldown}
-                    onClick={handlePlayPause}
-                    aria-label={isPlaying ? '暂停' : '播放'}
-                  >
-                    {isPlaying ? (
-                      <Pause className="size-7" fill="currentColor" />
-                    ) : (
-                      <Play className="ml-0.5 size-7" fill="currentColor" />
-                    )}
-                  </Button>
-                </motion.div>
-              </TooltipTrigger>
-              <TooltipContent>{isPlaying ? '暂停（空格）' : '播放（空格）'}</TooltipContent>
-            </Tooltip>
-
-            <Tooltip delayDuration={300}>
-              <TooltipTrigger asChild>
-                <motion.div whileTap={{ scale: 0.9 }}>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-9 w-9 text-primary/75 hover:bg-primary/10 hover:text-primary"
-                    disabled={disabled || skipCooldown}
-                    onClick={() => handleSkip(onNext, 'next')}
-                    aria-label="下一首"
-                  >
-                    <SkipForward className="size-5" fill="currentColor" />
-                  </Button>
-                </motion.div>
-              </TooltipTrigger>
-              <TooltipContent>下一首</TooltipContent>
-            </Tooltip>
-          </div>
-
-          {/* Right: queue */}
-          <div className="flex flex-1 items-center justify-end">
-            <Tooltip delayDuration={300}>
-              <TooltipTrigger asChild>
-                <motion.div whileTap={{ scale: 0.9 }}>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="relative h-9 w-9 text-primary/75 hover:bg-primary/10 hover:text-primary"
-                    onClick={onOpenQueue}
-                    aria-label="播放列表"
-                  >
-                    <ListMusic className="size-5" />
-                    {queueLength > 0 && (
-                      <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-white/90 px-1 text-[10px] font-semibold leading-none text-black">
-                        {queueLength > 99 ? '99+' : queueLength}
-                      </span>
-                    )}
-                  </Button>
-                </motion.div>
-              </TooltipTrigger>
-              <TooltipContent>播放列表</TooltipContent>
-            </Tooltip>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   )

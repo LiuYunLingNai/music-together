@@ -1,3 +1,4 @@
+import { ArtistNames } from '@/components/ArtistNames'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Slider } from '@/components/ui/slider'
@@ -110,6 +111,7 @@ export const SongInfoBar = memo(function SongInfoBar({
                 text={handoff.to ? handoff.to.artist.join(' / ') : '点击搜索添加歌曲到队列'}
                 from={handoff.from ? handoff.from.artist.join(' / ') : null}
                 token={handoff.token}
+                content={handoff.to ? <ArtistNames track={handoff.to} className="hover:text-white" /> : undefined}
               />
             </div>
             <QualityBadge

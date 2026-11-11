@@ -75,6 +75,8 @@ type SettingsStore = {
   ResettableFields<'transitionCueEnabled', boolean> &
   ResettableFields<'songHandoffAnimation', boolean> &
   ResettableFields<'classicImmersiveCover', boolean> &
+  ResettableFields<'classicLyricAutoAlign', boolean> &
+  ResettableFields<'classicControlsFft', boolean> &
   ResettableFields<'dynamicCoverEnabled', boolean> &
   ResettableFields<'showRemainingTime', boolean> &
   ResettableFields<'lyricFontFamily', string> &
@@ -203,6 +205,8 @@ export const useSettingsStore = create<SettingsStore>((set) => {
     ...resettable('transitionCueEnabled', storage.getTransitionCueEnabled, storage.setTransitionCueEnabled),
     ...resettable('songHandoffAnimation', storage.getSongHandoffAnimation, storage.setSongHandoffAnimation),
     ...resettable('classicImmersiveCover', storage.getClassicImmersiveCover, storage.setClassicImmersiveCover),
+    ...resettable('classicLyricAutoAlign', storage.getClassicLyricAutoAlign, storage.setClassicLyricAutoAlign),
+    ...resettable('classicControlsFft', storage.getClassicControlsFft, storage.setClassicControlsFft),
     ...resettable('dynamicCoverEnabled', storage.getDynamicCoverEnabled, storage.setDynamicCoverEnabled),
     ...resettable('showRemainingTime', storage.getShowRemainingTime, storage.setShowRemainingTime),
     ...resettable('lyricFontFamily', storage.getLyricFontFamily, storage.setLyricFontFamily),
