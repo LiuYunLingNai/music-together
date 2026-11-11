@@ -29,10 +29,10 @@ Android 客户端包含以下主要能力：
 
 | 项目 | 当前配置 |
 | --- | --- |
-| 语言 | Kotlin 2.4.10，Java Virtual Machine (JVM) 17 |
-| 构建 | Gradle 9.5.0，Android Gradle Plugin 9.3.1 |
+| 语言 | Kotlin 2.4.20，Java Virtual Machine (JVM) 21 |
+| 构建 | Gradle 9.7.1，Android Gradle Plugin 9.4.1 |
 | Android | `minSdk 26`，`targetSdk 36`，`compileSdk 37` |
-| 用户界面 | Jetpack Compose，MIUIX 0.9.3 |
+| 用户界面 | Jetpack Compose，MIUIX 0.9.4 |
 | 网络 | OkHttp 4.12，HTTP API，原生 WebSocket |
 | 播放 | Media3 ExoPlayer，MediaSessionService |
 | 图片与取色 | Coil 3，AndroidX Palette |
@@ -74,6 +74,8 @@ Kotlin 入口和功能包位于应用主命名空间：
 ```text
 io/github/yueby/musictogether/
 ├── account/
+├── catalog/
+├── library/
 ├── MainActivity.kt
 ├── MusicTogetherViewModel.kt
 ├── logging/
@@ -97,6 +99,8 @@ io/github/yueby/musictogether/
 | `MainActivity.kt` | 应用入口、主题和 Compose 挂载 |
 | `MusicTogetherViewModel.kt` | 应用状态、主 WebSocket 事件和业务模块编排 |
 | `account/` | 身份资料、头像、密码和管理员操作流程 |
+| `catalog/` | 网易云歌手主页与发现首页的目录数据加载，独立于 `AppState` 持有 `CatalogState` |
+| `library/` | 服务器账户歌单（`/api/playlists` 增删改查），按服务器、身份和密码状态隔离，独立持有 `UserPlaylistsState` |
 | `model/` | 房间、曲目、歌词、账号和界面状态 |
 | `network/` | 服务端连接、协议转换和多服务器房间发现 |
 | `player/` | 后台播放、系统媒体控制和同步 |
@@ -106,7 +110,7 @@ io/github/yueby/musictogether/
 | `share/` | 房间分享卡片的布局计算、二维码编码、可配置背景和图片渲染导出 |
 | `updates/` | 应用更新检查、下载校验和安装流程 |
 | `lyrics/` | 歌词解析和 Apple Music-like Lyrics (AMLL) 数据处理 |
-| `ui/` | 大厅、房间、设置、账号和平台界面 |
+| `ui/` | 根导航、四个主标签页、房间、设置、账号和平台界面 |
 | `ui/designsystem/` | MIUIX 主题桥接和公共组件 |
 | `ui/player/` | 播放器布局与歌词绘制 |
 | `notifications/` | 聊天通知 |
@@ -119,8 +123,9 @@ io/github/yueby/musictogether/
 ```text
 MainActivity
   -> MusicTogetherApp
-    -> LobbyScreen / RoomScreen
-      -> RoomHeader / Room panes / Settings / Player
+    -> NavDisplay(AppRoute 回退栈)
+      -> AppShell: MainTabsScreen(一起听 / 发现 / 媒体库 / 我的) + RoomScreen(播放器)
+      -> 二级整页: 搜索、歌单、歌手、账户歌单、房间与同步、设置各页
 
 UI 操作
   -> MusicTogetherViewModel
@@ -151,28 +156,46 @@ UI 操作
 
 ### 界面入口
 
-`MusicTogetherApp.kt` 根据房间状态显示 `LobbyScreen` 或 `RoomScreen`。`RoomScreen.kt` 负责房间整体布局和面板切换，具体内容分布在以下文件：
+`MusicTogetherApp.kt` 持有全应用唯一的 `miuix-nav` 回退栈（`AppNavigation.kt` 中的 `AppRoute` 与 `AppNavigator`，经 `LocalAppNavigator` 下发）。栈底固定为 `AppRoute.Shell`：它通过 `PlayerMinimizeTransitionHost` 在主标签页 `MainTabsScreen` 与房间播放器 `RoomScreen` 之间切换，播放器最小化状态按房间保存。其余功能都是压在 Shell 之上的整页，使用 MIUIX 默认横向转场、预测返回和向右滑动返回，页面外壳为 `ui/designsystem/AppPage`（可随滚动收起的大标题 `TopAppBar`）。因此在房间内打开搜索等页面时页面叠在播放器之上，返回即回到播放器；在主页打开时返回主页，全局只有一套返回语义。Shell 内的 `BackHandler` 只在栈中仅剩 Shell 时生效：播放器展开时依次关闭停靠面板、菜单、收起播放器，主页时先回到「一起听」标签。
 
-`MainActivity.kt` 在 Compose 根节点读取持久化的主题模式、MIUIX 纯黑背景和显示偏好，并通过 `MusicTogetherTheme` 提供 MIUIX 色彩上下文。主题支持跟随系统、浅色与深色；Android 12 及以上可选系统动态色，默认关闭。纯黑背景是 MIUIX 深色模式的独立偏好。MIUIX 主题同时向仍在复用的 Material 控件映射可读的背景、内容、轮廓与强调色，避免出现低对比度文字或弹层割裂。界面固定使用 MIUIX，业务页面不复制网络、播放器或状态逻辑；新增公共组件应优先放入 `ui/designsystem/`，再由页面组合使用。
+`AppNavigator.open` 对歌单详情、歌手页和账户歌单采用单实例策略：再次打开同类页面会先弹出栈中已有的同类页面及其上方页面，保证 ViewModel 中单份的详情状态与可见页面一致，也避免 NavDisplay 出现重复键。`AppRouteLifecycleEffects` 监听回退栈，同类页面离开栈时调用 `closePlaylist`、`closeArtist` 或 `closeUserPlaylist` 取消加载任务。房间 ID 变化时：加入新房间弹回 Shell 以显示播放器，离开房间只移除依赖房间的页面（推荐点歌、房间与同步、下载当前歌曲、音乐平台账号、平台歌单详情）。
 
-设置首页只承担分类导航，账号、服务器连接、外观与个性化、播放器、播放与同步、存储与更新、管理员入口分别进入二级页面；进入任意二级页后隐藏底部导航，返回设置首页时恢复。页面之间使用即时切换，系统返回只负责返回栈语义；在连续动效达到可发布质量前，不提供实验性页面过渡或对应设置项。底栏可在标准底栏与 iOS 风格液态悬浮胶囊之间切换。`BottomDock` 统一拥有系统导航栏 Insets、导航胶囊、迷你播放器附件和页面底部占位，禁止页面使用固定偏移分别定位这些元素。iOS 悬浮导航直接沿用 MIUIX `v0.9.3` 官方示例的 Apache-2.0 实现：外层为 64 dp 胶囊，并保留阻尼拖动、橡皮筋位移、双 Backdrop、折射、色散、设备倾斜高光、RTL 与无障碍语义。有迷你播放器时，播放器与导航胶囊位于同一高度、等分可用宽度，播放器切换为仅保留圆形封面和必要操作的紧凑形态，导航选中透镜限制为不超过标签槽宽的圆形；两侧共用相同的背景采样、模糊、折射、混色和外层胶囊半径。没有迷你播放器时导航胶囊占完整 Dock 宽度。主页内容延伸至悬浮 Dock 后方并用滚动内容 Padding 保证末项可达，禁止用不透明底部占位制造黑色条带。实时光学效果不可用或用户关闭玻璃效果时，仍使用官方实色 iOS 胶囊路径，不切换到 Material 组件，也不自行发明另一套降级外观。
+主标签页共四个：「一起听」展示正在收听的房间卡片和按服务器分组的公开房间，右上角菜单进入创建/加入房间整页表单；「发现」顶部为搜索入口，进入全屏搜索页，在房间内可切换到平台「为你推荐」；「媒体库」分为账户歌单、下载和平台歌单（平台歌单依赖房间内的平台凭据）；「我的」为账号卡片和扁平分组的设置入口。搜索、推荐、歌单、歌手和账户歌单在房间内外共用同一套页面与 `MusicTrackItem` 歌曲行：在房间内点歌曲即点歌，右侧提供点歌按钮；不在房间时点歌曲打开操作菜单。操作菜单统一提供点歌、下一首播放、下载、添加到账户歌单、查看歌手、收藏到网易云（`/api/music/liked`，仅房间内网易云歌曲）以及在账户歌单内移出。平台歌单与专辑详情不再要求在房间内，未加入房间时请求不带 `roomId`，按公开内容加载。
 
-MIUIX 设置二级页使用 MIUIX `Scaffold` 与 `SmallTopAppBar` 消费状态栏和横向安全区，列表只消费 Scaffold 返回的内容 Padding；页面 Scaffold、顶栏、系统栏衔接区和底部 Dock 后方必须读取同一个解析后页面背景，纯黑开关关闭时不得由 `surface` 默认值重新引入局部纯黑。自定义卡片内容必须保留不受圆角裁剪的内边距，不得用页面级圆角裁剪正文。播放器可见控件经 `PlayerControlPrimitives` 分派按钮、滑块、表面和菜单，歌词排版层保持 AMLL 风格中立。MIUIX 弹出偏好依赖 Activity 提供的 Navigation Event 环境，Compose、Activity、Lifecycle、Navigation Event 与 Material 3 必须作为同一兼容矩阵升级，禁止单独提升其中一个库。播放器“房间与音质”“音源账号与歌单”等复用弹层统一经 `AppModalBottomSheet`，使用窗口级 `WindowBottomSheet`。窗口 Sheet 内的下拉选择必须使用 `WindowDropdownPreference`，不得使用依赖主窗口 `MiuixPopupHost` 的 `OverlayDropdownPreference`；弹层存在内部详情时，返回键、手势、遮罩点击和左上角导航均先弹出内部页面，只有根页面可以关闭弹层。仪器测试应覆盖 MIUIX Overlay/Window 下拉弹窗的实际展开路径。
+房间播放器舞台对齐 main 经典舞台与 AMLL 的 `AutoLyricLayout`：按容器宽高比选择竖屏或横屏，两者都只包含封面、歌曲信息、进度与控制栏和歌词，不再内嵌队列、聊天或热歌面板。竖屏（`ClassicPortraitStage`）只有一个持久封面节点：大封面位与歌词页缩略位各放一个不可见占位块，测量占位块后用弹簧（stiffness 200、阻尼比约 1.06）动画封面矩形，点封面切换封面视图与歌词视图；默认开启的「沉浸封面」把封面放大为 `max(占位中心高度 × 2.4, 舞台宽 × 1.2)` 并向下渐隐，暂停时缩至 0.75。横屏（`ClassicLandscapeStage`）左 40% 为封面、歌曲信息和控制栏（宽度跟随封面），右 60% 为歌词。换歌时歌名和歌手由 `SongHandoff` 做 500ms 上飘淡出与 6dp 上浮淡入。队列、聊天、热歌榜、成员均为 `AppRoute` 整页（`Queue`、`Chat`、`HotSongs`、`Members`），从舞台底部按钮和房间菜单进入，右滑返回；打开聊天页期间 `setChatVisible(true)` 以清除未读。歌曲信息行显示服务端注入的实际音质徽标（`audioQuality`、`audioBitrate`、`qualityDowngraded`，降级时加箭头，无损档位高亮），网易云曲目在房间内显示喜欢按钮（`GET/POST /api/music/liked`），并带聊天入口。进度左侧时间点按可在已播放与剩余时间间切换并持久化；「控制栏频谱」开启后在播放按钮上方显示频谱，数据来自 `PlaybackService` 通过直通 `TeeAudioProcessor` 接入的 `AudioSpectrum`：只读本机输出 PCM、不修改音频，仅在频谱可见时做 2048 点滑动窗口 FFT，输出对齐 Web `AnalyserNode` 的 80–2000 Hz 字节频谱，界面按 main `AudioFFTVisualizer` 的平滑与绘制规则逐帧绘制。热歌榜页对应 main 的 `/api/music/hot`（网易云、QQ 音乐、酷狗，需在房间内），由 `HotSongsCoordinator` 加载与分页，离开房间时重置。main 经典舞台的「过渡」提示依赖 Web 端 automix 交叉淡化，安卓端没有交叉淡化，因此不提供。
+
+房间头部 `RoomHeader` 是叠在播放器背景上的半透明叠层，「更多」为锚定在按钮上的弹出菜单（房间与同步、分享、复制链接、音乐平台账号、下载当前歌曲、离开房间）。歌手主页与发现页由 `CatalogCoordinator` 加载，服务端目前仅网易云支持；歌手入口来自播放器歌名下方的歌手名、歌曲操作菜单和发现页热门歌手，专辑请求使用 `type=album`。
+
+`RoomScreen.kt` 负责房间整体布局和面板切换，具体内容分布在以下文件：
+
+`MainActivity.kt` 在 Compose 根节点读取持久化的主题模式、MIUIX 纯黑背景和显示偏好，并通过 `MusicTogetherTheme` 提供 MIUIX 色彩上下文。主题支持跟随系统、浅色与深色；Android 12 及以上可选系统动态色，默认关闭。纯黑背景是 MIUIX 深色模式的独立偏好。应用不再依赖 Material 3 库，主题只提供 MIUIX 色彩、文字样式和内容色；公共组件 `AppListItem`、`AppChip`、`AppTextAction`、`AppTextField`、`AppDialog` 位于 `ui/designsystem/`，页面不得重新引入 Material 控件。界面固定使用 MIUIX，业务页面不复制网络、播放器或状态逻辑；新增公共组件应优先放入 `ui/designsystem/`，再由页面组合使用。
+
+「我的」页把账号与安全、音乐平台账号、服务器连接、房间与同步（仅房间内）、外观与主题、歌词与播放器、通用、应用更新和服务器管理（仅管理员）放在同一列表中，设置各页都是根回退栈中的整页，进入后自然覆盖底部导航。播放同步相关开关只保留在「房间与同步」页，不再在设置中重复。底栏可在标准底栏与 iOS 风格液态悬浮胶囊之间切换。`BottomDock` 统一拥有系统导航栏 Insets、导航胶囊、迷你播放器附件和页面底部占位，禁止页面使用固定偏移分别定位这些元素。iOS 悬浮导航直接沿用 MIUIX `v0.9.4` 官方示例的 Apache-2.0 实现：外层为 64 dp 胶囊，并保留阻尼拖动、橡皮筋位移、双 Backdrop、折射、色散、设备倾斜高光、RTL 与无障碍语义。有迷你播放器时，播放器与导航胶囊位于同一高度、等分可用宽度，播放器切换为仅保留圆形封面和必要操作的紧凑形态，导航选中透镜限制为不超过标签槽宽的圆形；两侧共用相同的背景采样、模糊、折射、混色和外层胶囊半径。没有迷你播放器时导航胶囊占完整 Dock 宽度。主页内容延伸至悬浮 Dock 后方并用滚动内容 Padding 保证末项可达，禁止用不透明底部占位制造黑色条带。实时光学效果不可用或用户关闭玻璃效果时，仍使用官方实色 iOS 胶囊路径，不切换到 Material 组件，也不自行发明另一套降级外观。
+
+主标签页使用 `AppTabPage`、二级页使用 `AppPage`，两者都以 MIUIX `Scaffold` 与大标题 `TopAppBar` 消费状态栏和横向安全区，并通过 `nestedScroll` 让大标题随列表滚动收起；`AppPage` 额外消费导航栏与输入法的底部 Insets，列表只消费 Scaffold 返回的内容 Padding；页面 Scaffold、顶栏、系统栏衔接区和底部 Dock 后方必须读取同一个解析后页面背景，纯黑开关关闭时不得由 `surface` 默认值重新引入局部纯黑。自定义卡片内容必须保留不受圆角裁剪的内边距，不得用页面级圆角裁剪正文。播放器可见控件经 `PlayerControlPrimitives` 分派按钮、滑块、表面和菜单，歌词排版层保持 AMLL 风格中立。MIUIX 弹出偏好依赖 Activity 提供的 Navigation Event 环境，Compose、Activity、Lifecycle、Navigation Event 与 MIUIX 必须作为同一兼容矩阵升级，禁止单独提升其中一个库。弹窗只用于确认、命名和选择（如删除歌单、新建歌单、添加到歌单、房间密码），表单与列表均使用整页。窗口级弹层内的下拉选择必须使用 `WindowDropdownPreference`，不得使用依赖主窗口 `MiuixPopupHost` 的 `OverlayDropdownPreference`。仪器测试应覆盖 MIUIX Overlay/Window 下拉弹窗的实际展开路径。
 
 | 文件 | 内容 |
 | --- | --- |
-| `RoomHeader.kt` | 房间标题、连接状态和横屏侧栏 |
+| `RoomHeader.kt` | 房间标题、连接状态和「更多」弹出菜单 |
+| `player/ClassicStage.kt` | 竖屏单封面节点舞台与横屏舞台 |
+| `player/PlayerStageParts.kt` | 换歌文字过渡、音质徽标、喜欢按钮与控制栏频谱 |
+| `HotSongsPane.kt` | 房间热歌榜 |
 | `RoomMembersPane.kt` | 房间成员列表 |
 | `RoomQueuePane.kt` | 播放队列、固定操作栏和队列控制 |
-| `RoomSearchPane.kt` | 搜索、点歌、B 站合集/分 P 选择和元数据匹配 |
+| `DiscoverTab.kt` | 发现标签页与全屏搜索页 |
+| `TrackItem.kt` | 统一歌曲行、歌曲操作菜单和添加到账户歌单弹窗 |
+| `BilibiliMatchDialogs.kt` | B 站合集/分 P 选择和元数据匹配 |
 | `RecommendationsPane.kt` | 已登录音乐平台的原生推荐内容和快捷点歌 |
 | `MusicDownloadPane.kt` | 当前歌曲的可用下载音质与 Android 系统保存流程 |
 | `RoomChatPane.kt` | 房间聊天 |
-| `RoomSettingsPane.kt` | 房间设置与临时管理员队列权限 |
+| `RoomSettingsPane.kt` | 房间与同步页：房间信息、分享、同步、音质、可见性、权限和漫游 |
 | `AccountSettingsPane.kt` | 身份账号和服务器管理 |
 | `PlatformPane.kt` | 平台页面入口与账号列表 |
 | `PlatformLoginPane.kt` | 平台登录和二维码流程 |
-| `PlatformPlaylistPane.kt` | 歌单、收藏和曲目列表 |
+| `PlatformPlaylistPane.kt` | 平台歌单与专辑详情 |
+| `LibraryTab.kt` / `UserPlaylistScreen.kt` | 媒体库标签页与账户歌单详情 |
+| `TogetherTab.kt` / `RoomForms.kt` | 一起听标签页与创建/加入房间表单 |
+| `MeTab.kt` / `SettingsPages.kt` | 我的标签页与外观、歌词、通用设置页 |
 | `AppUpdatePane.kt` | 更新检查、下载和安装 |
 | `ui/player/` | 横竖屏播放器、播放控制和歌词 |
 

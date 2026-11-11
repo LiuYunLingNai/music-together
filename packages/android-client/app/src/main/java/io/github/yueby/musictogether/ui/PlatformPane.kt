@@ -1,6 +1,9 @@
 package io.github.yueby.musictogether.ui
 
-import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.filled.Groups
+import io.github.yueby.musictogether.ui.designsystem.AppEmptyState
+import io.github.yueby.musictogether.ui.designsystem.AppTextAction
+import io.github.yueby.musictogether.ui.designsystem.AppTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,13 +21,10 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -41,9 +41,7 @@ import io.github.yueby.musictogether.model.AppState
 import io.github.yueby.musictogether.model.MyPlatformAuth
 import io.github.yueby.musictogether.model.Playlist
 import io.github.yueby.musictogether.ui.designsystem.AppDialog
-import io.github.yueby.musictogether.ui.designsystem.LocalAppWindowSheet
 import top.yukonga.miuix.kmp.basic.Card as MiuixCard
-import top.yukonga.miuix.kmp.basic.SmallTitle as MiuixSmallTitle
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
 import top.yukonga.miuix.kmp.preference.WindowDropdownPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -57,18 +55,19 @@ private val platformOptions = listOf(
 
 @Composable
 fun PlatformPane(state: AppState, viewModel: MusicTogetherViewModel) {
-    val selected = state.platformHub.selectedPlaylist
-    BackHandler(enabled = selected != null) { viewModel.closePlaylist() }
-
+    if (state.room == null) {
+        AppEmptyState(
+            icon = Icons.Default.Groups,
+            title = "加入房间后管理平台账号",
+            summary = "音乐平台的登录凭据按服务器和房间隔离保存，可选择是否为房间共享 VIP 播放能力",
+        )
+        return
+    }
     LaunchedEffect(Unit) {
         viewModel.requestPlatformStatus()
     }
 
-    if (selected == null) {
-        PlatformAccountList(state, viewModel)
-    } else {
-        PlaylistDetailPane(state, selected, viewModel)
-    }
+    PlatformAccountList(state, viewModel)
 
     if (state.platformHub.qr.open) {
         QrLoginDialog(state.platformHub.qr, viewModel)
@@ -77,6 +76,7 @@ fun PlatformPane(state: AppState, viewModel: MusicTogetherViewModel) {
 
 @Composable
 private fun PlatformAccountList(state: AppState, viewModel: MusicTogetherViewModel) {
+    val navigator = LocalAppNavigator.current
     var platform by remember { mutableStateOf("netease") }
     var cookieDialogOpen by remember { mutableStateOf(false) }
     var cookiePlatform by remember { mutableStateOf("netease") }
@@ -93,11 +93,7 @@ private fun PlatformAccountList(state: AppState, viewModel: MusicTogetherViewMod
         cookieDialogOpen = true
     }
 
-    val horizontalPadding = if (LocalAppWindowSheet.current) 0.dp else 12.dp
-    Column(Modifier.fillMaxSize().padding(horizontal = horizontalPadding)) {
-        if (!LocalAppWindowSheet.current) {
-            MiuixSmallTitle(text = "平台账号与歌单")
-        }
+    Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
         MiuixText(
             "登录后可浏览个人歌单，并选择是否为房间共享 VIP 播放能力。",
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
@@ -167,6 +163,7 @@ private fun PlatformAccountList(state: AppState, viewModel: MusicTogetherViewMod
                 title = "我的${platformCollectionLabel(platform)}",
                 showLoggedOutHint = true,
                 viewModel = viewModel,
+                onOpen = navigator::openPlaylist,
             )
 
             if (platform == "kugou" && conceptAuth?.loggedIn == true) {
@@ -180,6 +177,7 @@ private fun PlatformAccountList(state: AppState, viewModel: MusicTogetherViewMod
                     title = "概念版歌单",
                     showLoggedOutHint = false,
                     viewModel = viewModel,
+                    onOpen = navigator::openPlaylist,
                 )
             }
         }
@@ -199,11 +197,12 @@ private fun PlatformAccountList(state: AppState, viewModel: MusicTogetherViewMod
         ) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Cookie 只会按当前服务端 URL 单独保存在本机，不会写入日志。")
-                    OutlinedTextField(
+                    AppTextField(
                         value = cookieText,
                         onValueChange = { cookieText = it.take(8000) },
                         modifier = Modifier.fillMaxWidth().height(150.dp),
-                        placeholder = { Text("粘贴平台 Cookie") },
+                        label = "粘贴平台 Cookie",
+                useLabelAsPlaceholder = true,
                         maxLines = 8,
                     )
                 }
@@ -220,6 +219,7 @@ private fun LazyListScope.platformPlaylistItems(
     title: String,
     showLoggedOutHint: Boolean,
     viewModel: MusicTogetherViewModel,
+    onOpen: (Playlist) -> Unit,
 ) {
     if (auth?.loggedIn == true) {
         item {
@@ -227,9 +227,9 @@ private fun LazyListScope.platformPlaylistItems(
                 Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(title, style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = { viewModel.fetchMyPlaylists(platform) }, enabled = !loading) {
+                AppTextAction(onClick = { viewModel.fetchMyPlaylists(platform) }, enabled = !loading) {
                     if (loading) {
                         CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                     } else {
@@ -251,11 +251,11 @@ private fun LazyListScope.platformPlaylistItems(
                     "暂无${platformCollectionLabel(platform)}",
                     Modifier.fillMaxWidth().padding(32.dp),
                     textAlign = TextAlign.Center,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
             }
             else -> items(playlists, key = { "${it.source}:${it.id}" }) { playlist ->
-                PlaylistRow(playlist) { viewModel.openPlaylist(playlist) }
+                PlaylistRow(playlist) { onOpen(playlist) }
             }
         }
     } else if (showLoggedOutHint) {
@@ -268,7 +268,7 @@ private fun LazyListScope.platformPlaylistItems(
                 },
                 Modifier.fillMaxWidth().padding(32.dp),
                 textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
         }
     }

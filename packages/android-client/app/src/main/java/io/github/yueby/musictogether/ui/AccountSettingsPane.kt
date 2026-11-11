@@ -1,5 +1,7 @@
 package io.github.yueby.musictogether.ui
 
+import io.github.yueby.musictogether.ui.designsystem.AppChip
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -26,20 +28,14 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoorBack
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import top.yukonga.miuix.kmp.basic.Button
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.Switch
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -77,12 +73,6 @@ fun AccountSettingsPane(
 }
 
 @Composable
-internal fun ServerAdminSettingsPane(state: AppState, viewModel: MusicTogetherViewModel) {
-    LaunchedEffect(Unit) { viewModel.loadAdminData() }
-    AdminManagementSection(state, viewModel)
-}
-
-@Composable
 internal fun AccountSection(state: AppState, viewModel: MusicTogetherViewModel) {
     val profile = state.accountProfile
     val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -113,7 +103,7 @@ internal fun AccountSection(state: AppState, viewModel: MusicTogetherViewModel) 
                             Icons.Default.AccountCircle,
                             contentDescription = null,
                             modifier = Modifier.size(64.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
                     }
                     if (profile != null) {
@@ -128,16 +118,16 @@ internal fun AccountSection(state: AppState, viewModel: MusicTogetherViewModel) 
                 }
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(profile?.nickname ?: "访客身份", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text(profile?.nickname ?: "访客身份", style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.SemiBold)
                     Text(
                         profile?.id ?: "保存昵称后生成账号 ID",
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MiuixTheme.textStyles.paragraph,
                         fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    if (profile?.role == "admin") AssistChip(onClick = {}, label = { Text("服务器管理员") })
+                    if (profile?.role == "admin") AppChip(onClick = {}, label = { Text("服务器管理员") })
                 }
                 if (state.accountLoading || state.accountBusy) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
             }
@@ -162,8 +152,8 @@ internal fun AccountSection(state: AppState, viewModel: MusicTogetherViewModel) 
             if (profile == null) {
                 Text(
                     "首次保存昵称后会创建正式账号，随后可设置账号 ID、头像和密码。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MiuixTheme.textStyles.paragraph,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     modifier = Modifier.padding(top = 8.dp),
                 )
             }
@@ -229,9 +219,9 @@ private fun AccountAccessControls(state: AppState, viewModel: MusicTogetherViewM
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Icon(Icons.Default.Lock, null, tint = MaterialTheme.colorScheme.primary)
+            Icon(Icons.Default.Lock, null, tint = MiuixTheme.colorScheme.primary)
             Text("当前账号已启用密码", Modifier.weight(1f))
-            OutlinedButton(onClick = viewModel::logoutIdentity, enabled = !state.accountBusy) {
+            Button(onClick = viewModel::logoutIdentity, enabled = !state.accountBusy) {
                 Icon(Icons.AutoMirrored.Filled.Logout, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("退出")
@@ -303,9 +293,9 @@ internal fun AdminManagementSection(state: AppState, viewModel: MusicTogetherVie
             Modifier.fillMaxWidth().padding(horizontal = 20.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            FilterChip(selected = section == AdminSection.Users, onClick = { section = AdminSection.Users }, label = { Text("账号") })
-            FilterChip(selected = section == AdminSection.Rooms, onClick = { section = AdminSection.Rooms }, label = { Text("房间") })
-            FilterChip(selected = section == AdminSection.Proxy, onClick = { section = AdminSection.Proxy }, label = { Text("代理") })
+            AppChip(selected = section == AdminSection.Users, onClick = { section = AdminSection.Users }, label = { Text("账号") })
+            AppChip(selected = section == AdminSection.Rooms, onClick = { section = AdminSection.Rooms }, label = { Text("房间") })
+            AppChip(selected = section == AdminSection.Proxy, onClick = { section = AdminSection.Proxy }, label = { Text("代理") })
         }
         when (section) {
             AdminSection.Users -> LazyColumn(
@@ -318,7 +308,7 @@ internal fun AdminManagementSection(state: AppState, viewModel: MusicTogetherVie
                         Text(
                             "暂无账号",
                             modifier = Modifier.fillMaxWidth().padding(24.dp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
                     }
                 }
@@ -344,7 +334,7 @@ internal fun AdminManagementSection(state: AppState, viewModel: MusicTogetherVie
                         Text(
                             "暂无活跃房间",
                             modifier = Modifier.fillMaxWidth().padding(24.dp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
                     }
                 }
@@ -389,8 +379,8 @@ private fun AudioProxyPolicySection(state: AppState, viewModel: MusicTogetherVie
         item {
             Text(
                 "B站始终通过服务器代理播放，Cookie 仅保留在服务端。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MiuixTheme.textStyles.paragraph,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
         }
         item {
@@ -420,7 +410,7 @@ private fun AudioProxyPolicyRow(
     ) {
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(label, fontWeight = FontWeight.Medium)
-            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(description, style = MiuixTheme.textStyles.paragraph, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
         }
         Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
     }
@@ -441,23 +431,23 @@ private fun AdminUserCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(user.nickname.ifBlank { "未设置昵称" }, fontWeight = FontWeight.SemiBold)
-                    Text(user.id, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                    Text(user.id, fontFamily = FontFamily.Monospace, style = MiuixTheme.textStyles.paragraph)
                 }
-                if (user.role == "admin") AssistChip(onClick = {}, label = { Text("管理员") })
+                if (user.role == "admin") AppChip(onClick = {}, label = { Text("管理员") })
                 IconButton(onClick = onDelete, enabled = !working && user.id != currentUserId) {
-                    Icon(Icons.Default.Delete, "删除账号", tint = MaterialTheme.colorScheme.error)
+                    Icon(Icons.Default.Delete, "删除账号", tint = MiuixTheme.colorScheme.error)
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
+                AppTextField(
                     value = password,
                     onValueChange = onPasswordChange,
                     modifier = Modifier.weight(1f),
-                    label = { Text("新密码（至少 8 位）") },
+                    label = "新密码（至少 8 位）",
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                 )
-                OutlinedButton(onClick = onResetPassword, enabled = !working && password.length >= 8) { Text("重置") }
+                Button(onClick = onResetPassword, enabled = !working && password.length >= 8) { Text("重置") }
             }
         }
     }
@@ -467,27 +457,27 @@ private fun AdminUserCard(
 private fun AdminRoomCard(room: AdminRoom, working: Boolean, onDissolve: () -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.DoorBack, null, tint = MaterialTheme.colorScheme.primary)
+            Icon(Icons.Default.DoorBack, null, tint = MiuixTheme.colorScheme.primary)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(room.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     "${room.id} · ${room.userCount} 人 · ${if (room.hidden) "隐藏" else "公开"} · " +
                         "${if (room.permanent) "永久" else "临时"}${room.currentTrackTitle?.let { " · $it" }.orEmpty()}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MiuixTheme.textStyles.paragraph,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            OutlinedButton(onClick = onDissolve, enabled = !working) { Text("解散") }
+            Button(onClick = onDissolve, enabled = !working) { Text("解散") }
         }
     }
 }
 
 @Composable
 private fun SettingsTitle(text: String) {
-    Text(text, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+    Text(text, style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.SemiBold)
 }
 
 private sealed interface AdminConfirmation {

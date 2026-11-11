@@ -1,5 +1,8 @@
 package io.github.yueby.musictogether.ui
 
+import io.github.yueby.musictogether.ui.designsystem.AppTextAction
+import io.github.yueby.musictogether.ui.designsystem.AppListItem
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,38 +18,25 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.VerticalAlignTop
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.yueby.musictogether.MusicTogetherViewModel
@@ -63,7 +53,6 @@ internal fun QueuePane(
     onClose: (() -> Unit)? = null,
     onDownloadCurrent: (() -> Unit)? = null,
 ) {
-    var confirmClear by remember { mutableStateOf(false) }
     val currentIndex = room.queue.indexOfFirst { it.id == room.currentTrack?.id }
     val initialIndex = (currentIndex - 2).coerceAtLeast(0)
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
@@ -77,60 +66,7 @@ internal fun QueuePane(
             autoScrolledTrackId = currentTrackId
         }
     }
-    LaunchedEffect(confirmClear) {
-        if (confirmClear) {
-            delay(3000)
-            confirmClear = false
-        }
-    }
     Column(Modifier.fillMaxSize()) {
-        Surface(
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 1.dp,
-        ) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "播放列表 (${room.queue.size})",
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                if (viewModel.canClearQueue() && room.queue.isNotEmpty()) {
-                    TextButton(
-                        onClick = {
-                            if (confirmClear) {
-                                confirmClear = false
-                                viewModel.clearQueue()
-                            } else {
-                                confirmClear = true
-                            }
-                        },
-                    ) {
-                        Text(
-                            if (confirmClear) "确认清空" else "清空",
-                            color =
-                                if (confirmClear) {
-                                    MaterialTheme.colorScheme.error
-                                } else {
-                                    MaterialTheme.colorScheme.primary
-                                },
-                            fontSize = 12.sp,
-                        )
-                    }
-                }
-                onClose?.let { close ->
-                    IconButton(onClick = close) {
-                        Icon(Icons.Default.Close, contentDescription = "关闭播放列表")
-                    }
-                }
-            }
-        }
-        HorizontalDivider()
         LazyColumn(
             Modifier
                 .weight(1f)
@@ -143,7 +79,7 @@ internal fun QueuePane(
                     Text(
                         "队列为空，去点歌页添加歌曲。",
                         Modifier.padding(20.dp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
                 }
             }
@@ -219,11 +155,9 @@ internal fun TrackRow(
     supportingMaxLines: Int = 1,
     trailingContent: (@Composable () -> Unit)? = null,
 ) {
-    ListItem(
+    AppListItem(
         modifier = if (onClick != null) Modifier.fillMaxWidth().clickable(onClick = onClick) else Modifier.fillMaxWidth(),
-        colors = ListItemDefaults.colors(
-            containerColor = if (highlighted) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-        ),
+        containerColor = if (highlighted) MiuixTheme.colorScheme.primaryContainer else Color.Transparent,
         leadingContent = {
             TrackCover(
                 track = track,
@@ -246,6 +180,7 @@ internal fun TrackRow(
                 maxLines = supportingMaxLines,
                 overflow = TextOverflow.Ellipsis,
                 fontSize = if (compact) 12.sp else 14.sp,
+                style = MiuixTheme.textStyles.body2,
             )
         },
         trailingContent = {
@@ -325,5 +260,24 @@ private fun QueueControlMenu(
                 onClick = { expanded = false; onRemove() },
             )
         }
+    }
+}
+
+@Composable
+internal fun QueueClearAction(room: RoomState, viewModel: MusicTogetherViewModel) {
+    var confirm by remember { mutableStateOf(false) }
+    LaunchedEffect(confirm) {
+        if (confirm) {
+            delay(3000)
+            confirm = false
+        }
+    }
+    if (!viewModel.canClearQueue() || room.queue.isEmpty()) return
+    AppTextAction(onClick = { if (confirm) { confirm = false; viewModel.clearQueue() } else confirm = true }) {
+        Text(
+            if (confirm) "确认清空" else "清空",
+            color = if (confirm) MiuixTheme.colorScheme.error else MiuixTheme.colorScheme.primary,
+            fontSize = 14.sp,
+        )
     }
 }

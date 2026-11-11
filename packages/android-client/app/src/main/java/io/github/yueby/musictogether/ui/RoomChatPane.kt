@@ -1,5 +1,8 @@
 package io.github.yueby.musictogether.ui
 
+import androidx.compose.foundation.layout.widthIn
+import io.github.yueby.musictogether.ui.designsystem.AppTextField
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -17,15 +20,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,10 +33,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.yueby.musictogether.MusicTogetherViewModel
 import io.github.yueby.musictogether.model.ChatMessage
@@ -44,6 +42,7 @@ import io.github.yueby.musictogether.model.ChatMessage
 @Composable
 internal fun ChatPane(
     messages: List<ChatMessage>,
+    userId: String?,
     viewModel: MusicTogetherViewModel,
     onClose: (() -> Unit)? = null,
 ) {
@@ -51,7 +50,7 @@ internal fun ChatPane(
     val listState = rememberLazyListState()
     LaunchedEffect(messages.size) { if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex) }
     Column(Modifier.fillMaxSize()) {
-        Row(
+        if (onClose != null) Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 18.dp, vertical = 10.dp),
@@ -62,12 +61,12 @@ internal fun ChatPane(
                 Icons.AutoMirrored.Filled.Chat,
                 contentDescription = null,
                 modifier = Modifier.size(18.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
             Text(
                 "聊天",
                 modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.titleMedium,
+                style = MiuixTheme.textStyles.title3,
                 fontWeight = FontWeight.SemiBold,
             )
             onClose?.let { close ->
@@ -76,7 +75,7 @@ internal fun ChatPane(
                 }
             }
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
+        HorizontalDivider(color = MiuixTheme.colorScheme.dividerLine.copy(alpha = 0.55f))
         LazyColumn(
             modifier = Modifier.weight(1f),
             state = listState,
@@ -89,30 +88,42 @@ internal fun ChatPane(
                         message.content,
                         modifier = Modifier.fillMaxWidth(),
                         textAlign = TextAlign.Center,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MiuixTheme.textStyles.paragraph,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
                 } else {
+                    val mine = message.userId == userId
                     Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.55f))
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        Modifier.fillMaxWidth(),
+                        horizontalAlignment = if (mine) Alignment.End else Alignment.Start,
                     ) {
-                        Text("${message.nickname} · ${formatMessageTime(message.timestamp)}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                        Text(message.content)
+                        Text(
+                            if (mine) formatMessageTime(message.timestamp) else "${message.nickname} · ${formatMessageTime(message.timestamp)}",
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                        Text(
+                            message.content,
+                            modifier = Modifier
+                                .widthIn(max = 300.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(if (mine) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.surfaceContainer)
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            color = if (mine) MiuixTheme.colorScheme.onPrimary else MiuixTheme.colorScheme.onSurface,
+                        )
                     }
                 }
             }
         }
         HorizontalDivider()
         Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
+            AppTextField(
                 value = content,
                 onValueChange = { content = it.take(500) },
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("说点什么…") },
+                label = "说点什么…",
+                useLabelAsPlaceholder = true,
                 maxLines = 3,
                 trailingIcon = {
                     IconButton(onClick = { viewModel.sendChat(content); content = "" }, enabled = content.isNotBlank()) {

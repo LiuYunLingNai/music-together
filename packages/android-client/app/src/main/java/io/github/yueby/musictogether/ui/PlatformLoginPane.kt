@@ -16,9 +16,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -176,7 +175,7 @@ internal fun QrLoginDialog(qr: QrLoginState, viewModel: MusicTogetherViewModel) 
                     if (qr.platform == "tencent") "使用手机 QQ 扫描二维码" else "使用${platformLabel(qr.platform)} App 扫描二维码",
                     modifier = Modifier.fillMaxWidth(),
                     textAlign = TextAlign.Center,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
                 Box(
                     Modifier.size(240.dp).clip(RoundedCornerShape(12.dp)).background(androidx.compose.ui.graphics.Color.White),
@@ -202,7 +201,7 @@ internal fun QrLoginDialog(qr: QrLoginState, viewModel: MusicTogetherViewModel) 
                     statusText,
                     modifier = Modifier.fillMaxWidth(),
                     textAlign = TextAlign.Center,
-                    color = if (qr.status == 800) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                    color = if (qr.status == 800) MiuixTheme.colorScheme.error else MiuixTheme.colorScheme.primary,
                     fontWeight = FontWeight.SemiBold,
                 )
             }

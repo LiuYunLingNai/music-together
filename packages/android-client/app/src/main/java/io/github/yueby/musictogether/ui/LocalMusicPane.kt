@@ -1,7 +1,11 @@
 package io.github.yueby.musictogether.ui
 
+import top.yukonga.miuix.kmp.utils.overScrollVertical
+import io.github.yueby.musictogether.ui.designsystem.AppEmptyState
+import androidx.compose.foundation.layout.PaddingValues
+import io.github.yueby.musictogether.ui.designsystem.AppListItem
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -11,20 +15,18 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
+import top.yukonga.miuix.kmp.basic.Slider
+import top.yukonga.miuix.kmp.basic.Surface
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -34,7 +36,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -47,53 +48,33 @@ import io.github.yueby.musictogether.player.PlayerUiState
 internal fun LocalMusicPane(
     state: AppState,
     viewModel: MusicTogetherViewModel,
-    onBack: () -> Unit,
-    showHeader: Boolean = true,
+    contentPadding: PaddingValues = PaddingValues(),
 ) {
     val player by viewModel.playerState.collectAsStateWithLifecycle()
     val library = state.offlineLibrary
     Column(Modifier.fillMaxSize()) {
-        if (showHeader) Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回主页")
-            }
-            Column(Modifier.weight(1f)) {
-                Text("本地音乐", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Text(
-                    buildString {
-                        append("${library.tracks.size} 首已下载")
-                        if (library.downloads.isNotEmpty()) append(" · ${library.downloads.size} 首下载中")
-                    },
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
         player.takeIf { it.localPlayback }?.let { localPlayer ->
             LocalPlaybackBar(player = localPlayer, viewModel = viewModel)
             HorizontalDivider()
         }
         if (library.tracks.isEmpty() && library.downloads.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("暂无已下载歌曲", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            AppEmptyState(
+                icon = Icons.Default.Download,
+                title = "暂无已下载歌曲",
+                summary = "在歌曲的「更多」菜单里选择「下载」，离开房间后也能播放",
+            )
         } else {
-            LazyColumn(Modifier.weight(1f)) {
+            LazyColumn(
+                modifier = Modifier.weight(1f).overScrollVertical(),
+                contentPadding = PaddingValues(bottom = 16.dp + contentPadding.calculateBottomPadding()),
+            ) {
                 if (library.downloads.isNotEmpty()) {
                     item(key = "downloads-header") {
                         Text(
                             "正在下载",
                             modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 4.dp),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
+                            style = MiuixTheme.textStyles.button,
+                            color = MiuixTheme.colorScheme.primary,
                         )
                     }
                     items(library.downloads.entries.toList(), key = { it.key }) { (_, download) ->
@@ -118,7 +99,7 @@ internal fun LocalMusicPane(
 
 @Composable
 private fun DownloadingTrackRow(track: io.github.yueby.musictogether.model.Track, progressPercent: Int?) {
-    ListItem(
+    AppListItem(
         leadingContent = {
             TrackCover(
                 track = track,
@@ -134,12 +115,13 @@ private fun DownloadingTrackRow(track: io.github.yueby.musictogether.model.Track
                     progressPercent?.let { "正在下载 · $it%" } ?: "正在下载",
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                )
+                style = MiuixTheme.textStyles.body2,
+            )
                 if (progressPercent == null) {
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
                 } else {
                     LinearProgressIndicator(
-                        progress = { progressPercent.coerceIn(0, 100) / 100f },
+                        progress = progressPercent.coerceIn(0, 100) / 100f,
                         modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                     )
                 }
@@ -156,10 +138,10 @@ private fun LocalPlaybackBar(player: PlayerUiState, viewModel: MusicTogetherView
     LaunchedEffect(player.positionSeconds) {
         if (!seeking) position = player.positionSeconds
     }
-    Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
+    Surface(color = MiuixTheme.colorScheme.surfaceContainer) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.MusicNote, null, tint = MaterialTheme.colorScheme.primary)
+                Icon(Icons.Default.MusicNote, null, tint = MiuixTheme.colorScheme.primary)
                 Text(
                     player.track?.title.orEmpty(),
                     modifier = Modifier.weight(1f).padding(start = 10.dp),
@@ -193,7 +175,7 @@ private fun DownloadedTrackRow(
     onDelete: () -> Unit,
 ) {
     val track = downloaded.track
-    ListItem(
+    AppListItem(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onPlay),
         leadingContent = {
             TrackCover(
@@ -209,6 +191,7 @@ private fun DownloadedTrackRow(
                 "${track.artist.joinToString(" / ")} · ${formatOfflineSize(downloaded.sizeBytes)}",
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                style = MiuixTheme.textStyles.body2,
             )
         },
         trailingContent = {

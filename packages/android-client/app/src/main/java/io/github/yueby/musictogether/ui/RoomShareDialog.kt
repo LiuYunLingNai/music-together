@@ -1,5 +1,6 @@
 package io.github.yueby.musictogether.ui
 
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
@@ -12,9 +13,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -93,7 +93,7 @@ internal fun RoomShareDialog(state: RoomShareState, viewModel: MusicTogetherView
 
                     else -> Text(
                         text = state.error ?: "分享图片不可用",
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MiuixTheme.textStyles.paragraph,
                         textAlign = TextAlign.Center,
                     )
                 }
@@ -101,14 +101,14 @@ internal fun RoomShareDialog(state: RoomShareState, viewModel: MusicTogetherView
             if (state.error != null && state.imageUri != null) {
                 Text(
                     text = state.error,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
+                    style = MiuixTheme.textStyles.paragraph,
+                    color = MiuixTheme.colorScheme.error,
                 )
             }
             Text(
                 text = state.link,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MiuixTheme.textStyles.paragraph,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
             AppButton(
                 text = "复制 App 房间链接",

@@ -1,5 +1,6 @@
 package io.github.yueby.musictogether.ui
 
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,14 +20,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Smartphone
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.Switch
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -62,6 +64,7 @@ internal fun MembersPane(
     onSetRole: (String, String) -> Unit,
     onKick: (String, Boolean) -> Unit,
     onUnban: (String) -> Unit,
+    onClose: (() -> Unit)? = null,
 ) {
     var confirmation by remember(room.id) { mutableStateOf<MemberAction?>(null) }
     val roleOrder = mapOf("owner" to 0, "admin" to 1, "member" to 2)
@@ -71,6 +74,7 @@ internal fun MembersPane(
             .thenByDescending { it.isOnline },
     )
     Column(Modifier.fillMaxSize()) {
+        if (onClose != null) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -79,11 +83,18 @@ internal fun MembersPane(
             Icon(Icons.Default.Groups, contentDescription = null, Modifier.size(20.dp))
             Text(
                 "房间成员 (${room.users.size}/${members.size})",
-                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f),
+                style = MiuixTheme.textStyles.title3,
                 fontWeight = FontWeight.SemiBold,
             )
+            onClose?.let { close ->
+                IconButton(onClick = close) {
+                    Icon(Icons.Default.Close, contentDescription = "关闭成员列表")
+                }
+            }
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
+        HorizontalDivider(color = MiuixTheme.colorScheme.dividerLine.copy(alpha = 0.55f))
+        }
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
@@ -120,9 +131,9 @@ internal fun MembersPane(
                                         "你",
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(8.dp))
-                                            .background(MaterialTheme.colorScheme.secondaryContainer)
+                                            .background(MiuixTheme.colorScheme.secondaryContainer)
                                             .padding(horizontal = 7.dp, vertical = 2.dp),
-                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        color = MiuixTheme.colorScheme.onSecondaryContainer,
                                         fontSize = 11.sp,
                                     )
                                 }
@@ -190,7 +201,7 @@ private fun MemberAvatar(member: RoomMember, creatorId: String) {
                 Icons.Default.AccountCircle,
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
-                tint = if (member.id == creatorId) Color(0xFFFFC857) else MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = if (member.id == creatorId) Color(0xFFFFC857) else MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
         } else {
             AsyncImage(
@@ -205,10 +216,10 @@ private fun MemberAvatar(member: RoomMember, creatorId: String) {
                 .align(Alignment.BottomEnd)
                 .size(9.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surface)
+                .background(MiuixTheme.colorScheme.surface)
                 .padding(1.5.dp)
                 .clip(CircleShape)
-                .background(if (member.isOnline) Color(0xFF22C55E) else MaterialTheme.colorScheme.outline),
+                .background(if (member.isOnline) Color(0xFF22C55E) else MiuixTheme.colorScheme.outline),
         )
     }
 }
@@ -222,7 +233,7 @@ private fun MemberClients(member: RoomMember) {
         verticalArrangement = Arrangement.spacedBy(1.dp),
     ) {
         if (!member.isOnline) {
-            Text("上次使用：", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+            Text("上次使用：", color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 11.sp)
         }
         clients.forEach { client ->
             Row(
@@ -237,14 +248,14 @@ private fun MemberClients(member: RoomMember) {
                     },
                     contentDescription = null,
                     modifier = Modifier.padding(top = 1.dp).size(14.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
                 Text(
                     text = buildString {
                         append(client.label)
                         client.count?.takeIf { it > 1 }?.let { append(" ×$it") }
                     },
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     fontSize = 11.sp,
                 )
             }
@@ -258,7 +269,7 @@ private fun MemberRoleLabel(member: RoomMember) {
     Text(
         label,
         modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
         fontSize = 12.sp,
         maxLines = 1,
     )
@@ -269,7 +280,7 @@ private fun AdminRoleSwitch(member: RoomMember, onCheckedChange: (Boolean) -> Un
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
             "管理员",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             fontSize = 11.sp,
         )
         Switch(

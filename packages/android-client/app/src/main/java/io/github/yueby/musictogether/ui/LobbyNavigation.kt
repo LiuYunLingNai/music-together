@@ -2,11 +2,10 @@ package io.github.yueby.musictogether.ui
 
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.LibraryMusic
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -23,11 +22,10 @@ import top.yukonga.miuix.kmp.basic.NavigationItem as MiuixNavigationItem
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
 
 internal enum class LobbyTab {
-    Home,
-    Search,
+    Together,
+    Discover,
     Library,
-    Recommendations,
-    Settings,
+    Me,
 }
 
 internal object LobbyNavigationDefaults {
@@ -69,20 +67,11 @@ internal fun bottomDockContentHeight(
 internal fun LobbyBottomNavigation(
     selectedTab: LobbyTab,
     onTabSelected: (LobbyTab) -> Unit,
-    showRecommendations: Boolean,
     modifier: Modifier = Modifier,
     blurBackdrop: LayerBackdrop? = null,
     compact: Boolean = false,
 ) {
-    val tabs = remember(showRecommendations) {
-        buildList {
-            add(LobbyTab.Home)
-            add(LobbyTab.Search)
-            add(LobbyTab.Library)
-            if (showRecommendations) add(LobbyTab.Recommendations)
-            add(LobbyTab.Settings)
-        }
-    }
+    val tabs = remember { LobbyTab.entries.toList() }
     when (LocalBottomBarStyle.current) {
         BottomBarStyle.Standard -> MiuixNavigationBar(
             modifier = modifier.fillMaxWidth(),
@@ -122,18 +111,16 @@ internal fun LobbyBottomNavigation(
 
 private val LobbyTab.icon: ImageVector
     get() = when (this) {
-        LobbyTab.Home -> Icons.Default.Home
-        LobbyTab.Search -> Icons.Default.Search
+        LobbyTab.Together -> Icons.Default.Groups
+        LobbyTab.Discover -> Icons.Default.Explore
         LobbyTab.Library -> Icons.Default.LibraryMusic
-        LobbyTab.Recommendations -> Icons.Default.AutoAwesome
-        LobbyTab.Settings -> Icons.Default.Settings
+        LobbyTab.Me -> Icons.Default.Person
     }
 
 private val LobbyTab.label: String
     get() = when (this) {
-        LobbyTab.Home -> "首页"
-        LobbyTab.Search -> "搜索"
+        LobbyTab.Together -> "一起听"
+        LobbyTab.Discover -> "发现"
         LobbyTab.Library -> "媒体库"
-        LobbyTab.Recommendations -> "推荐"
-        LobbyTab.Settings -> "设置"
+        LobbyTab.Me -> "我的"
     }

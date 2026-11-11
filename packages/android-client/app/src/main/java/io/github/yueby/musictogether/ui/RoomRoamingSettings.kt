@@ -9,16 +9,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Switch
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -53,110 +47,6 @@ private val roamingModes = listOf(
     RoamingOption("SCENE_RCMD:NIGHT_EMO", "深夜场景", "夜晚情绪向慢歌"),
     RoamingOption("aidj", "AI DJ", "AI 串烧混剪，曲间带过渡衔接"),
 )
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-internal fun MaterialRoomRoamingSettings(
-    state: AppState,
-    canManage: Boolean,
-    onEnabledChange: (Boolean) -> Unit,
-    onSourceChange: (String) -> Unit,
-    onModeChange: (String) -> Unit,
-) {
-    val room = state.room ?: return
-    val ownerLoginStatus = ownerLoginStatus(state, room.roamingSource)
-    val source = roamingSources.firstOrNull { it.value == room.roamingSource } ?: roamingSources.first()
-    val mode = roamingModes.firstOrNull { it.value == room.roamingMode } ?: roamingModes.first()
-    val canToggle = canManage && (room.roamingEnabled || ownerLoginStatus != false)
-    var sourceExpanded by remember { mutableStateOf(false) }
-    var modeExpanded by remember { mutableStateOf(false) }
-
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        HorizontalDivider()
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text("私人漫游", fontWeight = FontWeight.SemiBold)
-                Text(
-                    when (ownerLoginStatus) {
-                        false -> "请先登录房主的${source.label}账号"
-                        else -> "队列没有下一首时，使用房主账号继续个性化推荐"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Switch(checked = room.roamingEnabled, onCheckedChange = onEnabledChange, enabled = canToggle)
-        }
-        ExposedDropdownMenuBox(
-            expanded = sourceExpanded,
-            onExpandedChange = { if (canManage) sourceExpanded = it },
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            OutlinedTextField(
-                value = source.label,
-                onValueChange = {},
-                label = { Text("漫游平台") },
-                supportingText = { Text("个性化推荐只使用房主自己的平台账号") },
-                readOnly = true,
-                enabled = canManage,
-                modifier = Modifier.fillMaxWidth().menuAnchor(),
-                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(sourceExpanded) },
-            )
-            ExposedDropdownMenu(expanded = sourceExpanded, onDismissRequest = { sourceExpanded = false }) {
-                roamingSources.forEach { option ->
-                    DropdownMenuItem(
-                        text = { Text(option.label) },
-                        onClick = {
-                            sourceExpanded = false
-                            onSourceChange(option.value)
-                        },
-                    )
-                }
-            }
-        }
-        ExposedDropdownMenuBox(
-            expanded = modeExpanded,
-            onExpandedChange = { if (canManage && room.roamingSource == "netease") modeExpanded = it },
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            OutlinedTextField(
-                value = if (room.roamingSource == "netease") mode.label else "默认漫游",
-                onValueChange = {},
-                label = { Text("漫游模式") },
-                supportingText = {
-                    Text(if (room.roamingSource == "netease") mode.description else "该平台目前固定使用默认推荐")
-                },
-                readOnly = true,
-                enabled = canManage && room.roamingSource == "netease",
-                modifier = Modifier.fillMaxWidth().menuAnchor(),
-                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(modeExpanded) },
-            )
-            ExposedDropdownMenu(expanded = modeExpanded, onDismissRequest = { modeExpanded = false }) {
-                roamingModes.forEach { option ->
-                    DropdownMenuItem(
-                        text = {
-                            Column {
-                                Text(option.label)
-                                Text(
-                                    option.description,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        },
-                        onClick = {
-                            modeExpanded = false
-                            onModeChange(option.value)
-                        },
-                    )
-                }
-            }
-        }
-    }
-}
-
 @Composable
 internal fun MiuixRoomRoamingSettings(
     state: AppState,

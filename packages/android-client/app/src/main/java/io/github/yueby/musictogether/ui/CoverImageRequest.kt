@@ -12,12 +12,13 @@ internal val coverNetworkHeaders: NetworkHeaders = NetworkHeaders.EMPTY
 
 /** Load the upstream cover directly without leaking the app/server as a referrer. */
 @Composable
-internal fun rememberCoverImageRequest(url: String?): ImageRequest {
+internal fun rememberCoverImageRequest(url: String?, decodeSize: Int? = null): ImageRequest {
     val context = LocalContext.current
-    return remember(context, url) {
+    return remember(context, url, decodeSize) {
         ImageRequest.Builder(context)
             .data(url)
             .httpHeaders(coverNetworkHeaders)
+            .apply { decodeSize?.let(::size) }
             .build()
     }
 }

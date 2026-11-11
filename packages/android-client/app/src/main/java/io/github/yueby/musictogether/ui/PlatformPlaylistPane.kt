@@ -11,29 +11,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.VerticalAlignTop
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,205 +35,189 @@ import coil3.compose.AsyncImage
 import io.github.yueby.musictogether.MusicTogetherViewModel
 import io.github.yueby.musictogether.model.AppState
 import io.github.yueby.musictogether.model.Playlist
-import io.github.yueby.musictogether.model.Track
 import io.github.yueby.musictogether.model.queueIdentity
 import io.github.yueby.musictogether.ui.designsystem.AppButton
-import io.github.yueby.musictogether.ui.designsystem.LocalAppWindowSheet
-import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
-import top.yukonga.miuix.kmp.basic.IconButton as MiuixIconButton
-
-private val platformOptions = listOf(
-    "netease" to "网易云",
-    "tencent" to "QQ 音乐",
-    "kugou" to "酷狗",
-    "bilibili" to "B站",
-)
+import io.github.yueby.musictogether.ui.designsystem.AppEmptyState
+import io.github.yueby.musictogether.ui.designsystem.AppLoadingState
+import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.utils.overScrollVertical
 
 @Composable
 internal fun PlaylistRow(playlist: Playlist, onClick: () -> Unit) {
-    ListItem(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick),
-        leadingContent = {
-            AsyncImage(
-                model = playlist.cover,
-                contentDescription = playlist.name,
-                modifier = Modifier.size(54.dp).clip(RoundedCornerShape(9.dp)),
-                contentScale = ContentScale.Crop,
-            )
-        },
-        headlineContent = { Text(playlist.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        supportingContent = {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AsyncImage(
+            model = playlist.cover,
+            contentDescription = playlist.name,
+            modifier = Modifier.size(54.dp).clip(RoundedCornerShape(10.dp)),
+            contentScale = ContentScale.Crop,
+        )
+        Column(Modifier.weight(1f).padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
-                "${playlist.trackCount} 首${playlist.creator?.let { " · $it" }.orEmpty()}",
+                playlist.name,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                style = MiuixTheme.textStyles.body1,
+                fontWeight = FontWeight.Medium,
             )
-        },
-    )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                TrackPlatformBadge(playlist.source)
+                Text(
+                    buildString {
+                        append(if (playlist.isAlbum) "专辑" else "${playlist.trackCount} 首")
+                        playlist.creator?.takeIf { it.isNotBlank() }?.let { append(" · ").append(it) }
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MiuixTheme.textStyles.body2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
+        }
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
+        )
+    }
 }
 
 @Composable
 internal fun PlaylistDetailPane(state: AppState, playlist: Playlist, viewModel: MusicTogetherViewModel) {
     val hub = state.platformHub
     val listState = rememberLazyListState()
-    val queueKeys = state.room?.queue.orEmpty().mapTo(hashSetOf()) { it.queueIdentity() }
+    val queueKeys = rememberQueueKeys(state)
+    val inRoom = state.room != null
     val availableCount = (1000 - (state.room?.queue?.size ?: 0)).coerceAtLeast(0)
     val addableCount = hub.playlistTracks
         .distinctBy { it.queueIdentity() }
         .count { it.queueIdentity() !in queueKeys }
         .coerceAtMost(availableCount)
-    val shouldLoadMore by remember(
-        listState,
-        hub.playlistTracks.size,
-        hub.playlistHasMore,
-        hub.playlistLoadingMore,
-    ) {
+    val shouldLoadMore by remember(listState, hub.playlistTracks.size, hub.playlistHasMore, hub.playlistLoadingMore) {
         derivedStateOf {
             val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
             hub.playlistHasMore && !hub.playlistLoadingMore &&
-                hub.playlistTracks.isNotEmpty() && lastVisible >= hub.playlistTracks.lastIndex - 3
+                hub.playlistTracks.isNotEmpty() && lastVisible >= hub.playlistTracks.size - 2
         }
     }
     LaunchedEffect(shouldLoadMore, hub.playlistTracks.size) {
         if (shouldLoadMore) viewModel.loadMorePlaylistTracks()
     }
 
-    Column(
-        Modifier.fillMaxSize().padding(horizontal = if (LocalAppWindowSheet.current) 0.dp else 8.dp),
-    ) {
-        Row(
-            Modifier.fillMaxWidth().padding(vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+    when {
+        hub.playlistLoading -> AppLoadingState()
+        hub.playlistError != null && hub.playlistTracks.isEmpty() -> AppEmptyState(
+            icon = Icons.Default.ErrorOutline,
+            title = "加载失败",
+            summary = hub.playlistError,
+            actionText = "重试",
+            onAction = { viewModel.openPlaylist(playlist) },
+        )
+        else -> LazyColumn(
+            modifier = Modifier.fillMaxSize().overScrollVertical(),
+            state = listState,
+            contentPadding = PaddingValues(bottom = 20.dp),
         ) {
-            if (!LocalAppWindowSheet.current) {
-                MiuixIconButton(onClick = viewModel::closePlaylist) {
-                    MiuixIcon(Icons.AutoMirrored.Filled.ArrowBack, "返回歌单列表")
-                }
-            }
-            Column(Modifier.weight(1f)) {
-                Text(playlist.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold)
-                Text(
-                    when {
-                        hub.playlistLoading -> "加载中…"
-                        hub.playlistAddingAll -> "正在加载全部 · ${hub.playlistTracks.size}/${hub.playlistTotal}"
-                        else -> "${hub.playlistTotal} 首 · 已加载 ${hub.playlistTracks.size}"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            val addAllEnabled = !hub.playlistLoading && !hub.playlistLoadingMore && !hub.playlistAddingAll &&
-                availableCount > 0 && (hub.playlistHasMore || addableCount > 0)
-            val addAllLabel = when {
-                hub.playlistAddingAll -> "加载全部"
-                availableCount <= 0 -> "队列已满"
-                hub.playlistHasMore -> "添加全部"
-                addableCount > 0 -> "添加 $addableCount 首"
-                else -> "已添加"
-            }
-            AppButton(
-                text = addAllLabel,
-                onClick = { viewModel.addPlaylistTracksToQueue(playlist) },
-                enabled = addAllEnabled,
-            )
-        }
-        HorizontalDivider()
-        when {
-            hub.playlistLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-            hub.playlistError != null && hub.playlistTracks.isEmpty() -> Column(
-                Modifier.fillMaxSize(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Text(hub.playlistError, color = MaterialTheme.colorScheme.error)
-                TextButton(onClick = { viewModel.openPlaylist(playlist) }) { Text("重试") }
-            }
-            hub.playlistTracks.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    if (playlist.source == "bilibili") "收藏夹为空" else "歌单为空",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            else -> LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                state = listState,
-                contentPadding = PaddingValues(start = 0.dp, top = 6.dp, end = 0.dp, bottom = 20.dp),
-            ) {
-                items(hub.playlistTracks, key = { "${it.source}:${it.id}" }) { track ->
-                    PlatformTrackRow(
-                        track = track,
-                        isAdded = track.queueIdentity() in queueKeys,
-                        onAdd = { viewModel.addTrack(track) },
-                        onPin = { viewModel.insertAfterCurrent(track) },
-                    )
-                    HorizontalDivider()
-                }
-                if (hub.playlistLoadingMore) {
-                    item {
-                        Box(Modifier.fillMaxWidth().padding(20.dp), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+            item(key = "header") {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        AsyncImage(
+                            model = playlist.cover,
+                            contentDescription = playlist.name,
+                            modifier = Modifier.size(96.dp).clip(RoundedCornerShape(14.dp)),
+                            contentScale = ContentScale.Crop,
+                        )
+                        Column(Modifier.weight(1f).padding(start = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                playlist.name,
+                                style = MiuixTheme.textStyles.title4,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            playlist.creator?.takeIf { it.isNotBlank() }?.let {
+                                Text(it, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                TrackPlatformBadge(playlist.source)
+                                Text(
+                                    if (hub.playlistAddingAll) {
+                                        "正在加载全部 ${hub.playlistTracks.size}/${hub.playlistTotal}"
+                                    } else {
+                                        "${hub.playlistTotal} 首"
+                                    },
+                                    style = MiuixTheme.textStyles.footnote1,
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                )
+                            }
                         }
                     }
-                } else if (hub.playlistError != null) {
-                    item {
-                        TextButton(
-                            onClick = viewModel::loadMorePlaylistTracks,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) { Text("加载失败，点击重试") }
-                    }
-                } else if (!hub.playlistHasMore) {
-                    item {
+                    playlist.description?.takeIf { it.isNotBlank() }?.let {
                         Text(
-                            "已经到底了",
-                            Modifier.fillMaxWidth().padding(18.dp),
-                            textAlign = TextAlign.Center,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            it,
+                            modifier = Modifier.padding(top = 10.dp),
+                            style = MiuixTheme.textStyles.body2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (inRoom) {
+                        val addAllEnabled = !hub.playlistLoadingMore && !hub.playlistAddingAll &&
+                            availableCount > 0 && (hub.playlistHasMore || addableCount > 0)
+                        AppButton(
+                            text = when {
+                                hub.playlistAddingAll -> "正在加载全部…"
+                                availableCount <= 0 -> "播放队列已满"
+                                hub.playlistHasMore -> "全部点歌"
+                                addableCount > 0 -> "点歌 $addableCount 首"
+                                else -> "已全部在队列"
+                            },
+                            onClick = { viewModel.addPlaylistTracksToQueue(playlist) },
+                            enabled = addAllEnabled,
+                            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                         )
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-internal fun PlatformTrackRow(track: Track, isAdded: Boolean, onAdd: () -> Unit, onPin: () -> Unit) {
-    ListItem(
-        modifier = if (isAdded) Modifier.fillMaxWidth() else Modifier.fillMaxWidth().clickable(onClick = onAdd),
-        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-        leadingContent = {
-            TrackCover(
-                track = track,
-                size = 50.dp,
-                cornerRadius = 8.dp,
-                contentDescription = null,
-            )
-        },
-        headlineContent = { Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        supportingContent = {
-            Text(
-                "${track.artist.joinToString(" / ")} · ${track.album}",
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        },
-        trailingContent = {
-            Row {
-                IconButton(onClick = onAdd, enabled = !isAdded) {
-                    Icon(
-                        if (isAdded) Icons.Default.Check else Icons.AutoMirrored.Filled.PlaylistAdd,
-                        if (isAdded) "已添加" else "添加到播放列表",
-                        tint = if (isAdded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            if (hub.playlistTracks.isEmpty()) {
+                item(key = "empty") {
+                    AppEmptyState(
+                        icon = Icons.AutoMirrored.Filled.QueueMusic,
+                        title = if (playlist.source == "bilibili") "收藏夹为空" else "歌单为空",
                     )
                 }
-                if (!isAdded) {
-                    IconButton(onClick = onPin) {
-                        Icon(Icons.Default.VerticalAlignTop, "置顶到当前播放下方")
+            }
+            itemsIndexed(hub.playlistTracks, key = { _, track -> "${track.source}:${track.id}" }) { index, track ->
+                MusicTrackItem(track, state, viewModel, queueKeys, index = index + 1)
+            }
+            item(key = "footer") {
+                when {
+                    hub.playlistLoadingMore -> Box(Modifier.fillMaxWidth().padding(20.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
                     }
+                    hub.playlistError != null -> TextButton(
+                        text = "加载失败，点击重试",
+                        onClick = viewModel::loadMorePlaylistTracks,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    hub.playlistTracks.isNotEmpty() && !hub.playlistHasMore -> Text(
+                        "已经到底了",
+                        Modifier.fillMaxWidth().padding(18.dp),
+                        textAlign = TextAlign.Center,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
                 }
             }
-        },
-    )
+        }
+    }
 }

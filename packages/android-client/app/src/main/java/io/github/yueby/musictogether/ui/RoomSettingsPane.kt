@@ -1,5 +1,12 @@
 package io.github.yueby.musictogether.ui
 
+import top.yukonga.miuix.kmp.utils.overScrollVertical
+import top.yukonga.miuix.kmp.basic.Text as MiuixText
+import io.github.yueby.musictogether.ui.designsystem.AppButton
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -51,13 +58,32 @@ private fun MiuixRoomSettingsPane(
     val selectedQuality = qualityOptions.indexOfFirst { it.value == room.audioQuality }.coerceAtLeast(0)
     val syncDriftMs = (state.syncDriftSeconds * 1000).roundToInt()
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 0.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxSize().overScrollVertical(),
+        contentPadding = PaddingValues(bottom = 24.dp),
     ) {
         item {
-            MiuixSmallTitle(text = "${room.name} · ${room.id}")
-            MiuixCard(Modifier.fillMaxWidth()) {
+            MiuixCard(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    MiuixText(room.name, style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.SemiBold)
+                    MiuixText(
+                        buildString {
+                            append("房间号 ").append(room.id).append(" · ").append(room.users.size).append(" 人在线")
+                            if (room.hasPassword) append(" · 需要密码")
+                            if (room.hidden) append(" · 已隐藏")
+                        },
+                        style = MiuixTheme.textStyles.body2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                    Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        AppButton("分享房间", viewModel::openRoomShare, modifier = Modifier.weight(1f))
+                        AppButton("复制链接", viewModel::copyRoomLink, modifier = Modifier.weight(1f), primary = false)
+                    }
+                }
+            }
+        }
+        item {
+            MiuixSmallTitle(text = "同步状态")
+            MiuixCard(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
                 SliderPreference(
                     value = state.syncPacketIntervalSeconds.toFloat(),
                     onValueChange = { viewModel.updateSyncPacketInterval(it.roundToInt()) },
@@ -77,7 +103,7 @@ private fun MiuixRoomSettingsPane(
         }
         item {
             MiuixSmallTitle(text = "播放与同步")
-            MiuixCard(Modifier.fillMaxWidth()) {
+            MiuixCard(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
                 SwitchPreference(
                     title = "自动变速校准",
                     summary = "以最多 ±1% 的速度差平滑消除本机播放偏移",
@@ -109,7 +135,7 @@ private fun MiuixRoomSettingsPane(
         }
         item {
             MiuixSmallTitle(text = "房间可见性与权限")
-            MiuixCard(Modifier.fillMaxWidth()) {
+            MiuixCard(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
                 SwitchPreference(
                     title = "隐藏房间",
                     summary = if (room.hidden) "不在公开大厅显示" else "当前显示在公开大厅",
@@ -144,13 +170,15 @@ private fun MiuixRoomSettingsPane(
         }
         item {
             MiuixSmallTitle(text = "私人漫游")
-            MiuixRoomRoamingSettings(
-                state = state,
-                canManage = permissions.canManageAllSettings,
-                onEnabledChange = viewModel::updateRoamingEnabled,
-                onSourceChange = viewModel::updateRoamingSource,
-                onModeChange = viewModel::updateRoamingMode,
-            )
+            Column(Modifier.padding(horizontal = 12.dp)) {
+                MiuixRoomRoamingSettings(
+                    state = state,
+                    canManage = permissions.canManageAllSettings,
+                    onEnabledChange = viewModel::updateRoamingEnabled,
+                    onSourceChange = viewModel::updateRoamingSource,
+                    onModeChange = viewModel::updateRoamingMode,
+                )
+            }
         }
     }
 }

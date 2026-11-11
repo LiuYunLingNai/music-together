@@ -1,5 +1,10 @@
 package io.github.yueby.musictogether.ui
 
+import io.github.yueby.musictogether.ui.designsystem.AppTextAction
+import io.github.yueby.musictogether.ui.designsystem.AppTextField
+import io.github.yueby.musictogether.ui.designsystem.AppListItem
+import top.yukonga.miuix.kmp.basic.TextButton as MiuixTextButton
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -23,16 +28,11 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import top.yukonga.miuix.kmp.basic.Button
+import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -93,7 +93,7 @@ internal fun MusicDownloadPane(state: AppState, viewModel: MusicTogetherViewMode
         Text(
             "下载当前歌曲",
             modifier = Modifier.padding(top = 8.dp),
-            style = MaterialTheme.typography.titleLarge,
+            style = MiuixTheme.textStyles.title2,
             fontWeight = FontWeight.Bold,
         )
         Text(
@@ -101,24 +101,26 @@ internal fun MusicDownloadPane(state: AppState, viewModel: MusicTogetherViewMode
             modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
         )
+        if (resolvedDirectory == null) {
+            Text(
+                "目录必须位于 /storage/emulated/0/Download",
+                style = MiuixTheme.textStyles.paragraph,
+                color = MiuixTheme.colorScheme.error,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+        }
         Row(
             modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            OutlinedTextField(
+            AppTextField(
                 value = directoryText,
                 onValueChange = { directoryText = it.take(240) },
                 modifier = Modifier.weight(1f),
-                label = { Text("默认下载目录") },
-                supportingText = if (resolvedDirectory == null) {
-                    { Text("目录必须位于 /storage/emulated/0/Download") }
-                } else {
-                    null
-                },
-                isError = resolvedDirectory == null,
+                label = "默认下载目录",
                 singleLine = true,
             )
             Button(
@@ -158,10 +160,10 @@ internal fun MusicDownloadPane(state: AppState, viewModel: MusicTogetherViewMode
                             Icon(
                                 Icons.Default.ErrorOutline,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.error,
+                                tint = MiuixTheme.colorScheme.error,
                             )
                             Spacer(Modifier.width(8.dp))
-                            Text(error, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
+                            Text(error, color = MiuixTheme.colorScheme.error, modifier = Modifier.weight(1f))
                         }
                     }
                 }
@@ -176,7 +178,7 @@ internal fun MusicDownloadPane(state: AppState, viewModel: MusicTogetherViewMode
                     HorizontalDivider()
                 }
                 item {
-                    TextButton(
+                    AppTextAction(
                         onClick = viewModel::loadMusicDownloadOptions,
                         enabled = download.downloadingQuality == null,
                         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -199,7 +201,7 @@ private fun DownloadOptionRow(
     onDownload: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    ListItem(
+    AppListItem(
         headlineContent = { Text(audioQualityLabel(option.quality)) },
         supportingContent = {
             Text(
@@ -208,11 +210,12 @@ private fun DownloadOptionRow(
                     option.actualBitrate?.let { "$it kbps" },
                     option.fileSize?.let(::formatDownloadSize),
                 ).joinToString(" · ").ifBlank { "可下载" },
+                style = MiuixTheme.textStyles.body2,
             )
         },
         trailingContent = {
             if (downloading) {
-                OutlinedButton(onClick = onCancel) {
+                Button(onClick = onCancel) {
                     CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(6.dp))
                     Text("取消")
@@ -236,13 +239,13 @@ private fun DownloadStatus(text: String, loading: Boolean = false, action: (() -
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             if (loading) CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
-            else Icon(Icons.Default.ErrorOutline, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            else Icon(Icons.Default.ErrorOutline, null, tint = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             Text(
                 text,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 textAlign = TextAlign.Center,
             )
-            action?.let { TextButton(onClick = it) { Text("重试") } }
+            action?.let { MiuixTextButton(text = "重试", onClick = it) }
         }
     }
 }
