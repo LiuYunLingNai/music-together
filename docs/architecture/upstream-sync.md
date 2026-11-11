@@ -36,3 +36,13 @@
 未同步，后续按需评估：Discourse 迷你应用（`packages/mapp`、沙箱认证通道、宿主 API 表）、设置对话框改用 ui Tabs 与 Textarea、搜索失败与无结果的区分、平台认证服务与 `useAuth`/`useSearch` 的测试补充、依赖大版本批量升级、`.pi/` 忽略项。
 
 后续同步流程：`git fetch upstream` → `git log HEAD..upstream/main` 查看新提交 → 按上文策略移植 → 在同一提交或独立提交中 `git merge -s ours upstream/main` 并更新本节基线。
+
+## refs-folia（folia-major）视觉基线
+
+当前基线：`chthollyphile/folia-major@66d7ebd4`（v0.7.27 之后的 4 个提交，2026-11-10）。本地参考仓库为 `refs-folia`，移植结果在 `packages/client/src/components/Player/folia/upstream/`，宿主适配在 `folia/` 其余目录。
+
+已吸收：十八个歌词样式、六个背景族、样式过渡与换歌交接、共享字幕与字幕行布局、智能动感（`services/beatFx` + 分析链路）、雾笺窗外与水族箱、町景模拟节拍、可视化设置窗口（VisPlayground 及各模式/背景面板）、歌词渲染分辨率与抗锯齿、上游歌词匹配评分（`packages/shared/src/lyricMatch.ts`）、跨源歌词搜索别名与无 `itunes:key` 的 TTML 兜底。
+
+宿主差异（保留，不随上游）：Electron 壳与窗口交接、外部播放器与平台账号（Apple Music、Spotify）、OBS 通道与外观配置码、Lattice 封面墙与速记簿、桌面面板页签、Coven/Dedicatus 开发工具、自动 AI 分词（按次付费的 AI 请求）。窄视口一体胶囊只借用「展开态显示歌手与专辑」的信息，不搬桌面 compact dock。
+
+后续同步：`git -C ../refs-folia log --oneline <基线>..HEAD` 查看新提交，按「迁移能力与修复、保留宿主架构」的方式移植，并在同一批更新本节基线。

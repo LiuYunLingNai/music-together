@@ -88,6 +88,11 @@ function LyricSourceMatch() {
         params.set('lyricId', track.lyricId)
       }
       for (const artist of artists.length > 0 ? artists : track.artist) params.append('artists', artist)
+      // 用户自己填了歌名/歌手时不带别名，避免和手动搜索的意图打架。
+      if (!searchTitle.trim() && track.lyricAliases?.title) params.set('originalTitle', track.lyricAliases.title)
+      if (!searchArtists.trim() && track.lyricAliases?.artist) {
+        params.set('alternateArtist', track.lyricAliases.artist)
+      }
       const response = await fetch(`${SERVER_URL}/api/music/lyric-candidates?${params}`, { credentials: 'include' })
       if (!response.ok) throw new Error('search failed')
       const data = (await response.json()) as {

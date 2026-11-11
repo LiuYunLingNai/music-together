@@ -27,6 +27,8 @@ export interface KugouSongFields {
   hash: string
   /** 歌名。可能为空串（调用方决定是否落占位名）。 */
   title: string
+  /** 平台给的原始歌名（概念版 `OriSongName` 或去掉译名后缀），与 `title` 相同或缺失时为空串。 */
+  originalTitle: string
   /** 歌手列表。空数组表示解析不出。 */
   artists: string[]
   /** 专辑名，可能为空串。 */
@@ -126,10 +128,20 @@ export function parseKugouSongFields(song: Record<string, unknown>): KugouSongFi
     song.album_img,
   )
 
+  // 原名：概念版 `OriSongName`；标准版把译名放在 `trans_param.songname_suffix`，
+  // 歌名以它结尾时去掉后缀即为原名。只在确实与显示歌名不同时保留。
+  const suffix = firstString(
+    asRecord(song.trans_param)?.songname_suffix,
+    asRecord(audioInfo?.trans_param)?.songname_suffix,
+  )
+  const suffixStripped = suffix && title.endsWith(suffix) ? title.slice(0, -suffix.length).trim() : ''
+  const originalTitle = [firstString(song.OriSongName), suffixStripped].find((name) => name && name !== title) ?? ''
+
   return {
     hash,
     title,
     artists,
+    originalTitle,
     album: firstString(song.album_name, song.AlbumName, song.remark),
     duration,
     cover,

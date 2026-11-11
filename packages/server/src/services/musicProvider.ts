@@ -1150,6 +1150,7 @@ class MusicProvider {
           lyricId: fields.hash,
           picId: fields.hash,
           vip: fields.vip,
+          ...(fields.originalTitle ? { lyricAliases: { title: fields.originalTitle } } : {}),
         })
       }
 
@@ -1308,6 +1309,8 @@ class MusicProvider {
     const tracks: Track[] = songList.flatMap((song) => {
       const mid = song.mid?.trim()
       if (!mid) return []
+      // `name` 是原名、`title` 带括号译名或版本；显示用 `name`，另一个留给歌词搜索。
+      const otherTitle = song.name && song.title && song.name !== song.title ? song.title.trim() : ''
       return [
         {
           id: nanoid(),
@@ -1324,6 +1327,7 @@ class MusicProvider {
           lyricId: mid,
           picId: song.album?.mid || '',
           vip: song.pay?.pay_month === 1 || song.pay?.pay_down === 1 || (song.action?.msgpay ?? 0) > 0,
+          ...(otherTitle ? { lyricAliases: { title: otherTitle } } : {}),
         },
       ]
     })

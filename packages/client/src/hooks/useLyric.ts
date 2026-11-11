@@ -92,6 +92,8 @@ async function fetchLyricSupplement(
     duration: String(track.duration),
   })
   for (const artist of track.artist) params.append('artists', artist)
+  if (track.lyricAliases?.title) params.set('originalTitle', track.lyricAliases.title)
+  if (track.lyricAliases?.artist) params.set('alternateArtist', track.lyricAliases.artist)
   try {
     const response = await fetch(`${SERVER_URL}/api/music/lyric-supplement?${params}`, {
       signal,

@@ -345,7 +345,7 @@ B站没有与房间 128K、320K 完全对应的普通 DASH 音轨，因此分别
 | `/api/music/search-all`              | GET    | 跨源统一搜索：并行查询网易云/QQ/酷狗/概念版（单源 4 秒超时、失败隔离），按规范化标题+艺人聚合同曲的不同版本；无个人 cookie 时进程内缓存 60 秒                    |
 | `/api/music/url`                     | GET    | 解析流媒体 URL（`source` + `id`）；带 `roomId` 时使用房间内最高会员凭证，供下一首预热与降档重试复用                                                              |
 | `/api/music/lyric`                   | GET    | 获取平台歌词；返回 LRC/翻译/音译，以及 `wordLyric + wordFormat + source` 结构化逐字合同（yrc/qrc/krc/ttml/enhanced-lrc）                                         |
-| `/api/music/lyric-supplement`        | GET    | 当前来源缺少可靠逐词或时间轴需要修复时，并行搜索其他平台；按标题/歌手/专辑/时长加权评分返回 YRC/KRC/LRC 候选，由客户端统一评分择优；结果按曲目缓存并合并并发请求 |
+| `/api/music/lyric-supplement`        | GET    | 当前来源缺少可靠逐词或时间轴需要修复时，并行搜索其他平台；按标题/歌手/专辑/时长加权评分返回 YRC/KRC/LRC 候选，由客户端统一评分择优；显示歌名搜不到时用平台给的 `originalTitle` / `alternateArtist`（原名、译名、音译）再搜一次，伴奏类版本不换名；结果按曲目缓存并合并并发请求 |
 | `/api/music/ttml`                    | GET    | 代理 AMLL TTML DB；仅允许配置的 HTTPS 主机，最多跟随 3 次重定向且每一跳重新校验白名单，限制 2 MiB/6 秒；进程内 24 小时缓存、并发合并与 ETag                      |
 | `/api/music/amll-ttml`               | GET    | 按 `ncmMusicId`/`qqMusicId` 精确查询 AMLL 官方 TTML API；固定上游域名、5 秒超时、2 MiB 上限、24 小时缓存与 ETag                                                  |
 | `/api/music/cover`                   | GET    | 获取封面图                                                                                                                                                       |

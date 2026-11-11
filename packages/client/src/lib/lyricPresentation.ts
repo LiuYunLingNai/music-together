@@ -88,13 +88,50 @@ export function toCoreLyricLines(lines: ParserLyricLine[]): LyricLine[] {
   })
 }
 
+const ITUNES_TTML_NAMESPACE = 'http://music.apple.com/lyric-ttml-internal'
+
+const getLocalName = (node: { localName?: string | null; nodeName: string }): string =>
+  node.localName || node.nodeName.split(':').pop() || ''
+
+/**
+ * AMLL 的 TTML 解析器读不到 `<p>` 上的 `itunes:key` 就整行跳过。Apple Music 与
+ * AMLL TTML Tool 总会写 key，LRC 转换之类的工具通常不写，那种文件会解析成 0 行；
+ * 交给 AMLL 之前给没 key 的行补一个不与已有 key 冲突的 key。
+ */
+function ensureTtmlLineKeys(root: Element): void {
+  const lines = Array.from(root.getElementsByTagName('*')).filter((element) => getLocalName(element) === 'p')
+  const readKey = (element: Element) =>
+    Array.from(element.attributes).find((attribute) => getLocalName(attribute) === 'key')?.value
+  const usedKeys = new Set(lines.map(readKey).filter((key): key is string => Boolean(key)))
+  let nextIndex = 1
+  for (const line of lines) {
+    if (readKey(line)) continue
+    while (usedKeys.has(`L${nextIndex}`)) nextIndex += 1
+    const key = `L${nextIndex}`
+    usedKeys.add(key)
+    line.setAttributeNS(ITUNES_TTML_NAMESPACE, 'itunes:key', key)
+  }
+}
+
+/** Node 环境（测试、SSR）没有 DOMParser 时不注入，交给 AMLL 自己的默认实现。 */
+const ttmlDomParser =
+  typeof DOMParser === 'undefined'
+    ? undefined
+    : {
+        parseFromString: (source: string, mimeType: string) => {
+          const document = new DOMParser().parseFromString(source, mimeType as DOMParserSupportedType)
+          if (document.documentElement) ensureTtmlLineKeys(document.documentElement)
+          return document
+        },
+      }
+
 /**
  * TTML 走与上游 amll-player 同一个解析器（`@applemusic-like-lyrics/ttml`）：
  * 注音（ruby）、不雅词标记（obscene）、对唱与背景人声的判定都由它给出，
  * 再补回 Folia 使用的 `songPart` / `blockIndex` 结构字段。
  */
 export function parseTtmlLyricLines(text: string): LyricLine[] {
-  const result = TTMLParser.parse(text)
+  const result = TTMLParser.parse(text, ttmlDomParser ? { domParser: ttmlDomParser } : undefined)
   const lines = toAmllLyrics(result).lines as LyricLine[]
 
   let index = 0

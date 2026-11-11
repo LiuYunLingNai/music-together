@@ -5,6 +5,35 @@ function asRecord(value: unknown): Record<string, any> | null {
   return value && typeof value === 'object' ? value as Record<string, any> : null
 }
 
+const LATIN_LETTER = /\p{Script=Latin}/u
+const NON_LATIN_LETTER = /[^\p{Script=Latin}\p{Script=Common}\p{Script=Inherited}]/u
+
+/**
+ * 网易云给歌手的另一种写法（`tns` 音译 / `alias` 旧名）：原名是中文时取拉丁写法，
+ * 原名是拉丁字母时取中文写法。没有任何一位歌手换了写法时返回空串。
+ */
+function alternateArtistName(rawArtists: unknown[]): string {
+  let renamed = false
+  const names = rawArtists
+    .map((artist) => {
+      const record = asRecord(artist)
+      const name = String(record?.name ?? '').trim()
+      if (!name) return ''
+      const wantsLatin = NON_LATIN_LETTER.test(name)
+      const other = [record?.tns, record?.alias]
+        .flatMap((list) => (Array.isArray(list) ? list : []))
+        .map((value) => String(value ?? '').trim())
+        .find((value) => value && value !== name && (wantsLatin
+          ? LATIN_LETTER.test(value) && !NON_LATIN_LETTER.test(value)
+          : NON_LATIN_LETTER.test(value)))
+      if (!other) return name
+      renamed = true
+      return other
+    })
+    .filter(Boolean)
+  return renamed ? names.join(', ') : ''
+}
+
 /** Parse both the modern song-detail shape and the legacy private-FM shape. */
 export function parseNeteaseTrack(song: Record<string, unknown>): Track {
   const root = song as Record<string, any>
@@ -37,10 +66,15 @@ export function parseNeteaseTrack(song: Record<string, unknown>): Track {
     ? Math.round(rawDuration > 1000 ? rawDuration / 1000 : rawDuration)
     : 0
   const cover = String(album.picUrl ?? album.blurPicUrl ?? data.picUrl ?? '').trim()
+  const title = String(data.name ?? root.name ?? 'Unknown')
+  const aliasTitle = (Array.isArray(data.alia) ? data.alia : [])
+    .map((value: unknown) => String(value ?? '').trim())
+    .find((value: string) => value && value !== title) ?? ''
+  const aliasArtist = alternateArtistName(rawArtists)
 
   return {
     id: nanoid(),
-    title: String(data.name ?? root.name ?? 'Unknown'),
+    title,
     artist: artists.length > 0 ? artists : ['Unknown'],
     ...(artistIds && artistIds.length > 0 ? { artistIds } : {}),
     album: String(album.name ?? ''),
@@ -53,5 +87,8 @@ export function parseNeteaseTrack(song: Record<string, unknown>): Track {
     picId: String(album.pic_str ?? album.pic ?? album.picId ?? ''),
     // fee: 0=free, 1=VIP, 4=paid album, 8=low-quality free.
     vip: data.fee === 1 || data.fee === 4 || data.privilege?.fee === 1 || data.privilege?.fee === 4,
+    ...(aliasTitle || aliasArtist
+      ? { lyricAliases: { ...(aliasTitle ? { title: aliasTitle } : {}), ...(aliasArtist ? { artist: aliasArtist } : {}) } }
+      : {}),
   }
 }

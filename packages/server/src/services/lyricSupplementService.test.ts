@@ -113,6 +113,47 @@ describe('LyricSupplementService', () => {
     expect(fakeProvider.getLyric).toHaveBeenCalledWith('netease', '1901371647')
   })
 
+  it('retries with the platform alias title when the display name finds nothing', async () => {
+    const searched: string[] = []
+    const fakeProvider = provider([])
+    fakeProvider.search.mockImplementation(async (_source: string, keyword: string) => {
+      searched.push(keyword)
+      return keyword.startsWith('Yoru ni Kakeru')
+        ? [track({ title: 'Yoru ni Kakeru', artist: ['YOASOBI'], album: 'THE BOOK', duration: 261 })]
+        : []
+    })
+    const service = new LyricSupplementService(fakeProvider)
+
+    const result = await service.getSupplement({
+      source: 'netease',
+      lyricId: '123',
+      title: '向夜晚奔去',
+      artists: ['YOASOBI'],
+      duration: 261,
+      originalTitle: 'Yoru ni Kakeru',
+    })
+
+    expect(result.source).not.toBeNull()
+    expect(searched).toContain('向夜晚奔去 YOASOBI')
+    expect(searched).toContain('Yoru ni Kakeru YOASOBI')
+  })
+
+  it('does not retry with an alias title that marks an instrumental version', async () => {
+    const fakeProvider = provider([])
+    const service = new LyricSupplementService(fakeProvider)
+
+    await service.getSupplement({
+      source: 'netease',
+      lyricId: '123',
+      title: '飞云之下 (伴奏)',
+      artists: ['韩红'],
+      duration: 267,
+      originalTitle: '飞云之下',
+    })
+
+    expect(fakeProvider.search.mock.calls.map((call) => call[1])).not.toContain('飞云之下 韩红')
+  })
+
   it('falls back to an empty optional result when supplementary providers fail', async () => {
     const fakeProvider = provider([])
     fakeProvider.search.mockRejectedValue(new Error('provider unavailable'))

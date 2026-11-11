@@ -36,6 +36,9 @@ export function rawToTrack(song: Record<string, unknown>, source: MusicSource): 
       const artists = (t.singer || [])
         .map((artist: Record<string, unknown>) => String(artist.name ?? '').trim())
         .filter(Boolean)
+      // QQ 的 `title` 带括号译名或版本、`name` 是原名；显示沿用 `name`，
+      // 另一个写法留给歌词搜索在标题搜不到时再搜一次。
+      const otherTitle = t.name && t.title && t.name !== t.title ? String(t.title).trim() : ''
       return {
         id: nanoid(),
         title: t.name || t.title || 'Unknown',
@@ -50,6 +53,7 @@ export function rawToTrack(song: Record<string, unknown>, source: MusicSource): 
         picId: albumMid,
         // pay.pay_play=1 表示需要 VIP, pay.pay_month=1 表示月度VIP, pay.price_track>0 表示付费单曲
         vip: t.pay?.pay_play === 1 || t.pay?.pay_month === 1 || (t.pay?.price_track ?? 0) > 0,
+        ...(otherTitle ? { lyricAliases: { title: otherTitle } } : {}),
       }
     }
 
@@ -67,6 +71,7 @@ export function rawToTrack(song: Record<string, unknown>, source: MusicSource): 
           .filter(Boolean)
         trackName = parts.slice(1).join(' - ')
       }
+      const originalTitle = String(s.OriSongName ?? '').trim()
       return {
         id: nanoid(),
         title: trackName || 'Unknown',
@@ -83,6 +88,9 @@ export function rawToTrack(song: Record<string, unknown>, source: MusicSource): 
         picId: String(s.hash),
         // privilege 位掩码: & 8 表示 VIP; pay_type > 0 也表示付费
         vip: ((s.privilege ?? 0) & 8) !== 0 || (s.pay_type ?? 0) > 0,
+        ...(originalTitle && originalTitle !== (trackName || 'Unknown')
+          ? { lyricAliases: { title: originalTitle } }
+          : {}),
       }
     }
 

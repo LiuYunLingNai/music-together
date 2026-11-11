@@ -217,6 +217,11 @@ export interface Track {
   requestedBy?: string
   /** 服务端漫游补货的曲目；旧客户端忽略。 */
   roaming?: boolean
+  /**
+   * 平台自己给出的另一种歌名/歌手写法（译名、原名、去掉版本后缀的名字）。
+   * 只用于跨源歌词搜索：按显示歌名搜不到逐字歌词时换这个名字再搜一次。旧客户端忽略。
+   */
+  lyricAliases?: { title?: string; artist?: string }
 }
 
 /** One provider-backed format that the current room can download. */

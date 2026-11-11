@@ -167,6 +167,8 @@ export function FoliaControlBar({ activeVote, onCastVote, onOpenQueue, ...transp
 
   const track = actions.currentTrack
   const title = track?.title ?? '暂无歌曲'
+  // 展开态补歌手与专辑（上游 compact 胶囊同一行信息）；缺哪项就少哪项。
+  const subtitle = [track?.artist.filter(Boolean).join(' / '), track?.album].filter(Boolean).join(' · ')
   const visibilityLabel = settings.manualHide ? '恢复播放栏' : '隐藏播放栏'
   const canNavPrev = !actions.disabled && (actions.canPrev || actions.canVote)
   const canNavNext = !actions.disabled && (actions.canNext || actions.canVote)
@@ -258,14 +260,17 @@ export function FoliaControlBar({ activeVote, onCastVote, onOpenQueue, ...transp
                         )}
                       </div>
                       <div className="folia-capsule__title">
-                        <span className="folia-capsule__title-text">{title}</span>
-                        <QualityBadge
-                          quality={track?.audioQuality}
-                          bitrate={track?.audioBitrate}
-                          downgraded={track?.qualityDowngraded}
-                          requested={roomQuality}
-                          className="folia-capsule__quality"
-                        />
+                        <span className="folia-capsule__title-line">
+                          <span className="folia-capsule__title-text">{title}</span>
+                          <QualityBadge
+                            quality={track?.audioQuality}
+                            bitrate={track?.audioBitrate}
+                            downgraded={track?.qualityDowngraded}
+                            requested={roomQuality}
+                            className="folia-capsule__quality"
+                          />
+                        </span>
+                        {subtitle && <span className="folia-capsule__subtitle">{subtitle}</span>}
                       </div>
                       <div className="folia-capsule__nav-zone folia-capsule__nav-zone--next">
                         {canNavNext && (

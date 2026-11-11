@@ -243,6 +243,12 @@ const trackSchema = z.object({
   requiresServerProxy: z.boolean().optional(),
   streamFormat: z.enum(['m4a', 'flac']).optional(),
   vip: z.boolean().optional(),
+  lyricAliases: z
+    .object({
+      title: z.string().max(500).optional(),
+      artist: z.string().max(500).optional(),
+    })
+    .optional(),
 })
 
 export const queueAddSchema = z.object({
@@ -464,6 +470,9 @@ export const lyricSupplementQuerySchema = lyricQuerySchema.extend({
     z.array(z.string().min(1).max(200)).min(1).max(10),
   ),
   duration: z.coerce.number().finite().positive().max(86_400),
+  /** 平台给的另一种歌名/歌手写法；按显示歌名搜不到逐字歌词时再搜一次。 */
+  originalTitle: z.string().min(1).max(500).optional(),
+  alternateArtist: z.string().min(1).max(500).optional(),
 })
 
 /** Manual lyric matching may search AMLL by metadata alone, without a platform lyric id. */

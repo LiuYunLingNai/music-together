@@ -33,6 +33,10 @@ export interface LyricSupplementRequest {
   title: string
   artists: string[]
   duration: number
+  /** 平台给的另一种歌名（原名/译名）；按显示歌名搜不到时换它再搜一次。 */
+  originalTitle?: string
+  /** 平台给的另一位歌手写法（音译/旧名）。 */
+  alternateArtist?: string
 }
 
 export interface LyricSupplementCandidate {
@@ -85,6 +89,25 @@ function selectMatchingTrack(
   return scored[0] ?? null
 }
 
+/** 伴奏/卡拉 OK 版本不能拿原名去搜，否则会配上原唱的逐字歌词。 */
+const INSTRUMENTAL_MARKER = /伴奏|伴唱|纯音乐|instrumental|off\s*vocal|カラオケ|karaoke|\binst\.?\b/i
+
+/** 按显示歌名搜不到时，用平台给的另一种歌名/歌手写法再搜一次；没有可用别名时返回 null。 */
+function aliasRequest(request: LyricSupplementRequest): (LyricSupplementRequest & { keyword: string }) | null {
+  const aliasTitle = request.originalTitle?.trim() ?? ''
+  const aliasArtist = request.alternateArtist?.trim() ?? ''
+  const titleChanged = Boolean(aliasTitle) && aliasTitle !== request.title
+  const artistChanged = Boolean(aliasArtist) && aliasArtist !== request.artists.join(', ')
+  if (!titleChanged && !artistChanged) return null
+  if (INSTRUMENTAL_MARKER.test(request.title) || (titleChanged && INSTRUMENTAL_MARKER.test(aliasTitle))) return null
+  const title = titleChanged ? aliasTitle : request.title
+  const artists = artistChanged
+    ? aliasArtist.split(/\s*[,、&/]\s*/).map((name) => name.trim()).filter(Boolean)
+    : request.artists
+  if (artists.length === 0) return null
+  return { ...request, title, artists, keyword: `${title} ${artists.join(' ')}` }
+}
+
 export class LyricSupplementService {
   private readonly cache = new LRUCache<string, LyricSupplementResult>({ max: 500, ttl: SUCCESS_CACHE_TTL_MS })
   private readonly inFlight = new Map<string, Promise<LyricSupplementResult>>()
@@ -122,12 +145,16 @@ export class LyricSupplementService {
 
   private async resolveSupplement(request: LyricSupplementRequest): Promise<LyricSupplementResult> {
     const keyword = `${request.title} ${request.artists.join(' ')}`
+    const alias = aliasRequest(request)
     const sources = SUPPLEMENT_SOURCES.filter((source) => source !== request.source)
     const candidates = await Promise.all(
       sources.map(async (source): Promise<LyricSupplementCandidate | null> => {
         try {
-          const tracks = await this.provider.search(source, keyword, 10, 1)
-          const match = selectMatchingTrack(request, tracks)
+          let match = selectMatchingTrack(request, await this.provider.search(source, keyword, 10, 1))
+          if (!match && alias) {
+            // 显示歌名在别的平台是译名时按原名/另一种写法再搜一次；匹配也用别名算分。
+            match = selectMatchingTrack(alias, await this.provider.search(source, alias.keyword, 10, 1))
+          }
           if (!match) return null
           const lyric = await this.provider.getLyric(source, match.track.lyricId ?? match.track.sourceId)
           if (!lyric.lyric && !lyric.yrc && !lyric.wordLyric && !lyric.wordByWord?.length) return null
