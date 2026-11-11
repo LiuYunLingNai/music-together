@@ -39,9 +39,9 @@
 
 ## refs-folia（folia-major）视觉基线
 
-当前基线：`chthollyphile/folia-major@66d7ebd4`（v0.7.27 之后的 4 个提交，2026-11-10）。本地参考仓库为 `refs-folia`，移植结果在 `packages/client/src/components/Player/folia/upstream/`，宿主适配在 `folia/` 其余目录。
+当前基线：`chthollyphile/folia-major@b7423b40`（v0.7.27 之后的 222 个提交，2026-11-11；末尾两个提交仅新增贡献者文档）。本地参考仓库为 `refs-folia`，移植结果在 `packages/client/src/components/Player/folia/upstream/`，宿主适配在 `folia/` 其余目录。
 
-已吸收：十八个歌词样式、六个背景族、样式过渡与换歌交接、共享字幕与字幕行布局、智能动感（`services/beatFx` + 分析链路）、雾笺窗外与水族箱、町景模拟节拍、可视化设置窗口（VisPlayground 及各模式/背景面板）、歌词渲染分辨率与抗锯齿、上游歌词匹配评分（`packages/shared/src/lyricMatch.ts`）、跨源歌词搜索别名与无 `itunes:key` 的 TTML 兜底。
+已吸收：十八个歌词样式、六个背景族、样式过渡与换歌交接、共享字幕与字幕行布局（含后续歌词回退开关）、智能动感（`services/beatFx` + 分析链路）、雾笺窗外/水族箱/笔画按字号缩放、町景模拟节拍、可视化设置窗口（VisPlayground 及各模式/背景面板）、歌词渲染分辨率与抗锯齿、封面尺寸规则（QQ R1200、网易去参数、Monet/Nomand 全屏背景用原图）、上游歌词匹配评分（`packages/shared/src/lyricMatch.ts`）、跨源歌词搜索别名与无 `itunes:key` 的 TTML 兜底。
 
 宿主差异（保留，不随上游）：Electron 壳与窗口交接、外部播放器与平台账号（Apple Music、Spotify）、OBS 通道与外观配置码、Lattice 封面墙与速记簿、桌面面板页签、Coven/Dedicatus 开发工具、自动 AI 分词（按次付费的 AI 请求）。窄视口一体胶囊只借用「展开态显示歌手与专辑」的信息，不搬桌面 compact dock。
 
