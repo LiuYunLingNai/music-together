@@ -1,5 +1,8 @@
 package io.github.yueby.musictogether.ui
 
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Server
+import com.composables.icons.lucide.Trash2
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,9 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Dns
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -142,7 +142,7 @@ private fun ServerConnectionItem(
 @Composable
 private fun ConnectionStatusIcon(status: ConnectionStatus) {
     MiuixIcon(
-        Icons.Default.Dns,
+        Lucide.Server,
         contentDescription = null,
         tint = if (status == ConnectionStatus.Connected) MiuixTheme.colorScheme.primary
         else MiuixTheme.colorScheme.onSurfaceVariantSummary,
@@ -181,6 +181,6 @@ private fun ConnectionSelectButton(onClick: () -> Unit) {
 @Composable
 private fun ConnectionRemoveButton(enabled: Boolean, onClick: () -> Unit) {
     MiuixIconButton(onClick = onClick, enabled = enabled) {
-        MiuixIcon(Icons.Default.Delete, contentDescription = "移除服务器")
+        MiuixIcon(Lucide.Trash2, contentDescription = "移除服务器")
     }
 }

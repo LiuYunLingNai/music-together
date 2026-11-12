@@ -1,5 +1,14 @@
 package io.github.yueby.musictogether.ui
 
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ArrowUpToLine
+import com.composables.icons.lucide.ChevronDown
+import com.composables.icons.lucide.ChevronUp
+import com.composables.icons.lucide.Download
+import com.composables.icons.lucide.EllipsisVertical
+import com.composables.icons.lucide.Play
+import com.composables.icons.lucide.RefreshCw
+import com.composables.icons.lucide.Trash2
 import io.github.yueby.musictogether.ui.designsystem.AppTextAction
 import io.github.yueby.musictogether.ui.designsystem.AppListItem
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -15,15 +24,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.VerticalAlignTop
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
@@ -95,12 +95,12 @@ internal fun QueuePane(
                     },
                     primaryAction = if (canReorder) null else ({ viewModel.playTrack(track) }),
                     secondaryAction = if (canReorder) null else ({ viewModel.removeTrack(track) }),
-                    primaryIcon = Icons.Default.PlayArrow,
-                    secondaryIcon = Icons.Default.Delete,
+                    primaryIcon = Lucide.Play,
+                    secondaryIcon = Lucide.Trash2,
                     extraAction = {
                         if (isCurrent && onDownloadCurrent != null) onDownloadCurrent() else viewModel.downloadTrack(track)
                     },
-                    extraIcon = Icons.Default.Download,
+                    extraIcon = Lucide.Download,
                     extraContentDescription = "下载歌曲",
                     onClick = { viewModel.playTrack(track) },
                     highlighted = isCurrent,
@@ -217,46 +217,46 @@ private fun QueueControlMenu(
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        IconButton(onClick = { expanded = true }) { Icon(Icons.Default.MoreVert, "队列操作") }
+        IconButton(onClick = { expanded = true }) { Icon(Lucide.EllipsisVertical, "队列操作") }
         AppDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             AppDropdownMenuItem(
                 text = { Text("播放") },
-                leadingIcon = { Icon(Icons.Default.PlayArrow, null) },
+                leadingIcon = { Icon(Lucide.Play, null) },
                 onClick = { expanded = false; onPlay() },
             )
             onReselectMetadata?.let { reselect ->
                 AppDropdownMenuItem(
                     text = { Text("重选歌词和封面") },
-                    leadingIcon = { Icon(Icons.Default.Refresh, null) },
+                    leadingIcon = { Icon(Lucide.RefreshCw, null) },
                     onClick = { expanded = false; reselect() },
                 )
             }
             AppDropdownMenuItem(
                 text = { Text("上移") },
-                leadingIcon = { Icon(Icons.Default.KeyboardArrowUp, null) },
+                leadingIcon = { Icon(Lucide.ChevronUp, null) },
                 enabled = canMoveUp,
                 onClick = { expanded = false; onMoveUp() },
             )
             AppDropdownMenuItem(
                 text = { Text("下移") },
-                leadingIcon = { Icon(Icons.Default.KeyboardArrowDown, null) },
+                leadingIcon = { Icon(Lucide.ChevronDown, null) },
                 enabled = canMoveDown,
                 onClick = { expanded = false; onMoveDown() },
             )
             AppDropdownMenuItem(
                 text = { Text("置顶到当前播放下方") },
-                leadingIcon = { Icon(Icons.Default.VerticalAlignTop, null) },
+                leadingIcon = { Icon(Lucide.ArrowUpToLine, null) },
                 enabled = canPin,
                 onClick = { expanded = false; onPin() },
             )
             AppDropdownMenuItem(
                 text = { Text("下载") },
-                leadingIcon = { Icon(Icons.Default.Download, null) },
+                leadingIcon = { Icon(Lucide.Download, null) },
                 onClick = { expanded = false; onDownload() },
             )
             AppDropdownMenuItem(
                 text = { Text("移除") },
-                leadingIcon = { Icon(Icons.Default.Delete, null) },
+                leadingIcon = { Icon(Lucide.Trash2, null) },
                 onClick = { expanded = false; onRemove() },
             )
         }

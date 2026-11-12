@@ -1,5 +1,15 @@
 package io.github.yueby.musictogether.ui
 
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ChevronRight
+import com.composables.icons.lucide.CircleAlert
+import com.composables.icons.lucide.CloudOff
+import com.composables.icons.lucide.ListMusic
+import com.composables.icons.lucide.Lock
+import com.composables.icons.lucide.LogIn
+import com.composables.icons.lucide.Plus
+import com.composables.icons.lucide.RefreshCw
+import com.composables.icons.lucide.Users
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -13,16 +23,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.automirrored.filled.QueueMusic
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.CloudOff
-import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.Groups
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.automirrored.filled.Login
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -96,12 +96,12 @@ private fun UserPlaylistsSection(state: AppState, viewModel: MusicTogetherViewMo
 
     when {
         !connected && playlists.playlists.isEmpty() -> AppEmptyState(
-            icon = Icons.Default.CloudOff,
+            icon = Lucide.CloudOff,
             title = "服务器未连接",
             summary = "账户歌单保存在服务器上，连接后即可查看",
         )
         playlists.access == UserPlaylistAccess.RequiresPassword -> AppEmptyState(
-            icon = Icons.Default.Lock,
+            icon = Lucide.Lock,
             title = "设置账号密码后使用歌单",
             summary = "歌单跟随服务器账号保存，可以收藏任意音源的歌曲，换设备登录也能找回",
             actionText = "前往账号设置",
@@ -109,7 +109,7 @@ private fun UserPlaylistsSection(state: AppState, viewModel: MusicTogetherViewMo
         )
         playlists.loading && playlists.playlists.isEmpty() -> AppLoadingState()
         playlists.error != null && playlists.playlists.isEmpty() -> AppEmptyState(
-            icon = Icons.Default.ErrorOutline,
+            icon = Lucide.CircleAlert,
             title = "歌单加载失败",
             summary = playlists.error,
             actionText = "重试",
@@ -131,7 +131,7 @@ private fun UserPlaylistsSection(state: AppState, viewModel: MusicTogetherViewMo
                         Box(
                             Modifier.size(48.dp).clip(RoundedCornerShape(10.dp)).background(MiuixTheme.colorScheme.secondaryContainer),
                             contentAlignment = Alignment.Center,
-                        ) { Icon(Icons.Default.Add, null, tint = MiuixTheme.colorScheme.onSecondaryContainer) }
+                        ) { Icon(Lucide.Plus, null, tint = MiuixTheme.colorScheme.onSecondaryContainer) }
                         Text(
                             "新建歌单",
                             modifier = Modifier.padding(start = 12.dp),
@@ -189,7 +189,7 @@ private fun UserPlaylistRow(playlist: UserPlaylist, onClick: () -> Unit) {
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
         }
-        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MiuixTheme.colorScheme.onSurfaceVariantActions)
+        Icon(Lucide.ChevronRight, null, tint = MiuixTheme.colorScheme.onSurfaceVariantActions)
     }
 }
 
@@ -202,7 +202,7 @@ internal fun UserPlaylistCover(cover: String?, size: Dp) {
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                Icons.AutoMirrored.Filled.QueueMusic,
+                Lucide.ListMusic,
                 null,
                 Modifier.size(size / 2),
                 tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
@@ -224,7 +224,7 @@ private fun PlatformPlaylistsSection(state: AppState, viewModel: MusicTogetherVi
     val hub = state.platformHub
     if (state.room == null) {
         AppEmptyState(
-            icon = Icons.Default.Groups,
+            icon = Lucide.Users,
             title = "加入房间后查看平台歌单",
             summary = "音乐平台的登录凭据按房间隔离保存",
         )
@@ -240,7 +240,7 @@ private fun PlatformPlaylistsSection(state: AppState, viewModel: MusicTogetherVi
     when {
         !hub.statusLoaded -> AppLoadingState()
         loggedIn.isEmpty() -> AppEmptyState(
-            icon = Icons.AutoMirrored.Filled.Login,
+            icon = Lucide.LogIn,
             title = "还没有登录音乐平台",
             summary = "登录后可以浏览并点播自己的歌单",
             actionText = "登录音乐平台",
@@ -259,7 +259,7 @@ private fun PlatformPlaylistsSection(state: AppState, viewModel: MusicTogetherVi
                             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                         } else {
                             IconButton(onClick = { viewModel.fetchMyPlaylists(platform) }) {
-                                Icon(Icons.Default.Refresh, "刷新${platformLabel(platform)}歌单", Modifier.size(20.dp))
+                                Icon(Lucide.RefreshCw, "刷新${platformLabel(platform)}歌单", Modifier.size(20.dp))
                             }
                         }
                     }

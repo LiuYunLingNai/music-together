@@ -1,5 +1,8 @@
 package io.github.yueby.musictogether.ui.player
 
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.RotateCcw
+import com.composables.icons.lucide.X
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
@@ -16,12 +19,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Chat
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.RestartAlt
-import androidx.compose.material.icons.filled.Tune
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
@@ -49,13 +46,10 @@ internal fun MobileLyricsHero(
     lyrics: LyricsState,
     lyricOffsetMs: Int,
     player: PlayerUiState,
-    chatUnreadCount: Int,
-    onOpenChat: () -> Unit,
     onSeek: (Double) -> Unit,
-    onSetLyricOffset: (Int) -> Unit,
     coverSlot: Modifier,
+    titleModifier: Modifier = Modifier,
 ) {
-    var lyricOffsetPanelVisible by remember(track.id) { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -69,7 +63,7 @@ internal fun MobileLyricsHero(
                     title = track.title,
                     subtitle = track.artist.joinToString(" / "),
                 ),
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).then(titleModifier),
             ) { label ->
                 Column {
                     Text(
@@ -91,22 +85,8 @@ internal fun MobileLyricsHero(
                     )
                 }
             }
-            LyricActionsMenu(
-                unreadCount = chatUnreadCount,
-                canAdjustLyricOffset = lyricOffsetKey(track) != null,
-                onOpenChat = onOpenChat,
-                onOpenLyricOffset = { lyricOffsetPanelVisible = true },
-            )
         }
-        AnimatedVisibility(visible = lyricOffsetPanelVisible) {
-            LyricOffsetPanel(
-                offsetMs = lyricOffsetMs,
-                onDismiss = { lyricOffsetPanelVisible = false },
-                onOffsetChange = onSetLyricOffset,
-                modifier = Modifier.padding(top = 12.dp),
-            )
-        }
-        Spacer(Modifier.height(if (lyricOffsetPanelVisible) 12.dp else 6.dp))
+        Spacer(Modifier.height(6.dp))
         Box(
             modifier = Modifier
                 .weight(1f)
@@ -121,69 +101,6 @@ internal fun MobileLyricsHero(
                 onSeek = { lyricTimeSeconds -> onSeek(lyricTimeSeconds + lyricOffsetMs / 1_000.0) },
                 alignToTop = true,
             )
-        }
-    }
-}
-
-@Composable
-internal fun LyricActionsMenu(
-    unreadCount: Int,
-    canAdjustLyricOffset: Boolean,
-    onOpenChat: () -> Unit,
-    onOpenLyricOffset: () -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        IconButton(
-            onClick = { expanded = true },
-            modifier = Modifier.size(40.dp),
-        ) {
-            Icon(
-                Icons.Default.MoreVert,
-                contentDescription = "更多",
-                tint = Color.White.copy(alpha = 0.72f),
-            )
-            if (unreadCount > 0) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(top = 3.dp, end = 2.dp)
-                        .size(7.dp)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.92f)),
-                )
-            }
-        }
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-        ) {
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        if (unreadCount > 0) "聊天（${unreadCount.coerceAtMost(99)} 条未读）" else "聊天",
-                    )
-                },
-                leadingIcon = {
-                    Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null)
-                },
-                onClick = {
-                    expanded = false
-                    onOpenChat()
-                },
-            )
-            if (canAdjustLyricOffset) {
-                DropdownMenuItem(
-                    text = { Text("歌词时间校正") },
-                    leadingIcon = {
-                        Icon(Icons.Default.Tune, contentDescription = null)
-                    },
-                    onClick = {
-                        expanded = false
-                        onOpenLyricOffset()
-                    },
-                )
-            }
         }
     }
 }
@@ -226,13 +143,13 @@ internal fun LyricOffsetPanel(
                     enabled = offsetMs != 0,
                 ) {
                     Icon(
-                        Icons.Default.RestartAlt,
+                        Lucide.RotateCcw,
                         contentDescription = "重置歌词校正",
                     )
                 }
                 IconButton(onClick = onDismiss) {
                     Icon(
-                        Icons.Default.Close,
+                        Lucide.X,
                         contentDescription = "关闭歌词校正",
                     )
                 }

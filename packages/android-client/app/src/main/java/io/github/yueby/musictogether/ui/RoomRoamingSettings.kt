@@ -1,5 +1,7 @@
 package io.github.yueby.musictogether.ui
 
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Sparkles
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -7,8 +9,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Switch
@@ -71,7 +71,7 @@ internal fun MiuixRoomRoamingSettings(
             checked = room.roamingEnabled,
             enabled = canManage && (room.roamingEnabled || ownerLoginStatus != false),
             onCheckedChange = onEnabledChange,
-            startAction = { MiuixIcon(Icons.Default.AutoAwesome, null, tint = MiuixTheme.colorScheme.primary) },
+            startAction = { MiuixIcon(Lucide.Sparkles, null, tint = MiuixTheme.colorScheme.primary) },
         )
         WindowDropdownPreference(
             title = "漫游平台",

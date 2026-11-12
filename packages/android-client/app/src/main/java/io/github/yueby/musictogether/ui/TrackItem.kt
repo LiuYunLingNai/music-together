@@ -1,5 +1,17 @@
 package io.github.yueby.musictogether.ui
 
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ArrowUpToLine
+import com.composables.icons.lucide.Check
+import com.composables.icons.lucide.Download
+import com.composables.icons.lucide.EllipsisVertical
+import com.composables.icons.lucide.Heart
+import com.composables.icons.lucide.ListMusic
+import com.composables.icons.lucide.ListPlus
+import com.composables.icons.lucide.Play
+import com.composables.icons.lucide.Plus
+import com.composables.icons.lucide.Trash2
+import com.composables.icons.lucide.User
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,19 +24,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.LibraryAdd
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.automirrored.filled.QueueMusic
-import androidx.compose.material.icons.filled.VerticalAlignTop
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -121,7 +120,7 @@ internal fun MusicTrackItem(
         if (inRoom) {
             IconButton(onClick = { viewModel.addTrack(track) }, enabled = !added) {
                 Icon(
-                    if (added) Icons.Default.Check else Icons.AutoMirrored.Filled.PlaylistAdd,
+                    if (added) Lucide.Check else Lucide.ListPlus,
                     contentDescription = if (added) "已在队列" else "点歌",
                     tint = if (added) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantActions,
                 )
@@ -129,7 +128,7 @@ internal fun MusicTrackItem(
         }
         Box {
             IconButton(onClick = { menuOpen = true }) {
-                Icon(Icons.Default.MoreVert, "更多操作", tint = MiuixTheme.colorScheme.onSurfaceVariantActions)
+                Icon(Lucide.EllipsisVertical, "更多操作", tint = MiuixTheme.colorScheme.onSurfaceVariantActions)
             }
             TrackActionsMenu(
                 expanded = menuOpen,
@@ -180,20 +179,20 @@ private fun TrackActionsMenu(
         if (inRoom) {
             DropdownMenuItem(
                 text = { Text(if (added) "已在播放队列" else "点歌") },
-                leadingIcon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, null) },
+                leadingIcon = { Icon(Lucide.ListMusic, null) },
                 enabled = !added,
                 onClick = { act { viewModel.addTrack(track) } },
             )
             DropdownMenuItem(
                 text = { Text("下一首播放") },
-                leadingIcon = { Icon(Icons.Default.VerticalAlignTop, null) },
+                leadingIcon = { Icon(Lucide.ArrowUpToLine, null) },
                 enabled = !added,
                 onClick = { act { viewModel.insertAfterCurrent(track) } },
             )
         } else if (downloaded) {
             DropdownMenuItem(
                 text = { Text("播放本地文件") },
-                leadingIcon = { Icon(Icons.Default.PlayArrow, null) },
+                leadingIcon = { Icon(Lucide.Play, null) },
                 onClick = { act { viewModel.playDownloadedTrack(track) } },
             )
         }
@@ -210,13 +209,13 @@ private fun TrackActionsMenu(
             },
             leadingIcon = {
                 when {
-                    downloaded -> Icon(Icons.Default.Check, null, tint = MiuixTheme.colorScheme.primary)
+                    downloaded -> Icon(Lucide.Check, null, tint = MiuixTheme.colorScheme.primary)
                     download != null -> CircularProgressIndicator(
                         progress = (download.progressPercent ?: 0) / 100f,
                         modifier = Modifier.size(20.dp),
                         strokeWidth = 2.dp,
                     )
-                    else -> Icon(Icons.Default.Download, null)
+                    else -> Icon(Lucide.Download, null)
                 }
             },
             enabled = !downloaded && download == null,
@@ -224,27 +223,27 @@ private fun TrackActionsMenu(
         )
         DropdownMenuItem(
             text = { Text("添加到歌单") },
-            leadingIcon = { Icon(Icons.Default.LibraryAdd, null) },
+            leadingIcon = { Icon(Lucide.ListPlus, null) },
             onClick = { act { pickPlaylist = true } },
         )
         if (inRoom && track.source == CatalogSourceName) {
             DropdownMenuItem(
                 text = { Text("收藏到网易云") },
-                leadingIcon = { Icon(Icons.Default.Favorite, null) },
+                leadingIcon = { Icon(Lucide.Heart, null) },
                 onClick = { act { viewModel.likeTrack(track) } },
             )
         }
         artistId?.let { id ->
             DropdownMenuItem(
                 text = { Text("查看歌手") },
-                leadingIcon = { Icon(Icons.Default.Person, null) },
+                leadingIcon = { Icon(Lucide.User, null) },
                 onClick = { act { navigator.openArtist(track.source, id) } },
             )
         }
         userPlaylistId?.let { playlistId ->
             DropdownMenuItem(
                 text = { Text("从歌单移除", color = MiuixTheme.colorScheme.error) },
-                leadingIcon = { Icon(Icons.Default.Delete, null, tint = MiuixTheme.colorScheme.error) },
+                leadingIcon = { Icon(Lucide.Trash2, null, tint = MiuixTheme.colorScheme.error) },
                 onClick = { act { viewModel.removeFromUserPlaylist(playlistId, track) } },
             )
         }
@@ -346,7 +345,7 @@ internal fun AddToUserPlaylistDialog(
                                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                             )
                         }
-                        Icon(Icons.Default.Add, null, tint = MiuixTheme.colorScheme.onSurfaceVariantActions)
+                        Icon(Lucide.Plus, null, tint = MiuixTheme.colorScheme.onSurfaceVariantActions)
                     }
                 }
             }

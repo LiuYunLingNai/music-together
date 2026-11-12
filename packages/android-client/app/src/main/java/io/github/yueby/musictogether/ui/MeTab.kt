@@ -1,5 +1,17 @@
 package io.github.yueby.musictogether.ui
 
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Bug
+import com.composables.icons.lucide.ChevronRight
+import com.composables.icons.lucide.DoorOpen
+import com.composables.icons.lucide.HardDriveDownload
+import com.composables.icons.lucide.Music
+import com.composables.icons.lucide.Palette
+import com.composables.icons.lucide.Server
+import com.composables.icons.lucide.Settings
+import com.composables.icons.lucide.ShieldCheck
+import com.composables.icons.lucide.User
+import com.composables.icons.lucide.Volume2
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,18 +24,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.AdminPanelSettings
-import androidx.compose.material.icons.filled.BugReport
-import androidx.compose.material.icons.filled.Dns
-import androidx.compose.material.icons.filled.MeetingRoom
-import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.Palette
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.PlayCircle
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -81,7 +81,7 @@ internal fun MeTab(state: AppState, viewModel: MusicTogetherViewModel, bottomPad
                                     contentScale = ContentScale.Crop,
                                 )
                             } else {
-                                Icon(Icons.Default.Person, null, tint = MiuixTheme.colorScheme.onSecondaryContainer)
+                                Icon(Lucide.User, null, tint = MiuixTheme.colorScheme.onSecondaryContainer)
                             }
                         }
                         Column(Modifier.weight(1f).padding(horizontal = 14.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -103,14 +103,14 @@ internal fun MeTab(state: AppState, viewModel: MusicTogetherViewModel, bottomPad
                                 maxLines = 2,
                             )
                         }
-                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MiuixTheme.colorScheme.onSurfaceVariantActions)
+                        Icon(Lucide.ChevronRight, null, tint = MiuixTheme.colorScheme.onSurfaceVariantActions)
                     }
                 }
             }
             item(key = "music") {
                 MeGroup("音乐与连接") {
                     MeEntry(
-                        Icons.Default.MusicNote,
+                        Lucide.Music,
                         "音乐平台账号",
                         when {
                             state.room == null -> "在房间内登录和管理"
@@ -118,30 +118,30 @@ internal fun MeTab(state: AppState, viewModel: MusicTogetherViewModel, bottomPad
                             else -> loggedPlatforms.joinToString("、")
                         },
                     ) { navigator.open(AppRoute.PlatformAccounts) }
-                    MeEntry(Icons.Default.Dns, "服务器连接", "$connectedCount/${state.servers.size} 台在线") {
+                    MeEntry(Lucide.Server, "服务器连接", "$connectedCount/${state.servers.size} 台在线") {
                         navigator.open(AppRoute.Server)
                     }
                     if (state.room != null) {
-                        MeEntry(Icons.Default.MeetingRoom, "房间与同步", state.room.name) { navigator.open(AppRoute.RoomInfo) }
+                        MeEntry(Lucide.DoorOpen, "房间与同步", state.room.name) { navigator.open(AppRoute.RoomInfo) }
                     }
                 }
             }
             item(key = "personal") {
                 MeGroup("个性化") {
-                    MeEntry(Icons.Default.Palette, "外观与主题", "主题、模糊、底栏与分享卡片") { navigator.open(AppRoute.Appearance) }
-                    MeEntry(Icons.Default.PlayCircle, "歌词与播放器", "字号、动画与背景") { navigator.open(AppRoute.PlayerDisplay) }
-                    MeEntry(Icons.Default.Settings, "通用", "音频焦点与触感反馈") { navigator.open(AppRoute.General) }
+                    MeEntry(Lucide.Palette, "外观与主题", "主题、模糊、底栏与分享卡片") { navigator.open(AppRoute.Appearance) }
+                    MeEntry(Lucide.Volume2, "歌词与播放器", "字号、动画与背景") { navigator.open(AppRoute.PlayerDisplay) }
+                    MeEntry(Lucide.Settings, "通用", "音频焦点与触感反馈") { navigator.open(AppRoute.General) }
                 }
             }
             item(key = "about") {
                 MeGroup("关于") {
-                    MeEntry(Icons.Default.SystemUpdate, "应用更新", "当前版本 ${BuildConfig.VERSION_NAME}") { navigator.open(AppRoute.Updates) }
+                    MeEntry(Lucide.HardDriveDownload, "应用更新", "当前版本 ${BuildConfig.VERSION_NAME}") { navigator.open(AppRoute.Updates) }
                     if (profile?.role == "admin") {
-                        MeEntry(Icons.Default.AdminPanelSettings, "服务器管理", "账号、房间与代理策略") { navigator.open(AppRoute.Admin) }
+                        MeEntry(Lucide.ShieldCheck, "服务器管理", "账号、房间与代理策略") { navigator.open(AppRoute.Admin) }
                     }
                     if (BuildConfig.DEBUG) {
-                        MeEntry(Icons.Default.BugReport, "导出日志", null) { AppLogger.export(context) }
-                        MeEntry(Icons.Default.BugReport, "清空日志", null) { viewModel.clearLogs() }
+                        MeEntry(Lucide.Bug, "导出日志", null) { AppLogger.export(context) }
+                        MeEntry(Lucide.Bug, "清空日志", null) { viewModel.clearLogs() }
                     }
                 }
             }

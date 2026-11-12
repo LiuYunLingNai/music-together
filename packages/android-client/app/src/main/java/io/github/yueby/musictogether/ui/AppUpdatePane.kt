@@ -1,13 +1,13 @@
 package io.github.yueby.musictogether.ui
 
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.HardDriveDownload
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
@@ -53,7 +53,7 @@ private fun MiuixAppUpdatePane(state: AppState, viewModel: MusicTogetherViewMode
                         state.updateError != null -> "未能获取更新信息"
                         else -> "已是最新版本"
                     },
-                    startAction = { MiuixIcon(Icons.Default.SystemUpdate, null, tint = MiuixTheme.colorScheme.primary) },
+                    startAction = { MiuixIcon(Lucide.HardDriveDownload, null, tint = MiuixTheme.colorScheme.primary) },
                     onClick = viewModel::checkForAppUpdate,
                 )
                 if (update != null) {

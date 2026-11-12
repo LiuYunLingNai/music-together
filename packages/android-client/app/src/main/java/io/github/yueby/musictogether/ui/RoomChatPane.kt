@@ -1,5 +1,9 @@
 package io.github.yueby.musictogether.ui
 
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.MessageSquare
+import com.composables.icons.lucide.Send
+import com.composables.icons.lucide.X
 import androidx.compose.foundation.layout.widthIn
 import io.github.yueby.musictogether.ui.designsystem.AppTextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -16,10 +20,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Chat
-import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Close
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
@@ -58,7 +58,7 @@ internal fun ChatPane(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Icon(
-                Icons.AutoMirrored.Filled.Chat,
+                Lucide.MessageSquare,
                 contentDescription = null,
                 modifier = Modifier.size(18.dp),
                 tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
@@ -71,7 +71,7 @@ internal fun ChatPane(
             )
             onClose?.let { close ->
                 IconButton(onClick = close) {
-                    Icon(Icons.Default.Close, contentDescription = "关闭聊天")
+                    Icon(Lucide.X, contentDescription = "关闭聊天")
                 }
             }
         }
@@ -127,7 +127,7 @@ internal fun ChatPane(
                 maxLines = 3,
                 trailingIcon = {
                     IconButton(onClick = { viewModel.sendChat(content); content = "" }, enabled = content.isNotBlank()) {
-                        Icon(Icons.AutoMirrored.Filled.Send, "发送")
+                        Icon(Lucide.Send, "发送")
                     }
                 },
             )

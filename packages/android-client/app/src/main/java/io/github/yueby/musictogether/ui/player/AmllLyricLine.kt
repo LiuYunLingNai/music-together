@@ -42,6 +42,7 @@ internal fun AmllLineGroup(
     positionMs: State<Float>,
     active: Boolean,
     readingMode: Boolean,
+    hidden: Boolean = false,
     wordAnimationEnabled: Boolean,
     onClick: (() -> Unit)?,
     onMainLyricGeometryChanged: ((AmllPrimaryTextGeometry) -> Unit)?,
@@ -124,7 +125,7 @@ internal fun AmllLineGroup(
         label = "amllBackgroundLineScale",
     )
     val groupAlpha by animateFloatAsState(
-        targetValue = amllGroupTargetAlpha(
+        targetValue = if (hidden) 0f else amllGroupTargetAlpha(
             active = active,
         ),
         animationSpec = tween(durationMillis = 400, easing = AmllCssEase),
@@ -307,37 +308,41 @@ internal fun AmllMainLine(
             fontSize = mainFontSize,
             fontWeight = FontWeight(displaySettings.lyricFontWeight),
         )
-        line.translatedLyric.takeIf {
-            displaySettings.showTranslation && it.isNotBlank()
-        }?.let { translated ->
-            Text(
-                text = translated,
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = textAlign,
-                fontSize = translationFontSize.sp,
-                lineHeight = (translationFontSize * 1.5f).sp,
-                color = Color.White.copy(
-                    alpha = if (readingMode) AmllReadingSubLineAlpha else AmllSubLineAlpha,
-                ),
-            )
-        }
-        line.romanLyric
-            .takeIf {
-                displaySettings.showRomanization &&
-                    it.isNotBlank() && line.words.none { word -> word.romanText.isNotBlank() }
-            }
-            ?.let { roman ->
-                Text(
-                    text = roman,
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = textAlign,
-                    fontSize = romanFontSize.sp,
-                    lineHeight = (romanFontSize * 1.5f).sp,
-                    color = Color.White.copy(
-                        alpha = if (readingMode) AmllReadingSubLineAlpha else AmllSubLineAlpha,
-                    ),
-                )
-            }
+        val subAlpha = if (readingMode) AmllReadingSubLineAlpha else AmllSubLineAlpha
+        val subLines = listOf<@Composable () -> Unit>(
+            {
+                line.translatedLyric
+                    .takeIf { displaySettings.showTranslation && it.isNotBlank() }
+                    ?.let { translated ->
+                        Text(
+                            text = translated,
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = textAlign,
+                            fontSize = translationFontSize.sp,
+                            lineHeight = (translationFontSize * 1.5f).sp,
+                            color = Color.White.copy(alpha = subAlpha),
+                        )
+                    }
+            },
+            {
+                line.romanLyric
+                    .takeIf {
+                        displaySettings.showRomanization &&
+                            it.isNotBlank() && line.words.none { word -> word.romanText.isNotBlank() }
+                    }
+                    ?.let { roman ->
+                        Text(
+                            text = roman,
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = textAlign,
+                            fontSize = romanFontSize.sp,
+                            lineHeight = (romanFontSize * 1.5f).sp,
+                            color = Color.White.copy(alpha = subAlpha),
+                        )
+                    }
+            },
+        )
+        (if (displaySettings.lyricSwapTransRoman) subLines.reversed() else subLines).forEach { it() }
     }
 }
 

@@ -31,6 +31,7 @@ import io.github.yueby.musictogether.lyrics.amllMaskAlphaAt
 import io.github.yueby.musictogether.lyrics.amllMaskBoundaries
 import io.github.yueby.musictogether.lyrics.amllWordProgress
 import io.github.yueby.musictogether.model.LyricWord
+import io.github.yueby.musictogether.ui.designsystem.LocalPlayerDisplaySettings
 
 private val AmllWordFloatEasing = CubicBezierEasing(0f, 0f, 0.58f, 1f)
 
@@ -58,6 +59,7 @@ internal fun AmllKaraokeWord(
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
+    val fadeFactor = LocalPlayerDisplaySettings.current.lyricWordFadeWidth
     val fontSizePx = with(density) { fontSize.sp.toPx() }
     val wordFloatDuration = (word.endTimeMs - word.startTimeMs).coerceAtLeast(1_000L)
     val wordFloatProgress =
@@ -135,6 +137,7 @@ internal fun AmllKaraokeWord(
                                         progress = highlightProgress,
                                         width = canvasWidth,
                                         height = canvasHeight,
+                                        fadeFactor = fadeFactor,
                                     )
                                     val stops = buildList {
                                         add(
@@ -144,6 +147,7 @@ internal fun AmllKaraokeWord(
                                                     xFraction = 0f,
                                                     width = canvasWidth,
                                                     height = canvasHeight,
+                                                    fadeFactor = fadeFactor,
                                                 ),
                                             ),
                                         )
@@ -160,6 +164,7 @@ internal fun AmllKaraokeWord(
                                                     xFraction = 1f,
                                                     width = canvasWidth,
                                                     height = canvasHeight,
+                                                    fadeFactor = fadeFactor,
                                                 ),
                                             ),
                                         )

@@ -1,5 +1,9 @@
 package io.github.yueby.musictogether.ui
 
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ChevronRight
+import com.composables.icons.lucide.CircleAlert
+import com.composables.icons.lucide.ListMusic
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,10 +18,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.automirrored.filled.QueueMusic
-import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -84,7 +84,7 @@ internal fun PlaylistRow(playlist: Playlist, onClick: () -> Unit) {
             }
         }
         Icon(
-            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            Lucide.ChevronRight,
             contentDescription = null,
             tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
         )
@@ -116,7 +116,7 @@ internal fun PlaylistDetailPane(state: AppState, playlist: Playlist, viewModel: 
     when {
         hub.playlistLoading -> AppLoadingState()
         hub.playlistError != null && hub.playlistTracks.isEmpty() -> AppEmptyState(
-            icon = Icons.Default.ErrorOutline,
+            icon = Lucide.CircleAlert,
             title = "加载失败",
             summary = hub.playlistError,
             actionText = "重试",
@@ -192,7 +192,7 @@ internal fun PlaylistDetailPane(state: AppState, playlist: Playlist, viewModel: 
             if (hub.playlistTracks.isEmpty()) {
                 item(key = "empty") {
                     AppEmptyState(
-                        icon = Icons.AutoMirrored.Filled.QueueMusic,
+                        icon = Lucide.ListMusic,
                         title = if (playlist.source == "bilibili") "收藏夹为空" else "歌单为空",
                     )
                 }

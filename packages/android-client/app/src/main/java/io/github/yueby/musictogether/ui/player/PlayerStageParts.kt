@@ -1,5 +1,9 @@
 package io.github.yueby.musictogether.ui.player
 
+import androidx.compose.foundation.layout.Box
+import io.github.yueby.musictogether.ui.designsystem.LocalPlayerDisplaySettings
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Heart
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.draw.drawWithContent
@@ -25,9 +29,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -71,6 +72,10 @@ private val HandoffEasing = CubicBezierEasing(0.37f, 0f, 0.63f, 1f)
 /** Web `SongTextCrossfade`: old text drifts up and fades, new text rises 6dp into place over 500ms. */
 @Composable
 internal fun <T> SongHandoff(target: T, modifier: Modifier = Modifier, content: @Composable (T) -> Unit) {
+    if (!LocalPlayerDisplaySettings.current.songHandoff) {
+        Box(modifier) { content(target) }
+        return
+    }
     val density = LocalDensity.current
     val rise = with(density) { 6.dp.roundToPx() }
     val drift = with(density) { 4.dp.roundToPx() }
@@ -108,13 +113,12 @@ internal fun QualityBadge(track: Track?, modifier: Modifier = Modifier) {
 @Composable
 internal fun LikeButton(like: TrackLikeState?, onToggle: () -> Unit, size: Dp, modifier: Modifier = Modifier) {
     if (like == null) return
-    val scale by animateFloatAsState(if (like.liked) 1f else 0.92f, tween(180), label = "like-scale")
-    IconButton(onClick = onToggle, enabled = !like.busy, modifier = modifier) {
+    StageButton(onClick = onToggle, enabled = !like.busy, modifier = modifier) {
         Icon(
-            if (like.liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+            if (like.liked) StageHeartFilledIcon else Lucide.Heart,
             contentDescription = if (like.liked) "取消喜欢" else "喜欢到网易云",
-            modifier = Modifier.size(size * scale),
-            tint = if (like.liked) Color(0xFFFF6B81) else Color.White.copy(alpha = 0.78f),
+            modifier = Modifier.size(size),
+            tint = Color.White.copy(alpha = 0.75f),
         )
     }
 }
@@ -177,8 +181,8 @@ internal fun ControlsSpectrum(visible: Boolean, playing: Boolean, height: Dp, mo
 @Composable
 private fun SpectrumCanvas(playing: Boolean, height: Dp) {
     DisposableEffect(Unit) {
-        AudioSpectrum.enabled = true
-        onDispose { AudioSpectrum.enabled = false }
+        AudioSpectrum.acquire()
+        onDispose { AudioSpectrum.release() }
     }
     val state = remember { SpectrumState() }
     var frame by remember { mutableLongStateOf(0L) }

@@ -24,6 +24,10 @@ import io.github.yueby.musictogether.lyrics.preferLyricCandidate
 import io.github.yueby.musictogether.catalog.CatalogCoordinator
 import io.github.yueby.musictogether.model.CatalogState
 import io.github.yueby.musictogether.model.AppState
+import io.github.yueby.musictogether.model.AutomixTransition
+import io.github.yueby.musictogether.model.ReplayGainMode
+import io.github.yueby.musictogether.player.MediaCacheCoordinator
+import io.github.yueby.musictogether.player.MediaCacheSettings
 import io.github.yueby.musictogether.model.AudioProxyPolicy
 import io.github.yueby.musictogether.model.BilibiliMetadataMatchState
 import io.github.yueby.musictogether.model.BilibiliCollectionState
@@ -81,6 +85,7 @@ import io.github.yueby.musictogether.network.musicMimeType
 import io.github.yueby.musictogether.network.resolveMusicDownloadDirectory
 import io.github.yueby.musictogether.network.shouldRemoveStoredPlatformCredential
 import io.github.yueby.musictogether.network.suggestedMusicFileName
+import io.github.yueby.musictogether.network.toAutomixTransition
 import io.github.yueby.musictogether.network.toChatMessage
 import io.github.yueby.musictogether.network.toPlayState
 import io.github.yueby.musictogether.network.toPlaybackFailureEvent
@@ -192,6 +197,13 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             playbackHardSeekSyncEnabled = playbackSyncSettings.hardSeekEnabled,
             allowAudioMixing = appPreferences.allowAudioMixing(),
             hapticFeedbackEnabled = appPreferences.hapticFeedbackEnabled(),
+            equalizerEnabled = appPreferences.equalizerEnabled(),
+            equalizerPreset = appPreferences.equalizerPreset(),
+            ttmlLyricsEnabled = appPreferences.ttmlLyricsEnabled(),
+            mediaCacheEnabled = appPreferences.mediaCacheEnabled(),
+            mediaCacheLimitMb = appPreferences.mediaCacheLimitMb(),
+            preloadNextTrack = appPreferences.preloadNextTrack(),
+            replayGainMode = appPreferences.replayGainMode(),
             themeMode = appPreferences.themeMode(),
             pureBlackBackground = appPreferences.pureBlackBackground(),
             dynamicColor = appPreferences.dynamicColor(),
@@ -241,6 +253,17 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         ::onNativePlaybackFailure,
         ::onNativePlaybackReady,
     )
+    private val mediaCache = MediaCacheCoordinator(
+        context = application,
+        scope = viewModelScope,
+        settings = {
+            val state = _state.value
+            MediaCacheSettings(state.mediaCacheEnabled, state.preloadNextTrack, state.replayGainMode)
+        },
+        quality = { _state.value.room?.audioQuality ?: "320" },
+        nextTrack = ::predictNextTrack,
+        resolve = ::resolveTrackForCache,
+    )
     private val accounts = AccountCoordinator(
         application = application,
         api = api,
@@ -289,6 +312,12 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private val _likeState = MutableStateFlow<TrackLikeState?>(null)
     val likeState: StateFlow<TrackLikeState?> = _likeState.asStateFlow()
     private var likeJob: Job? = null
+    private val _dynamicCover = MutableStateFlow<DynamicCoverState?>(null)
+    val dynamicCover: StateFlow<DynamicCoverState?> = _dynamicCover.asStateFlow()
+    private var dynamicCoverJob: Job? = null
+    private val _sleepTimer = MutableStateFlow(SleepTimerState())
+    val sleepTimer: StateFlow<SleepTimerState> = _sleepTimer.asStateFlow()
+    private var sleepTimerJob: Job? = null
 
     private var activeServer: ServerAddress? = null
     private val offlineDownloadJobs = mutableMapOf<String, Job>()
@@ -337,6 +366,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
 
     init {
         PlaybackCommandBridge.setAudioFocusEnabled(!_state.value.allowAudioMixing)
+        PlaybackCommandBridge.setEqualizer(_state.value.equalizerEnabled, _state.value.equalizerPreset)
         PlaybackCommandBridge.listener = object : PlaybackCommandBridge.Listener {
             override fun onTogglePlayback() = this@MusicTogetherViewModel.togglePlayback()
             override fun onNext() = this@MusicTogetherViewModel.next()
@@ -474,6 +504,76 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         appPreferences.setAllowAudioMixing(enabled)
         _state.value = _state.value.copy(allowAudioMixing = enabled)
         PlaybackCommandBridge.setAudioFocusEnabled(!enabled)
+    }
+
+    fun updateEqualizer(enabled: Boolean, preset: Int) {
+        appPreferences.setEqualizer(enabled, preset)
+        PlaybackCommandBridge.setEqualizer(enabled, preset)
+        _state.value = _state.value.copy(equalizerEnabled = enabled, equalizerPreset = preset)
+    }
+
+    fun updateMediaCache(enabled: Boolean = _state.value.mediaCacheEnabled, limitMb: Int = _state.value.mediaCacheLimitMb, preload: Boolean = _state.value.preloadNextTrack) {
+        appPreferences.setMediaCache(enabled, limitMb, preload)
+        _state.value = _state.value.copy(mediaCacheEnabled = enabled, mediaCacheLimitMb = limitMb, preloadNextTrack = preload)
+        mediaCache.onSettingsChanged()
+    }
+
+    fun updateReplayGainMode(mode: ReplayGainMode) {
+        appPreferences.setReplayGainMode(mode)
+        _state.value = _state.value.copy(replayGainMode = mode)
+        mediaCache.onSettingsChanged()
+    }
+
+    fun mediaCacheUsageBytes(): Long = mediaCache.usageBytes()
+
+    fun clearMediaCache() {
+        mediaCache.clear()
+    }
+
+    private fun predictNextTrack(): Track? {
+        val room = _state.value.room ?: return null
+        if (room.playMode == "shuffle" || room.playMode == "loop-one") return null
+        val index = room.queue.indexOfFirst { it.id == room.currentTrack?.id }
+        return room.queue.getOrNull(index + 1) ?: if (room.playMode == "loop-all") room.queue.firstOrNull() else null
+    }
+
+    private suspend fun resolveTrackForCache(track: Track): PlaybackTarget? {
+        val server = activeServer ?: return null
+        val room = _state.value.room
+        val resolved = if (track.streamUrl.isNullOrBlank()) {
+            val url = api.streamUrl(server, track, room?.audioQuality ?: "320", room?.id) ?: return null
+            track.copy(streamUrl = url)
+        } else {
+            track
+        }
+        return api.playbackTarget(server, resolved, room?.id, _state.value.audioProxyPolicy)
+    }
+
+    fun updateTtmlLyricsEnabled(enabled: Boolean) {
+        appPreferences.setTtmlLyricsEnabled(enabled)
+        _state.value = _state.value.copy(ttmlLyricsEnabled = enabled)
+    }
+
+    /** Web sleep timer: on expiry only this device stops; the room keeps playing for everyone else. */
+    fun armSleepTimer(minutes: Int) {
+        sleepTimerJob?.cancel()
+        if (minutes <= 0) {
+            _sleepTimer.value = _sleepTimer.value.copy(minutes = 0, deadlineMs = null)
+            return
+        }
+        releaseSleepHold()
+        _sleepTimer.value = SleepTimerState(minutes, System.currentTimeMillis() + minutes * 60_000L, held = false)
+        sleepTimerJob = viewModelScope.launch {
+            delay(minutes * 60_000L)
+            nativePlayer.holdLocal()
+            _sleepTimer.value = SleepTimerState(minutes = 0, deadlineMs = null, held = true)
+        }
+    }
+
+    fun releaseSleepHold() {
+        if (!_sleepTimer.value.held) return
+        _sleepTimer.value = _sleepTimer.value.copy(held = false)
+        nativePlayer.releaseLocalHold(resume = _state.value.room?.playState?.isPlaying == true)
     }
 
     fun updateHapticFeedbackEnabled(enabled: Boolean) {
@@ -1199,6 +1299,26 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
 
     fun loadMoreHotSongs() = hotSongs.loadMore()
 
+    /** Side lookup for the platform video cover; never blocks playback and stays null on any failure. */
+    fun refreshDynamicCover(track: Track?, enabled: Boolean) {
+        val room = _state.value.room
+        val server = activeServer
+        val key = track?.takeIf { enabled }?.let(::dynamicCoverKey)
+        if (track == null || key == null || room == null || server == null) {
+            dynamicCoverJob?.cancel()
+            _dynamicCover.value = null
+            return
+        }
+        if (_dynamicCover.value?.key == key) return
+        dynamicCoverJob?.cancel()
+        _dynamicCover.value = DynamicCoverState(key, null)
+        dynamicCoverJob = viewModelScope.launch {
+            delay(350)
+            val url = runCatching { api.dynamicCover(server, track, room.id) }.getOrNull()
+            _dynamicCover.update { state -> if (state?.key == key) state.copy(url = url) else state }
+        }
+    }
+
     fun refreshLike(track: Track?) {
         val room = _state.value.room
         val server = activeServer
@@ -1565,6 +1685,10 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun togglePlayback() {
+        if (_sleepTimer.value.held) {
+            releaseSleepHold()
+            return
+        }
         if (nativePlayer.state.value.localPlayback) {
             nativePlayer.toggleLocalPlayback()
             return
@@ -2228,7 +2352,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     AppLogger.info("Sync", "skip duplicate join PLAYER_PLAY track=${track.id}")
                     recoveredTrackId = null
                 } else {
-                    loadTrack(track, playState)
+                    loadTrack(track, playState, value.optJSONObject("automix")?.toAutomixTransition())
                 }
             }
             Events.PLAYER_TRACK_METADATA_UPDATED -> {
@@ -2954,10 +3078,11 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         api.playbackTarget(it, track, _state.value.room?.id, policy)
     } ?: track.streamUrl?.let(::PlaybackTarget)
 
-    private fun loadTrack(track: Track, playState: PlayState) {
+    private fun loadTrack(track: Track, playState: PlayState, transition: AutomixTransition? = null) {
         offlineLibrary.playbackUrlFor(track)?.let { playbackUrl ->
             AppLogger.info("Player", "load local track=${track.id} source=${track.source}")
             nativePlayer.load(track, playState, playbackUrl)
+            mediaCache.onLocalTrack()
             return
         }
         val target = playbackTarget(track)
@@ -2966,7 +3091,8 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             "transport track=${track.id} mode=${if (target?.usesServerProxy == true) "proxy" else "direct"} " +
                 "requiresServerProxy=${track.requiresServerProxy}",
         )
-        nativePlayer.load(track, playState, target?.primaryUrl, target?.fallbackUrl)
+        nativePlayer.load(track, playState, target?.primaryUrl, target?.fallbackUrl, cacheKey = mediaCache.keyFor(track), transition = transition)
+        mediaCache.onTrackLoaded(track)
     }
 
     private suspend fun resolveTrackForDownload(track: Track): Track {
@@ -3118,7 +3244,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             coroutineScope {
                 val ttml = launch {
                     try {
-                        val xml = api.ttml(server, track)
+                        val xml = if (_state.value.ttmlLyricsEnabled) api.ttml(server, track) else null
                         val lines = withContext(Dispatchers.Default) { xml?.let(LyricsParser::parseTtml).orEmpty() }
                         ttmlLines = lines
                         publish(lines, "ttml")
@@ -3178,7 +3304,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             try {
                 coroutineScope {
                     val ttml = async {
-                        val xml = api.ttml(server, next)
+                        val xml = if (_state.value.ttmlLyricsEnabled) api.ttml(server, next) else null
                         withContext(Dispatchers.Default) { xml?.let(LyricsParser::parseTtml).orEmpty() }
                     }
                     val platform = async {
@@ -3412,5 +3538,12 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         else -> "未达到通过条件"
     }
 }
+
+data class SleepTimerState(val minutes: Int = 0, val deadlineMs: Long? = null, val held: Boolean = false)
+
+data class DynamicCoverState(val key: String, val url: String?)
+
+fun dynamicCoverKey(track: Track): String? =
+    if (track.source == "bilibili" || track.urlId.isBlank()) null else "${track.source}:${track.urlId}"
 
 data class TrackLikeState(val key: String, val liked: Boolean, val busy: Boolean)

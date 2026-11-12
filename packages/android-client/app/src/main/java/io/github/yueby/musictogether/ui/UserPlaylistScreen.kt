@@ -1,5 +1,11 @@
 package io.github.yueby.musictogether.ui
 
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.CircleAlert
+import com.composables.icons.lucide.EllipsisVertical
+import com.composables.icons.lucide.ListMusic
+import com.composables.icons.lucide.Pencil
+import com.composables.icons.lucide.Trash2
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,12 +16,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.QueueMusic
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -64,11 +64,11 @@ internal fun UserPlaylistScreen(
         onBack = onBack,
         actions = {
             Box {
-                IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "歌单操作") }
+                IconButton(onClick = { menu = true }) { Icon(Lucide.EllipsisVertical, "歌单操作") }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     DropdownMenuItem(
                         text = { Text("重命名") },
-                        leadingIcon = { Icon(Icons.Default.Edit, null) },
+                        leadingIcon = { Icon(Lucide.Pencil, null) },
                         onClick = {
                             menu = false
                             renaming = true
@@ -76,7 +76,7 @@ internal fun UserPlaylistScreen(
                     )
                     DropdownMenuItem(
                         text = { Text("删除歌单", color = MiuixTheme.colorScheme.error) },
-                        leadingIcon = { Icon(Icons.Default.Delete, null, tint = MiuixTheme.colorScheme.error) },
+                        leadingIcon = { Icon(Lucide.Trash2, null, tint = MiuixTheme.colorScheme.error) },
                         onClick = {
                             menu = false
                             deleting = true
@@ -89,7 +89,7 @@ internal fun UserPlaylistScreen(
         when {
             detailState == null || (detailState.loading && detail == null) -> AppLoadingState()
             detail == null -> AppEmptyState(
-                icon = Icons.Default.ErrorOutline,
+                icon = Lucide.CircleAlert,
                 title = "歌单加载失败",
                 summary = detailState.error,
                 actionText = "重试",
@@ -130,7 +130,7 @@ internal fun UserPlaylistScreen(
                 if (detail.tracks.isEmpty()) {
                     item(key = "empty") {
                         AppEmptyState(
-                            icon = Icons.AutoMirrored.Filled.QueueMusic,
+                            icon = Lucide.ListMusic,
                             title = "歌单还是空的",
                             summary = "在任意歌曲的「更多」菜单里选择「添加到歌单」",
                         )

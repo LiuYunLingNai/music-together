@@ -1,5 +1,9 @@
 package io.github.yueby.musictogether.ui
 
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.CircleAlert
+import com.composables.icons.lucide.Flame
+import com.composables.icons.lucide.RefreshCw
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -10,10 +14,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Whatshot
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -58,13 +58,13 @@ internal fun HotSongsPane(state: AppState, viewModel: MusicTogetherViewModel) {
             when {
                 hot.loading && hot.tracks.isEmpty() -> AppLoadingState()
                 hot.error != null && hot.tracks.isEmpty() -> AppEmptyState(
-                    icon = Icons.Default.ErrorOutline,
+                    icon = Lucide.CircleAlert,
                     title = "热歌榜加载失败",
                     summary = hot.error,
                     actionText = "重试",
                     onAction = { viewModel.loadHotSongs(refresh = true) },
                 )
-                hot.tracks.isEmpty() -> AppEmptyState(Icons.Default.Whatshot, "暂无热歌")
+                hot.tracks.isEmpty() -> AppEmptyState(Lucide.Flame, "暂无热歌")
                 else -> LazyColumn(
                     modifier = Modifier.fillMaxSize().overScrollVertical(),
                     contentPadding = PaddingValues(bottom = 12.dp),
@@ -107,6 +107,6 @@ internal fun HotSongsPane(state: AppState, viewModel: MusicTogetherViewModel) {
 internal fun HotSongsRefreshAction(viewModel: MusicTogetherViewModel) {
     val hot by viewModel.hotSongsState.collectAsStateWithLifecycle()
     IconButton(onClick = { viewModel.loadHotSongs(refresh = true) }, enabled = !hot.loading) {
-        Icon(Icons.Default.Refresh, "刷新热歌榜")
+        Icon(Lucide.RefreshCw, "刷新热歌榜")
     }
 }

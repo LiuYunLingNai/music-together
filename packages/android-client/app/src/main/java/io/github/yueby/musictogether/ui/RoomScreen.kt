@@ -1,5 +1,6 @@
 package io.github.yueby.musictogether.ui
 
+import io.github.yueby.musictogether.lyrics.lyricOffsetKey
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
@@ -54,6 +55,7 @@ fun RoomScreen(
     val navigator = LocalAppNavigator.current
     var landscapeChromeVisible by remember(room.id) { mutableStateOf(true) }
     var roomMenuExpanded by remember(room.id) { mutableStateOf(false) }
+    var lyricCalibrationOpen by remember(room.id) { mutableStateOf(false) }
     val layoutDirection = LocalLayoutDirection.current
     val openRoute: (AppRoute) -> Unit = { route ->
         roomMenuExpanded = false
@@ -108,6 +110,12 @@ fun RoomScreen(
                     onMinimizePlayer = onMinimizePlayer,
                     onOpenMembers = { openRoute(AppRoute.Members) },
                     onOpenRoute = openRoute,
+                    chatUnreadCount = appState.chatUnreadCount,
+                    onOpenLyricCalibration = if (lyricOffsetKey(room.currentTrack) != null) {
+                        { lyricCalibrationOpen = true }
+                    } else {
+                        null
+                    },
                 )
             }
             Box(
@@ -140,6 +148,8 @@ fun RoomScreen(
                     onOpenQueue = { openRoute(AppRoute.Queue) },
                     onOpenChat = { openRoute(AppRoute.Chat) },
                     onOpenArtist = navigator::openArtist,
+                    lyricCalibrationOpen = lyricCalibrationOpen,
+                    onCloseLyricCalibration = { lyricCalibrationOpen = false },
                 )
             }
         }

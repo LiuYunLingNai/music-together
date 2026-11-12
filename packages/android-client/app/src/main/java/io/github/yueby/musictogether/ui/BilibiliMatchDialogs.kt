@@ -1,5 +1,7 @@
 package io.github.yueby.musictogether.ui
 
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Music
 import io.github.yueby.musictogether.ui.designsystem.AppListItem
 import io.github.yueby.musictogether.ui.designsystem.AppChip
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -16,8 +18,6 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.MusicNote
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
@@ -111,7 +111,7 @@ internal fun BilibiliMetadataDialog(
                             onClick = { viewModel.searchBilibiliMetadata(keyword, source) },
                             label = { Text(label) },
                             leadingIcon = if (match.source == source) {
-                                { Icon(Icons.Default.MusicNote, null, Modifier.size(16.dp)) }
+                                { Icon(Lucide.Music, null, Modifier.size(16.dp)) }
                             } else {
                                 null
                             },

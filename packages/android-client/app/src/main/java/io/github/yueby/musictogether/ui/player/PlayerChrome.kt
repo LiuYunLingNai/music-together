@@ -1,5 +1,8 @@
 package io.github.yueby.musictogether.ui.player
 
+import com.composables.icons.lucide.Check
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.MessageSquare
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -18,9 +21,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Chat
-import androidx.compose.material.icons.filled.Check
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
@@ -50,11 +50,11 @@ internal fun PlayerChatButton(
     ) {
         Box(Modifier.size(30.dp)) {
             Icon(
-                Icons.AutoMirrored.Filled.Chat,
+                Lucide.MessageSquare,
                 contentDescription = "打开聊天",
                 modifier = Modifier
                     .align(Alignment.Center)
-                    .size(22.dp)
+                    .size(20.dp)
                     .graphicsLayer { alpha = iconAlpha },
                 tint = Color.White,
             )
@@ -160,7 +160,7 @@ internal fun PlayerVotePrompt(
                     horizontalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
                     Icon(
-                        Icons.Default.Check,
+                        Lucide.Check,
                         contentDescription = null,
                         modifier = Modifier.size(16.dp),
                         tint = Color.White.copy(alpha = 0.76f),

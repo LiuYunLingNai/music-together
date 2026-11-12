@@ -1,5 +1,9 @@
 package io.github.yueby.musictogether.ui.player
 
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ListMusic
+import com.composables.icons.lucide.Pause
+import com.composables.icons.lucide.Play
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.spring
@@ -17,10 +21,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.QueueMusic
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -217,7 +217,7 @@ internal fun MinimizedPlayerBar(
             MiniPlayerIconButton(
                 onClick = viewModel::togglePlayback,
                 enabled = enabled,
-                icon = if (player.playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                icon = if (player.playing) Lucide.Pause else Lucide.Play,
                 contentDescription = if (player.playing) "暂停" else "播放",
                 tint = if (enabled) contentColor else secondaryColor.copy(alpha = 0.38f),
                 modifier = Modifier.graphicsLayer {
@@ -227,7 +227,7 @@ internal fun MinimizedPlayerBar(
             )
             MiniPlayerIconButton(
                 onClick = onOpenQueue,
-                icon = Icons.AutoMirrored.Filled.QueueMusic,
+                icon = Lucide.ListMusic,
                 contentDescription = "打开播放列表",
                 tint = contentColor,
                 modifier = Modifier.graphicsLayer {
@@ -303,14 +303,14 @@ private fun CompactMiuixPlayerBar(
             MiniPlayerIconButton(
                 onClick = onTogglePlayback,
                 enabled = enabled,
-                icon = if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                icon = if (playing) Lucide.Pause else Lucide.Play,
                 contentDescription = if (playing) "暂停" else "播放",
                 tint = if (enabled) contentColor else contentColor.copy(alpha = 0.38f),
                 modifier = Modifier.size(40.dp),
             )
             MiniPlayerIconButton(
                 onClick = onOpenQueue,
-                icon = Icons.AutoMirrored.Filled.QueueMusic,
+                icon = Lucide.ListMusic,
                 contentDescription = "打开播放列表",
                 tint = contentColor,
                 modifier = Modifier.size(40.dp),

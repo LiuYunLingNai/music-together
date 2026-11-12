@@ -1,5 +1,14 @@
 package io.github.yueby.musictogether.ui
 
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Camera
+import com.composables.icons.lucide.DoorClosed
+import com.composables.icons.lucide.Lock
+import com.composables.icons.lucide.LogIn
+import com.composables.icons.lucide.LogOut
+import com.composables.icons.lucide.RefreshCw
+import com.composables.icons.lucide.Trash2
+import com.composables.icons.lucide.UserRound
 import io.github.yueby.musictogether.ui.designsystem.AppChip
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -19,15 +28,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Login
-import androidx.compose.material.icons.automirrored.filled.Logout
-import androidx.compose.material.icons.filled.AccountCircle
-import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DoorBack
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Refresh
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
@@ -100,7 +100,7 @@ internal fun AccountSection(state: AppState, viewModel: MusicTogetherViewModel) 
                         )
                     } else {
                         Icon(
-                            Icons.Default.AccountCircle,
+                            Lucide.UserRound,
                             contentDescription = null,
                             modifier = Modifier.size(64.dp),
                             tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
@@ -112,7 +112,7 @@ internal fun AccountSection(state: AppState, viewModel: MusicTogetherViewModel) 
                             enabled = !state.accountBusy,
                             modifier = Modifier.align(Alignment.BottomEnd).size(30.dp),
                         ) {
-                            Icon(Icons.Default.CameraAlt, "上传头像", Modifier.size(18.dp))
+                            Icon(Lucide.Camera, "上传头像", Modifier.size(18.dp))
                         }
                     }
                 }
@@ -219,10 +219,10 @@ private fun AccountAccessControls(state: AppState, viewModel: MusicTogetherViewM
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Icon(Icons.Default.Lock, null, tint = MiuixTheme.colorScheme.primary)
+            Icon(Lucide.Lock, null, tint = MiuixTheme.colorScheme.primary)
             Text("当前账号已启用密码", Modifier.weight(1f))
             Button(onClick = viewModel::logoutIdentity, enabled = !state.accountBusy) {
-                Icon(Icons.AutoMirrored.Filled.Logout, null, Modifier.size(18.dp))
+                Icon(Lucide.LogOut, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("退出")
             }
@@ -248,7 +248,7 @@ private fun AccountAccessControls(state: AppState, viewModel: MusicTogetherViewM
     }
 
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Icon(Icons.AutoMirrored.Filled.Login, null)
+        Icon(Lucide.LogIn, null)
         Text("登录已有账号", fontWeight = FontWeight.SemiBold)
     }
     AppTextField(
@@ -286,7 +286,7 @@ internal fun AdminManagementSection(state: AppState, viewModel: MusicTogetherVie
             Text("${state.adminUsers.size} 个账号 · ${state.adminRooms.size} 个活跃房间", Modifier.weight(1f))
             IconButton(onClick = viewModel::loadAdminData, enabled = !state.adminLoading) {
                 if (state.adminLoading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                else Icon(Icons.Default.Refresh, "刷新")
+                else Icon(Lucide.RefreshCw, "刷新")
             }
         }
         Row(
@@ -435,7 +435,7 @@ private fun AdminUserCard(
                 }
                 if (user.role == "admin") AppChip(onClick = {}, label = { Text("管理员") })
                 IconButton(onClick = onDelete, enabled = !working && user.id != currentUserId) {
-                    Icon(Icons.Default.Delete, "删除账号", tint = MiuixTheme.colorScheme.error)
+                    Icon(Lucide.Trash2, "删除账号", tint = MiuixTheme.colorScheme.error)
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -457,7 +457,7 @@ private fun AdminUserCard(
 private fun AdminRoomCard(room: AdminRoom, working: Boolean, onDissolve: () -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.DoorBack, null, tint = MiuixTheme.colorScheme.primary)
+            Icon(Lucide.DoorClosed, null, tint = MiuixTheme.colorScheme.primary)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(room.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)

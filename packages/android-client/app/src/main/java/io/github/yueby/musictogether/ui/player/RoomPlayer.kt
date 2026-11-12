@@ -1,5 +1,13 @@
 package io.github.yueby.musictogether.ui.player
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.Alignment
+import io.github.yueby.musictogether.dynamicCoverKey
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Size
@@ -50,6 +58,8 @@ internal fun PlayerPane(
     onOpenQueue: () -> Unit,
     onOpenChat: () -> Unit,
     onOpenArtist: (source: String, id: String) -> Unit,
+    lyricCalibrationOpen: Boolean = false,
+    onCloseLyricCalibration: () -> Unit = {},
 ) {
     val player by viewModel.playerState.collectAsStateWithLifecycle()
     val like by viewModel.likeState.collectAsStateWithLifecycle()
@@ -60,6 +70,12 @@ internal fun PlayerPane(
     var lyricsExpanded by remember(room.id) { mutableStateOf(false) }
     LaunchedEffect(track?.id, room.id) { viewModel.refreshLike(track) }
     val immersiveCover = LocalPlayerDisplaySettings.current.immersiveCover
+    val videoAllowed = LocalPlayerDisplaySettings.current.dynamicCover && immersiveCover && !immersiveLandscape
+    val dynamicCover by viewModel.dynamicCover.collectAsStateWithLifecycle()
+    LaunchedEffect(track?.id, room.id, videoAllowed) { viewModel.refreshDynamicCover(track, videoAllowed) }
+    val videoUrl = dynamicCover
+        ?.takeIf { videoAllowed && track != null && it.key == dynamicCoverKey(track) }
+        ?.url
     var autoExpanded by remember(room.id) { mutableStateOf(false) }
     LaunchedEffect(immersiveLandscape, immersiveCover) {
         if (immersiveLandscape || autoExpanded) return@LaunchedEffect
@@ -92,6 +108,9 @@ internal fun PlayerPane(
         onOpenChat = onOpenChat,
         onOpenArtist = onOpenArtist,
         like = like,
+        videoUrl = videoUrl,
+        lyricCalibrationOpen = lyricCalibrationOpen,
+        onCloseLyricCalibration = onCloseLyricCalibration,
     )
 }
 
@@ -174,6 +193,9 @@ private fun MobilePlayerSurface(
     onOpenChat: () -> Unit,
     onOpenArtist: (source: String, id: String) -> Unit,
     like: TrackLikeState?,
+    videoUrl: String?,
+    lyricCalibrationOpen: Boolean,
+    onCloseLyricCalibration: () -> Unit,
 ) {
     val minimizeTransition = LocalPlayerMinimizeTransition.current
     val immersiveCover = LocalPlayerDisplaySettings.current.immersiveCover
@@ -243,6 +265,7 @@ private fun MobilePlayerSurface(
                 chatUnreadCount = chatUnreadCount,
                 lyricsExpanded = lyricsExpanded,
                 immersive = immersiveCover,
+                videoUrl = videoUrl,
                 onToggleLyrics = onToggleLyrics,
                 onOpenQueue = onOpenQueue,
                 onOpenChat = onOpenChat,
@@ -250,6 +273,21 @@ private fun MobilePlayerSurface(
                 like = like,
                 onToggleLike = { track?.let(viewModel::toggleLike) },
                 contentPadding = safeContentPadding,
+            )
+        }
+        AnimatedVisibility(
+            visible = lyricCalibrationOpen && track != null,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(12.dp)
+                .widthIn(max = 448.dp),
+            enter = fadeIn() + slideInVertically { -it / 2 },
+            exit = fadeOut() + slideOutVertically { -it / 2 },
+        ) {
+            LyricOffsetPanel(
+                offsetMs = lyricOffsetMs,
+                onDismiss = onCloseLyricCalibration,
+                onOffsetChange = { offset -> track?.let { viewModel.setLyricOffset(it, offset) } },
             )
         }
     }

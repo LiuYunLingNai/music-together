@@ -179,6 +179,15 @@ UI 操作
 | `RoomHeader.kt` | 房间标题、连接状态和「更多」弹出菜单 |
 | `player/ClassicStage.kt` | 竖屏单封面节点舞台与横屏舞台 |
 | `player/PlayerStageParts.kt` | 换歌文字过渡、音质徽标、喜欢按钮与控制栏频谱 |
+| `player/CoverVideo.kt` | 动态视频封面：静音循环的独立 ExoPlayer，仅竖屏沉浸封面使用，数据来自 `/api/music/dynamic-cover` |
+| `player/StageIcons.kt` | 舞台用的 Lucide 实心图标（播放、暂停、切歌、喜欢）；全应用图标统一使用 `icons-lucide`，不再依赖 Material 图标 |
+
+睡眠定时和均衡器只作用于本机：睡眠定时到期后由 `NativePlayer` 的本机保持（local hold）拦截播放，房间时间线不受影响，用户点播放键后解除并由漂移校正追回进度；均衡器是 `PlaybackService` 挂在播放器音频会话上的系统 `Equalizer`，开关和预设经 `PlaybackCommandBridge` 下发。
+
+媒体缓存、预加载与响度平衡全部在本机完成、不依赖服务端。`player/PlaybackCache.kt` 是播放、预加载和分析共用的一份 Media3 `SimpleCache`（`cacheDir/track-cache`，最近最少使用淘汰，上限在首次打开时读取）：播放器通过 `CacheDataSource` 边播边存，`MediaItem` 的自定义缓存键来自 `MediaCache.kt` 的 `trackCacheKey`（来源、曲目标识、时长、房间音质，不含会过期的播放地址），所以重播和预加载都能命中，响度分析只补下载播放尚未取到的片段，一首歌只下载一次。`MediaCacheCoordinator` 在当前曲目播放 8 秒后预取队列里的下一首（随机和单曲循环不预取，计费网络不下载），并用 `LoudnessMeter`（K 加权、400 ms 窗口、绝对与相对门限，与网页端一致）测量整曲响度；`LoudnessBalance` 移植网页端的增益与缓入规则，增益经 `PlaybackCommandBridge.setReplayGain` 交给 `PlaybackService` 音频链首的 `GainAudioProcessor`，既能衰减也能在峰值余量内提升。
+
+自动混音的执行端是 `NativePlayer` 加 `TailDeck`：服务端在上一首结束前就把房间推进到下一首，并在 `PLAYER_PLAY` 里带 `automix`（重叠时长、出歌音量修正）。收到后 `TailDeck`（`PlaybackService` 里的第二个 ExoPlayer，不持有媒体会话和音频焦点）从缓存接着播放出歌，主播放器按服务端时间点开始入歌，两者按等功率曲线交叉淡化；过渡期间暂停漂移校正，被打断或失败时由超时兜底恢复。变速、频段倾斜、回声和分轨暂未执行，画像分析也未实现，没有画像时服务端使用默认重叠。
+| `player/MeshBackdrop.kt` | Android 13 及以上的 AMLL 风格流动渐变背景（AGSL），低版本回退 `PlayerBackdrop.kt` 的模糊封面 |
 | `HotSongsPane.kt` | 房间热歌榜 |
 | `RoomMembersPane.kt` | 房间成员列表 |
 | `RoomQueuePane.kt` | 播放队列、固定操作栏和队列控制 |

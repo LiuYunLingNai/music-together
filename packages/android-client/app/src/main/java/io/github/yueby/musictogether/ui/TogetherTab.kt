@@ -1,5 +1,15 @@
 package io.github.yueby.musictogether.ui
 
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ArrowRight
+import com.composables.icons.lucide.ChevronRight
+import com.composables.icons.lucide.CloudOff
+import com.composables.icons.lucide.Lock
+import com.composables.icons.lucide.Music
+import com.composables.icons.lucide.Plus
+import com.composables.icons.lucide.RefreshCw
+import com.composables.icons.lucide.UserPlus
+import com.composables.icons.lucide.Users
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -13,16 +23,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.CloudOff
-import androidx.compose.material.icons.filled.GroupAdd
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.People
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -75,14 +75,14 @@ internal fun TogetherTab(
         bottomPadding = bottomPadding,
         actions = {
             IconButton(onClick = viewModel::refreshRooms, enabled = anyConnected) {
-                Icon(Icons.Default.Refresh, "刷新房间")
+                Icon(Lucide.RefreshCw, "刷新房间")
             }
             Box {
-                IconButton(onClick = { addMenu = true }) { Icon(Icons.Default.Add, "创建或加入房间") }
+                IconButton(onClick = { addMenu = true }) { Icon(Lucide.Plus, "创建或加入房间") }
                 DropdownMenu(expanded = addMenu, onDismissRequest = { addMenu = false }) {
                     DropdownMenuItem(
                         text = { Text("创建房间") },
-                        leadingIcon = { Icon(Icons.Default.Add, null) },
+                        leadingIcon = { Icon(Lucide.Plus, null) },
                         onClick = {
                             addMenu = false
                             navigator.open(AppRoute.CreateRoom)
@@ -90,7 +90,7 @@ internal fun TogetherTab(
                     )
                     DropdownMenuItem(
                         text = { Text("加入房间") },
-                        leadingIcon = { Icon(Icons.Default.GroupAdd, null) },
+                        leadingIcon = { Icon(Lucide.UserPlus, null) },
                         onClick = {
                             addMenu = false
                             navigator.open(AppRoute.JoinRoom)
@@ -116,7 +116,7 @@ internal fun TogetherTab(
             when {
                 serversWithRooms.isEmpty() && !anyConnected -> item(key = "offline") {
                     AppEmptyState(
-                        icon = Icons.Default.CloudOff,
+                        icon = Lucide.CloudOff,
                         title = if (state.servers.any { it.status == ConnectionStatus.Connecting }) "正在连接服务器" else "服务器未连接",
                         summary = "连接后可浏览公开房间和音乐内容",
                         actionText = "服务器设置",
@@ -125,7 +125,7 @@ internal fun TogetherTab(
                 }
                 serversWithRooms.isEmpty() -> item(key = "empty") {
                     AppEmptyState(
-                        icon = Icons.Default.People,
+                        icon = Lucide.Users,
                         title = "暂无公开房间",
                         summary = "创建一个房间，把链接分享给朋友",
                     )
@@ -218,7 +218,7 @@ private fun NowListeningCard(room: RoomState, onClick: (() -> Unit)?) {
                 Box(
                     Modifier.size(60.dp).clip(CircleShape).background(MiuixTheme.colorScheme.secondaryContainer),
                     contentAlignment = Alignment.Center,
-                ) { Icon(Icons.Default.MusicNote, null, tint = MiuixTheme.colorScheme.onSecondaryContainer) }
+                ) { Icon(Lucide.Music, null, tint = MiuixTheme.colorScheme.onSecondaryContainer) }
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
@@ -245,7 +245,7 @@ private fun NowListeningCard(room: RoomState, onClick: (() -> Unit)?) {
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Icon(Icons.AutoMirrored.Filled.ArrowForward, "打开播放器", tint = MiuixTheme.colorScheme.onSurfaceVariantActions)
+            Icon(Lucide.ArrowRight, "打开播放器", tint = MiuixTheme.colorScheme.onSurfaceVariantActions)
         }
     }
 }
@@ -272,7 +272,7 @@ private fun PublicRoomRow(room: RoomListItem, current: Boolean, onClick: () -> U
                     overflow = TextOverflow.Ellipsis,
                 )
                 if (room.hasPassword) {
-                    Icon(Icons.Default.Lock, "需要密码", Modifier.size(14.dp), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                    Icon(Lucide.Lock, "需要密码", Modifier.size(14.dp), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                 }
             }
             Text(
@@ -290,7 +290,7 @@ private fun PublicRoomRow(room: RoomListItem, current: Boolean, onClick: () -> U
             )
         }
         Icon(
-            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            Lucide.ChevronRight,
             contentDescription = null,
             tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
         )

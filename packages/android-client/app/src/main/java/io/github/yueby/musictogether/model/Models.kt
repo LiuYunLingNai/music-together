@@ -59,6 +59,25 @@ data class ShareCardSettings(
 fun usesFloatingBottomBar(bottomBarStyle: BottomBarStyle): Boolean =
     bottomBarStyle == BottomBarStyle.Floating
 
+/** The blend the server asks for when it moves the room to the next song before the current one has ended. */
+@Immutable
+data class AutomixTransition(
+    val fromTrackId: String,
+    val overlapMs: Long,
+    val trimDb: Double = 0.0,
+)
+
+enum class ReplayGainMode(val value: String) {
+    Off("off"),
+    Track("track"),
+    Auto("auto"),
+    ;
+
+    companion object {
+        fun fromValue(value: String?) = entries.firstOrNull { it.value == value } ?: Off
+    }
+}
+
 @Immutable
 data class PlayerDisplaySettings(
     val showTranslation: Boolean = true,
@@ -74,6 +93,15 @@ data class PlayerDisplaySettings(
     val showRemainingTime: Boolean = false,
     val controlsSpectrum: Boolean = false,
     val immersiveCover: Boolean = true,
+    val songHandoff: Boolean = true,
+    val dynamicCover: Boolean = true,
+    val backgroundFps: Int = 60,
+    val lyricAutoAlign: Boolean = true,
+    val lyricSubFontScale: Float = 1f,
+    val lyricRomanFontScale: Float = 1f,
+    val lyricWordFadeWidth: Float = 0.5f,
+    val lyricHidePassedLines: Boolean = false,
+    val lyricSwapTransRoman: Boolean = false,
 )
 
 fun PlayerDisplaySettings.normalized(): PlayerDisplaySettings = copy(
@@ -81,6 +109,10 @@ fun PlayerDisplaySettings.normalized(): PlayerDisplaySettings = copy(
     lyricFontWeight = lyricFontWeight.coerceIn(400, 800),
     lyricAlignPosition = lyricAlignPosition.coerceIn(0.05f, 0.45f),
     backgroundMotionStrength = backgroundMotionStrength.coerceIn(0.5f, 1.5f),
+    lyricSubFontScale = lyricSubFontScale.coerceIn(0.7f, 1.3f),
+    lyricRomanFontScale = lyricRomanFontScale.coerceIn(0.7f, 1.3f),
+    lyricWordFadeWidth = lyricWordFadeWidth.coerceIn(0.05f, 1f),
+    backgroundFps = if (backgroundFps in setOf(15, 30, 60)) backgroundFps else 60,
 )
 
 @Immutable
@@ -528,6 +560,13 @@ data class AppState(
     val playbackHardSeekSyncEnabled: Boolean = false,
     val allowAudioMixing: Boolean = false,
     val hapticFeedbackEnabled: Boolean = true,
+    val equalizerEnabled: Boolean = false,
+    val equalizerPreset: Int = 0,
+    val mediaCacheEnabled: Boolean = true,
+    val mediaCacheLimitMb: Int = 512,
+    val preloadNextTrack: Boolean = true,
+    val replayGainMode: ReplayGainMode = ReplayGainMode.Off,
+    val ttmlLyricsEnabled: Boolean = true,
     val themeMode: ThemeMode = ThemeMode.System,
     val pureBlackBackground: Boolean = false,
     val dynamicColor: Boolean = false,

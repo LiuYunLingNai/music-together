@@ -54,6 +54,7 @@ internal fun LyricsPanel(
     isPlaying: Boolean,
     onSeek: ((Double) -> Unit)? = null,
     alignToTop: Boolean = false,
+    alignOverride: Float? = null,
 ) {
     val displaySettings = LocalPlayerDisplaySettings.current
     val rawPositionMs = (positionSeconds * 1_000.0 - lyricOffsetMs).toFloat().coerceAtLeast(0f)
@@ -151,13 +152,14 @@ internal fun LyricsPanel(
 
         else -> BoxWithConstraints(Modifier.fillMaxSize()) {
             val alignPosition =
-                if (alignToTop) displaySettings.lyricAlignPosition else AmllCenteredAlignPosition
+                alignOverride
+                    ?: if (alignToTop) displaySettings.lyricAlignPosition else AmllCenteredAlignPosition
             val mainFontSize = (
                 minOf(maxHeight.value * 0.05f, maxWidth.value * 0.07f) *
                     AmllMainFontScale * displaySettings.lyricFontScale
                 ).coerceIn(16f, 80f)
-            val translationFontSize = mainFontSize * AmllTranslationFontScale
-            val romanFontSize = mainFontSize * AmllRomanFontScale
+            val translationFontSize = mainFontSize * AmllTranslationFontScale * displaySettings.lyricSubFontScale
+            val romanFontSize = mainFontSize * AmllRomanFontScale * displaySettings.lyricRomanFontScale
             val backgroundFontSize = mainFontSize * AmllBackgroundFontScale
             val hasDuetLines = remember(groups) {
                 groups.any { group -> group.main.isDuet }
@@ -438,6 +440,9 @@ internal fun LyricsPanel(
                                             item.groupIndex in activeGroupIndices &&
                                                 interlude == null,
                                         readingMode = manualBrowseActive || !isPlaying,
+                                        hidden = displaySettings.lyricHidePassedLines &&
+                                            !manualBrowseActive &&
+                                            item.groupIndex < focusedGroupIndex,
                                         wordAnimationEnabled = wordAnimationEnabled,
                                         onClick = onSeek?.let { seek ->
                                             {

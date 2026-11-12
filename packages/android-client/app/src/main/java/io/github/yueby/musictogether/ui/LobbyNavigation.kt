@@ -1,11 +1,11 @@
 package io.github.yueby.musictogether.ui
 
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Compass
+import com.composables.icons.lucide.Disc3
+import com.composables.icons.lucide.User
+import com.composables.icons.lucide.Users
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Explore
-import androidx.compose.material.icons.filled.Groups
-import androidx.compose.material.icons.filled.LibraryMusic
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -111,10 +111,10 @@ internal fun LobbyBottomNavigation(
 
 private val LobbyTab.icon: ImageVector
     get() = when (this) {
-        LobbyTab.Together -> Icons.Default.Groups
-        LobbyTab.Discover -> Icons.Default.Explore
-        LobbyTab.Library -> Icons.Default.LibraryMusic
-        LobbyTab.Me -> Icons.Default.Person
+        LobbyTab.Together -> Lucide.Users
+        LobbyTab.Discover -> Lucide.Compass
+        LobbyTab.Library -> Lucide.Disc3
+        LobbyTab.Me -> Lucide.User
     }
 
 private val LobbyTab.label: String

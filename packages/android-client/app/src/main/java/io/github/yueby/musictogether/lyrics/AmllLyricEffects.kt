@@ -9,9 +9,10 @@ internal fun amllMaskBoundaries(
     progress: Float,
     width: Float,
     height: Float,
+    fadeFactor: Float = 0.5f,
 ): AmllMaskBoundaries {
     val safeWidth = width.coerceAtLeast(0.0001f)
-    val fadeWidth = height.coerceAtLeast(0f) * 0.5f
+    val fadeWidth = height.coerceAtLeast(0f) * fadeFactor
     val fadeEnd = progress.coerceIn(0f, 1f) * (safeWidth + fadeWidth)
     return AmllMaskBoundaries(
         brightEndFraction = (fadeEnd - fadeWidth) / safeWidth,
@@ -24,8 +25,9 @@ internal fun amllMaskAlphaAt(
     xFraction: Float,
     width: Float,
     height: Float,
+    fadeFactor: Float = 0.5f,
 ): Float {
-    val boundaries = amllMaskBoundaries(progress, width, height)
+    val boundaries = amllMaskBoundaries(progress, width, height, fadeFactor)
     val fadeSpan = boundaries.fadeEndFraction - boundaries.brightEndFraction
     return when {
         xFraction <= boundaries.brightEndFraction -> 1f

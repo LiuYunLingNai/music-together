@@ -1,5 +1,10 @@
 package io.github.yueby.musictogether.ui
 
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.CircleAlert
+import com.composables.icons.lucide.Download
+import com.composables.icons.lucide.Folder
+import com.composables.icons.lucide.RefreshCw
 import io.github.yueby.musictogether.ui.designsystem.AppTextAction
 import io.github.yueby.musictogether.ui.designsystem.AppTextField
 import io.github.yueby.musictogether.ui.designsystem.AppListItem
@@ -23,11 +28,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Refresh
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
@@ -129,7 +129,7 @@ internal fun MusicDownloadPane(state: AppState, viewModel: MusicTogetherViewMode
                     resolvedDirectory.absolutePath != state.musicDownloadDirectory &&
                     download.downloadingQuality == null,
             ) {
-                Icon(Icons.Default.Folder, null, Modifier.size(18.dp))
+                Icon(Lucide.Folder, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("保存")
             }
@@ -158,7 +158,7 @@ internal fun MusicDownloadPane(state: AppState, viewModel: MusicTogetherViewMode
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Icon(
-                                Icons.Default.ErrorOutline,
+                                Lucide.CircleAlert,
                                 contentDescription = null,
                                 tint = MiuixTheme.colorScheme.error,
                             )
@@ -183,7 +183,7 @@ internal fun MusicDownloadPane(state: AppState, viewModel: MusicTogetherViewMode
                         enabled = download.downloadingQuality == null,
                         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                     ) {
-                        Icon(Icons.Default.Refresh, null, Modifier.size(18.dp))
+                        Icon(Lucide.RefreshCw, null, Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
                         Text("刷新音质")
                     }
@@ -222,7 +222,7 @@ private fun DownloadOptionRow(
                 }
             } else {
                 Button(onClick = onDownload, enabled = enabled) {
-                    Icon(Icons.Default.Download, null, Modifier.size(18.dp))
+                    Icon(Lucide.Download, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("保存")
                 }
@@ -239,7 +239,7 @@ private fun DownloadStatus(text: String, loading: Boolean = false, action: (() -
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             if (loading) CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
-            else Icon(Icons.Default.ErrorOutline, null, tint = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+            else Icon(Lucide.CircleAlert, null, tint = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             Text(
                 text,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,

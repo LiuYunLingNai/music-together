@@ -1,9 +1,14 @@
 package io.github.yueby.musictogether.ui.player
 
+import io.github.yueby.musictogether.ui.designsystem.LocalPlayerDisplaySettings
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.BoundsTransform
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.VectorConverter
@@ -118,6 +123,7 @@ private fun StageCover(
     lyricsExpanded: Boolean,
     immersive: Boolean,
     playing: Boolean,
+    videoUrl: String?,
     onClick: () -> Unit,
 ) {
     val immersiveNow = immersive && !lyricsExpanded && track != null
@@ -135,7 +141,7 @@ private fun StageCover(
     }
     if (!placed) return
 
-    val shrink = immersiveNow && !playing
+    val shrink = immersiveNow && !playing && videoUrl == null
     val pauseScale by animateFloatAsState(
         targetValue = if (shrink) 0.75f else 1f,
         animationSpec = if (shrink) tween(600, easing = PauseShrinkEasing) else tween(500, easing = PauseResumeEasing),
@@ -195,10 +201,13 @@ private fun StageCover(
             },
             modifier = Modifier.fillMaxSize(),
             decodeSize = 1024,
+            platformBadge = false,
         )
+        if (videoUrl != null && immersiveNow) CoverVideo(videoUrl, Modifier.fillMaxSize())
     }
 }
 
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 internal fun ClassicPortraitStage(
     track: Track?,
@@ -212,6 +221,7 @@ internal fun ClassicPortraitStage(
     chatUnreadCount: Int,
     lyricsExpanded: Boolean,
     immersive: Boolean,
+    videoUrl: String?,
     onToggleLyrics: () -> Unit,
     onOpenQueue: () -> Unit,
     onOpenChat: () -> Unit,
@@ -253,6 +263,7 @@ internal fun ClassicPortraitStage(
             lyricsExpanded = showLyrics,
             immersive = immersive,
             playing = player.playing,
+            videoUrl = videoUrl,
             onClick = onToggleLyrics,
         )
         Column(
@@ -264,9 +275,10 @@ internal fun ClassicPortraitStage(
                 ),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            SharedTransitionLayout(Modifier.weight(1f).width(columnWidth)) {
             AnimatedContent(
                 targetState = showLyrics,
-                modifier = Modifier.weight(1f).width(columnWidth),
+                modifier = Modifier.fillMaxSize(),
                 transitionSpec = {
                     if (targetState) {
                         (fadeIn(tween(650, delayMillis = 80, easing = LyricEnterEasing)) +
@@ -279,17 +291,20 @@ internal fun ClassicPortraitStage(
                 },
                 label = "stage-view",
             ) { lyricsShown ->
+                val songInfoShared = Modifier.sharedBounds(
+                    sharedContentState = rememberSharedContentState(key = "song-info"),
+                    animatedVisibilityScope = this@AnimatedContent,
+                    boundsTransform = BoundsTransform { _, _ -> tween(700, easing = LyricEnterEasing) },
+                )
                 if (lyricsShown && track != null) {
                     StageLyricsView(
+                        titleModifier = songInfoShared,
                         track = track,
                         lyrics = lyrics,
                         lyricOffsetMs = lyricOffsetMs,
                         player = player,
-                        chatUnreadCount = chatUnreadCount,
                         slots = slots,
-                        onOpenChat = onOpenChat,
                         onSeek = viewModel::seek,
-                        onSetLyricOffset = { offset -> viewModel.setLyricOffset(track, offset) },
                     )
                 } else {
                     Column(
@@ -310,17 +325,17 @@ internal fun ClassicPortraitStage(
                             track = track,
                             error = player.error,
                             modifier = Modifier.fillMaxWidth(),
+                            textModifier = songInfoShared,
                             layoutScale = scale,
                             onOpenArtist = track?.artistIds?.firstOrNull()
                                 ?.takeIf { track.source == "netease" }
                                 ?.let { id -> { onOpenArtist(track.source, id) } },
                             like = like,
                             onToggleLike = onToggleLike,
-                            chatUnreadCount = chatUnreadCount,
-                            onOpenChat = onOpenChat,
                         )
                     }
                 }
+            }
             }
             Spacer(Modifier.height(gap))
             MobilePlayerControls(
@@ -347,25 +362,21 @@ internal fun ClassicPortraitStage(
 
 @Composable
 private fun StageLyricsView(
+    titleModifier: Modifier,
     track: Track,
     lyrics: LyricsState,
     lyricOffsetMs: Int,
     player: PlayerUiState,
-    chatUnreadCount: Int,
     slots: StageSlots,
-    onOpenChat: () -> Unit,
     onSeek: (Double) -> Unit,
-    onSetLyricOffset: (Int) -> Unit,
 ) {
     MobileLyricsHero(
         track = track,
         lyrics = lyrics,
         lyricOffsetMs = lyricOffsetMs,
         player = player,
-        chatUnreadCount = chatUnreadCount,
-        onOpenChat = onOpenChat,
         onSeek = onSeek,
-        onSetLyricOffset = onSetLyricOffset,
+        titleModifier = titleModifier,
         coverSlot = Modifier.onGloballyPositioned {
             slots.small = it
             slots.refresh()
@@ -391,6 +402,11 @@ internal fun ClassicLandscapeStage(
     onToggleLike: () -> Unit,
     metrics: PlayerLayoutMetrics,
 ) {
+    var coverCenterY by remember { mutableStateOf<Float?>(null) }
+    var lyricBounds by remember { mutableStateOf<Rect?>(null) }
+    val lyricAlign = lyricBounds?.takeIf { it.height > 0f }?.let { box ->
+        coverCenterY?.let { ((it - box.top) / box.height).coerceIn(0f, 1f) }
+    }
     BoxWithConstraints(Modifier.fillMaxSize()) {
     val leftWidth = (maxWidth - metrics.horizontalPadding * 2 - metrics.columnGap) * 0.40f
     val columnMax = minOf(leftWidth, 448.dp).coerceAtLeast(0.dp)
@@ -419,8 +435,10 @@ internal fun ClassicLandscapeStage(
                     placeholderIconSize = (size * 0.28f).coerceAtLeast(40.dp),
                     contentDescription = track?.title,
                     decodeSize = 1024,
+                    platformBadge = false,
                     modifier = Modifier
                         .size(size)
+                        .onGloballyPositioned { coverCenterY = it.boundsInRoot().center.y }
                         .graphicsLayer {
                             shadowElevation = 18.dp.toPx()
                             shape = RoundedCornerShape(24.dp)
@@ -459,8 +477,9 @@ internal fun ClassicLandscapeStage(
                 .weight(0.60f)
                 .fillMaxHeight(),
         ) {
-            Box(Modifier.fillMaxSize().lyricFadeMask()) {
+            Box(Modifier.fillMaxSize().onGloballyPositioned { lyricBounds = it.boundsInRoot() }.lyricFadeMask()) {
                 LyricsPanel(
+                    alignOverride = lyricAlign.takeIf { LocalPlayerDisplaySettings.current.lyricAutoAlign },
                     lyrics = lyrics,
                     positionSeconds = player.positionSeconds,
                     lyricOffsetMs = lyricOffsetMs,

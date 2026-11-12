@@ -1,5 +1,10 @@
 package io.github.yueby.musictogether.ui
 
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ArrowLeft
+import com.composables.icons.lucide.CloudOff
+import com.composables.icons.lucide.Search
+import com.composables.icons.lucide.SearchX
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -24,11 +29,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.CloudOff
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -99,7 +99,7 @@ internal fun DiscoverTab(state: AppState, viewModel: MusicTogetherViewModel, bot
             Box(Modifier.weight(1f)) {
                 when {
                     !connected && catalog.discover.home == null -> AppEmptyState(
-                        icon = Icons.Default.CloudOff,
+                        icon = Lucide.CloudOff,
                         title = "连接服务器后浏览",
                         summary = "发现页与搜索需要连接 Music Together 服务器",
                         actionText = "服务器设置",
@@ -126,7 +126,7 @@ private fun SearchEntry(onClick: () -> Unit, modifier: Modifier = Modifier) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Icon(Icons.Default.Search, null, Modifier.size(20.dp), tint = MiuixTheme.colorScheme.onSurfaceContainerHigh)
+        Icon(Lucide.Search, null, Modifier.size(20.dp), tint = MiuixTheme.colorScheme.onSurfaceContainerHigh)
         Text("搜索歌曲、歌手、专辑或 B 站视频", color = MiuixTheme.colorScheme.onSurfaceContainerHigh)
     }
 }
@@ -172,7 +172,7 @@ internal fun SearchScreen(state: AppState, viewModel: MusicTogetherViewModel, on
             Modifier.fillMaxWidth().padding(start = 4.dp, end = 12.dp, top = 8.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
+            IconButton(onClick = onBack) { Icon(Lucide.ArrowLeft, "返回") }
             InputField(
                 query = keyword,
                 onQueryChange = { keyword = it.take(searchInputMaxLength(source)) },
@@ -194,24 +194,24 @@ internal fun SearchScreen(state: AppState, viewModel: MusicTogetherViewModel, on
         )
         Box(Modifier.weight(1f)) {
             when {
-                !connected -> AppEmptyState(Icons.Default.CloudOff, "服务器未连接", summary = "连接服务器后才能搜索")
+                !connected -> AppEmptyState(Lucide.CloudOff, "服务器未连接", summary = "连接服务器后才能搜索")
                 state.searchLoading -> AppLoadingState()
                 state.searchError != null && state.searchResults.isEmpty() && state.unifiedSearchGroups.isEmpty() ->
                     AppEmptyState(
-                        Icons.Default.SearchOff,
+                        Lucide.SearchX,
                         "搜索失败",
                         summary = state.searchError,
                         actionText = "重试",
                         onAction = { submit(keyword) },
                     )
                 !state.searchHasSearched -> AppEmptyState(
-                    Icons.Default.Search,
+                    Lucide.Search,
                     "搜索全网音乐",
                     summary = if (state.room != null) "点结果直接点歌，长列表可继续上滑加载" else "加入房间后可点歌，现在可以下载或收藏到歌单",
                 )
                 state.searchSource == "all" -> UnifiedSearchResults(state, viewModel, queueKeys, Modifier.fillMaxSize())
                 state.searchResults.isEmpty() -> AppEmptyState(
-                    Icons.Default.SearchOff,
+                    Lucide.SearchX,
                     "没有找到结果",
                     summary = if (state.searchSource == "bilibili") "检查链接、BV 号或换个关键词" else "换个关键词或音源试试",
                 )

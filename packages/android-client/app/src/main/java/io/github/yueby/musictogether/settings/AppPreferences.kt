@@ -4,6 +4,7 @@ import android.content.Context
 import io.github.yueby.musictogether.logging.AppLogger
 import io.github.yueby.musictogether.model.DEFAULT_MUSIC_DOWNLOAD_DIRECTORY
 import io.github.yueby.musictogether.model.BottomBarStyle
+import io.github.yueby.musictogether.model.ReplayGainMode
 import io.github.yueby.musictogether.model.PlayerDisplaySettings
 import io.github.yueby.musictogether.model.ShareCardBackgroundSource
 import io.github.yueby.musictogether.model.ShareCardSettings
@@ -111,6 +112,40 @@ internal class AppPreferences(context: Context) {
         preferences.edit().putBoolean(ALLOW_AUDIO_MIXING_KEY, enabled).apply()
     }
 
+    fun equalizerEnabled(): Boolean = preferences.getBoolean(EQUALIZER_ENABLED_KEY, false)
+
+    fun equalizerPreset(): Int = preferences.getInt(EQUALIZER_PRESET_KEY, 0)
+
+    fun setEqualizer(enabled: Boolean, preset: Int) {
+        preferences.edit().putBoolean(EQUALIZER_ENABLED_KEY, enabled).putInt(EQUALIZER_PRESET_KEY, preset).apply()
+    }
+
+    fun mediaCacheEnabled(): Boolean = preferences.getBoolean(MEDIA_CACHE_ENABLED_KEY, true)
+
+    fun mediaCacheLimitMb(): Int = preferences.getInt(MEDIA_CACHE_LIMIT_KEY, 512)
+
+    fun preloadNextTrack(): Boolean = preferences.getBoolean(PRELOAD_NEXT_KEY, true)
+
+    fun replayGainMode(): ReplayGainMode = ReplayGainMode.fromValue(preferences.getString(REPLAY_GAIN_MODE_KEY, null))
+
+    fun setMediaCache(enabled: Boolean, limitMb: Int, preload: Boolean) {
+        preferences.edit()
+            .putBoolean(MEDIA_CACHE_ENABLED_KEY, enabled)
+            .putInt(MEDIA_CACHE_LIMIT_KEY, limitMb)
+            .putBoolean(PRELOAD_NEXT_KEY, preload)
+            .apply()
+    }
+
+    fun setReplayGainMode(mode: ReplayGainMode) {
+        preferences.edit().putString(REPLAY_GAIN_MODE_KEY, mode.value).apply()
+    }
+
+    fun ttmlLyricsEnabled(): Boolean = preferences.getBoolean(TTML_LYRICS_ENABLED_KEY, true)
+
+    fun setTtmlLyricsEnabled(enabled: Boolean) {
+        preferences.edit().putBoolean(TTML_LYRICS_ENABLED_KEY, enabled).apply()
+    }
+
     fun hapticFeedbackEnabled(): Boolean = preferences.getBoolean(HAPTIC_FEEDBACK_ENABLED_KEY, true)
 
     fun setHapticFeedbackEnabled(enabled: Boolean) {
@@ -198,6 +233,15 @@ internal class AppPreferences(context: Context) {
         showRemainingTime = preferences.getBoolean(SHOW_REMAINING_TIME_KEY, false),
         controlsSpectrum = preferences.getBoolean(CONTROLS_SPECTRUM_KEY, false),
         immersiveCover = preferences.getBoolean(IMMERSIVE_COVER_KEY, true),
+        songHandoff = preferences.getBoolean(SONG_HANDOFF_KEY, true),
+        dynamicCover = preferences.getBoolean(DYNAMIC_COVER_KEY, true),
+        backgroundFps = preferences.getInt(BACKGROUND_FPS_KEY, 60),
+        lyricAutoAlign = preferences.getBoolean(LYRIC_AUTO_ALIGN_KEY, true),
+        lyricSubFontScale = preferences.getFloat(LYRIC_SUB_FONT_SCALE_KEY, 1f),
+        lyricRomanFontScale = preferences.getFloat(LYRIC_ROMAN_FONT_SCALE_KEY, 1f),
+        lyricWordFadeWidth = preferences.getFloat(LYRIC_WORD_FADE_WIDTH_KEY, 0.5f),
+        lyricHidePassedLines = preferences.getBoolean(LYRIC_HIDE_PASSED_KEY, false),
+        lyricSwapTransRoman = preferences.getBoolean(LYRIC_SWAP_TRANS_ROMAN_KEY, false),
     )
 
     fun setPlayerDisplaySettings(settings: PlayerDisplaySettings) {
@@ -215,6 +259,15 @@ internal class AppPreferences(context: Context) {
             .putBoolean(SHOW_REMAINING_TIME_KEY, settings.showRemainingTime)
             .putBoolean(CONTROLS_SPECTRUM_KEY, settings.controlsSpectrum)
             .putBoolean(IMMERSIVE_COVER_KEY, settings.immersiveCover)
+            .putBoolean(SONG_HANDOFF_KEY, settings.songHandoff)
+            .putBoolean(DYNAMIC_COVER_KEY, settings.dynamicCover)
+            .putInt(BACKGROUND_FPS_KEY, settings.backgroundFps)
+            .putBoolean(LYRIC_AUTO_ALIGN_KEY, settings.lyricAutoAlign)
+            .putFloat(LYRIC_SUB_FONT_SCALE_KEY, settings.lyricSubFontScale)
+            .putFloat(LYRIC_ROMAN_FONT_SCALE_KEY, settings.lyricRomanFontScale)
+            .putFloat(LYRIC_WORD_FADE_WIDTH_KEY, settings.lyricWordFadeWidth)
+            .putBoolean(LYRIC_HIDE_PASSED_KEY, settings.lyricHidePassedLines)
+            .putBoolean(LYRIC_SWAP_TRANS_ROMAN_KEY, settings.lyricSwapTransRoman)
             .apply()
     }
 
@@ -322,6 +375,22 @@ internal class AppPreferences(context: Context) {
         const val SHOW_REMAINING_TIME_KEY = "player_show_remaining_time"
         const val CONTROLS_SPECTRUM_KEY = "player_controls_spectrum"
         const val IMMERSIVE_COVER_KEY = "player_immersive_cover"
+        const val SONG_HANDOFF_KEY = "player_song_handoff"
+        const val DYNAMIC_COVER_KEY = "player_dynamic_cover"
+        const val BACKGROUND_FPS_KEY = "player_background_fps"
+        const val LYRIC_AUTO_ALIGN_KEY = "player_lyric_auto_align"
+        const val LYRIC_SUB_FONT_SCALE_KEY = "player_lyric_sub_font_scale"
+        const val LYRIC_ROMAN_FONT_SCALE_KEY = "player_lyric_roman_font_scale"
+        const val LYRIC_WORD_FADE_WIDTH_KEY = "player_lyric_word_fade_width"
+        const val LYRIC_HIDE_PASSED_KEY = "player_lyric_hide_passed"
+        const val LYRIC_SWAP_TRANS_ROMAN_KEY = "player_lyric_swap_trans_roman"
+        const val EQUALIZER_ENABLED_KEY = "equalizer_enabled"
+        const val EQUALIZER_PRESET_KEY = "equalizer_preset"
+        const val TTML_LYRICS_ENABLED_KEY = "ttml_lyrics_enabled"
+        const val MEDIA_CACHE_ENABLED_KEY = "media_cache_enabled"
+        const val MEDIA_CACHE_LIMIT_KEY = "media_cache_limit_mb"
+        const val PRELOAD_NEXT_KEY = "preload_next_track"
+        const val REPLAY_GAIN_MODE_KEY = "replay_gain_mode"
         const val PLAYBACK_SETTINGS_SCHEMA_KEY = "playback_settings_schema_version"
         const val PLAYBACK_SETTINGS_SCHEMA_VERSION = 2
         const val SYNC_PACKET_INTERVAL_KEY = "sync_packet_interval_seconds"

@@ -1,5 +1,11 @@
 package io.github.yueby.musictogether.ui
 
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Download
+import com.composables.icons.lucide.Music
+import com.composables.icons.lucide.Pause
+import com.composables.icons.lucide.Play
+import com.composables.icons.lucide.Trash2
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import io.github.yueby.musictogether.ui.designsystem.AppEmptyState
 import androidx.compose.foundation.layout.PaddingValues
@@ -14,12 +20,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
@@ -59,7 +59,7 @@ internal fun LocalMusicPane(
         }
         if (library.tracks.isEmpty() && library.downloads.isEmpty()) {
             AppEmptyState(
-                icon = Icons.Default.Download,
+                icon = Lucide.Download,
                 title = "暂无已下载歌曲",
                 summary = "在歌曲的「更多」菜单里选择「下载」，离开房间后也能播放",
             )
@@ -141,7 +141,7 @@ private fun LocalPlaybackBar(player: PlayerUiState, viewModel: MusicTogetherView
     Surface(color = MiuixTheme.colorScheme.surfaceContainer) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.MusicNote, null, tint = MiuixTheme.colorScheme.primary)
+                Icon(Lucide.Music, null, tint = MiuixTheme.colorScheme.primary)
                 Text(
                     player.track?.title.orEmpty(),
                     modifier = Modifier.weight(1f).padding(start = 10.dp),
@@ -149,7 +149,7 @@ private fun LocalPlaybackBar(player: PlayerUiState, viewModel: MusicTogetherView
                     overflow = TextOverflow.Ellipsis,
                 )
                 IconButton(onClick = viewModel::togglePlayback) {
-                    Icon(if (player.playing) Icons.Default.Pause else Icons.Default.PlayArrow, "播放或暂停")
+                    Icon(if (player.playing) Lucide.Pause else Lucide.Play, "播放或暂停")
                 }
             }
             Slider(
@@ -196,7 +196,7 @@ private fun DownloadedTrackRow(
         },
         trailingContent = {
             IconButton(onClick = onDelete) {
-                Icon(Icons.Default.Delete, "删除本地歌曲")
+                Icon(Lucide.Trash2, "删除本地歌曲")
             }
         },
     )

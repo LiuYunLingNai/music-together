@@ -3,6 +3,7 @@ package io.github.yueby.musictogether.ui.player
 import android.animation.ValueAnimator
 import android.app.ActivityManager
 import android.content.Context
+import android.os.Build
 import android.os.PowerManager
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
@@ -71,6 +72,16 @@ internal fun PlayerBackdrop(
         ValueAnimator.areAnimatorsEnabled() &&
             !activityManager.isLowRamDevice &&
             !powerManager.isPowerSaveMode
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        MeshBackdrop(
+            coverUrl = coverUrl?.takeIf(String::isNotBlank),
+            animate = motionEnabled && motionAllowed,
+            flowSpeed = displaySettings.backgroundMotionStrength,
+            fps = displaySettings.backgroundFps,
+            modifier = modifier,
+        )
+        return
+    }
     val drift = remember { Animatable(0f) }
     val backgroundScale = animateFloatAsState(
         targetValue = if (playing && motionEnabled && motionAllowed) 1.28f else 1.22f,

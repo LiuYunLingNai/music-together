@@ -1,6 +1,8 @@
 package io.github.yueby.musictogether.ui
 
-import androidx.compose.material.icons.filled.Groups
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.RefreshCw
+import com.composables.icons.lucide.Users
 import io.github.yueby.musictogether.ui.designsystem.AppEmptyState
 import io.github.yueby.musictogether.ui.designsystem.AppTextAction
 import io.github.yueby.musictogether.ui.designsystem.AppTextField
@@ -19,8 +21,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Refresh
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
@@ -57,7 +57,7 @@ private val platformOptions = listOf(
 fun PlatformPane(state: AppState, viewModel: MusicTogetherViewModel) {
     if (state.room == null) {
         AppEmptyState(
-            icon = Icons.Default.Groups,
+            icon = Lucide.Users,
             title = "加入房间后管理平台账号",
             summary = "音乐平台的登录凭据按服务器和房间隔离保存，可选择是否为房间共享 VIP 播放能力",
         )
@@ -233,7 +233,7 @@ private fun LazyListScope.platformPlaylistItems(
                     if (loading) {
                         CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                     } else {
-                        Icon(Icons.Default.Refresh, null, Modifier.size(17.dp))
+                        Icon(Lucide.RefreshCw, null, Modifier.size(17.dp))
                     }
                     Spacer(Modifier.width(4.dp))
                     Text("刷新")

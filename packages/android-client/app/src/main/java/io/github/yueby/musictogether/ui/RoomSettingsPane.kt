@@ -1,5 +1,12 @@
 package io.github.yueby.musictogether.ui
 
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.AudioLines
+import com.composables.icons.lucide.EyeOff
+import com.composables.icons.lucide.Gauge
+import com.composables.icons.lucide.Pin
+import com.composables.icons.lucide.RefreshCcw
+import com.composables.icons.lucide.Timer
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
 import io.github.yueby.musictogether.ui.designsystem.AppButton
@@ -12,13 +19,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.GraphicEq
-import androidx.compose.material.icons.filled.PushPin
-import androidx.compose.material.icons.filled.Speed
-import androidx.compose.material.icons.filled.Sync
-import androidx.compose.material.icons.filled.Timer
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -92,12 +92,12 @@ private fun MiuixRoomSettingsPane(
                     valueText = "${state.syncPacketIntervalSeconds} 秒",
                     valueRange = 1f..60f,
                     steps = 58,
-                    startAction = { MiuixIcon(Icons.Default.Timer, null, tint = MiuixTheme.colorScheme.primary) },
+                    startAction = { MiuixIcon(Lucide.Timer, null, tint = MiuixTheme.colorScheme.primary) },
                 )
                 ArrowPreference(
                     title = "同步偏移",
                     summary = if (syncDriftMs > 0) "+${syncDriftMs}ms" else "${syncDriftMs}ms",
-                    startAction = { MiuixIcon(Icons.Default.Sync, null, tint = MiuixTheme.colorScheme.primary) },
+                    startAction = { MiuixIcon(Lucide.RefreshCcw, null, tint = MiuixTheme.colorScheme.primary) },
                 )
             }
         }
@@ -109,7 +109,7 @@ private fun MiuixRoomSettingsPane(
                     summary = "以最多 ±1% 的速度差平滑消除本机播放偏移",
                     checked = state.playbackTempoSyncEnabled,
                     onCheckedChange = viewModel::updatePlaybackTempoSync,
-                    startAction = { MiuixIcon(Icons.Default.Speed, null, tint = MiuixTheme.colorScheme.primary) },
+                    startAction = { MiuixIcon(Lucide.Gauge, null, tint = MiuixTheme.colorScheme.primary) },
                 )
                 if (!state.playbackTempoSyncEnabled) {
                     SwitchPreference(
@@ -117,7 +117,7 @@ private fun MiuixRoomSettingsPane(
                         summary = "连续确认明显漂移后直接定位",
                         checked = state.playbackHardSeekSyncEnabled,
                         onCheckedChange = viewModel::updatePlaybackHardSeekSync,
-                        startAction = { MiuixIcon(Icons.Default.Sync, null, tint = MiuixTheme.colorScheme.primary) },
+                        startAction = { MiuixIcon(Lucide.RefreshCcw, null, tint = MiuixTheme.colorScheme.primary) },
                     )
                 }
                 WindowDropdownPreference(
@@ -129,7 +129,7 @@ private fun MiuixRoomSettingsPane(
                     onSelectedIndexChange = { index ->
                         qualityOptions.getOrNull(index)?.let { viewModel.updateRoomAudioQuality(it.value) }
                     },
-                    startAction = { MiuixIcon(Icons.Default.GraphicEq, null, tint = MiuixTheme.colorScheme.primary) },
+                    startAction = { MiuixIcon(Lucide.AudioLines, null, tint = MiuixTheme.colorScheme.primary) },
                 )
             }
         }
@@ -142,7 +142,7 @@ private fun MiuixRoomSettingsPane(
                     checked = room.hidden,
                     enabled = permissions.canManageAllSettings,
                     onCheckedChange = viewModel::updateRoomHidden,
-                    startAction = { MiuixIcon(Icons.Default.VisibilityOff, null, tint = MiuixTheme.colorScheme.primary) },
+                    startAction = { MiuixIcon(Lucide.EyeOff, null, tint = MiuixTheme.colorScheme.primary) },
                 )
                 SwitchPreference(
                     title = "永久房间",
@@ -150,7 +150,7 @@ private fun MiuixRoomSettingsPane(
                     checked = room.permanent,
                     enabled = permissions.canManageAllSettings,
                     onCheckedChange = viewModel::updateRoomPermanent,
-                    startAction = { MiuixIcon(Icons.Default.PushPin, null, tint = MiuixTheme.colorScheme.primary) },
+                    startAction = { MiuixIcon(Lucide.Pin, null, tint = MiuixTheme.colorScheme.primary) },
                 )
                 if (permissions.canManageAllSettings) {
                     SwitchPreference(

@@ -1,5 +1,8 @@
 package io.github.yueby.musictogether.ui
 
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Key
+import com.composables.icons.lucide.Star
 import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.compose.foundation.Image
@@ -13,9 +16,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.Star
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
@@ -113,7 +113,7 @@ private fun MiuixPlatformLoginCard(
             summary = if (displayedVipType > 0) "$roomSummary · ${vipLabel(displayedVipType, displayedVipLabel)}" else roomSummary,
             startAction = {
                 MiuixIcon(
-                    imageVector = if (loggedIn) Icons.Default.Star else Icons.Default.Key,
+                    imageVector = if (loggedIn) Lucide.Star else Lucide.Key,
                     contentDescription = null,
                     tint = MiuixTheme.colorScheme.primary,
                 )

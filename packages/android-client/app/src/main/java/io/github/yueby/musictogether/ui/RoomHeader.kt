@@ -1,9 +1,26 @@
 package io.github.yueby.musictogether.ui
 
-import androidx.compose.material.icons.automirrored.filled.QueueMusic
-import androidx.compose.material.icons.filled.Whatshot
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ChevronDown
+import com.composables.icons.lucide.Copy
+import com.composables.icons.lucide.Download
+import com.composables.icons.lucide.EllipsisVertical
+import com.composables.icons.lucide.Flame
+import com.composables.icons.lucide.ListMusic
+import com.composables.icons.lucide.Lock
+import com.composables.icons.lucide.LogOut
+import com.composables.icons.lucide.Music
+import com.composables.icons.lucide.Search
+import com.composables.icons.lucide.Settings
+import com.composables.icons.lucide.Share2
+import com.composables.icons.lucide.SlidersHorizontal
+import com.composables.icons.lucide.Sparkles
+import com.composables.icons.lucide.Users
+import com.composables.icons.lucide.Wifi
+import com.composables.icons.lucide.WifiOff
 import io.github.yueby.musictogether.ui.player.DropdownMenuItem
 import io.github.yueby.musictogether.ui.player.DropdownMenu
+import io.github.yueby.musictogether.ui.player.PlayerChatButton
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,21 +33,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Logout
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Groups
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Wifi
-import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,6 +66,8 @@ internal fun RoomHeader(
     onMinimizePlayer: (() -> Unit)? = null,
     onOpenMembers: () -> Unit,
     onOpenRoute: (AppRoute) -> Unit,
+    chatUnreadCount: Int = 0,
+    onOpenLyricCalibration: (() -> Unit)? = null,
 ) {
     val layoutDirection = LocalLayoutDirection.current
     val safeTop = safeContentPadding.calculateTopPadding()
@@ -89,7 +93,7 @@ internal fun RoomHeader(
     ) {
         onMinimizePlayer?.let { minimize ->
             IconButton(onClick = minimize) {
-                Icon(Icons.Default.KeyboardArrowDown, "返回主页", Modifier.size(28.dp), tint = contentColor)
+                Icon(Lucide.ChevronDown, "返回主页", Modifier.size(28.dp), tint = contentColor)
             }
         }
         Column(
@@ -111,14 +115,14 @@ internal fun RoomHeader(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Icon(Icons.Default.Groups, contentDescription = null, modifier = Modifier.size(13.dp), tint = secondaryColor)
+                Icon(Lucide.Users, contentDescription = null, modifier = Modifier.size(13.dp), tint = secondaryColor)
                 Text(room.users.size.toString(), fontSize = 11.sp, color = secondaryColor)
                 if (room.hasPassword) {
-                    Icon(Icons.Default.Lock, contentDescription = "密码房间", modifier = Modifier.size(12.dp), tint = secondaryColor)
+                    Icon(Lucide.Lock, contentDescription = "密码房间", modifier = Modifier.size(12.dp), tint = secondaryColor)
                 }
                 Spacer(Modifier.size(4.dp))
                 Icon(
-                    if (connected) Icons.Default.Wifi else Icons.Default.WifiOff,
+                    if (connected) Lucide.Wifi else Lucide.WifiOff,
                     contentDescription = if (connected) "网络延迟" else "连接已断开",
                     modifier = Modifier.size(13.dp),
                     tint = latencyColor,
@@ -132,33 +136,39 @@ internal fun RoomHeader(
                 )
             }
         }
+        PlayerChatButton(
+            unreadCount = chatUnreadCount,
+            onClick = { onOpenRoute(AppRoute.Chat) },
+            iconAlpha = 0.92f,
+        )
         if (connected) {
             IconButton(onClick = { onOpenRoute(AppRoute.Recommendations) }) {
-                Icon(Icons.Default.AutoAwesome, "推荐点歌", Modifier.size(20.dp), tint = contentColor)
+                Icon(Lucide.Sparkles, "推荐点歌", Modifier.size(20.dp), tint = contentColor)
             }
         }
         IconButton(onClick = { onOpenRoute(AppRoute.Search) }) {
-            Icon(Icons.Default.Search, "搜索点歌", Modifier.size(20.dp), tint = contentColor)
+            Icon(Lucide.Search, "搜索点歌", Modifier.size(20.dp), tint = contentColor)
         }
         Box {
             IconButton(onClick = { onMenuExpandedChange(true) }) {
-                Icon(Icons.Default.MoreVert, "更多操作", Modifier.size(20.dp), tint = contentColor)
+                Icon(Lucide.EllipsisVertical, "更多操作", Modifier.size(20.dp), tint = contentColor)
             }
             DropdownMenu(expanded = menuExpanded, onDismissRequest = { onMenuExpandedChange(false) }) {
                 fun act(block: () -> Unit) {
                     onMenuExpandedChange(false)
                     block()
                 }
-                RoomMenuItem(Icons.AutoMirrored.Filled.QueueMusic, "播放队列") { act { onOpenRoute(AppRoute.Queue) } }
-                RoomMenuItem(Icons.Default.Whatshot, "热歌榜") { act { onOpenRoute(AppRoute.HotSongs) } }
-                RoomMenuItem(Icons.Default.Settings, "房间与同步") { act { onOpenRoute(AppRoute.RoomInfo) } }
-                RoomMenuItem(Icons.Default.Share, "分享房间") { act(viewModel::openRoomShare) }
-                RoomMenuItem(Icons.Default.ContentCopy, "复制房间链接") { act(viewModel::copyRoomLink) }
-                RoomMenuItem(Icons.Default.MusicNote, "音乐平台账号") { act { onOpenRoute(AppRoute.PlatformAccounts) } }
+                RoomMenuItem(Lucide.ListMusic, "播放队列") { act { onOpenRoute(AppRoute.Queue) } }
+                RoomMenuItem(Lucide.Flame, "热歌榜") { act { onOpenRoute(AppRoute.HotSongs) } }
+                onOpenLyricCalibration?.let { open -> RoomMenuItem(Lucide.SlidersHorizontal, "歌词校准") { act(open) } }
+                RoomMenuItem(Lucide.Settings, "房间与同步") { act { onOpenRoute(AppRoute.RoomInfo) } }
+                RoomMenuItem(Lucide.Share2, "分享房间") { act(viewModel::openRoomShare) }
+                RoomMenuItem(Lucide.Copy, "复制房间链接") { act(viewModel::copyRoomLink) }
+                RoomMenuItem(Lucide.Music, "音乐平台账号") { act { onOpenRoute(AppRoute.PlatformAccounts) } }
                 if (room.currentTrack != null) {
-                    RoomMenuItem(Icons.Default.Download, "下载当前歌曲") { act { onOpenRoute(AppRoute.Download) } }
+                    RoomMenuItem(Lucide.Download, "下载当前歌曲") { act { onOpenRoute(AppRoute.Download) } }
                 }
-                RoomMenuItem(Icons.AutoMirrored.Filled.Logout, "离开房间", MiuixTheme.colorScheme.error) {
+                RoomMenuItem(Lucide.LogOut, "离开房间", MiuixTheme.colorScheme.error) {
                     act(viewModel::leaveRoom)
                 }
             }

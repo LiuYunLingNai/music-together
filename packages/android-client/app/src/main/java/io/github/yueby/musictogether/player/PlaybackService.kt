@@ -1,5 +1,6 @@
 package io.github.yueby.musictogether.player
 
+import android.media.audiofx.Equalizer
 import androidx.media3.exoplayer.audio.TeeAudioProcessor
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.AudioSink
@@ -10,9 +11,6 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DefaultHttpDataSource
-import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.CommandButton
@@ -26,6 +24,7 @@ import io.github.yueby.musictogether.logging.AppLogger
 class PlaybackService : MediaSessionService() {
     private lateinit var player: ExoPlayer
     private lateinit var mediaSession: MediaSession
+    private var equalizer: Equalizer? = null
     private val audioAttributes = AudioAttributes.Builder()
         .setUsage(C.USAGE_MEDIA)
         .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -33,17 +32,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent(PlaybackRequestHeaders.USER_AGENT)
-        val dataSourceFactory = ResolvingDataSource.Factory(DefaultDataSource.Factory(this, httpDataSourceFactory)) { dataSpec ->
-            val host = dataSpec.uri.host.orEmpty().lowercase()
-            val headers = PlaybackRequestHeaders.forHost(host)
-            if (headers.isNotEmpty()) {
-                dataSpec.withRequestHeaders(headers)
-            } else {
-                dataSpec
-            }
-        }
+        val dataSourceFactory = PlaybackCache.playbackFactory(this)
         val renderersFactory = object : DefaultRenderersFactory(this) {
             override fun buildAudioSink(
                 context: Context,
@@ -52,14 +41,17 @@ class PlaybackService : MediaSessionService() {
             ): AudioSink = DefaultAudioSink.Builder(context)
                 .setEnableFloatOutput(enableFloatOutput)
                 .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
-                .setAudioProcessors(arrayOf(TeeAudioProcessor(AudioSpectrum.sink)))
+                .setAudioProcessors(arrayOf(GainAudioProcessor(), TeeAudioProcessor(AudioSpectrum.sink)))
                 .build()
         }
         player = ExoPlayer.Builder(this, renderersFactory)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
             .build()
+        PlaybackCommandBridge.tailDeck = TailDeck(this)
         configureAudioFocus(PlaybackCommandBridge.audioFocusEnabled)
         PlaybackCommandBridge.audioFocusListener = ::configureAudioFocus
+        configureEqualizer(PlaybackCommandBridge.equalizerEnabled, PlaybackCommandBridge.equalizerPreset)
+        PlaybackCommandBridge.equalizerListener = ::configureEqualizer
         val sessionPlayer = RoomMediaSessionPlayer(player)
         mediaSession = MediaSession.Builder(this, sessionPlayer)
             .setMediaButtonPreferences(roomMediaButtonPreferences())
@@ -104,9 +96,29 @@ class PlaybackService : MediaSessionService() {
     override fun onDestroy() {
         AppLogger.info("MediaSession", "playback service destroyed")
         PlaybackCommandBridge.audioFocusListener = null
+        PlaybackCommandBridge.equalizerListener = null
+        PlaybackCommandBridge.tailDeck?.release()
+        PlaybackCommandBridge.tailDeck = null
+        runCatching { equalizer?.release() }
+        equalizer = null
         mediaSession.release()
         player.release()
         super.onDestroy()
+    }
+
+    /** System equalizer on the player's audio session; presets come from the device. */
+    private fun configureEqualizer(enabled: Boolean, preset: Int) {
+        runCatching {
+            if (!enabled) {
+                equalizer?.enabled = false
+                return
+            }
+            val effect = equalizer ?: Equalizer(0, player.audioSessionId).also { equalizer = it }
+            val count = effect.numberOfPresets.toInt()
+            PlaybackCommandBridge.equalizerPresets = (0 until count).map { effect.getPresetName(it.toShort()) }
+            if (count > 0) effect.usePreset(preset.coerceIn(0, count - 1).toShort())
+            effect.enabled = true
+        }.onFailure { AppLogger.error("Player", "equalizer unavailable", it) }
     }
 
     private fun configureAudioFocus(enabled: Boolean) {

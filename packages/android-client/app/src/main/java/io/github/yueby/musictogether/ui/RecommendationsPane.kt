@@ -1,5 +1,10 @@
 package io.github.yueby.musictogether.ui
 
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Check
+import com.composables.icons.lucide.CircleAlert
+import com.composables.icons.lucide.RefreshCw
+import com.composables.icons.lucide.Sparkles
 import io.github.yueby.musictogether.ui.designsystem.AppTextAction
 import io.github.yueby.musictogether.ui.designsystem.AppChip
 import top.yukonga.miuix.kmp.basic.TextButton as MiuixTextButton
@@ -18,11 +23,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.Refresh
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
@@ -95,7 +95,7 @@ internal fun PersonalRecommendations(
                             onClick = { selectedPlatform = platform },
                             label = { Text(platformLabel(platform)) },
                             leadingIcon = if (selectedPlatform == platform) {
-                                { Icon(Icons.Default.AutoAwesome, null, Modifier.size(16.dp)) }
+                                { Icon(Lucide.Sparkles, null, Modifier.size(16.dp)) }
                             } else {
                                 null
                             },
@@ -105,7 +105,7 @@ internal fun PersonalRecommendations(
                         onClick = viewModel::loadRecommendations,
                         enabled = !state.recommendationsLoading && !state.recommendationsLoadingMore,
                     ) {
-                        Icon(Icons.Default.Refresh, "刷新推荐")
+                        Icon(Lucide.RefreshCw, "刷新推荐")
                     }
                 }
                 RecommendationContent(selectedRecommendation, state, viewModel, contentPadding)
@@ -136,7 +136,7 @@ private fun RecommendationContent(
                     onClick = { tencentView = "tracks" },
                     label = { Text("雷达歌曲") },
                     leadingIcon = if (tencentView == "tracks") {
-                        { Icon(Icons.Default.Check, null, Modifier.size(16.dp)) }
+                        { Icon(Lucide.Check, null, Modifier.size(16.dp)) }
                     } else {
                         null
                     },
@@ -145,7 +145,7 @@ private fun RecommendationContent(
                     onClick = { tencentView = "playlists" },
                     label = { Text("推荐歌单") },
                     leadingIcon = if (tencentView == "playlists") {
-                        { Icon(Icons.Default.Check, null, Modifier.size(16.dp)) }
+                        { Icon(Lucide.Check, null, Modifier.size(16.dp)) }
                     } else {
                         null
                     },
@@ -283,7 +283,7 @@ private fun RecommendationStatus(
             CircularProgressIndicator(modifier = Modifier.size(28.dp), strokeWidth = 2.dp)
         } else {
             Icon(
-                if (action == null) Icons.Default.AutoAwesome else Icons.Default.ErrorOutline,
+                if (action == null) Lucide.Sparkles else Lucide.CircleAlert,
                 contentDescription = null,
                 modifier = Modifier.size(32.dp),
                 tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,

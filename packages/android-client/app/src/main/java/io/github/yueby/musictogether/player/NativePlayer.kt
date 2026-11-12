@@ -3,7 +3,9 @@ package io.github.yueby.musictogether.player
 import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
+import androidx.annotation.OptIn
 import androidx.compose.runtime.Immutable
+import androidx.media3.common.util.UnstableApi
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -14,6 +16,7 @@ import androidx.media3.datasource.HttpDataSource
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import io.github.yueby.musictogether.logging.AppLogger
+import io.github.yueby.musictogether.model.AutomixTransition
 import io.github.yueby.musictogether.model.PlayState
 import io.github.yueby.musictogether.model.Track
 import kotlinx.coroutines.CoroutineScope
@@ -51,6 +54,8 @@ class NativePlayer(
     private companion object {
         const val HARD_SEEK_FADE_MS = 60L
         const val FADE_STEPS = 4
+        const val FADE_FRAME_MS = 25L
+        const val TAIL_START_LATENCY_MS = 150L
     }
 
     private data class PendingLoad(
@@ -80,6 +85,9 @@ class NativePlayer(
     private var hardSeekJob: Job? = null
     private var hardSeekRestoreVolume: Float? = null
     private var correctionGeneration = 0L
+    private var localHold = false
+    private var pendingTransition: Pair<AutomixTransition, Float>? = null
+    private var transitionJob: Job? = null
 
     init {
         controllerFuture.addListener({
@@ -109,6 +117,11 @@ class NativePlayer(
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) = publish()
 
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            // Sleep timer: this device stays stopped whatever the room does, until the user resumes.
+            if (localHold && playWhenReady) player?.pause()
+        }
+
         override fun onPlaybackStateChanged(playbackState: Int) {
             publish()
             if (playbackState == Player.STATE_READY) {
@@ -137,12 +150,15 @@ class NativePlayer(
         }
     }
 
+    @OptIn(markerClass = [UnstableApi::class])
     fun load(
         track: Track,
         playState: PlayState,
         playbackUrl: String? = track.streamUrl,
         fallbackUrl: String? = null,
         localPlayback: Boolean = false,
+        cacheKey: String? = null,
+        transition: AutomixTransition? = null,
     ) {
         val streamUrl = playbackUrl ?: run {
             AppLogger.warn("Player", "track has no stream URL id=${track.id}")
@@ -183,12 +199,61 @@ class NativePlayer(
             val mediaItem = MediaItem.Builder()
                     .setMediaId(track.id)
                     .setUri(streamUrl)
+                    .setCustomCacheKey(cacheKey?.takeIf { streamUrl.startsWith("http") })
                     .setMediaMetadata(metadata)
                     .build()
+            cancelTransition()
+            val outgoing = controller.currentMediaItem
+            val blend = transition?.takeIf {
+                controller.isPlaying && outgoing?.mediaId == it.fromTrackId && outgoing.localConfiguration != null
+            }
+            if (blend != null && outgoing != null) {
+                val gain = PlaybackCommandBridge.replayGain.linear.coerceAtMost(1f)
+                PlaybackCommandBridge.tailDeck?.start(
+                    uri = outgoing.localConfiguration!!.uri.toString(),
+                    cacheKey = outgoing.localConfiguration!!.customCacheKey,
+                    positionMs = controller.currentPosition + TAIL_START_LATENCY_MS,
+                    volume = gain,
+                )
+                pendingTransition = blend to gain
+                controller.volume = 0f
+                transitionJob = scope.launch {
+                    delay(blend.overlapMs + 20_000L)
+                    cancelTransition()
+                }
+            }
             controller.playWhenReady = false
             controller.playbackParameters = PlaybackParameters.DEFAULT
             controller.setMediaItem(mediaItem, positionMs)
             controller.prepare()
+        }
+    }
+
+    private fun cancelTransition() {
+        transitionJob?.cancel()
+        transitionJob = null
+        pendingTransition = null
+        PlaybackCommandBridge.tailDeck?.stop()
+        player?.volume = 1f
+    }
+
+    /** Equal-power blend: the outgoing tail fades down while the incoming song fades up on the main player. */
+    private fun startTransitionFade() {
+        val (blend, tailGain) = pendingTransition ?: return
+        pendingTransition = null
+        transitionJob?.cancel()
+        val outTrim = Math.pow(10.0, -blend.trimDb / 20).toFloat()
+        transitionJob = scope.launch {
+            val steps = (blend.overlapMs / FADE_FRAME_MS).toInt().coerceAtLeast(1)
+            repeat(steps) { step ->
+                val t = (step + 1f) / steps
+                player?.volume = kotlin.math.sin(t * Math.PI / 2).toFloat()
+                PlaybackCommandBridge.tailDeck?.setVolume(kotlin.math.cos(t * Math.PI / 2).toFloat() * tailGain * outTrim)
+                delay(FADE_FRAME_MS)
+            }
+            PlaybackCommandBridge.tailDeck?.stop()
+            player?.volume = 1f
+            transitionJob = null
         }
     }
 
@@ -259,6 +324,21 @@ class NativePlayer(
         withPlayer { it.seekTo((seconds * 1_000).toLong().coerceAtLeast(0L)) }
     }
 
+    fun holdLocal() {
+        localHold = true
+        withPlayer {
+            resetPlaybackCorrection(it)
+            it.pause()
+        }
+    }
+
+    /** Drops the sleep hold; drift correction pulls the position back onto the room timeline. */
+    fun releaseLocalHold(resume: Boolean) {
+        if (!localHold) return
+        localHold = false
+        if (resume) withPlayer { it.play() }
+    }
+
     fun setTempoSyncEnabled(enabled: Boolean) {
         tempoSyncEnabled = enabled
         resetPlaybackCorrection()
@@ -273,6 +353,7 @@ class NativePlayer(
 
     fun correctDrift(expectedSeconds: Double, serverIsPlaying: Boolean, medianRttMs: Long): Double? {
         val controller = player ?: return null
+        if (transitionJob != null || pendingTransition != null) return null
         if (!serverIsPlaying) {
             resetPlaybackCorrection(controller)
             return 0.0
@@ -301,6 +382,7 @@ class NativePlayer(
     }
 
     fun stop() {
+        cancelTransition()
         scheduledAction?.cancel()
         pendingLoad = null
         fallbackPlaybackUrl = null
@@ -313,6 +395,7 @@ class NativePlayer(
     }
 
     fun release() {
+        cancelTransition()
         progressJob?.cancel()
         scheduledAction?.cancel()
         pendingLoad = null
@@ -418,6 +501,7 @@ class NativePlayer(
                 it.seekTo(expectedPositionMs)
                 if (pending.autoPlay) it.play() else it.pause()
             }
+            if (pending.autoPlay) startTransitionFade() else cancelTransition()
             publish()
         }
     }

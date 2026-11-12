@@ -7,6 +7,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.audio.TeeAudioProcessor
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.PI
 import kotlin.math.ceil
 import kotlin.math.cos
@@ -34,15 +35,27 @@ object AudioSpectrum {
     private const val MaxDb = -30f
     private val Empty = FloatArray(0)
 
-    @Volatile
-    var enabled: Boolean = false
-        set(value) {
-            field = value
-            if (!value) latest = Empty
+    private val users = AtomicInteger(0)
+    private val enabled: Boolean get() = users.get() > 0
+
+    fun acquire() {
+        users.incrementAndGet()
+    }
+
+    fun release() {
+        if (users.updateAndGet { (it - 1).coerceAtLeast(0) } == 0) {
+            latest = Empty
+            lowFreqLevel = 0f
         }
+    }
 
     @Volatile
     var latest: FloatArray = Empty
+        private set
+
+    /** AMLL low-frequency level: mean of the first two bins from 80 Hz, `0.5 * log10(pcm / 255 + 1)`. */
+    @Volatile
+    var lowFreqLevel: Float = 0f
         private set
 
     val sink: TeeAudioProcessor.AudioBufferSink = object : TeeAudioProcessor.AudioBufferSink {
@@ -110,6 +123,11 @@ object AudioSpectrum {
                 out[bin - from] = (255f * (db - MinDb) / (MaxDb - MinDb)).coerceIn(0f, 255f)
             }
             latest = out
+            var low = 0f
+            for (bin in from until from + 2) {
+                low += 0.5f * log10(smoothed[bin.coerceAtMost(FftSize / 2 - 1)] * 32768f / 255f + 1f)
+            }
+            lowFreqLevel = low / 2f
         }
     }
 

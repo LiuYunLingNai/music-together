@@ -1,5 +1,12 @@
 package io.github.yueby.musictogether.ui
 
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Globe
+import com.composables.icons.lucide.Monitor
+import com.composables.icons.lucide.Smartphone
+import com.composables.icons.lucide.UserRound
+import com.composables.icons.lucide.Users
+import com.composables.icons.lucide.X
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -17,13 +24,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountCircle
-import androidx.compose.material.icons.filled.Computer
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Groups
-import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.Smartphone
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
@@ -80,7 +80,7 @@ internal fun MembersPane(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Icon(Icons.Default.Groups, contentDescription = null, Modifier.size(20.dp))
+            Icon(Lucide.Users, contentDescription = null, Modifier.size(20.dp))
             Text(
                 "房间成员 (${room.users.size}/${members.size})",
                 modifier = Modifier.weight(1f),
@@ -89,7 +89,7 @@ internal fun MembersPane(
             )
             onClose?.let { close ->
                 IconButton(onClick = close) {
-                    Icon(Icons.Default.Close, contentDescription = "关闭成员列表")
+                    Icon(Lucide.X, contentDescription = "关闭成员列表")
                 }
             }
         }
@@ -198,7 +198,7 @@ private fun MemberAvatar(member: RoomMember, creatorId: String) {
     Box(Modifier.size(40.dp)) {
         if (member.avatarUrl.isNullOrBlank()) {
             Icon(
-                Icons.Default.AccountCircle,
+                Lucide.UserRound,
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
                 tint = if (member.id == creatorId) Color(0xFFFFC857) else MiuixTheme.colorScheme.onSurfaceVariantSummary,
@@ -242,9 +242,9 @@ private fun MemberClients(member: RoomMember) {
             ) {
                 Icon(
                     imageVector = when (client.kind) {
-                        "android" -> Icons.Default.Smartphone
-                        "windows", "desktop" -> Icons.Default.Computer
-                        else -> Icons.Default.Language
+                        "android" -> Lucide.Smartphone
+                        "windows", "desktop" -> Lucide.Monitor
+                        else -> Lucide.Globe
                     },
                     contentDescription = null,
                     modifier = Modifier.padding(top = 1.dp).size(14.dp),

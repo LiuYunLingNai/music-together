@@ -417,6 +417,21 @@ class MusicTogetherApi(private val client: OkHttpClient) {
         )
     }
 
+    suspend fun dynamicCover(server: ServerAddress, track: Track, roomId: String): String? = withContext(Dispatchers.IO) {
+        val url = server.api("music", "dynamic-cover").newBuilder()
+            .addQueryParameter("source", track.source)
+            .addQueryParameter("id", track.urlId)
+            .addQueryParameter("roomId", roomId)
+            .apply {
+                track.title.takeIf(String::isNotBlank)?.let { addQueryParameter("title", it) }
+                track.artist.filter(String::isNotBlank).take(10).forEach { addQueryParameter("artists", it) }
+                track.album.takeIf(String::isNotBlank)?.let { addQueryParameter("album", it) }
+                if (track.duration > 0) addQueryParameter("duration", track.duration.toString())
+            }
+            .build()
+        executeJson(url, "dynamic-cover").optString("url").takeIf { it.startsWith("http") }
+    }
+
     suspend fun isLiked(server: ServerAddress, track: Track, roomId: String): Boolean = withContext(Dispatchers.IO) {
         val url = server.api("music", "liked").newBuilder()
             .addQueryParameter("source", track.source)

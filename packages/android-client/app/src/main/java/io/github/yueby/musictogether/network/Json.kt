@@ -1,5 +1,6 @@
 package io.github.yueby.musictogether.network
 
+import io.github.yueby.musictogether.model.AutomixTransition
 import io.github.yueby.musictogether.model.ChatMessage
 import io.github.yueby.musictogether.model.ClientInfo
 import io.github.yueby.musictogether.model.PlayState
@@ -120,6 +121,13 @@ internal fun JSONObject.toPlayState(): PlayState = PlayState(
         it.isFinite() && it >= 0 && it <= 9_007_199_254_740_991.0 && it == kotlin.math.floor(it)
     }?.toLong(),
 )
+
+internal fun JSONObject.toAutomixTransition(): AutomixTransition? {
+    val overlapMs = optLong("overlapMs", 0L)
+    val fromTrackId = stringOrNull("fromTrackId")
+    if (overlapMs <= 0L || fromTrackId == null) return null
+    return AutomixTransition(fromTrackId, overlapMs, optDouble("trimDb", 0.0).takeIf { it.isFinite() } ?: 0.0)
+}
 
 internal fun JSONObject.toUser(): User = User(
     id = optString("id"),
