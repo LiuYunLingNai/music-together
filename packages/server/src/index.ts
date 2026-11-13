@@ -29,6 +29,7 @@ import {
 import { startBackupScheduler, stopBackupScheduler } from './services/backupService.js'
 import { logger } from './utils/logger.js'
 import { databasePath, db } from './repositories/database.js'
+import { platformAuthRepo } from './repositories/platformAuthRepository.js'
 
 const app = express()
 app.disable('x-powered-by')
@@ -173,6 +174,7 @@ httpServer.listen(config.port, () => {
       ? `仅允许以下来源连接：${config.explicitOrigins.join(', ')}`
       : '当前允许所有来源连接（自动模式）',
   )
+  platformAuthRepo.auditDecryptability()
   if (config.isProd && config.identity.usesDefaultSecret) {
     logger.warn(
       '未设置 IDENTITY_SECRET，正在使用公开的默认值：任何人都能伪造身份（包括服务器管理员）。请参照部署文档设置独立密钥',
