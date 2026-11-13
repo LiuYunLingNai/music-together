@@ -144,6 +144,7 @@ export function PlaybackSection({ onOpenRoomSettings }: { onOpenRoomSettings?: (
       <SettingsSection title="音频输出">
         <OutputDeviceSetting />
         <PreloadNextSetting />
+        <BufferCurrentSetting />
         <MediaCacheSetting />
         <ReplayGainSetting />
       </SettingsSection>
@@ -309,6 +310,19 @@ function PreloadNextSetting() {
       description="播放结束前约 25 秒解析并缓冲下一首，减少切歌空档；Bilibili 音源暂不预加载。"
     >
       <Switch aria-label="预加载下一首" checked={enabled} onCheckedChange={setEnabled} />
+    </SettingRow>
+  )
+}
+
+function BufferCurrentSetting() {
+  const enabled = useAudioSettingsStore((state) => state.bufferCurrentTrack)
+  const setEnabled = useAudioSettingsStore((state) => state.setBufferCurrentTrack)
+  return (
+    <SettingRow
+      label="断网保护"
+      description="播放时在后台把当前歌曲整首取回本机；网络突然中断时用它继续播完，恢复后自动接回房间进度。会多占一首歌的流量和内存，酷狗、Bilibili 经服务端代理，断网时无法取流。"
+    >
+      <Switch aria-label="断网保护" checked={enabled} onCheckedChange={setEnabled} />
     </SettingRow>
   )
 }

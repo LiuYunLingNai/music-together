@@ -325,6 +325,10 @@ B站没有与房间 128K、320K 完全对应的普通 DASH 音轨，因此分别
 7. **持久化用户身份**：客户端通过 `storage.getUserId()` 生成并持久化 `nanoid`，每次 `ROOM_CREATE` / `ROOM_JOIN` 携带 `userId`，使服务端可跨 socket 重连识别同一用户。服务端通过 `roomRepo.getSocketMapping(socket.id)` 获取 `{ roomId, userId }` 映射——`socket.id` 仅用于 Socket 映射查找，所有涉及用户身份的操作（host 判断、auth cookie 归属、权限检查等）统一使用 `mapping.userId`
 8. **`currentUser` 自动推导**：`roomStore` 中 `currentUser` 始终从 `room.users` 自动推导（`deriveCurrentUser`），`setRoom` / `addUser` / `removeUser` / `updateRoom` 等 action 内部自动同步，不暴露 `setCurrentUser` 以避免脱节风险
 9. **断线时钟重置**：`resetAllRoomState()` 除重置 Zustand stores 外，还调用 `resetClockSync()` 清空 NTP 采样，确保重连后使用全新的时钟校准数据
+   - **断线保留播放**：`useConnectionGuard` 在断线时不再立即停止音频和重置房间，而是保留已加载的音频、房间与播放器状态，等待最长 120 秒（`OFFLINE_GRACE_MS`）。连接恢复后用重连令牌自动 `ROOM_JOIN`，服务端回放的 `PLAYER_PLAY` 若与本机已加载的是同一首歌，`usePlayer` 直接接回时间线（仍在播放则交给同步环微调，已停下才重新排期），不重新加载；超过宽限期仍未恢复才执行 `stopActiveAudio()` 与 `resetAllRoomState()`。
+   - **断线期间不替房间决策**：音频停滞或加载失败时，客户端不再发起流地址刷新、换源或“跳到下一首”，改为等待重新加入后再按原流程处理。
+   - **重连节奏与探活**：首次重连 0.5 秒起步，指数退避封顶 30 秒；浏览器 `online` 事件和页面回到前台会跳过退避立即重试；连接静默 12 秒后发送 `ntp:ping` 探测，8 秒内仍无任何入站消息则判定连接已死并重连。
+   - **断网保护（可选，默认关闭）**：音频设置 `bufferCurrentTrack` 开启后，`useCurrentTrackBuffer` 在曲目稳定播放后把当前歌曲整首取回内存；断线且音频停滞超过 3 秒时，`usePlayer` 改用本地副本从当前位置继续播放。酷狗与 Bilibili 经服务端代理，断网时无法取流。
 10. **Socket 断开竞态防护**：页面刷新时新旧 socket 的 join/disconnect 到达顺序不确定，`leaveRoom` 通过 `roomRepo.hasOtherSocketForUser()` 检测同一用户是否有更新的 socket 连接，避免旧 socket disconnect 误删活跃用户
 11. **投票安全网**：`voteController` 接收 `VOTE_START` 时，若检测到用户已有直接操作权限（owner/admin），不再返回错误，而是直接执行该操作，防止客户端-服务端角色不同步时操作失效。部分 VoteAction 通过 `PERM_MAP` 映射到不同的 CASL action+subject（如 `'play-track'` → `('play', 'Player')`，`'remove-track'` → `('remove', 'Queue')`）
 12. **切歌防抖**：500ms (`PLAYER_NEXT_DEBOUNCE_MS`) 内不重复触发同方向切歌，但允许立即反向操作。`playNextTrackInRoom` / `playPrevTrackInRoom` 将 debounce 检查和队列导航封装在 per-room mutex 内部，确保同 tick 的多个事件不会同时通过。投票执行、删除当前曲目等场景可使用 `{ skipDebounce: true }`。`player:next` 还接受可选的 `{ trackId }`：在 mutex 内核对它是否仍是当前曲目，不一致就丢弃这次请求——否则歌曲自然播完后，排队中的切歌会把刚开始的新歌一起跳掉。旧版 Web、Android 和 Windows 客户端不带这个字段，退回原有防抖行为

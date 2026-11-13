@@ -4,6 +4,7 @@ import { useChatStore } from '@/stores/chatStore'
 import { useArtistPageStore } from '@/stores/artistPageStore'
 import { useAccountPlaylistStore } from '@/stores/accountPlaylistStore'
 import { resetClockSync } from '@/lib/clockSync'
+import { clearOfflineBuffer } from '@/lib/offlineTrackBuffer'
 
 /** Reset all room-related stores at once (used on leave/disconnect) */
 export function resetAllRoomState() {
@@ -14,4 +15,5 @@ export function resetAllRoomState() {
   // 关闭可能残留的「加入歌单」选择器（账号级歌单缓存本身保留）。
   useAccountPlaylistStore.getState().closePicker()
   resetClockSync()
+  clearOfflineBuffer()
 }

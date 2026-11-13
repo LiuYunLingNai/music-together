@@ -30,6 +30,8 @@ export interface AudioSettingsState {
   highPrecisionStems: boolean
   /** 播放结束前提前解析并缓冲下一首，减少切歌空档。 */
   preloadNextTrack: boolean
+  /** 播放时在后台把当前歌曲整首取回本机，断网时用它继续播完；默认关闭。 */
+  bufferCurrentTrack: boolean
   /** 用 Cache Storage 持久缓存已校验的整曲音频。 */
   mediaCacheEnabled: boolean
   /** 媒体缓存容量上限（MB）；0 表示不缓存。 */
@@ -54,6 +56,7 @@ export const DEFAULT_AUDIO_SETTINGS: AudioSettingsState = {
   highPrecisionBeats: false,
   highPrecisionStems: false,
   preloadNextTrack: true,
+  bufferCurrentTrack: false,
   mediaCacheEnabled: true,
   mediaCacheLimitMb: defaultMediaCacheLimitMb(),
 }
@@ -136,6 +139,7 @@ const resolveStored = (value: StoredAudioSettings | null | undefined): AudioSett
     highPrecisionBeats: value?.highPrecisionBeats === true,
     highPrecisionStems: value?.highPrecisionStems === true,
     preloadNextTrack: value?.preloadNextTrack !== false,
+    bufferCurrentTrack: value?.bufferCurrentTrack === true,
     mediaCacheEnabled: value?.mediaCacheEnabled !== false,
     mediaCacheLimitMb:
       typeof value?.mediaCacheLimitMb === 'number' && Number.isFinite(value.mediaCacheLimitMb)
@@ -176,6 +180,7 @@ interface AudioSettingsStore extends AudioSettingsState {
   setHighPrecisionBeats: (enabled: boolean) => void
   setHighPrecisionStems: (enabled: boolean) => void
   setPreloadNextTrack: (enabled: boolean) => void
+  setBufferCurrentTrack: (enabled: boolean) => void
   setMediaCacheEnabled: (enabled: boolean) => void
   setMediaCacheLimitMb: (limitMb: number) => void
 }
@@ -193,6 +198,7 @@ export const useAudioSettingsStore = create<AudioSettingsStore>((set, get) => {
       highPrecisionBeats: patch.highPrecisionBeats ?? get().highPrecisionBeats,
       highPrecisionStems: patch.highPrecisionStems ?? get().highPrecisionStems,
       preloadNextTrack: patch.preloadNextTrack ?? get().preloadNextTrack,
+      bufferCurrentTrack: patch.bufferCurrentTrack ?? get().bufferCurrentTrack,
       mediaCacheEnabled: patch.mediaCacheEnabled ?? get().mediaCacheEnabled,
       mediaCacheLimitMb: clamp(patch.mediaCacheLimitMb ?? get().mediaCacheLimitMb, 0, 5000),
     }
@@ -227,6 +233,7 @@ export const useAudioSettingsStore = create<AudioSettingsStore>((set, get) => {
     setHighPrecisionBeats: (highPrecisionBeats) => update({ highPrecisionBeats }),
     setHighPrecisionStems: (highPrecisionStems) => update({ highPrecisionStems }),
     setPreloadNextTrack: (preloadNextTrack) => update({ preloadNextTrack }),
+    setBufferCurrentTrack: (bufferCurrentTrack) => update({ bufferCurrentTrack }),
     setMediaCacheEnabled: (mediaCacheEnabled) => update({ mediaCacheEnabled }),
     setMediaCacheLimitMb: (mediaCacheLimitMb) => update({ mediaCacheLimitMb }),
   }

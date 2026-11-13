@@ -193,7 +193,9 @@ src/
     ├── audioPlaybackLifecycle.ts #  断线时停止当前活动音频
     ├── playbackSync.ts         #   漂移阈值、计划位置和自适应同步纯函数
     ├── resetStores.ts          #   全局 store 重置工具
-    ├── socket.ts               #   原生 WebSocket 类型化客户端实例
+    ├── socket.ts               #   原生 WebSocket 类型化客户端实例（指数退避重连、online/前台立即重试、静默探活）
+    ├── playbackContinuity.ts   #   断线保留播放：宽限期与重连后“接回时间线”标记
+    ├── offlineTrackBuffer.ts   #   断网保护：当前歌曲整曲字节（仅一首）
     ├── storage.ts              #   localStorage 封装（带类型校验）
     ├── platform.ts             #   平台常量（PLATFORM_LABELS / PLATFORM_SHORT_LABELS / PLATFORM_COLORS / VIP_LABELS / 状态查找函数）
     ├── format.ts               #   格式化工具（时间、文本等）

@@ -36,7 +36,7 @@ usePlayer                             useRoom
 ├── useLyric (歌词解析)                ├── useChatSync (聊天事件)
 └── usePlayerSync                     ├── useQueueSync (队列事件)
     ├── Scheduled Execution           ├── useAuthSync (Cookie 持久化 + toast 反馈，永不删除 cookie)
-    └── Host Progress Reporting       └── useConnectionGuard (断线重置)
+    └── Host Progress Reporting       └── useConnectionGuard (断线保留播放，宽限期后重置)
 
 SocketProvider (连接管理，无 NTP)
 

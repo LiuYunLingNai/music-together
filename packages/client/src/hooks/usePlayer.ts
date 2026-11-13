@@ -3,6 +3,8 @@ import { PLATFORM_LABELS } from '@/lib/platform'
 import { PLAYER_PLAY_DEDUP_MS } from '@/lib/constants'
 import { setPendingAutomixPlan, setPendingAutomixTransition } from '@/lib/playbackTransition'
 import { storage } from '@/lib/storage'
+import { consumePlaybackReattach } from '@/lib/playbackContinuity'
+import { takeOfflineBufferCopy } from '@/lib/offlineTrackBuffer'
 import { useSocketContext } from '@/providers/socket-context'
 import { usePlayerStore } from '@/stores/playerStore'
 import { usePlaybackFailureStore } from '@/stores/playbackFailureStore'
@@ -25,6 +27,7 @@ import { useNextTrackPreload } from './useNextTrackPreload'
 import { useAutomixStemPrep } from './useAutomixStemPrep'
 import { useAnalysisModelAutoLoad } from './useAnalysisModelAutoLoad'
 import { useAutomixProfilePrefetch } from './useAutomixProfilePrefetch'
+import { useCurrentTrackBuffer } from './useCurrentTrackBuffer'
 import { useAutomixLyricEvidence } from './useAutomixLyricEvidence'
 import { getScheduledPlaybackPosition } from '@/lib/playbackSync'
 import { getProxiedCoverUrl } from '@/lib/cover'
@@ -83,6 +86,8 @@ export function usePlayer() {
   const recoveryRef = useRef<{ trackId: string } | null>(null)
   const recoveryAttemptsRef = useRef<{ trackId: string; count: number } | null>(null)
   const recoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const offlineRecoveryPendingRef = useRef(false)
+  const recoverFromLoadFailureRef = useRef<((kind: MediaFailureKind) => boolean) | null>(null)
   const recoverFromLoadFailure = useCallback(
     (kind: MediaFailureKind) => {
       const track = usePlayerStore.getState().currentTrack
@@ -90,6 +95,20 @@ export function usePlayer() {
       if (!track || roomTrackId !== track.id) return false
       // A recovery is already in flight: keep suppressing the default skip until it settles.
       if (recoveryRef.current?.trackId === track.id) return true
+      // 断线时 PLAYER_REFRESH_STREAM 发不出去，计时器也会误判成“刷新失败”而跳歌：
+      // 等重新加入房间后再按原样处理这次失败。
+      if (!socket.connected) {
+        if (!offlineRecoveryPendingRef.current) {
+          offlineRecoveryPendingRef.current = true
+          const retry = () => {
+            socket.off(EVENTS.ROOM_STATE, retry)
+            offlineRecoveryPendingRef.current = false
+            recoverFromLoadFailureRef.current?.(kind)
+          }
+          socket.on(EVENTS.ROOM_STATE, retry)
+        }
+        return true
+      }
       const attempts = recoveryAttemptsRef.current?.trackId === track.id ? recoveryAttemptsRef.current.count : 0
       if (attempts >= 2) return false
       const nextAttempt = attempts + 1
@@ -140,6 +159,9 @@ export function usePlayer() {
     },
     [autoNext, socket],
   )
+  useEffect(() => {
+    recoverFromLoadFailureRef.current = recoverFromLoadFailure
+  }, [recoverFromLoadFailure])
 
   const {
     howlRef,
@@ -160,6 +182,7 @@ export function usePlayer() {
   useAnalysisModelAutoLoad()
   useAutomixStemPrep()
   useAutomixProfilePrefetch()
+  useCurrentTrackBuffer()
   useAutomixLyricEvidence()
 
   useSleepTimer(howlRef, pausePlayback)
@@ -198,6 +221,39 @@ export function usePlayer() {
     }
   }, [socket])
 
+  // 断线且音频停滞：本机已有整曲副本时，改用本地副本从当前位置继续播放。
+  // 重连后同一首歌不会重新加载，进度由同步环接回房间时间线。
+  useEffect(() => {
+    let lastTime = -1
+    let stalledSince = 0
+    let swappedFor: string | null = null
+    const timer = setInterval(() => {
+      const { currentTrack, currentTime, isPlaying } = usePlayerStore.getState()
+      if (socket.connected || !currentTrack || !isPlaying) {
+        stalledSince = 0
+        lastTime = -1
+        return
+      }
+      const now = performance.now()
+      if (Math.abs(currentTime - lastTime) > 0.05) {
+        lastTime = currentTime
+        stalledSince = now
+        return
+      }
+      if (stalledSince === 0 || now - stalledSince < 3_000) return
+      if (swappedFor === currentTrack.id) return
+      const bytes = takeOfflineBufferCopy(currentTrack.id)
+      if (!bytes) return
+      swappedFor = currentTrack.id
+      const blobUrl = URL.createObjectURL(new Blob([bytes]))
+      preloadTrack(currentTrack, currentTrack.streamUrl ?? '', blobUrl)
+      loadTrack(currentTrack, currentTime, false)
+      schedulePlayback(currentTime, getServerTime())
+      toast.info('网络中断，已改用本机缓冲继续播放')
+    }, 1_000)
+    return () => clearInterval(timer)
+  }, [socket, loadTrack, preloadTrack, schedulePlayback])
+
   // Listen for PLAYER_PLAY events (new track load)
   useEffect(() => {
     const onPlayerPlay = (data: {
@@ -221,6 +277,48 @@ export function usePlayer() {
       // ensures that a legitimate replay of the same track (e.g. loop mode)
       // with a different serverTimestamp is not discarded.
       const now = Date.now()
+
+      // 断线重连后的第一次回放：本机还留着同一首歌的已加载音频时，直接接回时间线，
+      // 不重新加载，这样断线期间的缓冲和播放位置都不会丢。
+      if (consumePlaybackReattach()) {
+        const loaded = usePlayerStore.getState().currentTrack
+        const howl = howlRef.current
+        if (loaded?.id === data.track.id && howl && howl.state() === 'loaded') {
+          loadingRef.current = {
+            trackId: data.track.id,
+            revision: incomingRevision,
+            ts: now,
+            serverTimestamp: data.playState.serverTimestamp,
+          }
+          useRoomStore.getState().updateRoom({
+            currentTrack: data.track,
+            playState: {
+              isPlaying: data.playState.isPlaying,
+              currentTime: data.playState.currentTime,
+              serverTimestamp: data.playState.serverTimestamp,
+              revision: data.playState.revision ?? currentRevision,
+            },
+          })
+          if (data.playState.isPlaying) {
+            // 仍在播放就交给同步环微调；只有本机已经停下（缓冲耗尽、曲终）才重新排期。
+            if (!howl.playing()) {
+              schedulePlayback(data.playState.currentTime, data.playState.serverTimeToExecute)
+            } else {
+              // 时钟重新校准约需 1 秒；校准后马上取两次样本，不等下一个常规周期再纠偏。
+              for (const delay of [1_400, 2_400]) {
+                setTimeout(() => {
+                  if (socket.connected) socket.emit(EVENTS.PLAYER_SYNC_REQUEST)
+                }, delay)
+              }
+            }
+          } else {
+            pausePlayback(data.playState.currentTime)
+            usePlayerStore.getState().setCurrentTime(data.playState.currentTime)
+          }
+          return
+        }
+      }
+
       if (
         loadingRef.current?.trackId === data.track.id &&
         loadingRef.current.revision === incomingRevision &&
@@ -302,7 +400,7 @@ export function usePlayer() {
     return () => {
       socket.off(EVENTS.PLAYER_PLAY, onPlayerPlay)
     }
-  }, [socket, loadTrack, fetchLyric, prefetchLyric, schedulePlayback])
+  }, [socket, loadTrack, fetchLyric, prefetchLyric, schedulePlayback, pausePlayback, howlRef])
 
   // Server parked the room on a track it could not resolve: stop the local
   // recovery/skip timers and explain the reason with actionable choices.

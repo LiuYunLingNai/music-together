@@ -27,6 +27,7 @@ import { diagMark } from '@/lib/automix/upstream/diag'
 import { applyTempoBend, resetTempoBend } from '@/lib/automix/tempoBend'
 import { setHowlPosition } from '@/lib/howlPosition'
 import { registerActivePlaybackStop } from '@/lib/audioPlaybackLifecycle'
+import { getSocket } from '@/lib/socket'
 import { lyricPlayerBridge } from '@/lib/lyricPlayerBridge'
 import { getScheduledPlaybackPosition } from '@/lib/playbackSync'
 import { hideLoading, showLoading } from '@/components/Player/mineradio/particles/loadingState'
@@ -173,7 +174,11 @@ export function useHowl(
             const element = howlRef.current ? mediaElementOf(howlRef.current) : null
             const buffering = element ? element.readyState < element.HAVE_FUTURE_DATA : false
             const stallLimit = buffering ? BUFFERING_TIMEOUT_MS : STALLED_TIMEOUT_MS
-            if (st.since > 0 && now - st.since > stallLimit) {
+            if (st.since > 0 && now - st.since > stallLimit && !getSocket().connected) {
+              // 断线时无法向服务端请求新地址，也不能替房间做“跳到下一首”的决定：
+              // 继续等网络恢复，重连后由下面的流程接手。
+              stalledRef.current = { lastSeek: seekVal, since: now }
+            } else if (st.since > 0 && now - st.since > stallLimit) {
               stalledRef.current = { lastSeek: -1, since: 0 }
               if (isRecoverableStreamFailure('network') && onPlaybackFailure?.('network')) {
                 console.warn('Playback stalled, refreshing stream URL')
