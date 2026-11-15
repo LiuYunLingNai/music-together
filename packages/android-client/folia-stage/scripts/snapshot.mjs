@@ -53,8 +53,36 @@ const seeds = [
   "src/components/modal/settings/kit/kit.css",
   "src/components/visualizer/window/SubtitleOverlayRowsSetting.tsx",
   "src/stores/useVisualizerAssetStore.ts",
+  "src/components/visualizer/VisualizerHarmonyOverlay.tsx",
 ];
 const queue = [...seeds];
+// Native host files also import upstream helpers directly. Include those roots
+// so snapshot completeness does not depend on incidental upstream imports.
+for (const file of fs.globSync("src/*.{ts,tsx}")) {
+  const code = fs.readFileSync(file, "utf8");
+  for (const match of code.matchAll(/['"]\.\.\/\.work\/([^'"]+)['"]/g)) {
+    const base = match[1];
+    if (base.endsWith("/")) continue;
+    if (base.includes("*")) {
+      queue.push(...fs.globSync(base, { cwd: sourceRoot }));
+      continue;
+    }
+    const candidate = [
+      base,
+      base + ".ts",
+      base + ".tsx",
+      base + "/index.ts",
+      base + "/index.tsx",
+    ].find(
+      (name) =>
+        fs.existsSync(path.join(sourceRoot, name)) &&
+        fs.statSync(path.join(sourceRoot, name)).isFile(),
+    );
+    if (!candidate)
+      throw new Error(`Cannot resolve native import ${base} in ${file}`);
+    queue.push(candidate);
+  }
+}
 const visited = new Set();
 while (queue.length) {
   const file = queue.shift().replaceAll("\\", "/");
