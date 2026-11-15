@@ -65,6 +65,16 @@ data class AutomixTransition(
     val fromTrackId: String,
     val overlapMs: Long,
     val trimDb: Double = 0.0,
+    /** Speed the outgoing song is bent to during the overlap; 1 leaves it alone. */
+    val stretch: Double = 1.0,
+    val crossover: Double = 0.5,
+    val together: Double = 0.0,
+    val shapeBands: Boolean = false,
+    val sweepOut: Boolean = false,
+    val tiltMidDb: Double = 0.0,
+    val tiltHighDb: Double = 0.0,
+    /** Tempo of the outgoing song; only paces the on-screen hint. */
+    val bpm: Double? = null,
 )
 
 enum class ReplayGainMode(val value: String) {
@@ -94,6 +104,7 @@ data class PlayerDisplaySettings(
     val controlsSpectrum: Boolean = false,
     val immersiveCover: Boolean = true,
     val songHandoff: Boolean = true,
+    val transitionCue: Boolean = true,
     val dynamicCover: Boolean = true,
     val backgroundFps: Int = 60,
     val lyricAutoAlign: Boolean = true,
@@ -281,6 +292,8 @@ data class RoomState(
     val roamingEnabled: Boolean = false,
     val roamingSource: String = "netease",
     val roamingMode: String = "DEFAULT",
+    val automixEnabled: Boolean = false,
+    val transitionMode: String = "automix",
     val audioQuality: String,
     val users: List<User>,
     val members: List<RoomMember> = emptyList(),
@@ -468,6 +481,8 @@ data class PlatformHubState(
     val authStatus: List<PlatformAuthStatus> = emptyList(),
     val myAuth: List<MyPlatformAuth> = emptyList(),
     val statusLoaded: Boolean = false,
+    /** The server only serves platform accounts inside a room (it predates identity-scoped accounts). */
+    val roomRequired: Boolean = false,
     val qr: QrLoginState = QrLoginState(),
     val playlists: Map<String, List<Playlist>> = mapOf(
         "netease" to emptyList(),

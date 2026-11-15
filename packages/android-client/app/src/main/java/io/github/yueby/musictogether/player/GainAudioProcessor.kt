@@ -9,7 +9,8 @@ import java.nio.ByteBuffer
 
 /** Applies the loudness-balance gain (with an optional ramp) to the PCM the player outputs. */
 @OptIn(markerClass = [UnstableApi::class])
-internal class GainAudioProcessor : BaseAudioProcessor() {
+internal class GainAudioProcessor(private val deck: DeckState) : BaseAudioProcessor() {
+    private var wasActive = false
     private var current = 1f
     private var target = 1f
     private var step = 0f
@@ -24,11 +25,15 @@ internal class GainAudioProcessor : BaseAudioProcessor() {
     }
 
     override fun queueInput(inputBuffer: ByteBuffer) {
+        // The pipeline also calls with its shared empty buffer, which is what an unused output buffer is too.
+        if (!inputBuffer.hasRemaining()) return
         val request = PlaybackCommandBridge.replayGain
-        if (request.version != seenVersion) {
+        // The gain belongs to the session's song: an outgoing tail keeps the one it had.
+        val active = deck.active
+        if (active && request.version != seenVersion) {
             seenVersion = request.version
             target = request.linear
-            val frames = (request.rampSec * inputAudioFormat.sampleRate).toInt()
+            val frames = if (wasActive) (request.rampSec * inputAudioFormat.sampleRate).toInt() else 0
             if (frames <= 0) {
                 current = target
                 remainingFrames = 0
@@ -37,6 +42,7 @@ internal class GainAudioProcessor : BaseAudioProcessor() {
                 remainingFrames = frames
             }
         }
+        wasActive = active
         val output = replaceOutputBuffer(inputBuffer.remaining())
         if (current == 1f && remainingFrames == 0) {
             output.put(inputBuffer)

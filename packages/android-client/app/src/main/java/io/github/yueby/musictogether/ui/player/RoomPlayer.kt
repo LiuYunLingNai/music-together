@@ -69,24 +69,12 @@ internal fun PlayerPane(
     // users out of the lyrics view.
     var lyricsExpanded by remember(room.id) { mutableStateOf(false) }
     LaunchedEffect(track?.id, room.id) { viewModel.refreshLike(track) }
-    val immersiveCover = LocalPlayerDisplaySettings.current.immersiveCover
-    val videoAllowed = LocalPlayerDisplaySettings.current.dynamicCover && immersiveCover && !immersiveLandscape
+    val videoAllowed = LocalPlayerDisplaySettings.current.dynamicCover && !immersiveLandscape
     val dynamicCover by viewModel.dynamicCover.collectAsStateWithLifecycle()
     LaunchedEffect(track?.id, room.id, videoAllowed) { viewModel.refreshDynamicCover(track, videoAllowed) }
     val videoUrl = dynamicCover
         ?.takeIf { videoAllowed && track != null && it.key == dynamicCoverKey(track) }
         ?.url
-    var autoExpanded by remember(room.id) { mutableStateOf(false) }
-    LaunchedEffect(immersiveLandscape, immersiveCover) {
-        if (immersiveLandscape || autoExpanded) return@LaunchedEffect
-        if (immersiveCover) {
-            autoExpanded = true
-        } else {
-            kotlinx.coroutines.delay(900)
-            autoExpanded = true
-            lyricsExpanded = true
-        }
-    }
 
     MobilePlayerSurface(
         track = track,
@@ -213,6 +201,7 @@ private fun MobilePlayerSurface(
     ) {
         PlayerBackdrop(
             coverUrl = track?.cover,
+            videoUrl = videoUrl,
             playing = player.playing,
             motionAllowed =
                 visualMotionEnabled && minimizeTransition?.transitionRunning != true,
@@ -264,7 +253,8 @@ private fun MobilePlayerSurface(
                 userId = userId,
                 chatUnreadCount = chatUnreadCount,
                 lyricsExpanded = lyricsExpanded,
-                immersive = immersiveCover,
+                // A video cover enters the immersive view by itself (AMLL auto mode).
+                immersive = immersiveCover || videoUrl != null,
                 videoUrl = videoUrl,
                 onToggleLyrics = onToggleLyrics,
                 onOpenQueue = onOpenQueue,

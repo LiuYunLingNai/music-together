@@ -1,5 +1,6 @@
 package io.github.yueby.musictogether.ui
 
+import androidx.compose.runtime.LaunchedEffect
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Bug
 import com.composables.icons.lucide.ChevronRight
@@ -57,6 +58,8 @@ internal fun MeTab(state: AppState, viewModel: MusicTogetherViewModel, bottomPad
     val profile = state.accountProfile
     val connectedCount = state.servers.count { it.status == ConnectionStatus.Connected }
     val loggedPlatforms = state.platformHub.myAuth.filter { it.loggedIn }.map { platformLabel(it.platform) }
+    val connected = state.connectionStatus == ConnectionStatus.Connected
+    LaunchedEffect(state.room?.id, connected) { if (connected) viewModel.requestPlatformStatus() }
 
     AppTabPage(title = "我的", bottomPadding = bottomPadding) { padding ->
         LazyColumn(
@@ -113,9 +116,11 @@ internal fun MeTab(state: AppState, viewModel: MusicTogetherViewModel, bottomPad
                         Lucide.Music,
                         "音乐平台账号",
                         when {
-                            state.room == null -> "在房间内登录和管理"
-                            loggedPlatforms.isEmpty() -> "未登录"
-                            else -> loggedPlatforms.joinToString("、")
+                            loggedPlatforms.isNotEmpty() -> loggedPlatforms.joinToString("、")
+                            !connected -> "连接服务器后管理"
+                            state.room == null && state.platformHub.roomRequired -> "在房间内登录和管理"
+                            !state.platformHub.statusLoaded -> "正在读取"
+                            else -> "未登录"
                         },
                     ) { navigator.open(AppRoute.PlatformAccounts) }
                     MeEntry(Lucide.Server, "服务器连接", "$connectedCount/${state.servers.size} 台在线") {

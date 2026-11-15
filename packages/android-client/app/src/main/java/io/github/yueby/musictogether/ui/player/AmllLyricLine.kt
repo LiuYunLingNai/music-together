@@ -1,5 +1,8 @@
 package io.github.yueby.musictogether.ui.player
 
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import kotlinx.coroutines.delay
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.spring
@@ -17,6 +20,8 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
@@ -43,6 +48,8 @@ internal fun AmllLineGroup(
     active: Boolean,
     readingMode: Boolean,
     hidden: Boolean = false,
+    blurRadius: Float = 0f,
+    motionDelayMs: () -> Long = { 0L },
     wordAnimationEnabled: Boolean,
     onClick: (() -> Unit)?,
     onMainLyricGeometryChanged: ((AmllPrimaryTextGeometry) -> Unit)?,
@@ -52,15 +59,28 @@ internal fun AmllLineGroup(
 ) {
     val displaySettings = LocalPlayerDisplaySettings.current
     val line = group.main
-    var retainedPositionMs by remember(line) {
-        mutableFloatStateOf(line.startTimeMs.toFloat())
+    // Read only while drawing: the word effects follow the clock without recomposing the line each frame.
+    val activeNow by rememberUpdatedState(active)
+    val position = remember(line, positionMs) {
+        val retained = floatArrayOf(line.startTimeMs.toFloat())
+        val read: () -> Float = {
+            if (activeNow) positionMs.value.also { retained[0] = it } else retained[0]
+        }
+        read
     }
-    val livePositionMs = if (active) positionMs.value else null
-    SideEffect {
-        livePositionMs?.let { retainedPositionMs = it }
+    // AMLL hands the scale and background springs the same per-line delay as the scroll.
+    var motionActive by remember { mutableStateOf(active) }
+    LaunchedEffect(active) {
+        val wait = motionDelayMs()
+        if (wait > 0L) delay(wait)
+        motionActive = active
     }
-    val currentPositionMs = livePositionMs ?: retainedPositionMs
-    val effectReleaseProgress by animateFloatAsState(
+    val blur by animateFloatAsState(
+        targetValue = if (active || readingMode) 0f else blurRadius,
+        animationSpec = tween(durationMillis = 400, easing = AmllCssEase),
+        label = "amllLineBlur",
+    )
+    val effectRelease = animateFloatAsState(
         targetValue = if (active) 1f else 0f,
         animationSpec = tween(
             durationMillis =
@@ -71,7 +91,7 @@ internal fun AmllLineGroup(
     )
     val scale by animateFloatAsState(
         targetValue = when {
-            !displaySettings.lyricScaleEffect || readingMode || active -> 1f
+            !displaySettings.lyricScaleEffect || readingMode || motionActive -> 1f
             else -> AmllInactiveScale
         },
         animationSpec = if (displaySettings.lyricSpringAnimation) {
@@ -92,7 +112,7 @@ internal fun AmllLineGroup(
             }
             ?: false
     val backgroundRevealed = background != null && shouldRevealAmllBackground(
-        active = active,
+        active = motionActive,
         readingMode = readingMode,
     )
     val backgroundSlideProgress by animateFloatAsState(
@@ -141,13 +161,7 @@ internal fun AmllLineGroup(
             .graphicsLayer {
                 alpha = groupAlpha
             }
-            .blur(
-                radius = if (displaySettings.lyricBlurEffect && !active && !readingMode) {
-                    1.4.dp
-                } else {
-                    0.dp
-                },
-            )
+            .blur(radius = blur.dp)
             .then(
                 if (onClick != null) {
                     Modifier.clickable(
@@ -185,18 +199,18 @@ internal fun AmllLineGroup(
             ) {
                 AmllMainAndBackgroundLayout(
                     backgroundFirst = backgroundFirst,
-                    backgroundRevealProgress = backgroundSlideProgress,
+                    backgroundRevealProgress = { backgroundSlideProgress },
                     backgroundGap = typography.backgroundGap,
                     main = {
                         AmllMainLine(
                             line = line,
-                            positionMs = currentPositionMs,
+                            positionMs = position,
                             active = active,
-                            effectReleaseProgress = effectReleaseProgress,
+                            effectReleaseProgress = { effectRelease.value },
                             onPrimaryTextGeometryChanged = onMainLyricGeometryChanged,
                             wordAnimationEnabled = wordAnimationEnabled,
                             readingMode = readingMode,
-                            lineScale = scale,
+                            lineScale = { scale },
                             mainFontSize = typography.mainFontSize,
                             translationFontSize = typography.translationFontSize,
                             romanFontSize = typography.romanFontSize,
@@ -206,12 +220,12 @@ internal fun AmllLineGroup(
                         @Composable {
                             AmllBackgroundLine(
                                 line = backgroundLine,
-                                positionMs = currentPositionMs,
+                                positionMs = position,
                                 visible = active,
-                                effectReleaseProgress = effectReleaseProgress,
-                                revealProgress = backgroundSlideProgress,
-                                alphaProgress = backgroundAlphaProgress,
-                                lineScale = backgroundLineScale,
+                                effectReleaseProgress = { effectRelease.value },
+                                revealProgress = { backgroundSlideProgress },
+                                alphaProgress = { backgroundAlphaProgress },
+                                lineScale = { backgroundLineScale },
                                 wordAnimationEnabled = wordAnimationEnabled,
                                 readingMode = readingMode,
                                 placeBeforeMain = backgroundFirst,
@@ -229,7 +243,7 @@ internal fun AmllLineGroup(
 @Composable
 internal fun AmllMainAndBackgroundLayout(
     backgroundFirst: Boolean,
-    backgroundRevealProgress: Float,
+    backgroundRevealProgress: () -> Float,
     backgroundGap: Dp,
     main: @Composable () -> Unit,
     background: (@Composable () -> Unit)?,
@@ -246,9 +260,10 @@ internal fun AmllMainAndBackgroundLayout(
             constraints.copy(minHeight = 0),
         )
         val backgroundGapPx = if (backgroundPlaceable == null) 0 else backgroundGap.roundToPx()
+        val reveal = backgroundRevealProgress()
         val backgroundContribution = amllBackgroundHeightContribution(
             backgroundHeight = (backgroundPlaceable?.height ?: 0) + backgroundGapPx,
-            revealProgress = backgroundRevealProgress,
+            revealProgress = reveal,
         )
         layout(
             width = mainPlaceable.width,
@@ -264,7 +279,7 @@ internal fun AmllMainAndBackgroundLayout(
                     backgroundContribution - backgroundPlaceable.height - backgroundGapPx
                 } else {
                     mainPlaceable.height +
-                        (backgroundGapPx * backgroundRevealProgress).toInt()
+                        (backgroundGapPx * reveal).toInt()
                 },
             )
         }
@@ -274,13 +289,13 @@ internal fun AmllMainAndBackgroundLayout(
 @Composable
 internal fun AmllMainLine(
     line: LyricLine,
-    positionMs: Float,
+    positionMs: () -> Float,
     active: Boolean,
-    effectReleaseProgress: Float,
+    effectReleaseProgress: () -> Float,
     onPrimaryTextGeometryChanged: ((AmllPrimaryTextGeometry) -> Unit)?,
     wordAnimationEnabled: Boolean,
     readingMode: Boolean,
-    lineScale: Float,
+    lineScale: () -> Float,
     mainFontSize: Float,
     translationFontSize: Float,
     romanFontSize: Float,
@@ -291,8 +306,9 @@ internal fun AmllMainLine(
         modifier = Modifier
             .fillMaxWidth()
             .graphicsLayer {
-                scaleX = lineScale
-                scaleY = lineScale
+                val scale = lineScale()
+                scaleX = scale
+                scaleY = scale
                 transformOrigin =
                     if (line.isDuet) TransformOrigin(1f, 0.5f) else TransformOrigin(0f, 0.5f)
             },
@@ -349,19 +365,23 @@ internal fun AmllMainLine(
 @Composable
 internal fun AmllBackgroundLine(
     line: LyricLine,
-    positionMs: Float,
+    positionMs: () -> Float,
     visible: Boolean,
-    effectReleaseProgress: Float,
-    revealProgress: Float,
-    alphaProgress: Float,
-    lineScale: Float,
+    effectReleaseProgress: () -> Float,
+    revealProgress: () -> Float,
+    alphaProgress: () -> Float,
+    lineScale: () -> Float,
     wordAnimationEnabled: Boolean,
     readingMode: Boolean,
     placeBeforeMain: Boolean,
     fontSize: Float,
 ) {
     val displaySettings = LocalPlayerDisplaySettings.current
-    val wrapperScale = 0.8f + revealProgress * 0.2f
+    val singing by remember(line, positionMs) {
+        val start = line.words.minOfOrNull { it.startTimeMs } ?: line.startTimeMs
+        val end = line.words.maxOfOrNull { it.endTimeMs } ?: line.endTimeMs
+        derivedStateOf { positionMs().let { it >= start && it < end } }
+    }
     val backgroundTransformOrigin =
         if (line.isDuet) {
             TransformOrigin(1f, if (placeBeforeMain) 1f else 0f)
@@ -373,12 +393,14 @@ internal fun AmllBackgroundLine(
         modifier = Modifier
             .fillMaxWidth()
             .graphicsLayer {
-                alpha = alphaProgress * 0.4f
+                val reveal = revealProgress()
+                val wrapperScale = 0.8f + reveal * 0.2f
+                alpha = alphaProgress() * 0.4f
                 scaleX = wrapperScale
                 scaleY = wrapperScale
                 translationY =
                     (if (placeBeforeMain) 1f else -1f) *
-                    (1f - revealProgress) *
+                    (1f - reveal) *
                     size.height *
                     0.8f
                 transformOrigin = backgroundTransformOrigin
@@ -388,21 +410,16 @@ internal fun AmllBackgroundLine(
             modifier = Modifier
                 .fillMaxWidth()
                 .graphicsLayer {
-                    scaleX = lineScale
-                    scaleY = lineScale
+                    val scale = lineScale()
+                    scaleX = scale
+                    scaleY = scale
                     transformOrigin = backgroundTransformOrigin
                 },
         ) {
             AmllWordLine(
                 line = line,
                 positionMs = positionMs,
-                active = visible &&
-                    positionMs >= (
-                        line.words.minOfOrNull { it.startTimeMs } ?: line.startTimeMs
-                        ) &&
-                    positionMs < (
-                        line.words.maxOfOrNull { it.endTimeMs } ?: line.endTimeMs
-                        ),
+                active = visible && singing,
                 effectReleaseProgress = effectReleaseProgress,
                 wordAnimationEnabled = wordAnimationEnabled,
                 readingMode = readingMode,

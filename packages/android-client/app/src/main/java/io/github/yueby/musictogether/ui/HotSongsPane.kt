@@ -19,7 +19,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -32,14 +31,13 @@ import io.github.yueby.musictogether.ui.designsystem.AppLoadingState
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
-import top.yukonga.miuix.kmp.basic.TabRow
+import io.github.yueby.musictogether.ui.designsystem.AppTabRow
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 
 private val hotSourceLabels = mapOf("netease" to "网易云", "tencent" to "QQ 音乐", "kugou" to "酷狗")
-private val rankColors = listOf(Color(0xFFF87171), Color(0xFFFB923C), Color(0xFFFACC15))
 
 @Composable
 internal fun HotSongsPane(state: AppState, viewModel: MusicTogetherViewModel) {
@@ -48,7 +46,7 @@ internal fun HotSongsPane(state: AppState, viewModel: MusicTogetherViewModel) {
     LaunchedEffect(state.room?.id) { viewModel.loadHotSongs() }
 
     Column(Modifier.fillMaxSize()) {
-        TabRow(
+        AppTabRow(
             tabs = HotSongsSources.map { hotSourceLabels.getValue(it) },
             selectedTabIndex = HotSongsSources.indexOf(hot.source).coerceAtLeast(0),
             onTabSelected = { viewModel.loadHotSongs(HotSongsSources[it]) },
@@ -76,7 +74,7 @@ internal fun HotSongsPane(state: AppState, viewModel: MusicTogetherViewModel) {
                                 modifier = Modifier.padding(start = 12.dp).size(width = 22.dp, height = 20.dp),
                                 textAlign = TextAlign.Center,
                                 fontWeight = FontWeight.Bold,
-                                color = rankColors.getOrNull(index) ?: MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                color = if (index < 3) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary,
                             )
                             MusicTrackItem(track, state, viewModel, queueKeys, modifier = Modifier.weight(1f))
                         }

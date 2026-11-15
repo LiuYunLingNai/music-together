@@ -74,7 +74,7 @@ internal fun MusicTrackItem(
     val added = inRoom && track.queueIdentity() in queueKeys
     var menuOpen by remember { mutableStateOf(false) }
     val onRowClick = rememberHapticClick {
-        if (inRoom && !added) viewModel.addTrack(track) else menuOpen = true
+        if (inRoom) viewModel.addTrack(track) else menuOpen = true
     }
     Row(
         modifier = modifier

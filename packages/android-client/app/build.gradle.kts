@@ -20,8 +20,8 @@ android {
         applicationId = "io.github.yueby.musictogether"
         minSdk = 26
         targetSdk = 36
-        versionCode = 32
-        versionName = "3.0.8"
+        versionCode = 33
+        versionName = "3.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -111,6 +111,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
     implementation("androidx.navigationevent:navigationevent-compose:1.1.2")
     implementation("com.composables:icons-lucide-android:1.1.0")
+    implementation("sh.calvin.reorderable:reorderable:3.0.0")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     debugImplementation("androidx.compose.ui:ui-tooling")

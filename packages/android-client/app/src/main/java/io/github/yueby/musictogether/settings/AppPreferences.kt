@@ -234,6 +234,7 @@ internal class AppPreferences(context: Context) {
         controlsSpectrum = preferences.getBoolean(CONTROLS_SPECTRUM_KEY, false),
         immersiveCover = preferences.getBoolean(IMMERSIVE_COVER_KEY, true),
         songHandoff = preferences.getBoolean(SONG_HANDOFF_KEY, true),
+        transitionCue = preferences.getBoolean(TRANSITION_CUE_KEY, true),
         dynamicCover = preferences.getBoolean(DYNAMIC_COVER_KEY, true),
         backgroundFps = preferences.getInt(BACKGROUND_FPS_KEY, 60),
         lyricAutoAlign = preferences.getBoolean(LYRIC_AUTO_ALIGN_KEY, true),
@@ -260,6 +261,7 @@ internal class AppPreferences(context: Context) {
             .putBoolean(CONTROLS_SPECTRUM_KEY, settings.controlsSpectrum)
             .putBoolean(IMMERSIVE_COVER_KEY, settings.immersiveCover)
             .putBoolean(SONG_HANDOFF_KEY, settings.songHandoff)
+            .putBoolean(TRANSITION_CUE_KEY, settings.transitionCue)
             .putBoolean(DYNAMIC_COVER_KEY, settings.dynamicCover)
             .putInt(BACKGROUND_FPS_KEY, settings.backgroundFps)
             .putBoolean(LYRIC_AUTO_ALIGN_KEY, settings.lyricAutoAlign)
@@ -376,6 +378,7 @@ internal class AppPreferences(context: Context) {
         const val CONTROLS_SPECTRUM_KEY = "player_controls_spectrum"
         const val IMMERSIVE_COVER_KEY = "player_immersive_cover"
         const val SONG_HANDOFF_KEY = "player_song_handoff"
+        const val TRANSITION_CUE_KEY = "player_transition_cue"
         const val DYNAMIC_COVER_KEY = "player_dynamic_cover"
         const val BACKGROUND_FPS_KEY = "player_background_fps"
         const val LYRIC_AUTO_ALIGN_KEY = "player_lyric_auto_align"

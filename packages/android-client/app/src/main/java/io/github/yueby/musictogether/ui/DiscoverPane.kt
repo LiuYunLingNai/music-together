@@ -99,7 +99,7 @@ internal fun DiscoverPane(
                 item(key = "failed") {
                     Text(
                         "部分栏目暂时加载失败",
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 28.dp),
                         style = MiuixTheme.textStyles.paragraph,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
@@ -114,12 +114,12 @@ private fun DiscoverSection(title: String, content: androidx.compose.foundation.
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
             title,
-            modifier = Modifier.padding(horizontal = 16.dp),
+            modifier = Modifier.padding(horizontal = 28.dp),
             style = MiuixTheme.textStyles.title3,
             fontWeight = FontWeight.SemiBold,
         )
         LazyRow(
-            contentPadding = PaddingValues(horizontal = 16.dp),
+            contentPadding = PaddingValues(horizontal = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             content = content,
         )

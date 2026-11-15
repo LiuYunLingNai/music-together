@@ -37,6 +37,7 @@ object Events {
     const val PLAYER_REQUEST_SOURCE_FALLBACK = "player:request_source_fallback"
     const val PLAYER_PLAYBACK_FAILURE = "player:playback_failure"
     const val PLAYER_RETRY_TRACK = "player:retry_track"
+    const val PLAYER_TRACK_PROFILE = "player:track_profile"
 
     const val QUEUE_ADD = "queue:add"
     const val QUEUE_INSERT_AFTER_CURRENT = "queue:insert_after_current"

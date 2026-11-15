@@ -30,7 +30,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
-import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
@@ -134,7 +133,6 @@ internal fun MusicDownloadPane(state: AppState, viewModel: MusicTogetherViewMode
                 Text("保存")
             }
         }
-        HorizontalDivider()
 
         when {
             track == null -> DownloadStatus("暂无正在播放的歌曲")
@@ -175,7 +173,6 @@ internal fun MusicDownloadPane(state: AppState, viewModel: MusicTogetherViewMode
                         onDownload = { startDownload(option.quality) },
                         onCancel = viewModel::cancelMusicDownload,
                     )
-                    HorizontalDivider()
                 }
                 item {
                     AppTextAction(

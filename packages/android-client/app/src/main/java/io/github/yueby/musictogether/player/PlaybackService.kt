@@ -1,18 +1,11 @@
 package io.github.yueby.musictogether.player
 
 import android.media.audiofx.Equalizer
-import androidx.media3.exoplayer.audio.TeeAudioProcessor
-import androidx.media3.exoplayer.audio.DefaultAudioSink
-import androidx.media3.exoplayer.audio.AudioSink
-import androidx.media3.exoplayer.DefaultRenderersFactory
-import android.content.Context
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -22,9 +15,10 @@ import io.github.yueby.musictogether.logging.AppLogger
 
 @OptIn(markerClass = [UnstableApi::class])
 class PlaybackService : MediaSessionService() {
-    private lateinit var player: ExoPlayer
+    private lateinit var decks: PlaybackDecks
     private lateinit var mediaSession: MediaSession
-    private var equalizer: Equalizer? = null
+    private var equalizers: List<Equalizer> = emptyList()
+    private var equalizerSessions: List<Int> = emptyList()
     private val audioAttributes = AudioAttributes.Builder()
         .setUsage(C.USAGE_MEDIA)
         .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -32,28 +26,13 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-        val dataSourceFactory = PlaybackCache.playbackFactory(this)
-        val renderersFactory = object : DefaultRenderersFactory(this) {
-            override fun buildAudioSink(
-                context: Context,
-                enableFloatOutput: Boolean,
-                enableAudioTrackPlaybackParams: Boolean,
-            ): AudioSink = DefaultAudioSink.Builder(context)
-                .setEnableFloatOutput(enableFloatOutput)
-                .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
-                .setAudioProcessors(arrayOf(GainAudioProcessor(), TeeAudioProcessor(AudioSpectrum.sink)))
-                .build()
-        }
-        player = ExoPlayer.Builder(this, renderersFactory)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
-            .build()
-        PlaybackCommandBridge.tailDeck = TailDeck(this)
+        decks = PlaybackDecks(this) { mediaSession.player = it }
+        PlaybackCommandBridge.decks = decks
         configureAudioFocus(PlaybackCommandBridge.audioFocusEnabled)
         PlaybackCommandBridge.audioFocusListener = ::configureAudioFocus
         configureEqualizer(PlaybackCommandBridge.equalizerEnabled, PlaybackCommandBridge.equalizerPreset)
         PlaybackCommandBridge.equalizerListener = ::configureEqualizer
-        val sessionPlayer = RoomMediaSessionPlayer(player)
-        mediaSession = MediaSession.Builder(this, sessionPlayer)
+        mediaSession = MediaSession.Builder(this, decks.active.sessionPlayer)
             .setMediaButtonPreferences(roomMediaButtonPreferences())
             .setCallback(object : MediaSession.Callback {
                 override fun onPlayerCommandRequest(
@@ -89,7 +68,7 @@ class PlaybackService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = mediaSession
 
     override fun onTaskRemoved(rootIntent: android.content.Intent?) {
-        if (!player.playWhenReady) stopSelf()
+        if (!decks.active.player.playWhenReady) stopSelf()
         super.onTaskRemoved(rootIntent)
     }
 
@@ -97,32 +76,40 @@ class PlaybackService : MediaSessionService() {
         AppLogger.info("MediaSession", "playback service destroyed")
         PlaybackCommandBridge.audioFocusListener = null
         PlaybackCommandBridge.equalizerListener = null
-        PlaybackCommandBridge.tailDeck?.release()
-        PlaybackCommandBridge.tailDeck = null
-        runCatching { equalizer?.release() }
-        equalizer = null
+        PlaybackCommandBridge.decks = null
+        equalizers.forEach { runCatching { it.release() } }
+        equalizers = emptyList()
         mediaSession.release()
-        player.release()
+        decks.release()
         super.onDestroy()
     }
 
-    /** System equalizer on the player's audio session; presets come from the device. */
+    /** System equalizer, one per deck session so both songs of a transition are shaped; presets come from the device. */
     private fun configureEqualizer(enabled: Boolean, preset: Int) {
         runCatching {
             if (!enabled) {
-                equalizer?.enabled = false
+                equalizers.forEach { it.enabled = false }
                 return
             }
-            val effect = equalizer ?: Equalizer(0, player.audioSessionId).also { equalizer = it }
-            val count = effect.numberOfPresets.toInt()
-            PlaybackCommandBridge.equalizerPresets = (0 until count).map { effect.getPresetName(it.toShort()) }
-            if (count > 0) effect.usePreset(preset.coerceIn(0, count - 1).toShort())
-            effect.enabled = true
+            val sessions = decks.audioSessionIds
+            if (sessions != equalizerSessions) {
+                equalizers.forEach { runCatching { it.release() } }
+                equalizers = sessions.map { Equalizer(0, it) }
+                equalizerSessions = sessions
+            }
+            equalizers.forEachIndexed { index, effect ->
+                val count = effect.numberOfPresets.toInt()
+                if (index == 0) {
+                    PlaybackCommandBridge.equalizerPresets = (0 until count).map { effect.getPresetName(it.toShort()) }
+                }
+                if (count > 0) effect.usePreset(preset.coerceIn(0, count - 1).toShort())
+                effect.enabled = true
+            }
         }.onFailure { AppLogger.error("Player", "equalizer unavailable", it) }
     }
 
     private fun configureAudioFocus(enabled: Boolean) {
-        player.setAudioAttributes(audioAttributes, enabled)
+        decks.configureAudioFocus(audioAttributes, enabled)
         AppLogger.info("Player", "audio focus enabled=$enabled")
     }
 }

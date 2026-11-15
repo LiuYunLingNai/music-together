@@ -1,6 +1,6 @@
 package io.github.yueby.musictogether.ui
 
-import top.yukonga.miuix.kmp.basic.TabRow
+import io.github.yueby.musictogether.ui.designsystem.AppTabRow
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -72,7 +72,7 @@ internal fun ArtistPane(
                 }
             }
             item(key = "tabs") {
-                TabRow(
+                AppTabRow(
                     tabs = listOf("热门歌曲", "专辑"),
                     selectedTabIndex = tab,
                     onTabSelected = { tab = it },

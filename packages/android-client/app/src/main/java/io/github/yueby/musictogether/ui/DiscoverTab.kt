@@ -60,7 +60,8 @@ import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.InputField
-import top.yukonga.miuix.kmp.basic.TabRow
+import io.github.yueby.musictogether.ui.designsystem.AppTabRow
+import io.github.yueby.musictogether.ui.designsystem.appRaisedSurfaceColor
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
@@ -89,7 +90,7 @@ internal fun DiscoverTab(state: AppState, viewModel: MusicTogetherViewModel, bot
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
             )
             if (inRoom) {
-                TabRow(
+                AppTabRow(
                     tabs = listOf("发现", "为你推荐"),
                     selectedTabIndex = tab,
                     onTabSelected = { tab = it },
@@ -120,7 +121,7 @@ private fun SearchEntry(onClick: () -> Unit, modifier: Modifier = Modifier) {
             .fillMaxWidth()
             .height(45.dp)
             .clip(CircleShape)
-            .background(MiuixTheme.colorScheme.surfaceContainerHigh)
+            .background(appRaisedSurfaceColor())
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -183,7 +184,7 @@ internal fun SearchScreen(state: AppState, viewModel: MusicTogetherViewModel, on
                 modifier = Modifier.weight(1f).focusRequester(focusRequester),
             )
         }
-        TabRow(
+        AppTabRow(
             tabs = searchSources.map { it.second },
             selectedTabIndex = searchSources.indexOfFirst { it.first == source }.coerceAtLeast(0),
             onTabSelected = { index ->

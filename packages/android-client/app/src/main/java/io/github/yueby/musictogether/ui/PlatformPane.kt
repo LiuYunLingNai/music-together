@@ -1,5 +1,7 @@
 package io.github.yueby.musictogether.ui
 
+import io.github.yueby.musictogether.ui.designsystem.AppLoadingState
+import io.github.yueby.musictogether.model.ConnectionStatus
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.RefreshCw
 import com.composables.icons.lucide.Users
@@ -55,16 +57,33 @@ private val platformOptions = listOf(
 
 @Composable
 fun PlatformPane(state: AppState, viewModel: MusicTogetherViewModel) {
-    if (state.room == null) {
-        AppEmptyState(
-            icon = Lucide.Users,
-            title = "加入房间后管理平台账号",
-            summary = "音乐平台的登录凭据按服务器和房间隔离保存，可选择是否为房间共享 VIP 播放能力",
-        )
-        return
+    val connected = state.connectionStatus == ConnectionStatus.Connected
+    LaunchedEffect(state.room?.id, connected) {
+        if (connected) viewModel.requestPlatformStatus()
     }
-    LaunchedEffect(Unit) {
-        viewModel.requestPlatformStatus()
+    if (state.room == null) {
+        when {
+            !connected -> {
+                AppEmptyState(
+                    icon = Lucide.Users,
+                    title = "连接服务器后管理平台账号",
+                    summary = "音乐平台账号跟随你在该服务器上的身份保存，进入房间时可选择是否共享 VIP 播放能力",
+                )
+                return
+            }
+            state.platformHub.roomRequired -> {
+                AppEmptyState(
+                    icon = Lucide.Users,
+                    title = "加入房间后管理平台账号",
+                    summary = "当前服务器版本较旧，平台账号需要在房间内登录和管理",
+                )
+                return
+            }
+            !state.platformHub.statusLoaded -> {
+                AppLoadingState()
+                return
+            }
+        }
     }
 
     PlatformAccountList(state, viewModel)

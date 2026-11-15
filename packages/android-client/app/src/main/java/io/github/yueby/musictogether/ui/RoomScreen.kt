@@ -13,7 +13,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.border
 import androidx.compose.foundation.background
-import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
+import io.github.yueby.musictogether.ui.player.LocalPlayerMinimizeGesture
+import kotlin.coroutines.cancellation.CancellationException
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -63,10 +65,20 @@ fun RoomScreen(
         navigator.open(route)
     }
 
-    BackHandler(enabled = shellOnTop) {
-        when (resolveRoomBackAction(roomMenuExpanded)) {
-            RoomBackAction.DismissMenu -> roomMenuExpanded = false
-            RoomBackAction.MinimizePlayer -> onMinimizePlayer()
+    val minimizeGesture = LocalPlayerMinimizeGesture.current
+    PredictiveBackHandler(enabled = shellOnTop) { progress ->
+        val action = resolveRoomBackAction(roomMenuExpanded)
+        try {
+            progress.collect { event ->
+                if (action == RoomBackAction.MinimizePlayer) minimizeGesture?.preview(event.progress)
+            }
+            when (action) {
+                RoomBackAction.DismissMenu -> roomMenuExpanded = false
+                RoomBackAction.MinimizePlayer -> onMinimizePlayer()
+            }
+        } catch (cancelled: CancellationException) {
+            if (action == RoomBackAction.MinimizePlayer) minimizeGesture?.cancel()
+            throw cancelled
         }
     }
 

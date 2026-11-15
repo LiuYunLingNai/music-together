@@ -1,7 +1,14 @@
 package io.github.yueby.musictogether.ui.player
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.EaseInOut
 import androidx.compose.animation.core.EaseOut
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.runtime.State
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Brush
+import io.github.yueby.musictogether.player.TransitionCue
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -33,6 +40,33 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import kotlin.math.tanh
 
+/** Web transition hint: [phase] loops 0..1..0 with the outgoing beat, [shown] fades the hint in and out. */
+internal class TransitionBreath(val phase: State<Float>, val shown: State<Float>)
+
+@Composable
+internal fun rememberTransitionBreath(cue: TransitionCue?, enabled: Boolean): TransitionBreath {
+    val active = enabled && cue != null && cue.seconds >= 1.0
+    // Four beats per breath; 2.4s when the tempo is unknown.
+    val periodMs = (((cue?.periodSec ?: 0.6) * 4).coerceIn(1.4, 3.2) * 1000).toInt()
+    val phase = remember { Animatable(0f) }
+    LaunchedEffect(active, periodMs) {
+        if (!active) {
+            phase.animateTo(0f, tween(600, easing = EaseOut))
+        } else {
+            while (true) {
+                phase.animateTo(1f, tween(periodMs / 2, easing = EaseInOut))
+                phase.animateTo(0f, tween(periodMs / 2, easing = EaseInOut))
+            }
+        }
+    }
+    val shown = animateFloatAsState(
+        targetValue = if (active) 1f else 0f,
+        animationSpec = tween(if (active) 900 else 1100, easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)),
+        label = "transition-cue",
+    )
+    return remember(phase, shown) { TransitionBreath(phase.asState(), shown) }
+}
+
 private const val SliderMaxHeight = 20f
 private const val SliderRestInset = 6f
 private const val SliderMaxBounce = 12f
@@ -54,6 +88,7 @@ internal fun PlayerProgressSlider(
     onValueChange: (Float) -> Unit,
     onValueChangeFinished: () -> Unit,
     modifier: Modifier = Modifier,
+    breath: TransitionBreath? = null,
 ) {
     val latestChange by rememberUpdatedState(onValueChange)
     val latestFinished by rememberUpdatedState(onValueChangeFinished)
@@ -79,6 +114,24 @@ internal fun PlayerProgressSlider(
     Box(
         modifier = modifier
             .height((24f * scale).dp)
+            .drawBehind {
+                // Web `.mt-transition-glow`: a soft band behind the rail that breathes with the blend.
+                val shown = breath?.shown?.value ?: 0f
+                if (shown <= 0.001f) return@drawBehind
+                val glowHeight = 12f * scale * density * (0.7f + 0.3f * shown)
+                val level = shown * (0.35f + 0.65f * breath!!.phase.value)
+                drawRoundRect(
+                    brush = Brush.horizontalGradient(
+                        0f to Color.Transparent,
+                        0.14f to Color.White.copy(alpha = 0.30f * level),
+                        0.76f to Color.White.copy(alpha = 0.16f * level),
+                        1f to Color.Transparent,
+                    ),
+                    topLeft = Offset(0f, (size.height - glowHeight) / 2f),
+                    size = Size(size.width, glowHeight),
+                    cornerRadius = CornerRadius(glowHeight / 2f),
+                )
+            }
             .pointerInput(enabled, range) {
                 if (!enabled) return@pointerInput
                 awaitEachGesture {
@@ -113,7 +166,9 @@ internal fun PlayerProgressSlider(
                     alpha = if (enabled) 1f else 0.5f
                 },
         ) {
-            val barHeight = (SliderMaxHeight - 2f * inset.value).coerceAtLeast(1f) * scale * density
+            val phase = breath?.phase?.value ?: 0f
+            val barHeight =
+                (SliderMaxHeight - 2f * inset.value).coerceAtLeast(1f) * scale * density * (1f + 0.3f * phase)
             val top = (size.height - barHeight) / 2f
             val fraction = ((if (seeking) value else local.floatValue) / range).coerceIn(0f, 1f)
             val rail = Path().apply {
@@ -121,7 +176,7 @@ internal fun PlayerProgressSlider(
             }
             clipPath(rail) {
                 drawRect(Color.White.copy(alpha = 0.15f), Offset(0f, top), Size(size.width, barHeight))
-                drawRect(Color.White.copy(alpha = 0.40f), Offset(0f, top), Size(size.width * fraction, barHeight))
+                drawRect(Color.White.copy(alpha = 0.40f + 0.15f * phase), Offset(0f, top), Size(size.width * fraction, barHeight))
             }
         }
     }

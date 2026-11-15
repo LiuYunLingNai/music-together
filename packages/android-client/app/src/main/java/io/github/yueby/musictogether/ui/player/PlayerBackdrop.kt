@@ -55,6 +55,7 @@ private val DefaultBackdropColors = BackdropColors(
 @Composable
 internal fun PlayerBackdrop(
     coverUrl: String?,
+    videoUrl: String?,
     playing: Boolean,
     motionAllowed: Boolean,
     shortestSide: Dp,
@@ -75,6 +76,7 @@ internal fun PlayerBackdrop(
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         MeshBackdrop(
             coverUrl = coverUrl?.takeIf(String::isNotBlank),
+            videoUrl = videoUrl,
             animate = motionEnabled && motionAllowed,
             flowSpeed = displaySettings.backgroundMotionStrength,
             fps = displaySettings.backgroundFps,

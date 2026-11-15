@@ -1,5 +1,9 @@
 package io.github.yueby.musictogether.ui
 
+import io.github.yueby.musictogether.ui.designsystem.AppSemanticColors
+import top.yukonga.miuix.kmp.utils.overScrollVertical
+import top.yukonga.miuix.kmp.basic.SmallTitle
+import top.yukonga.miuix.kmp.basic.Card
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Globe
 import com.composables.icons.lucide.Monitor
@@ -21,7 +25,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
@@ -37,7 +40,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.semantics.contentDescription
@@ -96,11 +98,13 @@ internal fun MembersPane(
         HorizontalDivider(color = MiuixTheme.colorScheme.dividerLine.copy(alpha = 0.55f))
         }
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+            modifier = Modifier.fillMaxSize().overScrollVertical(),
+            contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
         ) {
-            items(members, key = { "member:${it.id}" }) { member ->
+            item(key = "members") {
+            Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+            members.forEachIndexed { index, member ->
+                if (index > 0) HorizontalDivider(Modifier.padding(start = 66.dp))
                 val canEditRole = canManageRoles &&
                     !member.isServerAdmin &&
                     member.role != "owner" &&
@@ -108,8 +112,8 @@ internal fun MembersPane(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         MemberAvatar(member, room.creatorId)
@@ -159,15 +163,33 @@ internal fun MembersPane(
                     }
                 }
             }
+            }
+            }
             if (canManageRoles) {
-                if (room.bannedMembers == null) {
-                    item { Text("当前服务端未提供成员移出与封禁管理能力", Modifier.padding(12.dp)) }
-                } else if (room.bannedMembers.isNotEmpty()) {
-                    item { Text("已封禁成员", Modifier.padding(12.dp), fontWeight = FontWeight.SemiBold) }
-                    items(room.bannedMembers, key = { "ban:${it.id}" }) { ban ->
-                        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(ban.nickname, Modifier.weight(1f))
-                            AppButton("解封", { confirmation = MemberAction(ban.id, ban.nickname, null) }, primary = false)
+                val banned = room.bannedMembers
+                if (banned == null) {
+                    item {
+                        Text(
+                            "当前服务端未提供成员移出与封禁管理能力",
+                            Modifier.padding(horizontal = 28.dp, vertical = 12.dp),
+                            style = MiuixTheme.textStyles.body2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
+                } else if (banned.isNotEmpty()) {
+                    item(key = "bans-title") { SmallTitle("已封禁成员") }
+                    item(key = "bans") {
+                        Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+                            banned.forEachIndexed { index, ban ->
+                                if (index > 0) HorizontalDivider(Modifier.padding(start = 16.dp))
+                                Row(
+                                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(ban.nickname, Modifier.weight(1f))
+                                    AppButton("解封", { confirmation = MemberAction(ban.id, ban.nickname, null) }, primary = false)
+                                }
+                            }
                         }
                     }
                 }
@@ -201,7 +223,7 @@ private fun MemberAvatar(member: RoomMember, creatorId: String) {
                 Lucide.UserRound,
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
-                tint = if (member.id == creatorId) Color(0xFFFFC857) else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                tint = if (member.id == creatorId) AppSemanticColors.owner else MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
         } else {
             AsyncImage(
@@ -216,10 +238,10 @@ private fun MemberAvatar(member: RoomMember, creatorId: String) {
                 .align(Alignment.BottomEnd)
                 .size(9.dp)
                 .clip(CircleShape)
-                .background(MiuixTheme.colorScheme.surface)
+                .background(MiuixTheme.colorScheme.surfaceContainer)
                 .padding(1.5.dp)
                 .clip(CircleShape)
-                .background(if (member.isOnline) Color(0xFF22C55E) else MiuixTheme.colorScheme.outline),
+                .background(if (member.isOnline) AppSemanticColors.online else MiuixTheme.colorScheme.outline),
         )
     }
 }

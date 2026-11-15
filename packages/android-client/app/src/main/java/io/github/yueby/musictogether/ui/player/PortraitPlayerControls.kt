@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -159,6 +160,7 @@ internal fun MobilePlayerControls(
     val displaySettings = LocalPlayerDisplaySettings.current
     val shownPosition = if (track == null) 0.0 else seekPosition
     val timeColor = Color.White.copy(alpha = 0.50f)
+    val breath = rememberTransitionBreath(player.transitionCue, displaySettings.transitionCue)
 
     Column(modifier.fillMaxWidth()) {
         PlayerProgressSlider(
@@ -177,9 +179,10 @@ internal fun MobilePlayerControls(
                 viewModel.seek(seekPosition)
             },
             modifier = Modifier.fillMaxWidth(),
+            breath = breath,
         )
         Spacer(Modifier.height((4f * scale).dp))
-        Row(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 if (displaySettings.showRemainingTime) {
                     "-" + formatPlayerTime((reportedDuration - shownPosition).coerceAtLeast(0.0))
@@ -195,7 +198,21 @@ internal fun MobilePlayerControls(
                 color = timeColor,
                 fontSize = (12f * scale).sp,
             )
-            Spacer(Modifier.weight(1f))
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                Text(
+                    "过渡",
+                    modifier = Modifier.graphicsLayer {
+                        val shown = breath.shown.value
+                        alpha = shown * (0.6f + 0.4f * breath.phase.value)
+                        translationY = 3.dp.toPx() * (1f - shown)
+                    },
+                    color = Color.White,
+                    fontSize = (12f * scale).sp,
+                    style = androidx.compose.ui.text.TextStyle(
+                        shadow = androidx.compose.ui.graphics.Shadow(Color.White.copy(alpha = 0.6f), blurRadius = 10f * scale),
+                    ),
+                )
+            }
             Text(formatPlayerTime(reportedDuration), color = timeColor, fontSize = (12f * scale).sp)
         }
         ControlsSpectrum(

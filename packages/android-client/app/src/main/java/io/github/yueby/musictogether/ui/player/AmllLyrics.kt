@@ -35,6 +35,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -154,12 +156,17 @@ internal fun LyricsPanel(
             val alignPosition =
                 alignOverride
                     ?: if (alignToTop) displaySettings.lyricAlignPosition else AmllCenteredAlignPosition
-            val mainFontSize = (
-                minOf(maxHeight.value * 0.05f, maxWidth.value * 0.07f) *
-                    AmllMainFontScale * displaySettings.lyricFontScale
-                ).coerceIn(16f, 80f)
-            val translationFontSize = mainFontSize * AmllTranslationFontScale * displaySettings.lyricSubFontScale
-            val romanFontSize = mainFontSize * AmllRomanFontScale * displaySettings.lyricRomanFontScale
+            // AMLL `index.css` (8vw up to a 768 wide viewport, max(5vh, 2.5vw) beyond it) taken at 0.8x for phones.
+            val screen = LocalConfiguration.current
+            val viewportFontSize =
+                if (screen.screenWidthDp <= 768) screen.screenWidthDp * 0.064f
+                else maxOf(screen.screenHeightDp * 0.05f, screen.screenWidthDp * 0.025f)
+            val mainFontSize = (viewportFontSize.coerceAtLeast(12f) * displaySettings.lyricFontScale)
+                .coerceIn(12f, 96f)
+            val translationFontSize =
+                (mainFontSize * AmllTranslationFontScale * displaySettings.lyricSubFontScale).coerceAtLeast(10f)
+            val romanFontSize =
+                (mainFontSize * AmllRomanFontScale * displaySettings.lyricRomanFontScale).coerceAtLeast(10f)
             val backgroundFontSize = mainFontSize * AmllBackgroundFontScale
             val hasDuetLines = remember(groups) {
                 groups.any { group -> group.main.isDuet }
@@ -186,6 +193,12 @@ internal fun LyricsPanel(
                 LazyListState(firstVisibleItemIndex = initialListIndex)
             }
             val scrollMotion = remember(listState) { Animatable(0f) }
+            // Lines leaving through the top keep springing after the list has moved on, so the list is
+            // laid out taller than the panel and the extra sits above the visible edge.
+            val overscan = maxHeight * 0.4f
+            val overscanPx = with(density) { overscan.roundToPx() }
+            val cascade = remember(listState) { AmllLineCascade() }
+            LaunchedEffect(cascade) { cascade.run() }
             var automaticScrollInProgress by remember(lyrics.trackId, groups) {
                 mutableStateOf(false)
             }
@@ -208,6 +221,7 @@ internal fun LyricsPanel(
                 manualBrowseActive = manualBrowseActive,
                 alignPosition = alignPosition,
                 alignToTop = alignToTop,
+                overscanPx = overscanPx,
             )
             val visibleItemSizeSignature by remember(listState) {
                 derivedStateOf {
@@ -289,6 +303,7 @@ internal fun LyricsPanel(
                                 alignPosition = alignPosition,
                                 alignToTop = alignToTop,
                                 scrollMotion = scrollMotion,
+                                overscanPx = overscanPx,
                             )
                         }
                     }
@@ -326,6 +341,7 @@ internal fun LyricsPanel(
                     previousFocusedGroupIndex = focusedGroupIndex
 
                     if (shouldReset) {
+                        cascade.clear()
                         val focusAlreadyVisible = listState.layoutInfo.visibleItemsInfo.any {
                             it.index == focusedListIndex
                         }
@@ -335,10 +351,15 @@ internal fun LyricsPanel(
                         withFrameNanos { }
                         listState.scrollFocusedItemToAdaptiveAnchor(
                             index = focusedListIndex,
-                            animate = false,
+                            // A seek within sight springs there, as AMLL does; a far one still jumps.
+                            animate = focusAlreadyVisible && previousGroupIndex >= 0 &&
+                                displaySettings.lyricSpringAnimation,
+                            cascade = cascade,
+                            stagger = false,
                             alignPosition = alignPosition,
                             alignToTop = alignToTop,
                             scrollMotion = scrollMotion,
+                            overscanPx = overscanPx,
                         )
                     } else if (playbackLayoutChanged || !focusChanged) {
                         withFrameNanos { }
@@ -348,6 +369,7 @@ internal fun LyricsPanel(
                             alignPosition = alignPosition,
                             alignToTop = alignToTop,
                             scrollMotion = scrollMotion,
+                            overscanPx = overscanPx,
                         )
                     } else {
                         // Wait for the focused lyric and any temporary interlude
@@ -365,6 +387,8 @@ internal fun LyricsPanel(
                             alignPosition = alignPosition,
                             alignToTop = alignToTop,
                             scrollMotion = scrollMotion,
+                            overscanPx = overscanPx,
+                            cascade = cascade,
                             stiffness = springParameters.composeStiffness,
                             dampingRatio = springParameters.dampingRatio,
                         )
@@ -377,6 +401,7 @@ internal fun LyricsPanel(
                                 alignPosition = alignPosition,
                                 alignToTop = alignToTop,
                                 scrollMotion = scrollMotion,
+                                overscanPx = overscanPx,
                             )
                         }
                     }
@@ -390,11 +415,12 @@ internal fun LyricsPanel(
                 LocalAmllExpensiveEffectsEnabled provides
                     motionPolicy.expensiveEffectsEnabled,
             ) {
-                LazyColumn(
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .graphicsLayer {
                             compositingStrategy = CompositingStrategy.Offscreen
+                            clip = true
                         }
                         .drawWithContent {
                             drawContent()
@@ -408,9 +434,16 @@ internal fun LyricsPanel(
                                 blendMode = BlendMode.DstIn,
                             )
                         },
+                ) {
+                LazyColumn(
+                    modifier = Modifier.layout { measurable, constraints ->
+                        val height = constraints.maxHeight + overscanPx
+                        val placeable = measurable.measure(constraints.copy(minHeight = height, maxHeight = height))
+                        layout(constraints.maxWidth, constraints.maxHeight) { placeable.place(0, -overscanPx) }
+                    },
                     state = listState,
                     contentPadding = PaddingValues(
-                        top = firstLineInset,
+                        top = firstLineInset + overscan,
                         bottom = lastLineInset,
                     ),
                     verticalArrangement = Arrangement.spacedBy(lineGap),
@@ -418,7 +451,7 @@ internal fun LyricsPanel(
                     itemsIndexed(
                         items = listItems,
                         key = { _, item -> item.stableKey },
-                    ) { _, item ->
+                    ) { listIndex, item ->
                         val lineMotion = remember(
                             visualSpringParameters,
                         ) {
@@ -430,7 +463,9 @@ internal fun LyricsPanel(
                             )
                         }
                         Column(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .graphicsLayer { translationY = cascade.offsetFor(listIndex) },
                         ) {
                             key(timelineFrame.seekGeneration) {
                                     AmllLineGroup(
@@ -443,6 +478,19 @@ internal fun LyricsPanel(
                                         hidden = displaySettings.lyricHidePassedLines &&
                                             !manualBrowseActive &&
                                             item.groupIndex < focusedGroupIndex,
+                                        blurRadius = if (displaySettings.lyricBlurEffect && !manualBrowseActive) {
+                                            amllBlurLevel(item.groupIndex, focusedGroupIndex)
+                                        } else {
+                                            0f
+                                        },
+                                        motionDelayMs = {
+                                            if (!displaySettings.lyricSpringAnimation || manualBrowseActive) {
+                                                0L
+                                            } else {
+                                                val first = listState.firstAmllLineOnScreen(overscanPx) ?: listIndex
+                                                (amllCascadeDelay(listIndex, first, focusedListIndex) * 1_000).toLong()
+                                            }
+                                        },
                                         wordAnimationEnabled = wordAnimationEnabled,
                                         onClick = onSeek?.let { seek ->
                                             {
@@ -475,7 +523,9 @@ internal fun LyricsPanel(
                                                     item.groupIndex == previewGroupIndex
                                                 )
                                         ) {
-                                            { bounds ->
+                                            { moving ->
+                                                // Report where the line rests, not where the cascade has it now.
+                                                val bounds = moving.translate(0f, -cascade.offsetFor(listIndex))
                                                 if (item.groupIndex == focusedGroupIndex) {
                                                     focusedGroupBoundsMeasurement = IndexedValue(
                                                         index = item.groupIndex,
@@ -516,6 +566,7 @@ internal fun LyricsPanel(
                         }
                     }
                 }
+                }
             }
 
             interlude?.let { activeInterlude ->
@@ -528,7 +579,9 @@ internal fun LyricsPanel(
                     ),
                     fontSize = mainFontSize,
                     horizontalPaddingPx = with(density) { 20.dp.toPx() },
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer { translationY = cascade.offsetFor(focusedListIndex) },
                 )
             }
 

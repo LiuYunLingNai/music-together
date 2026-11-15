@@ -24,7 +24,7 @@ internal class PlatformPreferenceCoordinator(
         val auth = state().platformHub.myAuth.firstOrNull { it.platform == platform && it.loggedIn } ?: return
         val field = if (reporting) "reportListening" else "shareWithRoom"
         val current = if (reporting) auth.reportListening else auth.shareWithRoom
-        if (current == null || current == value || (reporting && platform != "netease") || state().room == null) return
+        if (current == null || current == value || (reporting && platform != "netease") || (state().room == null && state().platformHub.roomRequired)) return
         val key = "$platform:$field"
         if (key in pending) return
         val expected = context()

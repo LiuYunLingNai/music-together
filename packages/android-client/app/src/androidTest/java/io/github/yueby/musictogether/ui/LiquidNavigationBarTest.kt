@@ -41,28 +41,4 @@ class LiquidNavigationBarTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithText("搜索").assertExists()
     }
-
-    @Test
-    fun compactNavigation_keepsCircularTabsAccessible() {
-        composeRule.setContent {
-            MiuixTheme {
-                val selected = remember { mutableIntStateOf(0) }
-                IosLiquidGlassNavigationBar(
-                    items = listOf(
-                        NavigationItem("首页", Icons.Default.Home),
-                        NavigationItem("搜索", Icons.Default.Search),
-                    ),
-                    selectedIndex = selected.intValue,
-                    onItemClick = { selected.intValue = it },
-                    backdrop = null,
-                    isBlurActive = false,
-                    compact = true,
-                )
-            }
-        }
-
-        composeRule.onNodeWithContentDescription("搜索").performClick()
-        composeRule.waitForIdle()
-        composeRule.onNodeWithContentDescription("搜索").assertExists()
-    }
 }

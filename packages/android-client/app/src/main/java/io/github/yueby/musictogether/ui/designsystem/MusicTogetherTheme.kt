@@ -1,5 +1,7 @@
 package io.github.yueby.musictogether.ui.designsystem
 
+import androidx.compose.ui.graphics.compositeOver
+import kotlin.math.abs
 import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.PaddingValues
@@ -37,6 +39,12 @@ internal fun resolveMiuixPageBackground(
     darkTheme && themeBackground.red < 0.02f && themeBackground.green < 0.02f && themeBackground.blue < 0.02f ->
         Color(0xFF101010)
     else -> themeBackground
+}
+
+/** Miuix dark schemes can give cards the page colour; lift them so groups keep a visible edge. */
+internal fun raisedContainerColor(page: Color, container: Color, content: Color, lift: Float): Color {
+    val distance = abs(page.red - container.red) + abs(page.green - container.green) + abs(page.blue - container.blue)
+    return if (distance < 0.03f) content.copy(alpha = lift).compositeOver(page) else container
 }
 
 @Composable
@@ -92,11 +100,19 @@ fun MusicTogetherTheme(
                 pureBlackBackground = pureBlackBackground,
             )
             val sharedContentColor = MiuixTheme.colorScheme.onBackground
-            CompositionLocalProvider(
-                LocalAppPageBackground provides pageBackground,
-                MiuixLocalContentColor provides sharedContentColor,
-                content = content,
-            )
+            val scheme = MiuixTheme.colorScheme
+            MiuixTheme(
+                colors = scheme.copy(
+                    surfaceContainer = raisedContainerColor(pageBackground, scheme.surfaceContainer, sharedContentColor, 0.06f),
+                    surfaceContainerHigh = raisedContainerColor(pageBackground, scheme.surfaceContainerHigh, sharedContentColor, 0.10f),
+                ),
+            ) {
+                CompositionLocalProvider(
+                    LocalAppPageBackground provides pageBackground,
+                    MiuixLocalContentColor provides sharedContentColor,
+                    content = content,
+                )
+            }
         }
     }
 }

@@ -100,9 +100,7 @@ import kotlin.math.sqrt
 
 private val LocalIosTabScale = staticCompositionLocalOf { { 1f } }
 
-internal fun compactDockIndicatorDiameter(tabWidth: androidx.compose.ui.unit.Dp) = minOf(tabWidth, 44.dp)
-
-private val iosIndicatorSpecular: Highlight = Highlight(
+internal val iosIndicatorSpecular: Highlight = Highlight(
     width = 1.dp,
     alpha = 1f,
     style = BloomStroke(
@@ -129,7 +127,7 @@ private const val GRAVITY_DIR_THRESHOLD_SQ = 0.01f // |g_xy| > 0.1, ≈ 6° tilt
 
 /** Tracks gravity for a `dualPeak` highlight's primary light, with an extra UV-clockwise offset on top. */
 @Composable
-private fun rememberGravityRotatedHighlight(
+internal fun rememberGravityRotatedHighlight(
     base: Highlight,
     extraDegrees: Float = 0f,
 ): Highlight {
@@ -173,7 +171,6 @@ internal fun IosLiquidGlassNavigationBar(
     isBlurActive: Boolean,
     modifier: Modifier = Modifier,
     badge: (Int) -> (@Composable () -> Unit)? = { null },
-    compact: Boolean = false,
 ) {
     val isDark = LocalAppIsDark.current
     val pillShape = remember { CircleShape }
@@ -219,7 +216,7 @@ internal fun IosLiquidGlassNavigationBar(
             valueRange = 0f..(tabsCount - 1).toFloat(),
             visibilityThreshold = 0.001f,
             initialScale = 1f,
-            pressedScale = if (compact) 1.10f else 78f / 56f,
+            pressedScale = 78f / 56f,
             canDrag = { offset ->
                 val anim = holder.instance ?: return@DampedDragAnimation true
                 if (tabWidthPx == 0f) return@DampedDragAnimation false
@@ -292,7 +289,7 @@ internal fun IosLiquidGlassNavigationBar(
     val combinedBackdrop = backdrop?.let { rememberCombinedBackdrop(it, tabsBackdrop) }
 
     val navBarBottomPadding = WindowInsets.navigationBars.only(WindowInsetsSides.Bottom).asPaddingValues().calculateBottomPadding()
-    val bottomPaddingValue = if (compact) 0.dp else when (platform()) {
+    val bottomPaddingValue = when (platform()) {
         Platform.IOS -> 20.dp
 
         else -> {
@@ -333,15 +330,13 @@ internal fun IosLiquidGlassNavigationBar(
                         contentDescription = null,
                     )
                 }
-                if (!compact) {
-                    Text(
-                        text = item.label,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Normal,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+                Text(
+                    text = item.label,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }
@@ -351,8 +346,8 @@ internal fun IosLiquidGlassNavigationBar(
             modifier = Modifier
                 .padding(
                     bottom = bottomPaddingValue,
-                    start = if (compact) 0.dp else 24.dp,
-                    end = if (compact) 0.dp else 24.dp,
+                    start = 24.dp,
+                    end = 24.dp,
                 )
                 .fillMaxWidth(),
             contentAlignment = Alignment.CenterStart,
@@ -453,13 +448,8 @@ internal fun IosLiquidGlassNavigationBar(
 
             if (tabWidthPx > 0f) {
                 val tabWidthDp = with(density) { tabWidthPx.toDp() }
-                val indicatorWidth = if (compact) compactDockIndicatorDiameter(tabWidthDp) else tabWidthDp
-                val indicatorHeight = if (compact) indicatorWidth else 56.dp
-                val indicatorCenterOffsetPx = if (compact) {
-                    (tabWidthPx - with(density) { indicatorWidth.toPx() }) / 2f
-                } else {
-                    0f
-                }
+                val indicatorWidth = tabWidthDp
+                val indicatorHeight = 56.dp
                 if (isBlurActive && combinedBackdrop != null) {
                     Box(
                         modifier = Modifier
@@ -468,9 +458,9 @@ internal fun IosLiquidGlassNavigationBar(
                                 val singleTabWidth = tabWidthPx
                                 val progressOffset = dampedDrag.value * singleTabWidth
                                 translationX = if (isLtr) {
-                                    progressOffset + panelOffset + indicatorCenterOffsetPx
+                                    progressOffset + panelOffset
                                 } else {
-                                    -progressOffset + panelOffset - indicatorCenterOffsetPx
+                                    -progressOffset + panelOffset
                                 }
                             }
                             .then(interactiveHighlight.gestureModifier)
@@ -521,9 +511,9 @@ internal fun IosLiquidGlassNavigationBar(
                             .graphicsLayer {
                                 val progressOffset = dampedDrag.value * tabWidthPx
                                 translationX = if (isLtr) {
-                                    progressOffset + panelOffset + indicatorCenterOffsetPx
+                                    progressOffset + panelOffset
                                 } else {
-                                    -progressOffset + panelOffset - indicatorCenterOffsetPx
+                                    -progressOffset + panelOffset
                                 }
                             }
                             .then(dampedDrag.modifier)

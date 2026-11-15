@@ -75,11 +75,11 @@ internal fun ChatPane(
                 }
             }
         }
-        HorizontalDivider(color = MiuixTheme.colorScheme.dividerLine.copy(alpha = 0.55f))
+        if (onClose != null) HorizontalDivider(color = MiuixTheme.colorScheme.dividerLine.copy(alpha = 0.55f))
         LazyColumn(
             modifier = Modifier.weight(1f),
             state = listState,
-            contentPadding = PaddingValues(14.dp),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             items(messages, key = { it.id }) { message ->
@@ -116,8 +116,7 @@ internal fun ChatPane(
                 }
             }
         }
-        HorizontalDivider()
-        Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             AppTextField(
                 value = content,
                 onValueChange = { content = it.take(500) },

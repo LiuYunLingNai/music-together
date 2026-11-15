@@ -1,31 +1,31 @@
 package io.github.yueby.musictogether.ui.player
 
 import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
 import android.graphics.BitmapShader
+import android.graphics.Canvas
+import android.graphics.Paint
 import android.graphics.RuntimeShader
 import android.graphics.Shader
 import android.os.Build
 import androidx.annotation.RequiresApi
-import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.FloatState
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ShaderBrush
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
 import coil3.BitmapImage
 import coil3.SingletonImageLoader
@@ -35,71 +35,117 @@ import coil3.request.allowHardware
 import io.github.yueby.musictogether.player.AudioSpectrum
 import io.github.yueby.musictogether.ui.coverNetworkHeaders
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.cos
 import kotlin.math.min
+import kotlin.math.sin
 
+/** AMLL `mesh.frag.glsl`; the mesh's interpolated texture coordinate arrives as the shader coordinate. */
 private const val MeshShaderSource = """
 uniform shader album;
-uniform float2 size;
 uniform float tex;
-uniform float time;
+uniform float2 size;
 uniform float volume;
+uniform float sinAngle;
+uniform float cosAngle;
 
-float2 rot(float2 p, float a) {
-    float s = sin(a);
-    float c = cos(a);
-    return float2(c * p.x - s * p.y, s * p.x + c * p.y);
-}
-
-half4 main(float2 fragCoord) {
-    float2 uv = fragCoord / size;
-    float aspect = size.x / size.y;
-    float2 p = (uv - 0.5) * float2(min(aspect, 1.0), min(1.0 / aspect, 1.0));
-    p = rot(p, time * 0.045);
-    float2 q = p;
-    q += 0.22 * float2(sin(p.y * 2.6 + time * 0.31), cos(p.x * 2.2 - time * 0.27));
-    q += 0.12 * float2(sin(q.y * 4.3 - time * 0.19 + 1.7), cos(q.x * 3.9 + time * 0.23 + 0.6));
-    q = rot(q, sin(time * 0.07) * 0.6);
-    q *= 0.52 - volume * 0.06;
-    half4 c = album.eval(clamp(q + 0.5, 0.04, 0.96) * tex);
-    float n = fract(sin(dot(fragCoord, float2(12.9898, 78.233))) * 43758.5453);
-    half3 rgb = c.rgb * (1.0 + volume * 0.12) + (n - 0.5) / 128.0;
-    return half4(rgb, 1.0);
+half4 main(float2 uv) {
+    float2 centered = uv - float2(0.2);
+    float2 rotated = float2(
+        cosAngle * centered.x - sinAngle * centered.y,
+        sinAngle * centered.x + cosAngle * centered.y
+    );
+    float2 finalUv = rotated * max(0.001, 1.0 - volume * 2.0) + float2(0.5);
+    half4 color = album.eval(finalUv * tex);
+    float level = max(0.5, 1.0 - volume * 0.5);
+    float noise = fract(52.9829189 * fract(dot(uv * size, float2(0.06711056, 0.00583715))));
+    half3 rgb = color.rgb * level + (noise - 0.5) / 255.0;
+    float vignette = 1.0 - smoothstep(0.3, 0.8, distance(uv, float2(0.5)));
+    rgb *= 0.6 + vignette * 0.4;
+    // Upstream also writes the level into alpha and blends over the page, which darkens once more.
+    return half4(rgb * level, 1.0);
 }
 """
 
-private const val MeshTextureSize = 128
+private const val MeshTextureSize = 32
+private val MeshFadeEasing = CubicBezierEasing(0.37f, 0f, 0.63f, 1f)
+
+@RequiresApi(Build.VERSION_CODES.TIRAMISU)
+private class MeshLayerState(bitmap: Bitmap, private val geometry: MeshGeometry) {
+    val alpha = Animatable(0f)
+    val shader = RuntimeShader(MeshShaderSource).apply {
+        val album = BitmapShader(bitmap, Shader.TileMode.MIRROR, Shader.TileMode.MIRROR)
+        album.filterMode = BitmapShader.FILTER_MODE_LINEAR
+        setInputShader("album", album)
+        setFloatUniform("tex", bitmap.width.toFloat())
+    }
+    val paint = Paint().apply { shader = this@MeshLayerState.shader }
+    private val vertices = FloatArray(geometry.positions.size)
+    private var laidOutFor = Size.Unspecified
+
+    /** AMLL `mesh.vert.glsl`: the square mesh is stretched along the longer side so it always covers. */
+    fun vertices(size: Size): FloatArray {
+        if (size == laidOutFor) return vertices
+        laidOutFor = size
+        val aspect = size.width / size.height
+        val scaleX = if (aspect > 1f) 1f else 1f / aspect
+        val scaleY = if (aspect > 1f) aspect else 1f
+        val positions = geometry.positions
+        for (i in positions.indices step 2) {
+            vertices[i] = (positions[i] * scaleX + 1f) / 2f * size.width
+            vertices[i + 1] = (1f - positions[i + 1] * scaleY) / 2f * size.height
+        }
+        return vertices
+    }
+
+    val uvs get() = geometry.uvs
+    val indices get() = geometry.indices
+}
 
 /**
- * AMLL mesh-gradient style backdrop: the cover is reduced to a 32px colour field (same contrast /
- * saturation / brightness / blur chain as upstream), then flowed by a UV-warp shader that pulses
- * with the low-frequency level.
+ * AMLL `MeshGradientRenderer`: the cover, reduced to a 32px colour field, is stretched over a bicubic Hermite
+ * mesh picked per song; the shader spins the texture under the mesh and pulls it in with the low-frequency
+ * level. A new song's mesh fades in over the previous one.
  */
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
 @Composable
 internal fun MeshBackdrop(
     coverUrl: String?,
+    videoUrl: String?,
     animate: Boolean,
     flowSpeed: Float,
     fps: Int,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    var texture by remember { mutableStateOf<Bitmap?>(null) }
-    LaunchedEffect(coverUrl) {
-        if (coverUrl == null) {
-            texture = null
+    val layers = remember { mutableStateListOf<MeshLayerState>() }
+    LaunchedEffect(coverUrl, videoUrl) {
+        // Upstream hands the renderer the video cover when there is one and samples a frame of it.
+        val source = videoUrl?.let { videoFrame(it) } ?: coverUrl?.let {
+            val request = ImageRequest.Builder(context)
+                .data(it)
+                .httpHeaders(coverNetworkHeaders)
+                .size(64)
+                .allowHardware(false)
+                .build()
+            (SingletonImageLoader.get(context).execute(request).image as? BitmapImage)?.bitmap
+        }
+        if (source == null) {
+            if (coverUrl != null) return@LaunchedEffect
+            coroutineScope {
+                layers.forEach { launch { it.alpha.animateTo(0f, tween(550, easing = MeshFadeEasing)) } }
+            }
+            layers.clear()
             return@LaunchedEffect
         }
-        val request = ImageRequest.Builder(context)
-            .data(coverUrl)
-            .httpHeaders(coverNetworkHeaders)
-            .size(64)
-            .allowHardware(false)
-            .build()
-        val source = (SingletonImageLoader.get(context).execute(request).image as? BitmapImage)?.bitmap
-            ?: return@LaunchedEffect
-        texture = withContext(Dispatchers.Default) { meshTexture(source) }
+        val layer = withContext(Dispatchers.Default) {
+            MeshLayerState(meshTexture(source), buildMeshGeometry(pickMeshPreset()))
+        }
+        layers += layer
+        layer.alpha.animateTo(1f, tween(550, easing = MeshFadeEasing))
+        layers.removeAll { it !== layer }
     }
 
     val time = remember { mutableFloatStateOf(0f) }
@@ -128,32 +174,26 @@ internal fun MeshBackdrop(
         }
     }
 
-    Crossfade(targetState = texture, animationSpec = tween(900), modifier = modifier, label = "mesh-backdrop") { bitmap ->
-        if (bitmap == null) {
-            Box(Modifier.fillMaxSize().background(Color(0xFF111214)))
-        } else {
-            MeshLayer(bitmap, time, volume)
-        }
-    }
-}
-
-@RequiresApi(Build.VERSION_CODES.TIRAMISU)
-@Composable
-private fun MeshLayer(bitmap: Bitmap, time: FloatState, volume: FloatState) {
-    val shader = remember(bitmap) {
-        RuntimeShader(MeshShaderSource).apply {
-            val album = BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
-            album.filterMode = BitmapShader.FILTER_MODE_LINEAR
-            setInputShader("album", album)
-            setFloatUniform("tex", bitmap.width.toFloat())
-        }
-    }
     Spacer(
-        Modifier.fillMaxSize().drawBehind {
-            shader.setFloatUniform("size", size.width, size.height)
-            shader.setFloatUniform("time", time.floatValue)
-            shader.setFloatUniform("volume", volume.floatValue)
-            drawRect(ShaderBrush(shader))
+        modifier.drawBehind {
+            drawRect(Color(0xFF111214))
+            // Upstream: `setLowFreqVolume` divides by ten, and the texture turns by (seconds / 10 + volume) * 2.
+            val level = volume.floatValue / 10f
+            val angle = (time.floatValue / 10f + level) * 2f
+            drawIntoCanvas { canvas ->
+                for (layer in layers) {
+                    layer.shader.setFloatUniform("size", size.width, size.height)
+                    layer.shader.setFloatUniform("volume", level)
+                    layer.shader.setFloatUniform("sinAngle", sin(angle))
+                    layer.shader.setFloatUniform("cosAngle", cos(angle))
+                    layer.paint.alpha = (layer.alpha.value.coerceIn(0f, 1f) * 255).toInt()
+                    val vertices = layer.vertices(size)
+                    canvas.nativeCanvas.drawVertices(
+                        Canvas.VertexMode.TRIANGLES, vertices.size, vertices, 0, layer.uvs, 0, null, 0,
+                        layer.indices, 0, layer.indices.size, layer.paint,
+                    )
+                }
+            }
         },
     )
 }
@@ -171,8 +211,21 @@ private fun lowFreqGradient(history: ArrayDeque<Float>, level: Float): Float {
     return if (peak - floor > 0.35f) peak else floor * 0.25f
 }
 
+@RequiresApi(Build.VERSION_CODES.TIRAMISU)
+private suspend fun videoFrame(url: String): Bitmap? = withContext(Dispatchers.IO) {
+    val retriever = MediaMetadataRetriever()
+    try {
+        retriever.setDataSource(url, emptyMap())
+        retriever.getScaledFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 64, 64)
+    } catch (_: Exception) {
+        null
+    } finally {
+        runCatching { retriever.release() }
+    }
+}
+
 private fun meshTexture(source: Bitmap): Bitmap {
-    val small = 32
+    val small = MeshTextureSize
     val scaled = Bitmap.createScaledBitmap(source, small, small, true)
     val pixels = IntArray(small * small)
     scaled.getPixels(pixels, 0, small, 0, 0, small, small)
@@ -192,8 +245,7 @@ private fun meshTexture(source: Bitmap): Bitmap {
     for (i in pixels.indices) {
         pixels[i] = (0xFF shl 24) or (channels[0][i].toInt() shl 16) or (channels[1][i].toInt() shl 8) or channels[2][i].toInt()
     }
-    val processed = Bitmap.createBitmap(pixels, small, small, Bitmap.Config.ARGB_8888)
-    return Bitmap.createScaledBitmap(processed, MeshTextureSize, MeshTextureSize, true)
+    return Bitmap.createBitmap(pixels, small, small, Bitmap.Config.ARGB_8888)
 }
 
 private fun boxBlur(data: FloatArray, width: Int, height: Int, radius: Int, passes: Int) {

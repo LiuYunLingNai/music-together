@@ -39,14 +39,14 @@ private val AmllWordFloatEasing = CubicBezierEasing(0f, 0f, 0.58f, 1f)
 internal fun AmllKaraokeWord(
     word: LyricWord,
     graphemes: List<String>,
-    positionMs: Float,
-    effectReleaseProgress: Float,
+    positionMs: () -> Float,
+    effectReleaseProgress: () -> Float,
     reserveRomanSpace: Boolean,
     reserveRubySpace: Boolean,
     fontSize: Float,
     fontWeight: FontWeight,
-    darkAlpha: Float,
-    brightAlpha: Float,
+    darkAlpha: () -> Float,
+    brightAlpha: () -> Float,
     gradientEnabled: Boolean,
     emphasize: Boolean,
     isBackground: Boolean,
@@ -54,7 +54,7 @@ internal fun AmllKaraokeWord(
     profile: AmllEmphasisProfile,
     glyphIndexOffset: Int,
     glyphCount: Int,
-    continuousHighlightProgress: Float?,
+    continuousHighlightProgress: () -> Float?,
     onMainTextSizeChanged: (IntSize, Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -62,12 +62,7 @@ internal fun AmllKaraokeWord(
     val fadeFactor = LocalPlayerDisplaySettings.current.lyricWordFadeWidth
     val fontSizePx = with(density) { fontSize.sp.toPx() }
     val wordFloatDuration = (word.endTimeMs - word.startTimeMs).coerceAtLeast(1_000L)
-    val wordFloatProgress =
-        ((positionMs - word.startTimeMs) / wordFloatDuration).coerceIn(0f, 1f)
-    val wordFloat = AmllWordFloatEasing.transform(wordFloatProgress)
     val wordFloatAmount = if (isBackground) 0.1f else 0.05f
-    val highlightProgress =
-        continuousHighlightProgress ?: amllWordProgress(word, positionMs)
     val effectHeadroom =
         with(density) { fontSize.sp.toDp() } * if (emphasize) 1f else 0f
     val effectHeadroomPx = with(density) { effectHeadroom.roundToPx() }
@@ -75,8 +70,11 @@ internal fun AmllKaraokeWord(
     Layout(
         modifier = modifier
             .graphicsLayer {
+                val wordFloat = AmllWordFloatEasing.transform(
+                    ((positionMs() - word.startTimeMs) / wordFloatDuration).coerceIn(0f, 1f),
+                )
                 translationY =
-                    -wordFloat * wordFloatAmount * fontSizePx * effectReleaseProgress
+                    -wordFloat * wordFloatAmount * fontSizePx * effectReleaseProgress()
             }
             .onSizeChanged { size ->
                 onMainTextSizeChanged(size, effectHeadroomPx)
@@ -90,7 +88,7 @@ internal fun AmllKaraokeWord(
                 reserveRubySpace = reserveRubySpace,
                 fontSize = fontSize,
                 fontWeight = fontWeight,
-                color = Color.White.copy(alpha = darkAlpha),
+                color = Color.White,
                 emphasize = emphasize,
                 isBackground = isBackground,
                 chunkStartTimeMs = chunkStartTimeMs,
@@ -99,7 +97,12 @@ internal fun AmllKaraokeWord(
                 glyphCount = glyphCount,
                 drawGlow = false,
                 effectReleaseProgress = effectReleaseProgress,
-                modifier = Modifier.padding(horizontal = effectHeadroom),
+                modifier = Modifier
+                    .graphicsLayer {
+                        alpha = darkAlpha()
+                        compositingStrategy = CompositingStrategy.ModulateAlpha
+                    }
+                    .padding(horizontal = effectHeadroom),
             )
             if (gradientEnabled) {
                 AmllKaraokeWordLayer(
@@ -110,9 +113,7 @@ internal fun AmllKaraokeWord(
                     reserveRubySpace = reserveRubySpace,
                     fontSize = fontSize,
                     fontWeight = fontWeight,
-                    color = Color.White.copy(
-                        alpha = (brightAlpha - darkAlpha).coerceAtLeast(0f),
-                    ),
+                    color = Color.White,
                     emphasize = emphasize,
                     isBackground = isBackground,
                     chunkStartTimeMs = chunkStartTimeMs,
@@ -123,9 +124,12 @@ internal fun AmllKaraokeWord(
                     effectReleaseProgress = effectReleaseProgress,
                     modifier = Modifier
                         .graphicsLayer {
+                            alpha = (brightAlpha() - darkAlpha()).coerceAtLeast(0f)
                             compositingStrategy = CompositingStrategy.Offscreen
                         }
                         .drawWithContent {
+                            val highlightProgress =
+                                continuousHighlightProgress() ?: amllWordProgress(word, positionMs())
                             when {
                                 highlightProgress <= 0f -> Unit
                                 highlightProgress >= 1f -> drawContent()
@@ -225,7 +229,7 @@ internal fun AmllKaraokeWord(
 internal fun AmllKaraokeWordLayer(
     word: LyricWord,
     graphemes: List<String>,
-    positionMs: Float,
+    positionMs: () -> Float,
     reserveRomanSpace: Boolean,
     reserveRubySpace: Boolean,
     fontSize: Float,
@@ -238,7 +242,7 @@ internal fun AmllKaraokeWordLayer(
     glyphIndexOffset: Int,
     glyphCount: Int,
     drawGlow: Boolean,
-    effectReleaseProgress: Float,
+    effectReleaseProgress: () -> Float,
     modifier: Modifier = Modifier,
 ) {
     Column(

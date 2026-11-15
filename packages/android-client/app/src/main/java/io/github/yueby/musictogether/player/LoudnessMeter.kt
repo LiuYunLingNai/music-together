@@ -1,11 +1,5 @@
 package io.github.yueby.musictogether.player
 
-import android.media.AudioFormat
-import android.media.MediaCodec
-import android.media.MediaExtractor
-import android.media.MediaDataSource
-import android.media.MediaFormat
-import java.nio.ByteOrder
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -105,87 +99,5 @@ internal class LoudnessMeter(private val sampleRate: Int, private val channels: 
 
     companion object {
         const val SILENCE_LUFS = -150.0
-    }
-}
-
-internal object LoudnessAnalyzer {
-    /** Decodes the whole song and measures it; returns null when it cannot be decoded. */
-    fun measure(source: MediaDataSource, isActive: () -> Boolean): LoudnessInfo? {
-        val extractor = MediaExtractor()
-        var codec: MediaCodec? = null
-        try {
-            extractor.setDataSource(source)
-            val index = (0 until extractor.trackCount).firstOrNull {
-                extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
-            } ?: return null
-            extractor.selectTrack(index)
-            val inputFormat = extractor.getTrackFormat(index)
-            val decoder = MediaCodec.createDecoderByType(inputFormat.getString(MediaFormat.KEY_MIME)!!)
-            codec = decoder
-            decoder.configure(inputFormat, null, null, 0)
-            decoder.start()
-
-            var sampleRate = inputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-            var channels = inputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-            var float = false
-            var meter = LoudnessMeter(sampleRate, channels)
-            var frame = DoubleArray(channels)
-            val info = MediaCodec.BufferInfo()
-            var inputDone = false
-            var outputDone = false
-            while (!outputDone) {
-                if (!isActive()) return null
-                if (!inputDone) {
-                    val inputIndex = decoder.dequeueInputBuffer(10_000)
-                    if (inputIndex >= 0) {
-                        val buffer = decoder.getInputBuffer(inputIndex)!!
-                        val size = extractor.readSampleData(buffer, 0)
-                        if (size < 0) {
-                            decoder.queueInputBuffer(inputIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                            inputDone = true
-                        } else {
-                            decoder.queueInputBuffer(inputIndex, 0, size, extractor.sampleTime, 0)
-                            extractor.advance()
-                        }
-                    }
-                }
-                val outputIndex = decoder.dequeueOutputBuffer(info, 10_000)
-                when {
-                    outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                        val format = decoder.outputFormat
-                        val newRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-                        val newChannels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-                        float = format.containsKey(MediaFormat.KEY_PCM_ENCODING) &&
-                            format.getInteger(MediaFormat.KEY_PCM_ENCODING) == AudioFormat.ENCODING_PCM_FLOAT
-                        if (newRate != sampleRate || newChannels != channels) {
-                            sampleRate = newRate
-                            channels = newChannels
-                            meter = LoudnessMeter(sampleRate, channels)
-                            frame = DoubleArray(channels)
-                        }
-                    }
-                    outputIndex >= 0 -> {
-                        val buffer = decoder.getOutputBuffer(outputIndex)!!.order(ByteOrder.nativeOrder())
-                        buffer.position(info.offset).limit(info.offset + info.size)
-                        while (buffer.remaining() >= channels * if (float) 4 else 2) {
-                            for (c in 0 until channels) {
-                                frame[c] = if (float) buffer.getFloat().toDouble() else buffer.getShort() / 32768.0
-                            }
-                            meter.addFrame(frame)
-                        }
-                        decoder.releaseOutputBuffer(outputIndex, false)
-                        if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) outputDone = true
-                    }
-                }
-            }
-            return meter.finish()
-        } catch (_: Exception) {
-            return null
-        } finally {
-            runCatching { codec?.stop() }
-            runCatching { codec?.release() }
-            extractor.release()
-            runCatching { source.close() }
-        }
     }
 }

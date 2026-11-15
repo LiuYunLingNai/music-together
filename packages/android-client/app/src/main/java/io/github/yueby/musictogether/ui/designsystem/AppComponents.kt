@@ -1,5 +1,8 @@
 package io.github.yueby.musictogether.ui.designsystem
 
+import androidx.compose.ui.graphics.compositeOver
+import top.yukonga.miuix.kmp.basic.TabRow
+import top.yukonga.miuix.kmp.basic.TabRowDefaults
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -107,4 +110,32 @@ fun AppTextAction(
         insideMargin = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
         content = content,
     )
+}
+
+/** Miuix `TabRow` fills its strip with `surface`, which is pure black in the dark scheme; keep it on the page colour. */
+@Composable
+fun AppTabRow(
+    tabs: List<String>,
+    selectedTabIndex: Int,
+    onTabSelected: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val page = LocalAppPageBackground.current.takeIf { it != Color.Unspecified } ?: MiuixTheme.colorScheme.background
+    TabRow(
+        tabs = tabs,
+        selectedTabIndex = selectedTabIndex,
+        onTabSelected = onTabSelected,
+        modifier = modifier,
+        colors = TabRowDefaults.tabRowColors(
+            backgroundColor = page,
+            selectedBackgroundColor = MiuixTheme.colorScheme.onBackground.copy(alpha = 0.12f).compositeOver(page),
+        ),
+    )
+}
+
+/** Fill for controls sitting directly on the page; Miuix container colours can equal the page in dark themes. */
+@Composable
+fun appRaisedSurfaceColor(): Color {
+    val page = LocalAppPageBackground.current.takeIf { it != Color.Unspecified } ?: MiuixTheme.colorScheme.background
+    return MiuixTheme.colorScheme.onBackground.copy(alpha = 0.07f).compositeOver(page)
 }

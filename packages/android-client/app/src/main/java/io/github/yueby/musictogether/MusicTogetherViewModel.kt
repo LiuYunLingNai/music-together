@@ -263,6 +263,10 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         quality = { _state.value.room?.audioQuality ?: "320" },
         nextTrack = ::predictNextTrack,
         resolve = ::resolveTrackForCache,
+        automixRoom = ::automixAnalysisRoom,
+        reportProfile = { trackId, profile ->
+            socket.emit(Events.PLAYER_TRACK_PROFILE, JSONObject().put("trackId", trackId).put("profile", profile))
+        },
     )
     private val accounts = AccountCoordinator(
         application = application,
@@ -362,6 +366,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private val queueActions = QueueActionTracker()
     private val autoRestoringPlatforms = mutableSetOf<String>()
     private val loadedPlaylistPlatforms = mutableSetOf<String>()
+    private var platformStatusProbeJob: Job? = null
     private val supportedPlatforms = listOf("netease", "tencent", "kugou", "kugou_concept", "bilibili")
 
     init {
@@ -528,6 +533,18 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
 
     fun clearMediaCache() {
         mediaCache.clear()
+    }
+
+    /**
+     * The room's id while it mixes by beat grid and this is the device that analyses for it: the online user
+     * with the lowest id, as the web client elects, so one device decodes each song for everyone.
+     */
+    private fun automixAnalysisRoom(): String? {
+        val state = _state.value
+        val room = state.room ?: return null
+        if (!room.automixEnabled || room.transitionMode != "automix") return null
+        val selfId = state.userId ?: return null
+        return room.id.takeIf { room.users.size <= 1 || room.users.all { it.id >= selfId } }
     }
 
     private fun predictNextTrack(): Track? {
@@ -1159,7 +1176,17 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun requestPlatformStatus() {
-        socket.emit(Events.AUTH_GET_STATUS)
+        val sent = socket.emit(Events.AUTH_GET_STATUS)
+        if (!sent || _state.value.room != null || _state.value.platformHub.statusLoaded) return
+        platformStatusProbeJob?.cancel()
+        platformStatusProbeJob = viewModelScope.launch {
+            delay(3_000)
+            val hub = _state.value.platformHub
+            // Older servers ignore status requests made outside a room.
+            if (_state.value.room == null && !hub.statusLoaded) {
+                _state.value = _state.value.copy(platformHub = hub.copy(roomRequired = true))
+            }
+        }
     }
 
     fun requestQrLogin(platform: String) {
@@ -1669,6 +1696,11 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         val moved = reordered.removeAt(from)
         reordered.add(to, moved)
         emitQueueOrder(reordered, "已调整《${track.title}》的位置")
+    }
+
+    fun reorderQueue(queue: List<Track>) {
+        if (!canControl()) return
+        emitQueueOrder(queue, "已调整队列顺序")
     }
 
     fun pinTrack(track: Track) {
@@ -2207,6 +2239,8 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                         roamingSource = value.optString("roamingSource", it.roamingSource),
                         roamingMode = value.optString("roamingMode", it.roamingMode),
                         audioQuality = value.audioQuality("audioQuality", it.audioQuality),
+                        automixEnabled = value.optBoolean("automixEnabled", it.automixEnabled),
+                        transitionMode = value.optString("transitionMode", it.transitionMode),
                     )
                 }
             }
@@ -2352,7 +2386,10 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     AppLogger.info("Sync", "skip duplicate join PLAYER_PLAY track=${track.id}")
                     recoveredTrackId = null
                 } else {
-                    loadTrack(track, playState, value.optJSONObject("automix")?.toAutomixTransition())
+                    // Bending the outgoing tempo is local; with others listening every device has to keep one speed.
+                    val solo = (_state.value.room?.users?.sumOf { it.clients.size.coerceAtLeast(1) } ?: 0) <= 1
+                    val transition = value.optJSONObject("automix")?.toAutomixTransition()
+                    loadTrack(track, playState, if (solo) transition else transition?.copy(stretch = 1.0))
                 }
             }
             Events.PLAYER_TRACK_METADATA_UPDATED -> {
@@ -2590,8 +2627,9 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             Events.AUTH_MY_STATUS -> {
                 val array = data as? JSONArray ?: JSONArray()
                 val myAuth = List(array.length()) { array.getJSONObject(it).toMyPlatformAuth() }
+                platformStatusProbeJob?.cancel()
                 _state.value = _state.value.copy(
-                    platformHub = _state.value.platformHub.copy(myAuth = myAuth, statusLoaded = true),
+                    platformHub = _state.value.platformHub.copy(myAuth = myAuth, statusLoaded = true, roomRequired = false),
                 )
                 myAuth.filter { it.loggedIn }.forEach { auth ->
                     if (
@@ -3130,7 +3168,15 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private fun updateRoom(transform: (io.github.yueby.musictogether.model.RoomState) -> io.github.yueby.musictogether.model.RoomState) {
         val room = _state.value.room ?: return
         _state.value = _state.value.copy(room = transform(room))
+        // Automix switched on, or this device became the one that analyses: start on the playing song now.
+        val analysisRoom = automixAnalysisRoom()
+        if (analysisRoom != lastAnalysisRoom) {
+            lastAnalysisRoom = analysisRoom
+            if (analysisRoom != null) mediaCache.onSettingsChanged()
+        }
     }
+
+    private var lastAnalysisRoom: String? = null
 
     private fun resolveRoomAvatarUrls(room: io.github.yueby.musictogether.model.RoomState) = room.copy(
         users = room.users.map(::resolveUserAvatarUrl),

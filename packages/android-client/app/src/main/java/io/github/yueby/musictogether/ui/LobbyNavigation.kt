@@ -47,7 +47,6 @@ internal fun floatingNavigationBottomPadding(navigationBarInset: Dp): Dp =
 internal fun bottomDockContentHeight(
     floating: Boolean,
     hasAccessory: Boolean,
-    sideBySideAccessory: Boolean = false,
     navigationBarInset: Dp = 0.dp,
     scaffoldBottomInset: Dp = 0.dp,
 ): Dp {
@@ -56,7 +55,7 @@ internal fun bottomDockContentHeight(
     } else {
         LobbyNavigationDefaults.StandardHeight + scaffoldBottomInset
     }
-    return navigationHeight + if (hasAccessory && !sideBySideAccessory) {
+    return navigationHeight + if (hasAccessory) {
         LobbyNavigationDefaults.AccessoryHeight + LobbyNavigationDefaults.AccessorySpacing
     } else {
         0.dp
@@ -69,7 +68,6 @@ internal fun LobbyBottomNavigation(
     onTabSelected: (LobbyTab) -> Unit,
     modifier: Modifier = Modifier,
     blurBackdrop: LayerBackdrop? = null,
-    compact: Boolean = false,
 ) {
     val tabs = remember { LobbyTab.entries.toList() }
     when (LocalBottomBarStyle.current) {
@@ -103,13 +101,12 @@ internal fun LobbyBottomNavigation(
                 onItemClick = { index -> hapticTabCallbacks.getOrNull(index)?.invoke() },
                 backdrop = blurBackdrop,
                 isBlurActive = LocalGlassBottomBarEnabled.current && blurBackdrop != null,
-                compact = compact,
             )
         }
     }
 }
 
-private val LobbyTab.icon: ImageVector
+internal val LobbyTab.icon: ImageVector
     get() = when (this) {
         LobbyTab.Together -> Lucide.Users
         LobbyTab.Discover -> Lucide.Compass
@@ -117,7 +114,7 @@ private val LobbyTab.icon: ImageVector
         LobbyTab.Me -> Lucide.User
     }
 
-private val LobbyTab.label: String
+internal val LobbyTab.label: String
     get() = when (this) {
         LobbyTab.Together -> "一起听"
         LobbyTab.Discover -> "发现"

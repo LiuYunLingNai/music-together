@@ -10,14 +10,6 @@ class LobbyNavigationLayoutTest {
         assertEquals(100.dp, bottomDockContentHeight(floating = true, hasAccessory = false))
         assertEquals(172.dp, bottomDockContentHeight(floating = true, hasAccessory = true))
         assertEquals(
-            100.dp,
-            bottomDockContentHeight(
-                floating = true,
-                hasAccessory = true,
-                sideBySideAccessory = true,
-            ),
-        )
-        assertEquals(
             96.dp,
             bottomDockContentHeight(
                 floating = true,

@@ -15,6 +15,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
@@ -53,10 +54,36 @@ private class LoudnessStore(context: Context) {
     }
 }
 
+/** Track profiles measured on this device, so a song is analysed once however many rooms it is played in. */
+private class ProfileStore(context: Context) {
+    private val directory = File(context.cacheDir, "track-profile")
+
+    fun get(key: String): JSONObject? = runCatching {
+        File(directory, key).takeIf { it.isFile }?.let { JSONObject(it.readText()) }
+            ?.takeIf { it.optInt("version") == TrackProfileBuilder.TRACK_PROFILE_VERSION }
+    }.getOrNull()
+
+    fun put(key: String, profile: JSONObject) {
+        directory.mkdirs()
+        File(directory, key).writeText(profile.toString())
+        directory.listFiles()?.sortedByDescending { it.lastModified() }?.drop(MAX_ENTRIES)?.forEach { it.delete() }
+    }
+
+    fun clear() {
+        directory.listFiles()?.forEach { it.delete() }
+    }
+
+    private companion object {
+        const val MAX_ENTRIES = 300
+    }
+}
+
 /**
  * Fetches the song that will come next into the shared playback cache while the current one plays, and keeps the
- * loudness-balance gain in step with each song's measured loudness. Analysis reads the same cache the player
- * fills, so a song is downloaded once.
+ * loudness-balance gain in step with each song's measured loudness. When the room mixes automatically and this
+ * device is the one chosen to analyse, it also measures each song's profile and reports it to the server, which
+ * plans the transitions from it. Analysis reads the same cache the player fills, so a song is downloaded once
+ * and decoded once.
  */
 internal class MediaCacheCoordinator(
     private val context: Context,
@@ -65,8 +92,13 @@ internal class MediaCacheCoordinator(
     private val quality: () -> String,
     private val nextTrack: () -> Track?,
     private val resolve: suspend (Track) -> PlaybackTarget?,
+    /** The room's id while it wants track profiles from this device, null otherwise. */
+    private val automixRoom: () -> String?,
+    private val reportProfile: (trackId: String, profile: JSONObject) -> Boolean,
 ) {
     private val loudnessStore = LoudnessStore(context)
+    private val profileStore = ProfileStore(context)
+    private val reported = HashSet<String>()
     private val preferences = context.getSharedPreferences("loudness_balance", Context.MODE_PRIVATE)
     private var job: Job? = null
     private var currentTrack: Track? = null
@@ -79,6 +111,7 @@ internal class MediaCacheCoordinator(
     fun clear() {
         PlaybackCache.clear(context)
         loudnessStore.clear()
+        profileStore.clear()
     }
 
     fun keyFor(track: Track): String = trackCacheKey(track, quality())
@@ -109,8 +142,10 @@ internal class MediaCacheCoordinator(
 
     private suspend fun background(track: Track) {
         try {
-            if (settings().replayGain != ReplayGainMode.Off) analyse(track)?.let { publish(track, it) }
-            if (settings().preloadNext) {
+            if (settings().replayGain != ReplayGainMode.Off || automixRoom() != null) {
+                analyse(track)?.let { publish(track, it) }
+            }
+            if (settings().preloadNext || automixRoom() != null) {
                 delay(PRELOAD_DELAY_MS)
                 nextTrack()?.takeIf { it.id != track.id }?.let { analyse(it) }
             }
@@ -120,25 +155,60 @@ internal class MediaCacheCoordinator(
         }
     }
 
-    /** Makes sure the song is cached and measured; returns its loudness when the balance needs it. */
+    /**
+     * Makes sure the song is cached, measured and (when the room asks) profiled, decoding it at most once;
+     * returns its loudness when the balance needs it.
+     */
     private suspend fun analyse(track: Track): LoudnessInfo? {
         val current = settings()
         if (!current.enabled) return null
         val key = keyFor(track)
-        val measured = loudnessStore.get(key)
+        val reportKey = automixRoom()?.let { "$it|${track.id}" }?.takeIf { it !in reported }
+        var wantProfile = reportKey != null
+        if (reportKey != null) {
+            profileStore.get(key)?.let { cached ->
+                if (reportProfile(track.id, cached)) reported += reportKey
+                wantProfile = false
+            }
+        }
+        var loudness = loudnessStore.get(key)
+        val wantLoudness = current.replayGain != ReplayGainMode.Off && loudness == null
         var uri: String? = null
         if (!PlaybackCache.isComplete(context, key)) {
             if (isMetered()) return null
             val target = resolve(track) ?: return null
             uri = download(key, listOfNotNull(target.primaryUrl, target.fallbackUrl)) ?: return null
         }
-        if (current.replayGain == ReplayGainMode.Off) return null
-        if (measured != null) return measured
-        val source = uri ?: resolve(track)?.primaryUrl ?: return null
-        return withContext(Dispatchers.Default) {
-            val active = coroutineContext[Job]
-            LoudnessAnalyzer.measure(PlaybackCache.mediaDataSource(context, source, key)) { active?.isActive != false }
-        }?.also { loudnessStore.put(key, it) }
+        if (wantLoudness || wantProfile) {
+            val source = uri ?: resolve(track)?.primaryUrl ?: return null
+            val loudnessSink = if (wantLoudness) LoudnessSink() else null
+            val profileSink = if (wantProfile) ProfileSink(track.duration) else null
+            val startedAt = System.currentTimeMillis()
+            val decoded = withContext(Dispatchers.Default) {
+                val active = coroutineContext[Job]
+                PcmDecoder.decode(
+                    PlaybackCache.mediaDataSource(context, source, key),
+                    { active?.isActive != false },
+                    listOfNotNull(loudnessSink, profileSink),
+                ) to profileSink?.takeIf { active?.isActive != false }
+            }
+            if (decoded.first) {
+                loudnessSink?.result()?.let {
+                    loudnessStore.put(key, it)
+                    loudness = it
+                }
+                val profile = withContext(Dispatchers.Default) { decoded.second?.result() }
+                if (profile != null && reportKey != null) {
+                    profileStore.put(key, profile)
+                    if (reportProfile(track.id, profile)) reported += reportKey
+                    AppLogger.info(
+                        "Automix",
+                        "profile track=${track.id} bpm=${profile.opt("bpm")} ms=${System.currentTimeMillis() - startedAt}",
+                    )
+                }
+            }
+        }
+        return loudness.takeIf { current.replayGain != ReplayGainMode.Off }
     }
 
     /** Returns the URL that worked. */

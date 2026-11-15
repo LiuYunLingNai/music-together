@@ -3,6 +3,7 @@ package io.github.yueby.musictogether.player
 import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
+import android.os.SystemClock
 import androidx.annotation.OptIn
 import androidx.compose.runtime.Immutable
 import androidx.media3.common.util.UnstableApi
@@ -39,7 +40,11 @@ data class PlayerUiState(
     val bufferedPercent: Int = 0,
     val error: String? = null,
     val connectedToMediaSession: Boolean = false,
+    val transitionCue: TransitionCue? = null,
 )
+
+/** A blend in progress, for the progress bar hint (web `transitionCue`). */
+data class TransitionCue(val seconds: Double, val periodSec: Double?)
 
 class NativePlayer(
     context: Context,
@@ -55,7 +60,7 @@ class NativePlayer(
         const val HARD_SEEK_FADE_MS = 60L
         const val FADE_STEPS = 4
         const val FADE_FRAME_MS = 25L
-        const val TAIL_START_LATENCY_MS = 150L
+        const val MIN_BEND_OVERLAP_MS = 800L
     }
 
     private data class PendingLoad(
@@ -86,7 +91,7 @@ class NativePlayer(
     private var hardSeekRestoreVolume: Float? = null
     private var correctionGeneration = 0L
     private var localHold = false
-    private var pendingTransition: Pair<AutomixTransition, Float>? = null
+    private var pendingTransition: AutomixTransition? = null
     private var transitionJob: Job? = null
 
     init {
@@ -133,6 +138,13 @@ class NativePlayer(
         }
 
         override fun onPlayerError(error: PlaybackException) {
+            if (error.errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED &&
+                PlaybackCommandBridge.decks?.repairAudioSessions() == true
+            ) {
+                AppLogger.info("Player", "audio session repaired after track init failure")
+                player?.prepare()
+                return
+            }
             if (retryWithFallback(error)) return
             val item = player?.currentMediaItem
             val remote = item?.localConfiguration?.uri?.scheme in setOf("http", "https")
@@ -203,19 +215,14 @@ class NativePlayer(
                     .setMediaMetadata(metadata)
                     .build()
             cancelTransition()
+            PlaybackCommandBridge.decks?.repairAudioSessions()
             val outgoing = controller.currentMediaItem
-            val blend = transition?.takeIf {
-                controller.isPlaying && outgoing?.mediaId == it.fromTrackId && outgoing.localConfiguration != null
-            }
-            if (blend != null && outgoing != null) {
-                val gain = PlaybackCommandBridge.replayGain.linear.coerceAtMost(1f)
-                PlaybackCommandBridge.tailDeck?.start(
-                    uri = outgoing.localConfiguration!!.uri.toString(),
-                    cacheKey = outgoing.localConfiguration!!.customCacheKey,
-                    positionMs = controller.currentPosition + TAIL_START_LATENCY_MS,
-                    volume = gain,
-                )
-                pendingTransition = blend to gain
+            val blend = transition?.takeIf { controller.isPlaying && outgoing?.mediaId == it.fromTrackId }
+            val decks = PlaybackCommandBridge.decks
+            if (blend != null && decks != null) {
+                // The outgoing song keeps playing where it is; everything below lands on the other deck.
+                decks.handOver()
+                pendingTransition = blend
                 controller.volume = 0f
                 transitionJob = scope.launch {
                     delay(blend.overlapMs + 20_000L)
@@ -233,26 +240,46 @@ class NativePlayer(
         transitionJob?.cancel()
         transitionJob = null
         pendingTransition = null
-        PlaybackCommandBridge.tailDeck?.stop()
+        PlaybackCommandBridge.decks?.stopTail()
         player?.volume = 1f
+        clearTransitionCue()
     }
 
-    /** Equal-power blend: the outgoing tail fades down while the incoming song fades up on the main player. */
+    private fun clearTransitionCue() {
+        if (_state.value.transitionCue != null) _state.value = _state.value.copy(transitionCue = null)
+    }
+
+    /** Runs the blend the server planned: equal-power gains, the low end changing hands, and the tempo bend. */
     private fun startTransitionFade() {
-        val (blend, tailGain) = pendingTransition ?: return
+        val blend = pendingTransition ?: return
+        val decks = PlaybackCommandBridge.decks ?: return cancelTransition()
         pendingTransition = null
         transitionJob?.cancel()
         val outTrim = Math.pow(10.0, -blend.trimDb / 20).toFloat()
+        if (blend.overlapMs >= MIN_BEND_OVERLAP_MS && kotlin.math.abs(blend.stretch - 1) > 0.001) {
+            decks.setTailSpeed(blend.stretch.toFloat().coerceIn(0.8f, 1.25f))
+        }
+        _state.value = _state.value.copy(
+            transitionCue = TransitionCue(blend.overlapMs / 1000.0, blend.bpm?.let { 60.0 / it }),
+        )
         transitionJob = scope.launch {
-            val steps = (blend.overlapMs / FADE_FRAME_MS).toInt().coerceAtLeast(1)
-            repeat(steps) { step ->
-                val t = (step + 1f) / steps
-                player?.volume = kotlin.math.sin(t * Math.PI / 2).toFloat()
-                PlaybackCommandBridge.tailDeck?.setVolume(kotlin.math.cos(t * Math.PI / 2).toFloat() * tailGain * outTrim)
+            val startedAt = SystemClock.elapsedRealtime()
+            while (true) {
+                val progress = ((SystemClock.elapsedRealtime() - startedAt).toDouble() / blend.overlapMs).coerceIn(0.0, 1.0)
+                val (outGain, inGain) = AutomixCurves.gains(progress, blend.crossover, blend.together)
+                val (outBands, inBands) = if (blend.shapeBands) {
+                    AutomixCurves.bands(progress, blend.crossover, blend.sweepOut, blend.tiltMidDb, blend.tiltHighDb)
+                } else {
+                    AutomixCurves.FLAT to AutomixCurves.FLAT
+                }
+                player?.volume = inGain
+                decks.blend(outGain * outTrim, outBands, inBands)
+                if (progress >= 1.0) break
                 delay(FADE_FRAME_MS)
             }
-            PlaybackCommandBridge.tailDeck?.stop()
+            decks.stopTail()
             player?.volume = 1f
+            clearTransitionCue()
             transitionJob = null
         }
     }

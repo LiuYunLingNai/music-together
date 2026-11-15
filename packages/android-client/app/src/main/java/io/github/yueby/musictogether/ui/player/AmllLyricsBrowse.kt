@@ -14,12 +14,14 @@ internal fun rememberAmllPreviewGroupIndex(
     manualBrowseActive: Boolean,
     alignPosition: Float,
     alignToTop: Boolean,
+    overscanPx: Int,
 ): State<Int> = remember(
     listItems,
     listState,
     manualBrowseActive,
     alignPosition,
     alignToTop,
+    overscanPx,
 ) {
     derivedStateOf {
         if (!manualBrowseActive) {
@@ -33,7 +35,7 @@ internal fun rememberAmllPreviewGroupIndex(
                     val distance = amllFocusDistance(
                         itemOffset = visibleItem.offset,
                         itemSize = visibleItem.size,
-                        viewportHeight = layoutInfo.viewportSize.height,
+                        viewportHeight = layoutInfo.viewportSize.height - overscanPx,
                         alignPosition = alignPosition,
                         alignToTop = alignToTop,
                     )

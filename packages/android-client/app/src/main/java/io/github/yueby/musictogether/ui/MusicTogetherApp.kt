@@ -1,5 +1,6 @@
 package io.github.yueby.musictogether.ui
 
+import io.github.yueby.musictogether.lyrics.lyricOffsetKey
 import android.widget.Toast
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -99,7 +100,7 @@ fun MusicTogetherApp(viewModel: MusicTogetherViewModel) {
                         onBack = { if (backStack.lastOrNull() == route) navigator.pop() },
                     )
                 }
-                entry<AppRoute.RoomInfo> {
+                entry<AppRoute.RoomInfo>(swipeDismiss = NavSwipeDirection.LeftToRight) {
                     AppPage("房间与同步", onBack = navigator::pop) { RoomSettingsPane(state, viewModel) }
                 }
                 entry<AppRoute.Members>(swipeDismiss = NavSwipeDirection.LeftToRight) {
@@ -120,7 +121,7 @@ fun MusicTogetherApp(viewModel: MusicTogetherViewModel) {
                 }
                 entry<AppRoute.Queue>(swipeDismiss = NavSwipeDirection.LeftToRight) {
                     state.room?.let { room ->
-                        AppPage("播放队列", onBack = navigator::pop, subtitle = "${room.queue.size} 首", actions = { QueueClearAction(room, viewModel) }) {
+                        AppPage("播放队列", onBack = navigator::pop, subtitle = "${room.queue.size} 首" + if (viewModel.canControl()) " · 长按拖动排序" else "", actions = { QueueClearAction(room, viewModel) }) {
                             QueuePane(room, viewModel, onDownloadCurrent = { navigator.open(AppRoute.Download) })
                         }
                     }
@@ -135,37 +136,37 @@ fun MusicTogetherApp(viewModel: MusicTogetherViewModel) {
                 entry<AppRoute.HotSongs>(swipeDismiss = NavSwipeDirection.LeftToRight) {
                     AppPage("热歌榜", onBack = navigator::pop, actions = { HotSongsRefreshAction(viewModel) }) { HotSongsPane(state, viewModel) }
                 }
-                entry<AppRoute.Download> {
+                entry<AppRoute.Download>(swipeDismiss = NavSwipeDirection.LeftToRight) {
                     AppPage("下载当前歌曲", onBack = navigator::pop) { MusicDownloadPane(state, viewModel) }
                 }
-                entry<AppRoute.CreateRoom> {
+                entry<AppRoute.CreateRoom>(swipeDismiss = NavSwipeDirection.LeftToRight) {
                     AppPage("创建房间", onBack = navigator::pop) { CreateRoomForm(state, viewModel) }
                 }
-                entry<AppRoute.JoinRoom> {
+                entry<AppRoute.JoinRoom>(swipeDismiss = NavSwipeDirection.LeftToRight) {
                     AppPage("加入房间", onBack = navigator::pop) { JoinRoomForm(state, viewModel) }
                 }
-                entry<AppRoute.PlatformAccounts> {
+                entry<AppRoute.PlatformAccounts>(swipeDismiss = NavSwipeDirection.LeftToRight) {
                     AppPage("音乐平台账号", onBack = navigator::pop) { PlatformPane(state, viewModel) }
                 }
-                entry<AppRoute.Account> {
+                entry<AppRoute.Account>(swipeDismiss = NavSwipeDirection.LeftToRight) {
                     AppPage("账号与安全", onBack = navigator::pop) { AccountSettingsPane(state, viewModel) }
                 }
-                entry<AppRoute.Server> {
+                entry<AppRoute.Server>(swipeDismiss = NavSwipeDirection.LeftToRight) {
                     AppPage("服务器连接", onBack = navigator::pop) { ConnectionSettingsPane(state, viewModel) }
                 }
-                entry<AppRoute.Appearance> {
+                entry<AppRoute.Appearance>(swipeDismiss = NavSwipeDirection.LeftToRight) {
                     AppPage("外观与主题", onBack = navigator::pop) { AppearanceSettingsPage(state, viewModel) }
                 }
-                entry<AppRoute.PlayerDisplay> {
+                entry<AppRoute.PlayerDisplay>(swipeDismiss = NavSwipeDirection.LeftToRight) {
                     AppPage("歌词与播放器", onBack = navigator::pop) { PlayerSettingsPage(state.playerDisplaySettings, viewModel) }
                 }
-                entry<AppRoute.General> {
+                entry<AppRoute.General>(swipeDismiss = NavSwipeDirection.LeftToRight) {
                     AppPage("通用", onBack = navigator::pop) { GeneralSettingsPage(state, viewModel) }
                 }
-                entry<AppRoute.Updates> {
+                entry<AppRoute.Updates>(swipeDismiss = NavSwipeDirection.LeftToRight) {
                     AppPage("应用更新", onBack = navigator::pop) { AppUpdatePane(state, viewModel) }
                 }
-                entry<AppRoute.Admin> {
+                entry<AppRoute.Admin>(swipeDismiss = NavSwipeDirection.LeftToRight) {
                     val isAdmin = state.accountProfile?.role == "admin"
                     LaunchedEffect(isAdmin) { if (isAdmin) viewModel.loadAdminData() else navigator.pop() }
                     AppPage("服务器管理", onBack = navigator::pop) { AdminManagementSection(state, viewModel) }
@@ -218,15 +219,17 @@ private fun AppShell(
                     shellOnTop = shellOnTop,
                     onOpenPlayer = room?.let { { playerMinimized = false } },
                     bottomAccessory = room?.takeIf { playerMinimized }?.let { activeRoom ->
-                        { blurBackdrop, compact ->
+                        { blurBackdrop ->
+                            val miniTrack = player.track ?: activeRoom.currentTrack
                             MinimizedPlayerBar(
-                                track = player.track ?: activeRoom.currentTrack,
+                                track = miniTrack,
                                 player = player,
                                 viewModel = viewModel,
                                 onExpand = { playerMinimized = false },
                                 onOpenQueue = { navigator.open(AppRoute.Queue) },
                                 blurBackdrop = blurBackdrop,
-                                compact = compact,
+                                lyrics = state.lyrics,
+                                lyricOffsetMs = lyricOffsetKey(miniTrack)?.let { state.lyricOffsets[it] } ?: 0,
                             )
                         }
                     },

@@ -2,7 +2,7 @@ package io.github.yueby.musictogether.ui.player
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
-import androidx.compose.animation.core.spring
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.lazy.LazyListState
 import io.github.yueby.musictogether.lyrics.AmllLyricGroup
@@ -15,8 +15,8 @@ internal const val AmllPortraitAlignPosition = 0.10f
 internal const val AmllTopFadeEnd = 0.10f
 internal const val AmllBottomFadeStart = 0.91f
 internal const val AmllMainFontScale = 0.9f
-internal const val AmllTranslationFontScale = 0.75f
-internal const val AmllRomanFontScale = 0.75f
+internal const val AmllTranslationFontScale = 0.5f
+internal const val AmllRomanFontScale = 0.5f
 internal const val AmllBackgroundFontScale = 0.7f
 internal const val AmllInactiveScale = 0.97f
 internal const val AmllDuetInsetFraction = 0.15f
@@ -51,39 +51,47 @@ internal suspend fun LazyListState.scrollFocusedItemToAdaptiveAnchor(
     scrollMotion: Animatable<Float, AnimationVector1D>,
     stiffness: Float = AmllSpringStiffness,
     dampingRatio: Float = AmllPositionDampingRatio,
+    overscanPx: Int = 0,
+    cascade: AmllLineCascade? = null,
+    stagger: Boolean = true,
 ): Boolean {
     val focusedItem = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
         ?: return false
     val distance = amllFocusDistance(
+        // Item offsets start after the top content padding, which already holds the overscan.
         itemOffset = focusedItem.offset,
         itemSize = focusedItem.size,
-        viewportHeight = layoutInfo.viewportSize.height,
+        viewportHeight = layoutInfo.viewportSize.height - overscanPx,
         alignPosition = alignPosition,
         alignToTop = alignToTop,
     )
     if (abs(distance) < 0.5f) return true
 
-    if (animate) {
-        val startValue = scrollMotion.value
-        var previousValue = startValue
-        scrollMotion.animateTo(
-            targetValue = startValue + distance,
-            animationSpec = spring(
-                dampingRatio = dampingRatio,
-                stiffness = stiffness,
-            ),
-        ) {
-            val frameDelta = value - previousValue
-            if (abs(frameDelta) >= 0.01f) {
-                this@scrollFocusedItemToAdaptiveAnchor.dispatchRawDelta(frameDelta)
-            }
-            previousValue = value
-        }
+    if (animate && cascade != null) {
+        // The list lands at once; each line then springs the same distance back in on its own delay.
+        // AMLL drops the stagger for a seek: every line then travels together on the slow spring.
+        val firstOnScreen = if (stagger) firstAmllLineOnScreen(overscanPx, distance) ?: index else Int.MAX_VALUE
+        val now = withFrameNanos { it }
+        val consumed = dispatchRawDelta(distance)
+        cascade.push(consumed, now, firstOnScreen, index, stiffness, dampingRatio)
+        scrollMotion.snapTo(scrollMotion.value + consumed)
     } else {
         val consumed = scrollBy(distance)
         scrollMotion.snapTo(scrollMotion.value + consumed)
     }
     return true
+}
+
+/** First line whose bottom edge is still inside the panel once the list has moved by [shift]. */
+internal fun LazyListState.firstAmllLineOnScreen(overscanPx: Int, shift: Float = 0f): Int? =
+    layoutInfo.visibleItemsInfo
+        .firstOrNull { it.offset + it.size + layoutInfo.beforeContentPadding - overscanPx - shift >= 0f }
+        ?.index
+
+/** AMLL `resolveBlurLevel`: lines blur more the further they are from the focused one, capped at 5px. */
+internal fun amllBlurLevel(index: Int, focusedIndex: Int): Float {
+    val distance = if (index < focusedIndex) focusedIndex - index + 1 else index - focusedIndex
+    return minOf(5f, (1 + distance) * 0.8f)
 }
 
 internal fun amllFocusDistance(

@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
@@ -55,7 +54,6 @@ internal fun LocalMusicPane(
     Column(Modifier.fillMaxSize()) {
         player.takeIf { it.localPlayback }?.let { localPlayer ->
             LocalPlaybackBar(player = localPlayer, viewModel = viewModel)
-            HorizontalDivider()
         }
         if (library.tracks.isEmpty() && library.downloads.isEmpty()) {
             AppEmptyState(
@@ -80,7 +78,6 @@ internal fun LocalMusicPane(
                     items(library.downloads.entries.toList(), key = { it.key }) { (_, download) ->
                         download.track?.let { track ->
                             DownloadingTrackRow(track = track, progressPercent = download.progressPercent)
-                            HorizontalDivider()
                         }
                     }
                 }
@@ -90,7 +87,6 @@ internal fun LocalMusicPane(
                         onPlay = { viewModel.playDownloadedTrack(downloaded.track) },
                         onDelete = { viewModel.removeDownloadedTrack(downloaded.track) },
                     )
-                    HorizontalDivider()
                 }
             }
         }

@@ -269,6 +269,9 @@ internal fun PlayerSettingsPage(settings: PlayerDisplaySettings, viewModel: Musi
             SettingSwitch("换歌过渡", "换歌时封面与歌名做约 0.5 秒的交叉淡化", Lucide.Sparkles, settings.songHandoff) { v ->
                 update { it.copy(songHandoff = v) }
             }
+            SettingSwitch("过渡提示", "两首歌混合期间进度条随节拍呼吸，并显示「过渡」", Lucide.Sparkles, settings.transitionCue) { v ->
+                update { it.copy(transitionCue = v) }
+            }
             SettingSwitch("歌词自动对齐封面", "横屏时当前歌词行对齐封面中心", Lucide.ChevronsUpDown, settings.lyricAutoAlign) { v ->
                 update { it.copy(lyricAutoAlign = v) }
             }

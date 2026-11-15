@@ -126,7 +126,21 @@ internal fun JSONObject.toAutomixTransition(): AutomixTransition? {
     val overlapMs = optLong("overlapMs", 0L)
     val fromTrackId = stringOrNull("fromTrackId")
     if (overlapMs <= 0L || fromTrackId == null) return null
-    return AutomixTransition(fromTrackId, overlapMs, optDouble("trimDb", 0.0).takeIf { it.isFinite() } ?: 0.0)
+    fun number(name: String, fallback: Double) = optDouble(name, fallback).takeIf { it.isFinite() } ?: fallback
+    val tilt = optJSONArray("tiltDb")
+    return AutomixTransition(
+        fromTrackId = fromTrackId,
+        overlapMs = overlapMs,
+        trimDb = number("trimDb", 0.0),
+        stretch = number("stretch", 1.0),
+        crossover = number("crossover", 0.5),
+        together = number("together", 0.0),
+        shapeBands = optBoolean("shapeBands", false),
+        sweepOut = optBoolean("sweepOut", false),
+        tiltMidDb = tilt?.optDouble(0, 0.0)?.takeIf { it.isFinite() } ?: 0.0,
+        tiltHighDb = tilt?.optDouble(1, 0.0)?.takeIf { it.isFinite() } ?: 0.0,
+        bpm = optDouble("bpm").takeIf { it.isFinite() && it > 0 },
+    )
 }
 
 internal fun JSONObject.toUser(): User = User(
@@ -187,6 +201,8 @@ internal fun JSONObject.toRoomState(): RoomState {
         roamingEnabled = optBoolean("roamingEnabled", false),
         roamingSource = optString("roamingSource", "netease"),
         roamingMode = optString("roamingMode", "DEFAULT"),
+        automixEnabled = optBoolean("automixEnabled", false),
+        transitionMode = optString("transitionMode", "automix"),
         audioQuality = audioQuality("audioQuality"),
         users = users,
         members = membersJson?.let { value ->

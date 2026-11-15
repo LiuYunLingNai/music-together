@@ -26,6 +26,10 @@ import io.github.yueby.musictogether.lyrics.AmllEmphasisProfile
 import io.github.yueby.musictogether.lyrics.amllEmphasisEasing
 import io.github.yueby.musictogether.lyrics.amllEmphasisProfile
 import io.github.yueby.musictogether.lyrics.amllReleasedEffectProgress
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import kotlin.math.roundToInt
 import kotlin.math.PI
 import kotlin.math.sin
 
@@ -33,7 +37,7 @@ import kotlin.math.sin
 internal fun AmllAnimatedWordLayer(
     text: String,
     graphemes: List<String>,
-    positionMs: Float,
+    positionMs: () -> Float,
     fontSize: Float,
     fontWeight: FontWeight,
     color: Color,
@@ -44,7 +48,7 @@ internal fun AmllAnimatedWordLayer(
     glyphCount: Int,
     drawGlow: Boolean,
     isBackground: Boolean,
-    effectReleaseProgress: Float,
+    effectReleaseProgress: () -> Float,
     modifier: Modifier = Modifier,
 ) {
     if (emphasize) {
@@ -70,7 +74,7 @@ internal fun AmllAnimatedWordLayer(
             modifier = modifier,
             color = color,
             fontSize = fontSize.sp,
-            lineHeight = (fontSize * 1.25f).sp,
+            lineHeight = (fontSize * 1.2f).sp,
             fontWeight = fontWeight,
             maxLines = 1,
         )
@@ -80,7 +84,7 @@ internal fun AmllAnimatedWordLayer(
 @Composable
 internal fun AmllAnimatedGlyphRow(
     graphemes: List<String>,
-    positionMs: Float,
+    positionMs: () -> Float,
     fontSize: Float,
     fontWeight: FontWeight,
     color: Color,
@@ -91,7 +95,7 @@ internal fun AmllAnimatedGlyphRow(
     glyphCount: Int,
     drawGlow: Boolean,
     isBackground: Boolean,
-    effectReleaseProgress: Float,
+    effectReleaseProgress: () -> Float,
     modifier: Modifier = Modifier,
 ) {
     Row(modifier = modifier) {
@@ -119,7 +123,7 @@ internal fun AmllAnimatedGlyphRow(
 @Composable
 internal fun AmllAnimatedCharacter(
     grapheme: String,
-    positionMs: Float,
+    positionMs: () -> Float,
     fontSize: Float,
     fontWeight: FontWeight,
     color: Color,
@@ -130,44 +134,35 @@ internal fun AmllAnimatedCharacter(
     glyphCount: Int,
     drawGlow: Boolean,
     isBackground: Boolean,
-    effectReleaseProgress: Float,
+    effectReleaseProgress: () -> Float,
     modifier: Modifier = Modifier,
 ) {
     val expensiveEffectsEnabled = LocalAmllExpensiveEffectsEnabled.current
     val staggerMs = profile.durationMs.toFloat() / 2.5f / glyphCount
     val entryTimeMs = chunkStartTimeMs + staggerMs * glyphIndex
-    val emphasisProgress =
-        ((positionMs - entryTimeMs) / profile.durationMs).coerceIn(0f, 1f)
-    val emphasis = if (emphasize) amllEmphasisEasing(emphasisProgress) else 0f
-    val releasedEmphasis = amllReleasedEffectProgress(
-        effectProgress = emphasis,
-        releaseProgress = effectReleaseProgress,
-    )
-    val floatStartMs = entryTimeMs - 400f
-    val floatProgress =
-        ((positionMs - floatStartMs) / (profile.durationMs * 1.4f)).coerceIn(0f, 1f)
-    val floatLift = if (emphasize) {
-        sin(floatProgress * PI).toFloat() * if (isBackground) 2f else 1f
-    } else {
-        0f
+    val durationMs = profile.durationMs.toFloat()
+    val emphasisAt: (Float) -> Float = { at ->
+        if (emphasize) {
+            amllReleasedEffectProgress(
+                effectProgress = amllEmphasisEasing(((at - entryTimeMs) / durationMs).coerceIn(0f, 1f)),
+                releaseProgress = effectReleaseProgress(),
+            )
+        } else {
+            0f
+        }
     }
     val density = LocalDensity.current
     val fontSizePx = with(density) { fontSize.sp.toPx() }
     val glyphEffectHeadroom = with(density) { fontSizePx.toDp() }
     val glyphEffectHeadroomPx = with(density) { glyphEffectHeadroom.roundToPx() }
     val centerOffset = glyphCount / 2f - glyphIndex
-    val glowLevel = (releasedEmphasis * profile.blur).coerceIn(0f, 0.8f)
-    val glowRadius =
-        fontSizePx * minOf(0.3f, profile.blur * 0.3f) * releasedEmphasis
-
-    val scale = 1f + releasedEmphasis * 0.1f * profile.amount
-    val translationX =
-        -releasedEmphasis * 0.03f * profile.amount * centerOffset * fontSizePx
-    val translationY =
-        -(
-            releasedEmphasis * 0.025f * profile.amount +
-                floatLift * 0.05f * effectReleaseProgress
-            ) * fontSizePx
+    // The glow is a text shadow, which only composition can change: step it like the 32 AMLL keyframes.
+    val glowOn = drawGlow && expensiveEffectsEnabled && emphasize
+    val glowStep by remember(glowOn, entryTimeMs, durationMs, positionMs) {
+        derivedStateOf { if (glowOn) (emphasisAt(positionMs()) * 32f).roundToInt() else 0 }
+    }
+    val glowLevel = (glowStep / 32f * profile.blur).coerceIn(0f, 0.8f).div(0.6f).coerceAtMost(1f)
+    val glowRadius = if (glowStep > 0) fontSizePx * minOf(0.3f, profile.blur * 0.3f) else 0f
 
     Layout(
         modifier = modifier,
@@ -177,25 +172,13 @@ internal fun AmllAnimatedCharacter(
                 modifier = Modifier.padding(horizontal = glyphEffectHeadroom),
                 color = color,
                 fontSize = fontSize.sp,
-                lineHeight = (fontSize * 1.25f).sp,
+                lineHeight = (fontSize * 1.2f).sp,
                 fontWeight = fontWeight,
                 maxLines = 1,
                 style = TextStyle(
                     shadow = Shadow(
-                        color = Color.White.copy(
-                            alpha =
-                                if (drawGlow && expensiveEffectsEnabled) {
-                                    glowLevel
-                                } else {
-                                    0f
-                                },
-                        ),
-                        blurRadius =
-                            if (drawGlow && expensiveEffectsEnabled) {
-                                glowRadius
-                            } else {
-                                0f
-                            },
+                        color = Color.White.copy(alpha = glowLevel),
+                        blurRadius = glowRadius,
                     ),
                 ),
             )
@@ -223,10 +206,19 @@ internal fun AmllAnimatedCharacter(
             alignmentLines = mapOf(FirstBaseline to firstBaseline),
         ) {
             placeable.placeWithLayer(-glyphEffectHeadroomPx, 0) {
+                val at = positionMs()
+                val emphasis = emphasisAt(at)
+                // AMLL `generateFloatKeyframes`: a sine lift over 1.4x the duration plus a rise that stays.
+                val floatProgress =
+                    if (emphasize) ((at - entryTimeMs) / (durationMs * 1.4f)).coerceIn(0f, 1f) else 0f
+                val floatScale = if (isBackground) 2f else 1f
+                val floatLift =
+                    (sin(floatProgress * PI).toFloat() * 0.05f + floatProgress * 0.05f) * floatScale
+                val scale = 1f + emphasis * 0.1f * profile.amount
                 scaleX = scale
                 scaleY = scale
-                this.translationX = translationX
-                this.translationY = translationY
+                translationX = -emphasis * 0.03f * profile.amount * centerOffset * fontSizePx
+                translationY = -(emphasis * 0.025f * profile.amount + floatLift * effectReleaseProgress()) * fontSizePx
                 transformOrigin = TransformOrigin(
                     pivotFractionX = 0.5f,
                     pivotFractionY = amllBaselineTransformOrigin(

@@ -32,6 +32,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.yueby.musictogether.lyrics.lyricOffsetKey
@@ -48,15 +49,17 @@ internal fun MobileLyricsHero(
     player: PlayerUiState,
     onSeek: (Double) -> Unit,
     coverSlot: Modifier,
+    coverSize: Dp,
     titleModifier: Modifier = Modifier,
+    lyricsModifier: Modifier = Modifier,
 ) {
     Column(Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Box(coverSlot.size(56.dp))
+            Box(coverSlot.size(coverSize))
             SongHandoff(
                 target = PortraitTrackText(
                     trackId = track.id,
@@ -91,6 +94,7 @@ internal fun MobileLyricsHero(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
+                .then(lyricsModifier)
                 .lyricFadeMask(),
         ) {
             LyricsPanel(

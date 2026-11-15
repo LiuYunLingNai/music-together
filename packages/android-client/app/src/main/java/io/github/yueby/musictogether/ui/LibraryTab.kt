@@ -55,7 +55,7 @@ import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
-import top.yukonga.miuix.kmp.basic.TabRow
+import io.github.yueby.musictogether.ui.designsystem.AppTabRow
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
@@ -67,7 +67,7 @@ internal fun LibraryTab(state: AppState, viewModel: MusicTogetherViewModel, bott
     var tab by rememberSaveable { mutableIntStateOf(0) }
     AppTabPage(title = "媒体库", bottomPadding = bottomPadding) { padding ->
         Column(Modifier.fillMaxSize()) {
-            TabRow(
+            AppTabRow(
                 tabs = listOf("我的歌单", "下载", "平台歌单"),
                 selectedTabIndex = tab,
                 onTabSelected = { tab = it },
@@ -222,16 +222,18 @@ internal fun UserPlaylistCover(cover: String?, size: Dp) {
 private fun PlatformPlaylistsSection(state: AppState, viewModel: MusicTogetherViewModel, padding: PaddingValues) {
     val navigator = LocalAppNavigator.current
     val hub = state.platformHub
-    if (state.room == null) {
+    val connected = state.connectionStatus == ConnectionStatus.Connected
+    if (state.room == null && (!connected || hub.roomRequired)) {
         AppEmptyState(
             icon = Lucide.Users,
-            title = "加入房间后查看平台歌单",
-            summary = "音乐平台的登录凭据按房间隔离保存",
+            title = if (connected) "加入房间后查看平台歌单" else "连接服务器后查看平台歌单",
+            summary = if (connected) "当前服务器版本较旧，平台账号需要在房间内使用" else "音乐平台账号跟随你在该服务器上的身份保存",
         )
-        return
+        if (connected) return
     }
+    if (state.room == null && !connected) return
     val loggedIn = libraryPlatforms.filter { platform -> hub.myAuth.any { it.platform == platform && it.loggedIn } }
-    LaunchedEffect(Unit) { viewModel.requestPlatformStatus() }
+    LaunchedEffect(state.room?.id, connected) { if (connected) viewModel.requestPlatformStatus() }
     LaunchedEffect(loggedIn) {
         loggedIn.forEach { platform ->
             if (hub.playlists[platform].isNullOrEmpty() && platform !in hub.playlistsLoading) viewModel.fetchMyPlaylists(platform)

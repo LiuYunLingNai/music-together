@@ -1,6 +1,14 @@
 package io.github.yueby.musictogether.ui.player
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.SeekableTransitionState
+import androidx.compose.animation.core.rememberTransition
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.staticCompositionLocalOf
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -24,6 +32,26 @@ internal data class PlayerMinimizeTransitionContext(
 internal val LocalPlayerMinimizeTransition =
     compositionLocalOf<PlayerMinimizeTransitionContext?> { null }
 
+/** Lets the system back gesture scrub the minimize transition before it commits. */
+internal class PlayerMinimizeGesture(
+    private val state: SeekableTransitionState<Boolean>,
+    private val scope: CoroutineScope,
+) {
+    suspend fun preview(progress: Float) {
+        if (!state.currentState) state.seekTo(progress.coerceIn(0f, 1f) * PREVIEW_DEPTH, targetState = true)
+    }
+
+    fun cancel() {
+        scope.launch { state.animateTo(state.currentState) }
+    }
+
+    private companion object {
+        const val PREVIEW_DEPTH = 0.35f
+    }
+}
+
+internal val LocalPlayerMinimizeGesture = staticCompositionLocalOf<PlayerMinimizeGesture?> { null }
+
 @Composable
 internal fun PlayerMinimizeTransitionHost(
     roomId: String?,
@@ -33,8 +61,13 @@ internal fun PlayerMinimizeTransitionHost(
     homeContent: @Composable () -> Unit,
     playerContent: @Composable () -> Unit,
 ) {
-    AnimatedContent(
-        targetState = showHome,
+    val seekable = remember { SeekableTransitionState(showHome) }
+    val scope = rememberCoroutineScope()
+    val gesture = remember(seekable, scope) { PlayerMinimizeGesture(seekable, scope) }
+    LaunchedEffect(showHome) { seekable.animateTo(showHome) }
+    val hostTransition = rememberTransition(seekable, label = "room-minimized-player")
+    CompositionLocalProvider(LocalPlayerMinimizeGesture provides gesture) {
+    hostTransition.AnimatedContent(
         transitionSpec = {
             if (targetState) {
                 (
@@ -69,7 +102,6 @@ internal fun PlayerMinimizeTransitionHost(
             }
         },
         modifier = modifier,
-        label = "room-minimized-player-container",
     ) { homeVisible ->
         CompositionLocalProvider(
             LocalPlayerMinimizeTransition provides roomId?.let {
@@ -82,5 +114,6 @@ internal fun PlayerMinimizeTransitionHost(
         ) {
             if (homeVisible) homeContent() else playerContent()
         }
+    }
     }
 }

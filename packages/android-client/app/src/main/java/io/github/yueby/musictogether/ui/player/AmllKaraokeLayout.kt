@@ -156,18 +156,18 @@ internal fun AmllBalancedWordLayout(
 internal fun AmllKaraokeChunk(
     chunk: AmllWordChunk,
     lastLineWord: String,
-    positionMs: Float,
-    effectReleaseProgress: Float,
+    positionMs: () -> Float,
+    effectReleaseProgress: () -> Float,
     reserveRomanSpace: Boolean,
     reserveRubySpace: Boolean,
     fontSize: Float,
     fontWeight: FontWeight,
-    darkAlpha: Float,
-    brightAlpha: Float,
+    darkAlpha: () -> Float,
+    brightAlpha: () -> Float,
     gradientEnabled: Boolean,
     isBackground: Boolean,
     maskWordIndexOffset: Int,
-    continuousMaskProgresses: List<Float>,
+    continuousMaskProgress: (Int) -> Float?,
     onMaskWordSizeChanged: (Int, AmllMaskWordMeasurement) -> Unit,
 ) {
     val mergedWord = remember(chunk.words) {
@@ -222,8 +222,7 @@ internal fun AmllKaraokeChunk(
                 profile = profile,
                 glyphIndexOffset = glyphOffsets[index],
                 glyphCount = glyphCount,
-                continuousHighlightProgress =
-                    continuousMaskProgresses.getOrNull(maskWordIndexOffset + index),
+                continuousHighlightProgress = { continuousMaskProgress(maskWordIndexOffset + index) },
                 onMainTextSizeChanged = { size, horizontalHeadroomPx ->
                     onMaskWordSizeChanged(
                         maskWordIndexOffset + index,

@@ -38,7 +38,7 @@ object PlaybackCommandBridge {
     }
 
     @Volatile
-    internal var tailDeck: TailDeck? = null
+    internal var decks: PlaybackDecks? = null
 
     class GainRequest(val linear: Float, val rampSec: Float, val version: Int)
 
