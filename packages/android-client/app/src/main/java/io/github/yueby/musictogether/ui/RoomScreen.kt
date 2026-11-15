@@ -30,6 +30,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import io.github.yueby.musictogether.ui.player.folia.FoliaPlayer
+import io.github.yueby.musictogether.ui.player.folia.ImmersiveWindow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLayoutDirection
 import io.github.yueby.musictogether.MusicTogetherViewModel
@@ -39,11 +42,15 @@ import kotlinx.coroutines.delay
 
 internal enum class RoomBackAction {
     DismissMenu,
+    ExitImmersive,
     MinimizePlayer,
 }
 
-internal fun resolveRoomBackAction(roomMenuExpanded: Boolean): RoomBackAction =
-    if (roomMenuExpanded) RoomBackAction.DismissMenu else RoomBackAction.MinimizePlayer
+internal fun resolveRoomBackAction(roomMenuExpanded: Boolean, immersive: Boolean = false): RoomBackAction = when {
+    roomMenuExpanded -> RoomBackAction.DismissMenu
+    immersive -> RoomBackAction.ExitImmersive
+    else -> RoomBackAction.MinimizePlayer
+}
 
 @Composable
 fun RoomScreen(
@@ -55,6 +62,8 @@ fun RoomScreen(
 ) {
     val room = appState.room ?: return
     val navigator = LocalAppNavigator.current
+    var immersive by rememberSaveable(appState.serverUrl, room.id) { mutableStateOf(false) }
+    ImmersiveWindow(enabled = immersive && shellOnTop)
     var landscapeChromeVisible by remember(room.id) { mutableStateOf(true) }
     var roomMenuExpanded by remember(room.id) { mutableStateOf(false) }
     var lyricCalibrationOpen by remember(room.id) { mutableStateOf(false) }
@@ -67,19 +76,32 @@ fun RoomScreen(
 
     val minimizeGesture = LocalPlayerMinimizeGesture.current
     PredictiveBackHandler(enabled = shellOnTop) { progress ->
-        val action = resolveRoomBackAction(roomMenuExpanded)
+        val action = resolveRoomBackAction(roomMenuExpanded, immersive)
         try {
             progress.collect { event ->
                 if (action == RoomBackAction.MinimizePlayer) minimizeGesture?.preview(event.progress)
             }
             when (action) {
                 RoomBackAction.DismissMenu -> roomMenuExpanded = false
+                RoomBackAction.ExitImmersive -> immersive = false
                 RoomBackAction.MinimizePlayer -> onMinimizePlayer()
             }
         } catch (cancelled: CancellationException) {
             if (action == RoomBackAction.MinimizePlayer) minimizeGesture?.cancel()
             throw cancelled
         }
+    }
+
+    if (immersive) {
+        FoliaPlayer(
+            appState = appState,
+            viewModel = viewModel,
+            visible = shellOnTop,
+            onExit = { immersive = false },
+            onOpenQueue = { openRoute(AppRoute.Queue) },
+            onOpenChat = { openRoute(AppRoute.Chat) },
+        )
+        return
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize().background(Color(0xFF080A0F))) {
@@ -110,6 +132,11 @@ fun RoomScreen(
             ) {
                 RoomHeader(
                     room = room,
+                    onEnterImmersive = {
+                        roomMenuExpanded = false
+                        lyricCalibrationOpen = false
+                        immersive = true
+                    },
                     safeContentPadding = outerPadding,
                     menuExpanded = roomMenuExpanded,
                     onMenuExpandedChange = {

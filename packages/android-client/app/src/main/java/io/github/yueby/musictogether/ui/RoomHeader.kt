@@ -5,6 +5,7 @@ import com.composables.icons.lucide.ChevronDown
 import com.composables.icons.lucide.Copy
 import com.composables.icons.lucide.Download
 import com.composables.icons.lucide.EllipsisVertical
+import com.composables.icons.lucide.Maximize
 import com.composables.icons.lucide.Flame
 import com.composables.icons.lucide.ListMusic
 import com.composables.icons.lucide.Lock
@@ -68,6 +69,7 @@ internal fun RoomHeader(
     onOpenRoute: (AppRoute) -> Unit,
     chatUnreadCount: Int = 0,
     onOpenLyricCalibration: (() -> Unit)? = null,
+    onEnterImmersive: (() -> Unit)? = null,
 ) {
     val layoutDirection = LocalLayoutDirection.current
     val safeTop = safeContentPadding.calculateTopPadding()
@@ -158,6 +160,7 @@ internal fun RoomHeader(
                     onMenuExpandedChange(false)
                     block()
                 }
+                onEnterImmersive?.let { enter -> RoomMenuItem(Lucide.Maximize, "沉浸模式") { act(enter) } }
                 RoomMenuItem(Lucide.ListMusic, "播放队列") { act { onOpenRoute(AppRoute.Queue) } }
                 RoomMenuItem(Lucide.Flame, "热歌榜") { act { onOpenRoute(AppRoute.HotSongs) } }
                 onOpenLyricCalibration?.let { open -> RoomMenuItem(Lucide.SlidersHorizontal, "歌词校准") { act(open) } }

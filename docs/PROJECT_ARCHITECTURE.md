@@ -35,6 +35,7 @@ Android 客户端包含以下主要能力：
 | 用户界面 | Jetpack Compose，MIUIX 0.9.4 |
 | 网络 | OkHttp 4.12，HTTP API，原生 WebSocket |
 | 播放 | Media3 ExoPlayer，MediaSessionService |
+| 沉浸舞台 | AndroidX WebKit 本地资源宿主、Folia React/Pixi/Three 渲染器，Node.js 24 构建 |
 | 图片与取色 | Coil 3，AndroidX Palette |
 | 状态 | Kotlin Flow，Compose State |
 | 测试 | JUnit 4 JVM 单元测试 |
@@ -164,6 +165,10 @@ UI 操作
 
 房间播放器舞台对齐 main 经典舞台与 AMLL 的 `AutoLyricLayout`：按容器宽高比选择竖屏或横屏，两者都只包含封面、歌曲信息、进度与控制栏和歌词，不再内嵌队列、聊天或热歌面板。竖屏（`ClassicPortraitStage`）只有一个持久封面节点：大封面位与歌词页缩略位各放一个不可见占位块，测量占位块后用弹簧（AMLL `VerticalLayout` 的 stiffness 200、damping 30）动画封面矩形（封面每次移动只按较大的一端布局一次，过程中只变换图层；弹簧是逐帧积分的单个连续状态，目标中途改变时只改去向、不取消飞行，亚像素抖动不会让封面停在半路），点封面切换封面视图与歌词视图；与 AMLL 一样两套视图始终常驻，只交换透明度（歌词 0.5 秒淡入并延迟 0.5 秒等封面落位，淡出 0.5 秒），歌词列表不随切换重建，歌名与歌手沿用 main 的共享过渡（两处文字在各自位置之间平移缩放并交叉淡化），歌词页小封面为 72dp（宽屏 96dp），歌词区向两侧各外扩 20dp 使文字左缘与封面对齐，隐藏的一侧被移出触摸范围，封面的目标位置在切换瞬间即固定；默认开启的「沉浸封面」把封面放大为 `max(占位中心高度 × 2.4, 舞台宽 × 1.2)` 并向下渐隐，暂停时缩至 0.75；查到动态封面的曲目即使未开该设置也自动进入沉浸。进入播放器停在封面视图，不自动切到歌词。两个视图共用同一组留白（参照 AMLL `VerticalLayout`：宽度不超过 480dp 时两侧 24dp，否则 48dp），控件位置不随视图切换移动。横屏（`ClassicLandscapeStage`）左 40% 为封面、歌曲信息和控制栏（宽度跟随封面），右 60% 为歌词。换歌时歌名和歌手由 `SongHandoff` 做 500ms 上飘淡出与 6dp 上浮淡入。队列、聊天、热歌榜、成员均为 `AppRoute` 整页（`Queue`、`Chat`、`HotSongs`、`Members`），从舞台底部按钮和房间菜单进入，右滑返回；打开聊天页期间 `setChatVisible(true)` 以清除未读。歌曲信息行显示服务端注入的实际音质徽标（`audioQuality`、`audioBitrate`、`qualityDowngraded`，降级时加箭头，无损档位高亮），网易云曲目在房间内显示喜欢按钮（`GET/POST /api/music/liked`），并带聊天入口。进度左侧时间点按可在已播放与剩余时间间切换并持久化；「控制栏频谱」开启后在播放按钮上方显示频谱，数据来自 `PlaybackService` 通过直通 `TeeAudioProcessor` 接入的 `AudioSpectrum`：只读本机输出 PCM、不修改音频，仅在频谱可见时做 2048 点滑动窗口 FFT，输出对齐 Web `AnalyserNode` 的 80–2000 Hz 字节频谱，界面按 main `AudioFFTVisualizer` 的平滑与绘制规则逐帧绘制。热歌榜页对应 main 的 `/api/music/hot`（网易云、QQ 音乐、酷狗，需在房间内），由 `HotSongsCoordinator` 加载与分页，离开房间时重置。混音过渡期间 `NativePlayer` 在 `PlayerUiState.transitionCue` 给出过渡时长和出歌每拍秒数，`PlayerProgressSlider` 与时间行对齐 main 的「过渡」提示：进度条粗细和亮度按四拍一次呼吸、下方垫一层柔光、时间行中央显示同拍明灭的「过渡」；短于 1 秒的过渡不提示，可在播放器显示设置的「过渡提示」关闭。
 
+房间菜单的「沉浸模式」进入全屏 Folia 舞台，默认商籁，可切换参考项目的全部 20 种内建舞台（不包含独立背景模式与 Folium 模组）。舞台只渲染视觉：曲目、歌词、播放位置、暂停和本机频谱来自原生状态，播放控制、Seek 与投票继续通过 ViewModel。进入后双系统栏隐藏、保持屏幕点亮；控制栏 4.5 秒无操作后收起，点屏幕唤出；返回依次关闭舞台选择、退出沉浸模式、最小化播放器。被二级页面覆盖或应用后台时销毁 WebView、worker 与 WebGL 上下文，窗口效果恢复；回到前台按当前曲目和进度重建，不触碰 MediaSession。
+
+Folia 原始渲染源码保存在 `folia-stage/upstream-source.tar.gz`（最小依赖闭包、固定上游提交、SHA-256 校验和 AGPL 授权）。`folia-stage/src/` 只适配窗口壳、只读设置、缓存、导航与音频分析边界，原账号/媒体库不进入舞台包。Gradle `buildFoliaStage` 将 Vite 输出写入 `app/build/generated/foliaAssets`，两个 flavor 共用，本地与 CI 首次构建都需 Node.js 24 和 `npm ci --prefix folia-stage --ignore-scripts`。原生歌词使用一份 AMLL 共享时钟，背景人声、对唱、翻译、音译、Ruby 转成 Folia 的秒单位输入；本地偏移先从播放位置扣除，歌词跳转再加回。舞台根布局在渲染器初始化前将 `innerHeight` 写为 CSS 像素高度，原生尺寸变化与浏览器 resize 会重新校准，避免沉浸系统栏下部分 WebView 把 `100%` / `100vh` 解析为零高度；共享舞台外壳保留 Folia 的纵向 Flex 居中，原始 `70vh` 歌词区使用已校准的视口高度。流光、云阶和倾诉在动画层外测量整组歌词的布局尺寸，长句或放大字号超过可用高度/宽度时等比缩放，避免顶部裁切；测量由 ResizeObserver 和内容变化触发，不跟随逐词动画逐帧重算；云阶宽度候选全部超出行预算时保留原始分组交给外层适配，不返回空歌词布局。Debug 构建允许 WebView 本地调试。Web 消息仅允许本地 HTTPS 来源的主 frame，外部导航被拦截。频谱沿用现有 80–2000Hz 本机分析，神经网络拍点/人声分离、AI 主题、用户自定义画布资产和文字 PV 编辑器导出未接入；雾笺笔顺下载不可用时沿用字体骨架回退。详细移植范围见 `folia-stage/README.md`。
+
 房间头部 `RoomHeader` 是叠在播放器背景上的半透明叠层，「更多」为锚定在按钮上的弹出菜单（房间与同步、分享、复制链接、音乐平台账号、下载当前歌曲、离开房间）。歌手主页与发现页由 `CatalogCoordinator` 加载，服务端目前仅网易云支持；歌手入口来自播放器歌名下方的歌手名、歌曲操作菜单和发现页热门歌手，专辑请求使用 `type=album`。
 
 `RoomScreen.kt` 负责房间整体布局和面板切换，具体内容分布在以下文件：
@@ -177,6 +182,7 @@ UI 操作
 | 文件 | 内容 |
 | --- | --- |
 | `RoomHeader.kt` | 房间标题、连接状态和「更多」弹出菜单 |
+| `player/folia/` | 沉浸模式、20 种 Folia 舞台选择、受来源约束的 WebView 数据桥、全屏窗口生命周期与歌词载荷转换 |
 | `player/ClassicStage.kt` | 竖屏单封面节点舞台与横屏舞台 |
 | `player/PlayerStageParts.kt` | 换歌文字过渡、音质徽标、喜欢按钮与控制栏频谱 |
 | `player/CoverVideo.kt` | 动态视频封面：静音循环的独立 ExoPlayer，仅竖屏沉浸封面使用，数据来自 `/api/music/dynamic-cover` |

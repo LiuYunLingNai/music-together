@@ -112,7 +112,7 @@
 
 ## 5. 本地验证
 
-构建需要 JDK 21 和 Android SDK 37.0。应用输出字节码以 JVM 21 为目标（miuix-nav 的内联 API 以 JVM 21 编译，Android 端由 D8 脱糖，不提高运行门槛），并继续以 Android 16（API 36）为目标版本；JDK 21 用于加载 MIUIX 构建依赖和运行 JVM 单元测试，不会提高应用运行门槛。常用命令如下：
+构建需要 JDK 21、Android SDK 37.0 和 Node.js 24。首次构建先在 `packages/android-client/` 运行 `npm ci --prefix folia-stage --ignore-scripts --no-audit --no-fund` 安装 Folia 渲染依赖；Gradle 的 `preBuild` 自动构建离线舞台资源，不提交 `dist/` 或生成 assets。应用输出字节码以 JVM 21 为目标（miuix-nav 的内联 API 以 JVM 21 编译，Android 端由 D8 脱糖，不提高运行门槛），并继续以 Android 16（API 36）为目标版本；JDK 21 用于加载 MIUIX 构建依赖和运行 JVM 单元测试，不会提高应用运行门槛。常用命令如下：
 
 ```powershell
 cd packages/android-client
@@ -139,6 +139,7 @@ cd packages/android-client
 | Markdown | 空白检查，核对路径和命令 |
 | 模型、解析器、算法 | 对应测试，完整 JVM 单元测试 |
 | HTTP、WebSocket、JSON | 网络测试，完整单元测试，Lint |
+| Folia 渲染宿主、舞台数据桥或上游快照 | 舞台浏览器测试，完整 Debug 门禁；快照 SHA-256 与来源/授权检查 |
 | Compose 界面 | 完整单元测试，Lint，Standard Debug 构建 |
 | 播放、Manifest、资源、flavor | 完整 Debug 门禁，检查相关变体 |
 | 发布 | Debug 门禁，签名 Release 构建，签名与资产校验 |

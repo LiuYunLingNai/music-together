@@ -1,8 +1,8 @@
 package io.github.yueby.musictogether.ui
 
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Search
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.House
+import com.composables.icons.lucide.Search
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -26,8 +26,8 @@ class LiquidNavigationBarTest {
                 val selected = remember { mutableIntStateOf(0) }
                 IosLiquidGlassNavigationBar(
                     items = listOf(
-                        NavigationItem("首页", Icons.Default.Home),
-                        NavigationItem("搜索", Icons.Default.Search),
+                        NavigationItem("首页", Lucide.House),
+                        NavigationItem("搜索", Lucide.Search),
                     ),
                     selectedIndex = selected.intValue,
                     onItemClick = { selected.intValue = it },

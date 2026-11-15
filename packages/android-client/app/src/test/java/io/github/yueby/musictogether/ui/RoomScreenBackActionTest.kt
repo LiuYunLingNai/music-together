@@ -13,4 +13,9 @@ class RoomScreenBackActionTest {
     fun `back minimizes the player when no transient content is open`() {
         assertEquals(RoomBackAction.MinimizePlayer, resolveRoomBackAction(roomMenuExpanded = false))
     }
+    @Test
+    fun `immersive mode exits before minimizing the player`() {
+        assertEquals(RoomBackAction.ExitImmersive, resolveRoomBackAction(roomMenuExpanded = false, immersive = true))
+        assertEquals(RoomBackAction.DismissMenu, resolveRoomBackAction(roomMenuExpanded = true, immersive = true))
+    }
 }

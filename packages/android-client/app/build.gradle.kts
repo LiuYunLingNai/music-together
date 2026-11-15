@@ -77,6 +77,19 @@ kotlin {
     }
 }
 
+val buildFoliaStage by tasks.registering(Exec::class) {
+    workingDir = rootProject.file("folia-stage")
+    commandLine(if (System.getProperty("os.name").startsWith("Windows")) "npm.cmd" else "npm", "run", "build")
+    inputs.files(fileTree(rootProject.file("folia-stage")) {
+        exclude("node_modules/**", ".work/**", "dist/**")
+    })
+    outputs.dir(layout.buildDirectory.dir("generated/foliaAssets"))
+}
+androidComponents.onVariants { variant ->
+    variant.sources.assets?.addStaticSourceDirectory(layout.buildDirectory.dir("generated/foliaAssets").get().asFile.path)
+}
+tasks.named("preBuild").configure { dependsOn(buildFoliaStage) }
+
 // Gradle's Windows test worker can fail to load class directories when the checkout
 // path contains non-ASCII characters. Putting the compiled classes in a jar gives
 // the worker a Unicode-safe classpath while keeping normal test discovery intact.
@@ -125,6 +138,7 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.7.1")
     implementation("androidx.media3:media3-session:1.7.1")
     implementation("androidx.core:core-ktx:1.16.0")
+    implementation("androidx.webkit:webkit:1.14.0")
     implementation("io.coil-kt.coil3:coil-compose:3.2.0")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.2.0")
     implementation("com.google.zxing:core:3.5.3")

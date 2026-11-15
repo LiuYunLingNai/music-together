@@ -18,10 +18,11 @@ Music Together 的原生 Android 客户端，使用 Kotlin、Jetpack Compose、O
 
 ## 构建
 
-需要 JDK 21（推荐兼容版本的 Android Studio 内置 JBR）和 Android SDK 37.0。应用输出字节码以 JVM 21 为目标（miuix-nav 的内联 API 以 JVM 21 编译，Android 端由 D8 脱糖，不提高运行门槛），`targetSdk` 仍为 36。
+需要 Node.js 24、JDK 21（推荐兼容版本的 Android Studio 内置 JBR）和 Android SDK 37.0。应用输出字节码以 JVM 21 为目标（miuix-nav 的内联 API 以 JVM 21 编译，Android 端由 D8 脱糖，不提高运行门槛），`targetSdk` 仍为 36。
 
 ```powershell
 cd packages/android-client
+npm ci --prefix folia-stage --ignore-scripts --no-audit --no-fund
 $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
 .\gradlew.bat testStandardDebugUnitTest assembleStandardDebug
 ```

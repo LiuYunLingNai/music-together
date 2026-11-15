@@ -112,8 +112,25 @@ jobs:
       - name: Install Android SDK 37.0
         run: sdkmanager "platforms;android-37.0" "build-tools;36.0.0"
 
+      - name: Set up Node for Folia stages
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: packages/android-client/folia-stage/package-lock.json
+
+      - name: Install Folia stage dependencies
+        run: npm ci --prefix folia-stage --ignore-scripts --no-audit --no-fund
+
       - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@v6
+
+      - name: Check all Folia stages in Chromium
+        run: |
+          npm run build --prefix folia-stage
+          cd folia-stage
+          npx playwright install --with-deps chromium
+          npm run test:render
 
       - name: Check and build Debug APKs
         run: |
@@ -166,6 +183,16 @@ jobs:
 
       - name: Install Android SDK 37.0
         run: sdkmanager "platforms;android-37.0" "build-tools;36.0.0"
+
+      - name: Set up Node for Folia stages
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: packages/android-client/folia-stage/package-lock.json
+
+      - name: Install Folia stage dependencies
+        run: npm ci --prefix folia-stage --ignore-scripts --no-audit --no-fund
 
       - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@v6

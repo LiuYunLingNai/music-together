@@ -1,0 +1,36 @@
+@import "tailwindcss" source(none);
+@source "../.work/src/components/visualizer";
+@source "./";
+html,
+body,
+#root {
+  width: 100%;
+  height: var(--folia-viewport-height, 100vh);
+  margin: 0;
+  overflow: hidden;
+  background: #080a0f;
+  color: #fff;
+  font-family: system-ui, sans-serif;
+}
+#root {
+  position: fixed;
+  inset: 0;
+}
+/* Upstream's shared shell centers its 70vh lyric region. Resolve that same
+   region from the measured Android viewport; old WebViews can resolve vh to 0. */
+[data-folia-stage-shell] > [class~="h-[70vh]"] {
+  height: calc(var(--folia-viewport-height, 100vh) * 0.7);
+  flex-shrink: 0;
+}
+[data-folia-lyric-fit] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  flex-shrink: 0;
+  transform: scale(var(--folia-lyric-fit, 1));
+  transform-origin: center;
+}
+button {
+  font: inherit;
+}
