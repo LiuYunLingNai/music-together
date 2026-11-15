@@ -9,6 +9,9 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.webkit.WebSettings
+import android.webkit.WebChromeClient
+import android.webkit.ValueCallback
+import android.net.Uri
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
@@ -21,7 +24,11 @@ private const val FoliaPage = FoliaOrigin + "/assets/folia/index.html"
 
 // This view is created by Compose, never inflated from an XML layout.
 @SuppressLint("SetJavaScriptEnabled", "ViewConstructor")
-internal class FoliaWebView(context: Context, private val onEvent: (String, Double?) -> Unit) : WebView(context) {
+internal class FoliaWebView(
+    context: Context,
+    private val onChooseFiles: (WebChromeClient.FileChooserParams, ValueCallback<Array<Uri>>) -> Unit = { _, callback -> callback.onReceiveValue(null) },
+    private val onEvent: (String, Double?) -> Unit,
+) : WebView(context) {
     private var ready = false
     private var documentPayload: String? = null
     private var modeId = "sonnet"
@@ -43,11 +50,19 @@ internal class FoliaWebView(context: Context, private val onEvent: (String, Doub
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
         settings.allowFileAccess = false
-        settings.allowContentAccess = false
+        // WebChromeClient receives only user-selected document URIs; Chromium
+        // needs content access to read those files for the original upload UI.
+        settings.allowContentAccess = true
         settings.mediaPlaybackRequiresUserGesture = true
         // HTTP cover images remain supported alongside HTTPS server images.
         settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
         CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
+        webChromeClient = object : WebChromeClient() {
+            override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean {
+                onChooseFiles(params, callback)
+                return true
+            }
+        }
         webViewClient = object : WebViewClient() {
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                 if (request.url.host == "appassets.androidplatform.net") {
@@ -78,7 +93,7 @@ internal class FoliaWebView(context: Context, private val onEvent: (String, Doub
                     documentPayload?.let { evaluateJavascript("window.FoliaStage.document(" + it + ")", null) }
                     selectMode(modeId)
                 }
-                if (event in setOf("ready", "tap", "error", "seek")) {
+                if (event in setOf("ready", "tap", "error", "seek", "editorSeek", "play", "pause", "settingsOpen", "settingsClose")) {
                     val position = payload.optDouble("position", Double.NaN).takeIf { it.isFinite() && it >= 0.0 }
                     onEvent(event, position)
                 }
@@ -102,6 +117,10 @@ internal class FoliaWebView(context: Context, private val onEvent: (String, Doub
 
     fun updateFrame(payload: String) {
         if (ready) evaluateJavascript("window.FoliaStage.frame(" + payload + ")", null)
+    }
+
+    fun showSettings(open: Boolean) {
+        if (ready) evaluateJavascript("window.FoliaStage.settings($open)", null)
     }
 
     override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {

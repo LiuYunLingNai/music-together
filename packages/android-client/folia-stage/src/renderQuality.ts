@@ -1,4 +1,4 @@
-const quality = { scale: 1, antialias: "auto" };
-export const useLyricRenderQuality = () => quality;
-export const useGlobalLyricRenderQuality = useLyricRenderQuality;
+import { useVisualizerSettingsStore } from "./tuningStore";
+export const useGlobalLyricRenderQuality = () =>
+  useVisualizerSettingsStore((state) => state.lyricRenderQuality);
 export const useLyricRenderQualityPin = () => null;

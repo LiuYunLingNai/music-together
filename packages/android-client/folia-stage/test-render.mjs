@@ -101,6 +101,11 @@ for (const viewport of [
       await page.waitForFunction(() => Boolean(window.FoliaStage), {
         timeout: 10000,
       });
+      await page.evaluate(() => window.FoliaStage.settings(true));
+      await page.getByRole("dialog", { name: "舞台配置" }).waitFor();
+      // Every mode owns its real settings panel, including those that read
+      // asset/loading flags from stores. Opening it must not throw.
+      await page.evaluate(() => window.FoliaStage.settings(false));
       await page.evaluate((mode) => {
         const lines = Array.from({ length: 8 }, (_, i) => ({
           id: String(i),
@@ -138,6 +143,13 @@ for (const viewport of [
           spectrum: [10, 80, 120, 180],
         });
       }, mode);
+      await page.evaluate(() => window.FoliaStage.settings(true));
+      await page.getByRole("dialog", { name: "舞台配置" }).waitFor();
+      await page.waitForTimeout(100);
+      const untranslated = await page.getByRole("dialog").innerText();
+      if (/options\.[A-Za-z]|ui\.[A-Za-z]/.test(untranslated))
+        errors.push("Stage settings contain untranslated keys");
+      await page.evaluate(() => window.FoliaStage.settings(false));
       await page.waitForTimeout(1500);
       const geometry = await page.evaluate(() => ({
         rootHeight: document.getElementById("root").clientHeight,
@@ -237,21 +249,28 @@ for (const viewport of [
         },
         { mode, fontScale },
       );
-      // The upstream word components subscribe after mounting. Deliver a later
-      // clock sample as NativePlayer does so the test measures visible glyphs.
-      await page.waitForTimeout(200);
-      await page.evaluate((fontScale) => {
-        let sample = 0;
-        const frames = setInterval(() => {
-          window.FoliaStage.frame({
-            position: 4 + fontScale * 0.01 + sample++ * 0.001,
-            lineIndex: 0,
-            paused: false,
-            chromeHidden: true,
+      await page.evaluate(() => document.fonts.ready);
+      // ICU segmentation may replace the word nodes after first paint. A paused
+      // frame must still initialize these words from the existing shared clock.
+      await page.waitForFunction(
+        () => {
+          const fit = document.querySelector("[data-folia-lyric-fit]");
+          return [...(fit?.querySelectorAll("span") ?? [])].some((element) => {
+            if (element.childElementCount || !element.textContent.trim())
+              return false;
+            let opacity = 1;
+            for (
+              let node = element;
+              node && node !== fit.parentElement;
+              node = node.parentElement
+            )
+              opacity *= Number(getComputedStyle(node).opacity);
+            return opacity > 0.1;
           });
-        }, 50);
-        setTimeout(() => clearInterval(frames), 550);
-      }, fontScale);
+        },
+        null,
+        { timeout: 15000 },
+      );
       await page.waitForTimeout(600);
       const geometry = await page.evaluate(() => {
         const fit = document.querySelector("[data-folia-lyric-fit]");
@@ -330,6 +349,149 @@ for (const viewport of [
     }
     await page.close();
   }
+}
+// Exercise the settings as a user: live change, tab navigation, reload and reset.
+for (const viewport of [
+  { width: 390, height: 844 },
+  { width: 844, height: 390 },
+]) {
+  const context = await browser.newContext({ viewport });
+  const page = await context.newPage();
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto("http://127.0.0.1:4176/assets/folia/index.html");
+  await page.waitForFunction(() => Boolean(window.FoliaStage));
+  await page.evaluate(() => {
+    window.FoliaStage.mode("classic");
+    window.FoliaStage.settings(true);
+  });
+  const dialog = page.getByRole("dialog", { name: "舞台配置" });
+  await dialog.waitFor();
+  const switches = dialog.getByRole("switch");
+  const original = await switches.first().getAttribute("aria-checked");
+  await switches.first().click();
+  await page.waitForFunction(
+    () => localStorage.getItem("classic_tuning") !== null,
+  );
+  const stored = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("classic_tuning")),
+  );
+  if (stored.enableWordRotation === (original === "true"))
+    errors.push("Stage toggle did not save");
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.FoliaStage));
+  await page.evaluate(() => {
+    window.FoliaStage.mode("classic");
+    window.FoliaStage.settings(true);
+  });
+  await dialog.waitFor();
+  if ((await switches.first().getAttribute("aria-checked")) === original)
+    errors.push("Stage toggle did not restore");
+  await dialog.getByRole("button", { name: "恢复本页默认" }).click();
+  if ((await switches.first().getAttribute("aria-checked")) !== original)
+    errors.push("Stage reset did not restore defaults");
+  for (const tab of ["文字", "字幕", "性能", "背景"]) {
+    await dialog.getByRole("button", { name: tab, exact: true }).click();
+    await page.waitForTimeout(100);
+  }
+  await dialog.getByRole("button", { name: "舞台", exact: true }).click();
+  await page.evaluate(() => {
+    window.FoliaStage.mode("still");
+    window.FoliaStage.document({
+      seed: "settings-live",
+      lines: [
+        {
+          fullText: "设置实时预览",
+          words: [{ text: "设置实时预览", startTime: 0, endTime: 30 }],
+          startTime: 0,
+          endTime: 30,
+        },
+      ],
+    });
+    window.FoliaStage.frame({
+      position: 3,
+      lineIndex: 0,
+      paused: true,
+      chromeHidden: true,
+    });
+  });
+  const stageText = page
+    .locator("[data-folia-stage-shell]")
+    .getByText("设置实时预览", { exact: true });
+  await stageText.waitFor();
+  await dialog
+    .getByRole("switch", { name: "显示舞台歌词", exact: true })
+    .click();
+  await stageText.waitFor({ state: "hidden" });
+  await dialog
+    .getByRole("switch", { name: "显示舞台歌词", exact: true })
+    .click();
+  await stageText.waitFor();
+  await dialog.getByRole("button", { name: "背景", exact: true }).click();
+  for (let index = 2; index < 9; index++) {
+    await dialog.getByRole("combobox").first().click();
+    const option = page.getByRole("option").nth(index);
+    const background = await option.innerText();
+    await option.click();
+    await page.waitForTimeout(500);
+    const text = await dialog.innerText();
+    if (/options\.[A-Za-z]/.test(text))
+      errors.push(`Background ${background} contains untranslated keys`);
+  }
+  await dialog.getByRole("combobox").first().click();
+  await page.getByRole("option").first().click();
+  // Native file chooser calls the same input used by the browser. Verify the
+  // binary image survives a new document and that its blob URL is rebuilt.
+  await page.evaluate(() => window.FoliaStage.mode("cappella"));
+  await dialog.getByRole("button", { name: "舞台", exact: true }).click();
+  const inputs = dialog.locator('input[type="file"]');
+  await inputs.first().setInputFiles({
+    name: "emoji.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZJ0AAAAASUVORK5CYII=",
+      "base64",
+    ),
+  });
+  await page.waitForFunction(() =>
+    document.querySelector('[role="dialog"] img[src^="blob:"]'),
+  );
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.FoliaStage));
+  await page.evaluate(() => {
+    window.FoliaStage.mode("cappella");
+    window.FoliaStage.settings(true);
+  });
+  await page.waitForFunction(() =>
+    document.querySelector('[role="dialog"] img[src^="blob:"]'),
+  );
+  await page.screenshot({
+    path: `.work/screens/settings-${viewport.width}.png`,
+  });
+  await page.evaluate(() => window.FoliaStage.mode("kinetic"));
+  await dialog.getByRole("button", { name: /打开原版编辑台/ }).click();
+  await page.locator('iframe[src="/jizura/editor.html"]').waitFor();
+  await page.waitForFunction(
+    () =>
+      [...document.querySelectorAll("iframe")].some(
+        (frame) => frame.contentWindow?.J?.uiApi,
+      ),
+    null,
+    { timeout: 15000 },
+  );
+  const editor = page
+    .frames()
+    .find((frame) => frame.url().includes("/jizura/editor.html"));
+  if (!editor) errors.push("Original JIZURA editor did not open");
+  else
+    await editor.waitForFunction(() => Boolean(window.J?.uiApi), null, {
+      timeout: 15000,
+    });
+  await page.evaluate(() => window.FoliaStage.settings(false));
+  if (await dialog.count()) errors.push("Settings dialog did not close");
+  results.push({ test: "settings-persistence", viewport, errors });
+  console.log(JSON.stringify(results.at(-1)));
+  await context.close();
 }
 fs.writeFileSync(".work/render-results.json", JSON.stringify(results, null, 2));
 await browser.close();

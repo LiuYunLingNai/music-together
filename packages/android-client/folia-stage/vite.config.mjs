@@ -10,8 +10,6 @@ const hostModules = {
   "components/visualizer/VisualizerShell.tsx": "VisualizerShell.tsx",
   "components/visualizer/registry.tsx": "registry.tsx",
   "hooks/useReducedMotionFor.ts": "reducedMotion.ts",
-  "components/visualizer/renderQuality/useLyricRenderQuality.ts":
-    "renderQuality.ts",
   "components/visualizer/renderQuality/lyricRenderQualityPin.ts":
     "renderQuality.ts",
   "services/analysis/drumHits.ts": "analysis.ts",
@@ -22,11 +20,13 @@ const hostModules = {
   "components/visualizer/kinetic/saveExportFile.ts": "saveExportFile.ts",
   "i18n/config.ts": "i18n.ts",
   "mods/folium/registries/tunings.tsx": "foliumTunings.ts",
+  "components/modal/settings/pages/integration/market/MarketEntryButton.tsx":
+    "MarketEntryButton.tsx",
 };
 for (const store of [
   "usePlaybackStore",
   "useVisualizerSettingsStore",
-  "useVisualizerAssetStore",
+  "useAudioSettingsStore",
   "useAppViewStore",
   "useVideoLayerSettingsStore",
   "usePlayerChromeSettingsStore",
@@ -60,6 +60,60 @@ export default defineConfig({
         }
       },
       transform(code, id) {
+        if (id.replaceAll("\\", "/").endsWith("/partita/PartitaChunk.tsx")) {
+          const initial =
+            "useState<'waiting' | 'active' | 'passed'>('waiting')";
+          if (!code.includes(initial))
+            throw new Error(
+              "Folia Partita chunk state changed; review clock initialization",
+            );
+          return code
+            .replace("useMemo, useState", "useMemo, useState, useEffect")
+            .replace(
+              initial,
+              `useState<'waiting' | 'active' | 'passed'>(() => {
+              const now = currentTime.get();
+              const end = getGlowWordActiveEndTime(chunkWords[chunkWords.length - 1], renderProfile);
+              return now > end ? 'passed' : now >= chunkWords[0].startTime - renderProfile.wordLookahead ? 'active' : 'waiting';
+            })`,
+            )
+            .replace(
+              "const activeColor =",
+              `useEffect(() => {
+              const now = currentTime.get();
+              setChunkStatus(now > chunkEndTime ? 'passed' : now >= chunkStartTime - renderProfile.wordLookahead ? 'active' : 'waiting');
+            }, [chunkWords, renderProfile, currentTime, chunkStartTime, chunkEndTime]);
+            const activeColor =`,
+            );
+        }
+        if (id.replaceAll("\\", "/").endsWith("/visualizer/GlowWord.tsx")) {
+          const initial =
+            "useState<'waiting' | 'active' | 'passed'>('waiting')";
+          if (!code.includes(initial))
+            throw new Error(
+              "Folia GlowWord state changed; review clock initialization",
+            );
+          // Paused playback and a late segmentation result may mount words after
+          // the last clock event. Read the shared clock on mount and word changes.
+          return code
+            .replace("useMemo, useState", "useMemo, useState, useEffect")
+            .replace(
+              initial,
+              `useState<'waiting' | 'active' | 'passed'>(() => {
+              const now = currentTime.get();
+              const end = getGlowWordActiveEndTime(word, renderProfile);
+              return now > end ? 'passed' : now >= word.startTime - renderProfile.wordLookahead ? 'active' : 'waiting';
+            })`,
+            )
+            .replace(
+              "const graphemeTimings =",
+              `useEffect(() => {
+              const now = currentTime.get();
+              setStatus(now > activeEndTime ? 'passed' : now >= word.startTime - renderProfile.wordLookahead ? 'active' : 'waiting');
+            }, [word, renderProfile, currentTime, activeEndTime]);
+            const graphemeTimings =`,
+            );
+        }
         if (
           !id
             .replaceAll("\\", "/")

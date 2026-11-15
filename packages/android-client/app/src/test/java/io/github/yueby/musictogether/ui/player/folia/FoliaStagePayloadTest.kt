@@ -52,6 +52,21 @@ class FoliaStagePayloadTest {
     }
 
     @Test
+    fun `stage customization keeps alternate text while preserving native display defaults`() {
+        val document = foliaDocument(
+            track,
+            LyricsState(trackId = track.id, lines = listOf(line(0, 1000))),
+            PlayerDisplaySettings(showTranslation = false, showRomanization = false),
+            preserveAlternateText = true,
+        )
+        val main = document.getJSONArray("lines").getJSONObject(0)
+        assertEquals("translation", main.getString("translation"))
+        assertEquals("ge ci", main.getString("romanization"))
+        assertFalse(document.getBoolean("showSubtitleTranslation"))
+        assertFalse(document.getBoolean("showSubtitleRomanization"))
+    }
+
+    @Test
     fun `seek and offset use the same line and word position`() {
         val lines = listOf(line(1000, 2000), line(2000, 3000))
         assertEquals(1500f, foliaLyricPositionMs(2.0, 500), 0f)

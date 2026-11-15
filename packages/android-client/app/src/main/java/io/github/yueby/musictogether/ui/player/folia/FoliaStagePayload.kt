@@ -48,7 +48,12 @@ private fun LyricLine.foliaWords(): JSONArray = JSONArray().apply {
     }
 }
 
-internal fun foliaDocument(track: Track?, lyrics: LyricsState, settings: PlayerDisplaySettings): JSONObject {
+internal fun foliaDocument(
+    track: Track?,
+    lyrics: LyricsState,
+    settings: PlayerDisplaySettings,
+    preserveAlternateText: Boolean = false,
+): JSONObject {
     // Reject a previous track's lyrics during an automix handover or an async load.
     val groups = if (track != null && lyrics.trackId == track.id) {
         prepareAmllLyricGroups(lyrics.lines, tryAdvanceStartTime = false)
@@ -64,6 +69,7 @@ internal fun foliaDocument(track: Track?, lyrics: LyricsState, settings: PlayerD
         put("subtitleFontScale", settings.lyricSubFontScale)
         put("hideTranslationSubtitle", !settings.showTranslation)
         put("showSubtitleTranslation", settings.showTranslation)
+        put("showSubtitleRomanization", settings.showRomanization)
         put("subtitleContentMode", when {
             settings.showTranslation && settings.showRomanization -> "both"
             settings.showTranslation -> "translation"
@@ -94,8 +100,8 @@ internal fun foliaDocument(track: Track?, lyrics: LyricsState, settings: PlayerD
                 put("startTime", line.startTimeMs / 1_000.0)
                 put("endTime", line.endTimeMs / 1_000.0)
                 put("words", line.foliaWords())
-                put("translation", if (settings.showTranslation) line.translatedLyric else "")
-                put("romanization", if (settings.showRomanization) {
+                put("translation", if (settings.showTranslation || preserveAlternateText) line.translatedLyric else "")
+                put("romanization", if (settings.showRomanization || preserveAlternateText) {
                     line.romanLyric.ifBlank { line.words.joinToString(" ") { it.romanText }.trim() }
                 } else "")
                 if (line.isDuet) put("agentId", "duet")
@@ -105,7 +111,7 @@ internal fun foliaDocument(track: Track?, lyrics: LyricsState, settings: PlayerD
                         put("startTime", background.startTimeMs / 1_000.0)
                         put("endTime", background.endTimeMs / 1_000.0)
                         put("words", background.foliaWords())
-                        put("translation", if (settings.showTranslation) background.translatedLyric else "")
+                        put("translation", if (settings.showTranslation || preserveAlternateText) background.translatedLyric else "")
                     })
                 }
             }) }

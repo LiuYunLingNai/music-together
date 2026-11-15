@@ -1,6 +1,11 @@
 package io.github.yueby.musictogether.ui.player.folia
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
+import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -49,6 +54,7 @@ import androidx.lifecycle.compose.currentStateAsState
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Minimize
 import com.composables.icons.lucide.Palette
+import com.composables.icons.lucide.SlidersHorizontal
 import io.github.yueby.musictogether.MusicTogetherViewModel
 import io.github.yueby.musictogether.lyrics.lyricOffsetKey
 import io.github.yueby.musictogether.lyrics.prepareAmllLyricGroups
@@ -101,15 +107,28 @@ internal fun FoliaPlayer(
     val mode = FoliaStageMode.entries.firstOrNull { it.id == modeId } ?: FoliaStageMode.Sonnet
     var chromeVisible by remember { mutableStateOf(true) }
     var pickerVisible by remember { mutableStateOf(false) }
+    var settingsVisible by remember { mutableStateOf(false) }
+    var fileCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
+    var returningFromFilePicker by remember { mutableStateOf(false) }
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        fileCallback?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data))
+        fileCallback = null
+    }
+    DisposableEffect(Unit) {
+        onDispose { fileCallback?.onReceiveValue(null); fileCallback = null }
+    }
+    LaunchedEffect(active, fileCallback) {
+        if (active && fileCallback == null) returningFromFilePicker = false
+    }
     var interaction by remember { mutableIntStateOf(0) }
     var webView by remember { mutableStateOf<FoliaWebView?>(null) }
     var ready by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val document = remember(track, appState.lyrics, appState.playerDisplaySettings) {
-        foliaDocument(track, appState.lyrics, appState.playerDisplaySettings).toString()
+        foliaDocument(track, appState.lyrics, appState.playerDisplaySettings, preserveAlternateText = true).toString()
     }
     val latestPlayer by rememberUpdatedState(player)
-    val latestChrome by rememberUpdatedState(chromeVisible || pickerVisible)
+    val latestChrome by rememberUpdatedState(chromeVisible || pickerVisible || settingsVisible)
     val latestMode by rememberUpdatedState(mode)
     val latestLines by rememberUpdatedState(lines)
     val latestOffset by rememberUpdatedState(offset)
@@ -120,8 +139,9 @@ internal fun FoliaPlayer(
         interaction++
     }
     BackHandler(enabled = visible && pickerVisible) { pickerVisible = false; reveal() }
-    LaunchedEffect(chromeVisible, pickerVisible, interaction, active, error) {
-        if (chromeVisible && !pickerVisible && active && error == null) {
+    BackHandler(enabled = visible && settingsVisible) { settingsVisible = false; webView?.showSettings(false); reveal() }
+    LaunchedEffect(chromeVisible, pickerVisible, settingsVisible, interaction, active, error) {
+        if (chromeVisible && !pickerVisible && !settingsVisible && active && error == null) {
             delay(4_500)
             chromeVisible = false
         }
@@ -176,10 +196,21 @@ internal fun FoliaPlayer(
 
     Box(Modifier.fillMaxSize().background(Color(0xFF080A0F))) {
         // Destroy covered/backgrounded renderers, workers and WebGL contexts.
-        if (active) {
+        // A system document picker covers this Activity. Retain the requesting
+        // WebView until its result arrives, while the frame/FFT jobs stay paused.
+        if (active || (visible && returningFromFilePicker)) {
             AndroidView(
                 factory = { context ->
-                    FoliaWebView(context) { event, position ->
+                    FoliaWebView(context, onChooseFiles = { params, callback ->
+                        fileCallback?.onReceiveValue(null)
+                        fileCallback = callback
+                        returningFromFilePicker = true
+                        runCatching { filePicker.launch(params.createIntent()) }.onFailure {
+                            fileCallback?.onReceiveValue(null)
+                            fileCallback = null
+                            returningFromFilePicker = false
+                        }
+                    }) { event, position ->
                         when (event) {
                             "ready" -> { ready = true; error = null }
                             "seek" -> {
@@ -187,6 +218,15 @@ internal fun FoliaPlayer(
                                     viewModel.seek((position + latestOffset / 1_000.0).coerceAtLeast(0.0))
                                 }
                             }
+                            "editorSeek" -> {
+                                if (viewModel.canControl() && position != null) {
+                                    viewModel.seek((position + latestOffset / 1_000.0).coerceIn(0.0, latestPlayer.durationSeconds.coerceAtLeast(0.0)))
+                                }
+                            }
+                            "play" -> if (!latestPlayer.playing) viewModel.togglePlayback()
+                            "pause" -> if (latestPlayer.playing) viewModel.togglePlayback()
+                            "settingsOpen" -> { settingsVisible = true; reveal() }
+                            "settingsClose" -> { settingsVisible = false; reveal() }
                             "tap" -> { chromeVisible = !chromeVisible; interaction++ }
                             "error" -> { error = "舞台渲染失败，请尝试其他舞台"; reveal() }
                             "unsupported" -> { error = "请更新 Android System WebView 后使用沉浸舞台"; reveal() }
@@ -194,7 +234,10 @@ internal fun FoliaPlayer(
                     }.also { webView = it }
                 },
                 update = { stage -> stage.updateDocument(document); stage.selectMode(mode.id) },
-                onRelease = { stage -> stage.release(); webView = null; ready = false },
+                onRelease = { stage ->
+                    fileCallback?.onReceiveValue(null); fileCallback = null
+                    stage.release(); webView = null; ready = false; settingsVisible = false
+                },
                 modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.displayCutout),
             )
         }
@@ -212,7 +255,7 @@ internal fun FoliaPlayer(
             )
         }
         AnimatedVisibility(
-            visible = chromeVisible && visible,
+            visible = chromeVisible && visible && !settingsVisible,
             modifier = Modifier.align(Alignment.TopCenter),
             enter = fadeIn(), exit = fadeOut(),
         ) {
@@ -231,13 +274,16 @@ internal fun FoliaPlayer(
                     Text("Folia · " + mode.label, color = Color.White.copy(alpha = 0.72f), fontSize = 12.sp)
                 }
                 PlayerChatButton(appState.chatUnreadCount, onOpenChat)
+                IconButton(onClick = { webView?.showSettings(true); settingsVisible = true; reveal() }, modifier = Modifier.size(48.dp)) {
+                    Icon(Lucide.SlidersHorizontal, "舞台配置", Modifier.size(24.dp), tint = Color.White)
+                }
                 IconButton(onClick = { pickerVisible = true; reveal() }, modifier = Modifier.size(48.dp)) {
                     Icon(Lucide.Palette, "选择舞台", Modifier.size(24.dp), tint = Color.White)
                 }
             }
         }
         AnimatedVisibility(
-            visible = chromeVisible && visible,
+            visible = chromeVisible && visible && !settingsVisible,
             modifier = Modifier.align(Alignment.BottomCenter),
             enter = fadeIn(), exit = fadeOut(),
         ) {

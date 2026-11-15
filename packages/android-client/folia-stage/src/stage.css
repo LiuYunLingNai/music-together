@@ -1,5 +1,7 @@
 @import "tailwindcss" source(none);
 @source "../.work/src/components/visualizer";
+@source "../.work/src/components/modal/settings";
+@source "../.work/src/components/shared";
 @source "./";
 html,
 body,
@@ -33,4 +35,39 @@ body,
 }
 button {
   font: inherit;
+}
+.folia-settings-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  pointer-events: none;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+}
+.folia-settings {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 480px);
+  height: 65%;
+  background: var(--st-win);
+  color: var(--st-t1);
+  font-size: 14px;
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -4px 24px #0004;
+  outline: none;
+}
+.folia-settings-scroll {
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+  overscroll-behavior: contain;
+}
+@media (min-aspect-ratio: 1/1) {
+  .folia-settings {
+    height: 100%;
+    width: min(55%, 480px);
+    border-radius: 16px 0 0 16px;
+  }
 }

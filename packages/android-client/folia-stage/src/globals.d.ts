@@ -5,5 +5,6 @@ interface Window {
     document(data: unknown): void;
     mode(id: string): void;
     frame(data: unknown): void;
+    settings(open: boolean): void;
   };
 }
