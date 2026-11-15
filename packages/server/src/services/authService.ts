@@ -186,6 +186,47 @@ export function removeCookie(roomId: string, platform: MusicSource, userId: stri
   return true
 }
 
+/**
+ * 房间外登录：只写入该身份的持久化凭据，不进入任何房间池；
+ * 进入房间时由 restoreUserCookies 按共享偏好带入。
+ */
+export function saveUserCredential(
+  userId: string,
+  platform: MusicSource,
+  cookie: string,
+  nickname: string,
+  vipType: number,
+  membership?: MembershipDetails,
+  avatarUrl?: string,
+): void {
+  vipType = normalizeVipType(platform, vipType)
+  const { vipLabel, vipLevel } = normalizeMembershipDetails(membership)
+  const previous = platformAuthRepo.loadUser(userId).find((entry) => entry.platform === platform)
+  invalidateAuthorization(userId, platform)
+  platformAuthRepo.save(
+    {
+      ...previous,
+      userId,
+      platform,
+      cookie,
+      nickname,
+      vipType,
+      vipLabel,
+      vipLevel,
+      avatarUrl,
+      shareWithRoom: previous?.shareWithRoom ?? true,
+    },
+    { resetCredentialRefreshSchedule: platform === 'tencent' && previous?.cookie !== cookie },
+  )
+  logger.info(`用户“${nickname}”已在房间外登录 ${platform}`, {
+    event: 'auth.account_saved',
+    userId,
+    nickname,
+    platform,
+    vipType,
+  })
+}
+
 /** Restore a user's server-persisted platform accounts into a room pool. */
 export function restoreUserCookies(roomId: string, userId: string): number {
   const entries = platformAuthRepo.loadUser(userId).filter((entry) => entry.shareWithRoom !== false)

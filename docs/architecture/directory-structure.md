@@ -242,7 +242,7 @@ src/
 │   ├── kugouLyricService.ts    #   基于原生 fetch/zlib 的 KRC 获取、解密与逐字解析
 │   ├── kugouTrackFields.ts     #   酷狗歌曲字段解析（标准版小写 + 概念版 PascalCase 双命名兼容：FileName/PayType/Singers/OriSongName；搜索、漫游、歌单三条路径共用同一套解析，避免概念版歌名落到占位名）
 │   ├── lyricSupplementService.ts # 严格匹配其他音乐平台并聚合 YRC/KRC/LRC 候选，含缓存、并发合并和超时降级
-│   ├── authService.ts          #   Cookie 池管理（房间级作用域；默认共享，账号主可关闭；getUserCookie 供本人私有操作；听歌打卡偏好）
+│   ├── authService.ts          #   Cookie 池管理（房间级作用域；房间外按连接身份读写持久化凭据；默认共享，账号主可关闭；getUserCookie 供本人私有操作；听歌打卡偏好）
 │   ├── tencentCredentialRefreshService.ts # 平台凭证自动续期（QQ login_refresh + 网易云 login_refresh；24h 间隔、失败保留旧凭证）
 │   ├── authProvider.ts         #   统一认证接口（AuthProvider 接口定义 + GetUserInfoResult/UserInfoData 共享类型 + AUTH_PROVIDERS 策略映射表）
 │   ├── neteaseAuthService.ts   #   网易云 API 认证（QR / Cookie 验证 / 用户信息 / 用户歌单列表；getUserInfo 返回 { ok, data? } | { ok: false, reason: 'expired' | 'error' } 区分过期与临时故障）

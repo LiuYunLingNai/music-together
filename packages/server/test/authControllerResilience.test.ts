@@ -172,3 +172,34 @@ test('an unverifiable cookie is still saved when the user has no credential yet'
     roomRepo.delete(room.id)
   }
 })
+
+test('platform accounts follow the identity outside a room', async () => {
+  const { handlers, emitted } = createHarness('personal-scope', 'fresh-user')
+  const original = AUTH_PROVIDERS.netease
+  AUTH_PROVIDERS.netease = {
+    ...original,
+    getUserInfo: async () => ({ ok: true, data: { nickname: '房间外账号', vipType: 1 } }),
+  } as typeof original
+  const myStatus = () =>
+    (emitted.filter((entry) => entry.event === EVENTS.AUTH_MY_STATUS).at(-1)?.data as unknown as {
+      platform: string
+      loggedIn: boolean
+      nickname?: string
+    }[]).find((entry) => entry.platform === 'netease')
+  try {
+    await handlers.get(EVENTS.AUTH_SET_COOKIE)!({ platform: 'netease', cookie: 'MUSIC_U=outside-room' })
+    assert.equal(platformAuthRepo.loadUser('fresh-user').find((entry) => entry.platform === 'netease')?.cookie, 'MUSIC_U=outside-room')
+
+    emitted.length = 0
+    await handlers.get(EVENTS.AUTH_GET_STATUS)!(undefined)
+    assert.equal(myStatus()?.loggedIn, true)
+    assert.equal(myStatus()?.nickname, '房间外账号')
+
+    await handlers.get(EVENTS.AUTH_LOGOUT)!({ platform: 'netease' })
+    assert.equal(myStatus()?.loggedIn, false)
+    assert.equal(platformAuthRepo.loadUser('fresh-user').length, 0)
+  } finally {
+    AUTH_PROVIDERS.netease = original
+    platformAuthRepo.remove('fresh-user', 'netease')
+  }
+})
