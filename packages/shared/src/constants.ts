@@ -9,7 +9,10 @@ export const ARTIST_SOURCES: readonly MusicSource[] = ['netease']
 /** 账号主页提供雷达、推荐歌手与新碟的平台。 */
 export const DISCOVER_SOURCES: readonly MusicSource[] = ['netease']
 
+export const PASSWORD_LOCKED_MESSAGE = '密码错误次数过多，请稍后再试'
+
 export const LIMITS = {
+  ROOM_JOIN_PASSWORD_MAX_FAILURES: 5,
   ROOM_PASSWORD_MAX_LENGTH: 32,
   ROOM_NAME_MAX_LENGTH: 30,
   NICKNAME_MAX_LENGTH: 20,

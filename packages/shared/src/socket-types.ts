@@ -10,6 +10,7 @@ import type {
   MusicSource,
   MyPlatformAuth,
   PlayMode,
+  QueueMode,
   Playlist,
   PlatformAuthStatus,
   PlaybackFailureEvent,
@@ -101,7 +102,7 @@ export interface ServerToClientEvents {
 
   [EVENTS.ROOM_CREATED]: (data: { roomId: string; userId: string }) => void
   [EVENTS.ROOM_STATE]: (room: RoomState) => void
-  [EVENTS.ROOM_REJOIN_TOKEN]: (data: { roomId: string; token: string; expiresAt: number }) => void
+  [EVENTS.ROOM_REJOIN_TOKEN]: (data: { roomId: string; token: string; expiresAt: number; ttlMs?: number }) => void
   [EVENTS.ROOM_ERROR]: (error: { code: string; message: string }) => void
   [EVENTS.ROOM_AUTO_FALLBACK]: (data: RoomAutoFallbackEvent) => void
   [EVENTS.ROOM_USER_JOINED]: (user: User & { isPersistentMember?: boolean }) => void
@@ -114,6 +115,7 @@ export interface ServerToClientEvents {
     allowTemporaryAdminTrackRemoval: boolean
     allowTemporaryAdminQueueClear: boolean
     removePlayedTracks?: boolean
+    queueMode?: QueueMode
     roamingEnabled?: boolean
     automixEnabled?: boolean
     transitionMode?: TransitionMode
@@ -222,6 +224,7 @@ export interface ClientToServerEvents {
     allowTemporaryAdminTrackRemoval?: boolean
     allowTemporaryAdminQueueClear?: boolean
     removePlayedTracks?: boolean
+    queueMode?: QueueMode
     roamingEnabled?: boolean
     automixEnabled?: boolean
     transitionMode?: TransitionMode

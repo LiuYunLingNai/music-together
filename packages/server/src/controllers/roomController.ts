@@ -1,6 +1,7 @@
 import {
   ERROR_CODE,
   EVENTS,
+  PASSWORD_LOCKED_MESSAGE,
   roomCreateSchema,
   roomJoinSchema,
   roomSettingsSchema,
@@ -11,7 +12,13 @@ import {
 import type { TypedServer, TypedSocket } from '../middleware/types.js'
 import { createWithOwnerOnly } from '../middleware/withControl.js'
 import { createWithRoom } from '../middleware/withRoom.js'
-import { cleanupSocketRateLimit } from '../middleware/socketRateLimiter.js'
+import {
+  checkRoomEntryRateLimit,
+  clearJoinPasswordFailures,
+  cleanupSocketRateLimit,
+  isJoinPasswordLocked,
+  recordJoinPasswordFailure,
+} from '../middleware/socketRateLimiter.js'
 import { roomRepo } from '../repositories/roomRepository.js'
 import type { RoomData } from '../repositories/types.js'
 import { userRepo } from '../repositories/userRepository.js'
@@ -41,8 +48,9 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
   })
 
   // ---- Create room (含可选密码) ----
-  socket.on(EVENTS.ROOM_CREATE, (raw) => {
+  socket.on(EVENTS.ROOM_CREATE, async (raw) => {
     try {
+      if (!(await checkRoomEntryRateLimit(socket))) return
       const parsed = roomCreateSchema.safeParse(raw)
       if (!parsed.success) {
         socket.emit(EVENTS.ROOM_ERROR, {
@@ -73,7 +81,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
       // 创建者是 owner，发送含密码的完整状态
       socket.emit(EVENTS.ROOM_STATE, roomService.toPublicRoomStateForOwner(room))
       const rejoin = issueRejoinTicket(room.id, user.id)
-      socket.emit(EVENTS.ROOM_REJOIN_TOKEN, { roomId: room.id, token: rejoin.token, expiresAt: rejoin.expiresAt })
+      socket.emit(EVENTS.ROOM_REJOIN_TOKEN, { roomId: room.id, token: rejoin.token, expiresAt: rejoin.expiresAt, ttlMs: rejoin.ttlMs })
 
       // 广播房间列表给大厅用户
       roomService.broadcastRoomList(io)
@@ -95,21 +103,34 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         return
       }
       const { roomId, nickname, password, rejoinToken } = parsed.data
+      if (!rejoinToken && !(await checkRoomEntryRateLimit(socket))) return
+
+      const passwordLocked = await isJoinPasswordLocked(socket, roomId)
 
       // Validate join request (password, rejoin scenarios) — pure business logic
       const validation = roomService.validateJoinRequest(
         roomId,
         socket.id,
         socket.data.identityUserId,
-        password,
+        passwordLocked ? undefined : password,
         rejoinToken,
       )
       if (!validation.valid) {
+        if (validation.errorCode === 'WRONG_PASSWORD') {
+          if (passwordLocked) {
+            socket.emit(EVENTS.ROOM_ERROR, { code: ERROR_CODE.WRONG_PASSWORD, message: PASSWORD_LOCKED_MESSAGE })
+            return
+          }
+          await recordJoinPasswordFailure(socket, roomId)
+        }
         socket.emit(EVENTS.ROOM_ERROR, {
           code: ERROR_CODE[validation.errorCode as keyof typeof ERROR_CODE] ?? ERROR_CODE.JOIN_FAILED,
           message: validation.errorMessage ?? '加入房间失败',
         })
         return
+      }
+      if (password && !passwordLocked && !validation.skipPassword) {
+        await clearJoinPasswordFailures(socket, roomId)
       }
 
       // Auto-leave any previous room (different from target) before joining
@@ -176,7 +197,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
       if (hostChanged || roleChanged || validation.isRejoin) {
         socket.to(roomId).emit(EVENTS.ROOM_STATE, roomService.toPublicRoomState(updatedRoom))
       }
-      socket.emit(EVENTS.ROOM_REJOIN_TOKEN, { roomId, token: rejoin.token, expiresAt: rejoin.expiresAt })
+      socket.emit(EVENTS.ROOM_REJOIN_TOKEN, { roomId, token: rejoin.token, expiresAt: rejoin.expiresAt, ttlMs: rejoin.ttlMs })
       socket.emit(EVENTS.AUTH_MY_STATUS, authService.getUserAuthStatus(user.id, roomId))
       io.to(roomId).emit(EVENTS.AUTH_STATUS_UPDATE, authService.getAllPlatformStatus(roomId))
 
@@ -272,6 +293,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         allowTemporaryAdminTrackRemoval: parsed.data.allowTemporaryAdminTrackRemoval,
         allowTemporaryAdminQueueClear: parsed.data.allowTemporaryAdminQueueClear,
         removePlayedTracks: parsed.data.removePlayedTracks,
+        queueMode: parsed.data.queueMode,
         roamingEnabled: parsed.data.roamingEnabled,
         automixEnabled: parsed.data.automixEnabled,
         transitionMode: parsed.data.transitionMode,
@@ -305,6 +327,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         allowTemporaryAdminTrackRemoval: updatedRoom.allowTemporaryAdminTrackRemoval,
         allowTemporaryAdminQueueClear: updatedRoom.allowTemporaryAdminQueueClear,
         removePlayedTracks: updatedRoom.removePlayedTracks,
+        queueMode: updatedRoom.queueMode,
         roamingEnabled: updatedRoom.roamingEnabled,
         automixEnabled: updatedRoom.automixEnabled,
         transitionMode: updatedRoom.transitionMode,
@@ -333,8 +356,9 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         })
       }
 
-      // 开关自动混音后立即按当前播放状态重排或撤销过渡点。
+      // 开关自动混音、或切换队列模式（决定下一首是谁）后，立即按当前播放状态重排或撤销过渡点。
       if (
+        parsed.data.queueMode !== undefined ||
         parsed.data.automixEnabled !== undefined ||
         parsed.data.transitionMode !== undefined ||
         parsed.data.crossfadeMaxSec !== undefined ||
