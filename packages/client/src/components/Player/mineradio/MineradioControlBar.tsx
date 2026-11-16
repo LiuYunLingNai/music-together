@@ -1,6 +1,11 @@
-import { VoteBanner } from '../../Vote/VoteBanner'
-import { Transport } from '../stages/Transport'
+import { useEffect, useState } from 'react'
 import type { VoteAction, VoteState } from '@music-together/shared'
+import { useRoomStore } from '@/stores/roomStore'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { VoteBanner } from '../../Vote/VoteBanner'
+import { QualityBadge } from '../QualityBadge'
+import { QueueButton, TrackMeta, TransportButtons, TransportProgress, VolumeControl } from '../stages/Transport'
+import { useTransportActions } from '../stages/useTransportActions'
 
 interface MineradioControlBarProps {
   onPlay: () => void
@@ -8,22 +13,21 @@ interface MineradioControlBarProps {
   onSeek: (time: number) => void
   onNext: () => void
   onPrev: () => void
-  onOpenChat: () => void
   onOpenQueue: () => void
-  chatUnreadCount: number
   activeVote: VoteState | null
   onCastVote: (approve: boolean) => void
   onStartVote: (action: VoteAction, payload?: Record<string, unknown>) => void
 }
 
+/** 停手多久后控制条淡出；任何指针/键盘活动都会立刻唤醒。 */
+const IDLE_DELAY_MS = 3000
+
 /**
- * 底部悬浮玻璃控制台。
+ * 3D 舞台的底部控制条：两行、信息更轻。
  *
- * 内容使用共享的 `stages/Transport`（三列 grid，参照 Mineradio 的
- * `#controls` 结构），而不是复用经典播放器的窄列组件 ——
- * 后者的 `zoom = clientWidth / 300` 缩放假设与横向胶囊不兼容。
- *
- * 播放、权限、投票行为沿用同一套 store 与 Ability，因此语义不变。
+ * 画面本身是主角，所以只保留识别与操控必需的东西 —— 封面、歌名/歌手、
+ * 播放三键、音量、队列。聊天与播放模式在视觉舞台里是低频操作，留给侧栏与
+ * 设置面板；空闲时整条淡到 45%，指针进入即恢复（可在设置里关闭）。
  */
 export function MineradioControlBar({
   onPlay,
@@ -31,13 +35,35 @@ export function MineradioControlBar({
   onSeek,
   onNext,
   onPrev,
-  onOpenChat,
   onOpenQueue,
-  chatUnreadCount,
   activeVote,
   onCastVote,
   onStartVote,
 }: MineradioControlBarProps) {
+  const actions = useTransportActions({ onPlay, onPause, onSeek, onNext, onPrev, onStartVote })
+  const roomQuality = useRoomStore((s) => s.room?.audioQuality)
+  const autoFade = useSettingsStore((s) => s.stageConsoleAutoFade)
+  const [idle, setIdle] = useState(false)
+
+  useEffect(() => {
+    if (!autoFade) return
+    let timer = window.setTimeout(() => setIdle(true), IDLE_DELAY_MS)
+    const wake = () => {
+      setIdle(false)
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => setIdle(true), IDLE_DELAY_MS)
+    }
+    window.addEventListener('pointermove', wake)
+    window.addEventListener('pointerdown', wake)
+    window.addEventListener('keydown', wake)
+    return () => {
+      window.clearTimeout(timer)
+      window.removeEventListener('pointermove', wake)
+      window.removeEventListener('pointerdown', wake)
+      window.removeEventListener('keydown', wake)
+    }
+  }, [autoFade])
+
   return (
     <>
       {activeVote && (
@@ -45,20 +71,29 @@ export function MineradioControlBar({
           <VoteBanner vote={activeVote} onCastVote={onCastVote} />
         </div>
       )}
-
       <div className="mt-mineradio-console">
-        <div className="mt-mineradio-console__inner">
-          <Transport
-            onPlay={onPlay}
-            onPause={onPause}
-            onSeek={onSeek}
-            onNext={onNext}
-            onPrev={onPrev}
-            onOpenQueue={onOpenQueue}
-            onOpenChat={onOpenChat}
-            onStartVote={onStartVote}
-            chatUnreadCount={chatUnreadCount}
-          />
+        <div className="mt-mineradio-console__inner" data-idle={autoFade && idle ? '' : undefined}>
+          <TransportProgress disabled={actions.disabled} canSeek={actions.canSeek} onSeek={onSeek} />
+          <div className="mt-console-row">
+            <div className="mt-console-meta-group">
+              <TrackMeta
+                track={actions.currentTrack}
+                badge={
+                  <QualityBadge
+                    quality={actions.currentTrack?.audioQuality}
+                    bitrate={actions.currentTrack?.audioBitrate}
+                    downgraded={actions.currentTrack?.qualityDowngraded}
+                    requested={roomQuality}
+                  />
+                }
+              />
+            </div>
+            <TransportButtons actions={actions} />
+            <div className="mt-console-modes">
+              <VolumeControl actions={actions} />
+              <QueueButton actions={actions} onOpenQueue={onOpenQueue} />
+            </div>
+          </div>
         </div>
       </div>
     </>

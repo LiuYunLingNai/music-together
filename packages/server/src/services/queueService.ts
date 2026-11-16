@@ -1,5 +1,5 @@
 import type { PlayMode, Track } from '@music-together/shared'
-import { LIMITS } from '@music-together/shared'
+import { effectivePlayMode, LIMITS } from '@music-together/shared'
 import { nanoid } from 'nanoid'
 import { roomRepo } from '../repositories/roomRepository.js'
 import { getSuccessorAfterRemovalFromQueue } from './queueNavigation.js'
@@ -49,18 +49,47 @@ export function addBatchTracks(roomId: string, tracks: Track[]): number {
 /**
  * Insert a new track right after the current playing track.
  * If current track is missing from the queue (edge race), insert to the front.
+ * Returns the actual queued entry (which may have a new id on collision).
  */
-export function insertAfterCurrent(roomId: string, track: Track): boolean {
+export function insertTrackAfterCurrent(roomId: string, track: Track): Track | null {
   const room = roomRepo.get(roomId)
-  if (!room) return false
-  if (room.queue.length >= LIMITS.QUEUE_MAX_SIZE) return false
+  if (!room) return null
+  if (room.queue.length >= LIMITS.QUEUE_MAX_SIZE) return null
 
   const currentId = room.currentTrack?.id
   const currentIndex = currentId ? room.queue.findIndex((t) => t.id === currentId) : -1
   const insertIndex = currentIndex >= 0 ? currentIndex + 1 : 0
-  room.queue.splice(insertIndex, 0, withUniqueId(room, track))
+  const entry = withUniqueId(room, track)
+  room.queue.splice(insertIndex, 0, entry)
   roomRepo.persist(roomId)
-  return true
+  return entry
+}
+
+/**
+ * Insert several tracks right after the current playing track, keeping their order.
+ * Returns the actual queued entries (ids may change on collision); stops at queue capacity.
+ */
+export function insertTracksAfterCurrent(roomId: string, tracks: Track[]): Track[] {
+  const room = roomRepo.get(roomId)
+  if (!room || tracks.length === 0) return []
+
+  const currentId = room.currentTrack?.id
+  const currentIndex = currentId ? room.queue.findIndex((t) => t.id === currentId) : -1
+  let insertIndex = currentIndex >= 0 ? currentIndex + 1 : 0
+  const inserted: Track[] = []
+  for (const track of tracks) {
+    if (room.queue.length >= LIMITS.QUEUE_MAX_SIZE) break
+    const entry = withUniqueId(room, track)
+    room.queue.splice(insertIndex, 0, entry)
+    inserted.push(entry)
+    insertIndex += 1
+  }
+  if (inserted.length > 0) roomRepo.persist(roomId)
+  return inserted
+}
+
+export function insertAfterCurrent(roomId: string, track: Track): boolean {
+  return insertTrackAfterCurrent(roomId, track) !== null
 }
 
 export function removeTrack(roomId: string, trackId: string): boolean {
@@ -77,7 +106,11 @@ export function removeTrack(roomId: string, trackId: string): boolean {
 export function getSuccessorAfterRemoval(roomId: string, trackId: string, playMode?: PlayMode): Track | null {
   const room = roomRepo.get(roomId)
   if (!room) return null
-  return getSuccessorAfterRemovalFromQueue(room.queue, trackId, playMode ?? room.playMode)
+  return getSuccessorAfterRemovalFromQueue(
+    room.queue,
+    trackId,
+    effectivePlayMode(room.queueMode, playMode ?? room.playMode),
+  )
 }
 
 export function clearQueue(roomId: string): void {
@@ -86,6 +119,32 @@ export function clearQueue(roomId: string): void {
     room.queue = []
     roomRepo.persist(roomId)
   }
+}
+
+/** 清掉当前曲之前的已播放项；当前曲和待播项保持不动。 */
+export function removePlayedTracks(roomId: string): number {
+  const room = roomRepo.get(roomId)
+  if (!room?.currentTrack) return 0
+  const currentIndex = room.queue.findIndex((track) => track.id === room.currentTrack?.id)
+  if (currentIndex <= 0) return 0
+  const removed = room.queue.splice(0, currentIndex)
+  roomRepo.persist(roomId)
+  return removed.length
+}
+
+/** 切换漫游平台/模式时清掉尚未播放的旧漫游曲目；当前曲目保留。 */
+export function removePendingRoamingTracks(roomId: string): number {
+  const room = roomRepo.get(roomId)
+  if (!room) return 0
+  const currentId = room.currentTrack?.id
+  const nextQueue = room.queue.filter(
+    (track) => !(track.roaming === true || track.requestedBy === '私人漫游') || track.id === currentId,
+  )
+  const removed = room.queue.length - nextQueue.length
+  if (removed <= 0) return 0
+  room.queue = nextQueue
+  roomRepo.persist(roomId)
+  return removed
 }
 
 export function reorderTracks(roomId: string, trackIds: string[]): void {
@@ -161,20 +220,23 @@ export function updateTrackArtwork(
  * - loop-one:   returns the current track itself
  * - shuffle:    random track from queue (excludes current; returns self if queue has 1 item)
  */
-export function getNextTrack(roomId: string, playMode?: PlayMode): Track | null {
+export function getNextTrack(roomId: string, playMode?: PlayMode, fromTrackId?: string): Track | null {
   const room = roomRepo.get(roomId)
   if (!room || room.queue.length === 0) return null
 
-  const mode = playMode ?? room.playMode ?? 'sequential'
+  // In a queue that is consumed as it plays, the looping modes mean nothing: it just goes forward.
+  const mode = effectivePlayMode(room.queueMode, playMode ?? room.playMode ?? 'sequential')
 
-  const currentIndex = room.currentTrack ? room.queue.findIndex((t) => t.id === room.currentTrack!.id) : -1
+  // `fromTrackId` lets a caller look past a transition that has been scheduled but not committed yet.
+  const fromId = fromTrackId ?? room.currentTrack?.id
+  const currentIndex = fromId ? room.queue.findIndex((t) => t.id === fromId) : -1
 
   switch (mode) {
     case 'loop-one':
       // Replay the current track, including a roaming track that is not stored
       // in the user queue.
-      if (room.currentTrack) return room.currentTrack
-      return room.queue[0] ?? null
+      if (fromTrackId === undefined && room.currentTrack) return room.currentTrack
+      return room.queue[currentIndex] ?? room.queue[0] ?? null
 
     case 'loop-all': {
       const nextIndex = currentIndex + 1
@@ -191,7 +253,11 @@ export function getNextTrack(roomId: string, playMode?: PlayMode): Track | null 
     case 'sequential':
     default: {
       const nextIndex = currentIndex + 1
-      return nextIndex < room.queue.length ? room.queue[nextIndex] : null
+      if (nextIndex < room.queue.length) return room.queue[nextIndex]
+      // A consumed queue only holds what has not been heard yet: whatever sits before the current track was jumped
+      // over, so it comes next instead of being left behind for good.
+      if (room.queueMode === 'consume') return room.queue.find((t) => t.id !== fromId) ?? null
+      return null
     }
   }
 }
@@ -203,7 +269,7 @@ export function getPreviousTrack(roomId: string): Track | null {
   const currentIndex = room.currentTrack ? room.queue.findIndex((t) => t.id === room.currentTrack!.id) : -1
 
   // For loop-all, wrap to last track when at the beginning
-  if (room.playMode === 'loop-all' && currentIndex <= 0) {
+  if (effectivePlayMode(room.queueMode, room.playMode) === 'loop-all' && currentIndex <= 0) {
     return room.queue[room.queue.length - 1]
   }
 

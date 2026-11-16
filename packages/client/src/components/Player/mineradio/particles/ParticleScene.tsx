@@ -1,8 +1,7 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { usePlayerStore } from '@/stores/playerStore'
-import { useRoomStore } from '@/stores/roomStore'
-import { SERVER_URL } from '@/lib/config'
+import { analysisUrlFor, trackCacheKey } from '@/lib/playbackSource'
 import { getAudioTapRevision } from '@/lib/audioTap'
 import { lyricPlayerBridge } from '@/lib/lyricPlayerBridge'
 import { disposeAudioAnalyser, ensureAudioAnalyser, stepAudioFrame } from '../../stages/AudioAnalyser'
@@ -206,16 +205,13 @@ function BeatMapAnalysisDriver() {
       lastRevision = revision
       const track = usePlayerStore.getState().currentTrack
       if (!track?.streamUrl) return
-      // 与 `useHowl` 的 URL 构造保持一致（同一个播放源）——
-      // 上游分析的也是播放用的那个 URL。
-      const roomId = useRoomStore.getState().room?.id ?? ''
-      const playbackUrl =
-        track.source === 'bilibili'
-          ? `${SERVER_URL}/api/music/bilibili-audio-proxy?url=${encodeURIComponent(track.streamUrl)}&bvid=${encodeURIComponent(track.urlId)}&roomId=${encodeURIComponent(roomId)}`
-          : track.source === 'kugou' || track.source === 'kugou_concept'
-            ? `${SERVER_URL}/api/music/kugou-audio-proxy?url=${encodeURIComponent(track.streamUrl)}`
-            : track.streamUrl
-      cancel = startBeatMapAnalysis(playbackUrl, { name: track.title, artist: track.artist?.[0] })
+      const playbackUrl = analysisUrlFor(track, track.streamUrl)
+      cancel = startBeatMapAnalysis(
+        playbackUrl,
+        { name: track.title, artist: track.artist?.[0] },
+        trackCacheKey(track),
+        track.duration,
+      )
     }
     run()
     // tap 代次只在 `publishStretchAnalyser` 时变，没有订阅机制 ⇒ 轮询。

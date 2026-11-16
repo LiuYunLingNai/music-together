@@ -16,7 +16,7 @@ const MONET_PORTRAIT_IMAGE_KEY = 'monet_portrait_image'
 
 const SUPPORTED_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg']
 
-function withDatabase<T>(run: (store: IDBObjectStore) => T | undefined): Promise<T | null> {
+function withDatabase<T>(run: (store: IDBObjectStore) => IDBRequest<T> | void): Promise<T | null> {
   return new Promise((resolve) => {
     if (typeof indexedDB === 'undefined') {
       resolve(null)
@@ -39,10 +39,16 @@ function withDatabase<T>(run: (store: IDBObjectStore) => T | undefined): Promise
       const database = request.result
       try {
         const transaction = database.transaction('assets', 'readwrite')
-        const outcome = run(transaction.objectStore('assets'))
+        let outcome: T | null = null
+        const query = run(transaction.objectStore('assets'))
+        if (query) {
+          query.onsuccess = () => {
+            outcome = query.result ?? null
+          }
+        }
         transaction.oncomplete = () => {
           database.close()
-          resolve(outcome ?? null)
+          resolve(outcome)
         }
         transaction.onerror = () => {
           database.close()
@@ -61,7 +67,7 @@ function withDatabase<T>(run: (store: IDBObjectStore) => T | undefined): Promise
 }
 
 export async function loadStoredMonetPortraitImage(): Promise<StoredMonetPortraitImage | null> {
-  const stored = await withDatabase((store) => store.get(MONET_PORTRAIT_IMAGE_KEY) as unknown as StoredMonetPortraitImage | undefined)
+  const stored = await withDatabase<StoredMonetPortraitImage>((store) => store.get(MONET_PORTRAIT_IMAGE_KEY))
   if (!stored || !(stored.blob instanceof Blob) || typeof stored.name !== 'string') return null
   return stored
 }

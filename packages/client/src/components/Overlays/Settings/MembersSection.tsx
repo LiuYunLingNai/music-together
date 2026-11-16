@@ -1,15 +1,25 @@
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { useRoomStore } from '@/stores/roomStore'
 import { useAccountStore } from '@/stores/accountStore'
 import type { ClientInfo, RoomMember, UserRole } from '@music-together/shared'
-import { Crown, Globe2, Monitor, Shield, ShieldCheck, Smartphone, User as UserIcon } from 'lucide-react'
+import { Crown, Globe2, Monitor, MoreHorizontal, Shield, ShieldCheck, Smartphone, User as UserIcon, UserX } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { resolveAvatarUrl } from '@/lib/profileApi'
 
 interface MembersSectionProps {
   onSetUserRole?: (userId: string, role: 'admin' | 'member') => void
+  onKickUser?: (userId: string, ban: boolean) => void
+  onUnbanUser?: (userId: string) => void
 }
 
 /** A member roster entry, plus online-only guests synthesized from `room.users`. */
@@ -56,7 +66,7 @@ function getVisibleClients(user: { client?: ClientInfo; clients?: ClientInfo[]; 
   return !user.isOnline && user.lastClient ? [user.lastClient] : []
 }
 
-export function MembersSection({ onSetUserRole }: MembersSectionProps) {
+export function MembersSection({ onSetUserRole, onKickUser, onUnbanUser }: MembersSectionProps) {
   const room = useRoomStore((s) => s.room)
   const currentUser = useRoomStore((s) => s.currentUser)
   const isServerAdmin = useAccountStore((state) => state.profile?.role === 'admin')
@@ -147,25 +157,93 @@ export function MembersSection({ onSetUserRole }: MembersSectionProps) {
                     not transient guests — guests never receive a persistent role). */}
                 {isOwner &&
                   !user.isServerAdmin &&
-                  !user.isGuest &&
                   user.role !== 'owner' &&
                   user.id !== currentUser?.id &&
-                  onSetUserRole && (
-                    <Select value={user.role} onValueChange={(v) => onSetUserRole(user.id, v as 'admin' | 'member')}>
-                      <SelectTrigger className="h-7 w-24 shrink-0 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="admin">管理员</SelectItem>
-                        <SelectItem value="member">成员</SelectItem>
-                      </SelectContent>
-                    </Select>
+                  (onSetUserRole || onKickUser) && (
+                    <div className="flex shrink-0 items-center gap-1">
+                      {onSetUserRole && !user.isGuest && (
+                        <Select
+                          value={user.role}
+                          onValueChange={(v) => onSetUserRole(user.id, v as 'admin' | 'member')}
+                        >
+                          <SelectTrigger className="h-7 w-24 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="admin">管理员</SelectItem>
+                            <SelectItem value="member">成员</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
+                      {onKickUser && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="成员操作">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              onClick={() => {
+                                if (window.confirm(`确定将「${user.nickname}」移出房间？对方可以重新加入。`)) {
+                                  onKickUser(user.id, false)
+                                }
+                              }}
+                            >
+                              <UserX className="mr-2 h-4 w-4" />
+                              移出房间
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              className="text-destructive focus:text-destructive"
+                              onClick={() => {
+                                if (
+                                  window.confirm(
+                                    `确定将「${user.nickname}」移出并永久禁止加入本房间？可在封禁名单中解除。`,
+                                  )
+                                ) {
+                                  onKickUser(user.id, true)
+                                }
+                              }}
+                            >
+                              <UserX className="mr-2 h-4 w-4" />
+                              移出并禁止加入
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
+                    </div>
                   )}
               </div>
             )
           })}
         </div>
       </div>
+
+      {isOwner && (room?.bannedMembers?.length ?? 0) > 0 && (
+        <div>
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-base font-semibold">封禁名单</h3>
+            <span className="text-xs text-muted-foreground">{room?.bannedMembers?.length} 人</span>
+          </div>
+          <Separator className="mt-2 mb-4" />
+          <div className="space-y-1">
+            {room?.bannedMembers?.map((entry) => (
+              <div key={entry.id} className="flex items-center justify-between gap-2 rounded-lg px-3 py-1.5">
+                <div className="min-w-0">
+                  <p className="truncate text-sm">{entry.nickname}</p>
+                  <p className="text-xs text-muted-foreground">
+                    封禁于 {new Date(entry.bannedAt).toLocaleString()}
+                  </p>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => onUnbanUser?.(entry.id)} disabled={!onUnbanUser}>
+                  解除封禁
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

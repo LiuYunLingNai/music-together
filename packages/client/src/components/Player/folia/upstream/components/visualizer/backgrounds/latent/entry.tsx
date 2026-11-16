@@ -56,7 +56,7 @@ export default defineVisualizerBackground({
         retired: true,
     }],
     // No `song`: a new song's cover colours blend in place (blendMs).
-    render: ({ config, theme, coverUrl, audioPower, audioBands, staticMode, paused, blendMs }) => (
+    render: ({ config, theme, coverUrl, audioPower, audioBands, staticMode, paused, blendMs, blendProgress }) => (
         <LatentBackground
             theme={theme}
             coverUrl={coverUrl}
@@ -66,7 +66,7 @@ export default defineVisualizerBackground({
             paused={paused}
             tuning={config?.latent?.tuning}
             blendMs={blendMs}
-            
+            blendProgress={blendProgress}
         />
     ),
     renderSettingsPanel: ({ config, actions, ...props }) => (

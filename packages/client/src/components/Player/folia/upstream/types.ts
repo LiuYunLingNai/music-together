@@ -49,9 +49,26 @@ export interface LyricBackgroundVocal {
 }
 
 
-// 'both' stacks romanization above translation; only the shared bottom subtitle overlay renders both rows.
+// 'both' stacks romanization above translation.
 // Modes that lay translation out inside their own lyric layout (Monet, Pendolo, Lattice, Still) fall back to translation only.
+// The shared bottom subtitle overlay does not read this: it has its own rows (SubtitleOverlayLayout).
 export type SubtitleContentMode = 'translation' | 'romanization' | 'both' | 'none';
+
+// One row of the shared bottom subtitle overlay: the line on screen, the line after it, or the line on screen's translation / romanization.
+export type SubtitleOverlayRowSource = 'current' | 'next' | 'translation' | 'romanization';
+export type SubtitleOverlayFollowRow = Exclude<SubtitleOverlayRowSource, 'current'>;
+// The shared bottom subtitle overlay's rows, top to bottom, joined with '+'.
+// The first row is the current line, its translation or its romanization (so a stack can leave the original text out);
+// each row after it is the next line, the translation or the romanization.
+export type SubtitleOverlayFirstRow = Exclude<SubtitleOverlayRowSource, 'next'>;
+export type SubtitleOverlayRowsLayout =
+  | SubtitleOverlayFirstRow
+  | `${SubtitleOverlayFirstRow}+${SubtitleOverlayFollowRow}`
+  | `${SubtitleOverlayFirstRow}+${SubtitleOverlayFollowRow}+${SubtitleOverlayFollowRow}`;
+// A line the rows have nothing for (a translation row on a song without one) previews the coming lyrics instead.
+// The '|only' ending turns that off: the overlay then shows its rows and nothing else.
+// Stored and carried as this string.
+export type SubtitleOverlayLayout = SubtitleOverlayRowsLayout | `${SubtitleOverlayRowsLayout}|only`;
 
 
 export interface Line {
@@ -104,12 +121,32 @@ export type BuiltinVisualizerMode = 'classic' | 'cadenza' | 'partita' | 'fume' |
 export type VisualizerMode = BuiltinVisualizerMode | (string & {});
 export type VisualizerFrameRate = 'off' | 120 | 90 | 60;
 
+/**
+ * 用 canvas / WebGL 画的歌词样式的渲染分辨率：相对样式自己默认像素密度（大多是屏幕的 devicePixelRatio，钳到 2）的倍数，
+ * 大于 1 是超采样（utils/lyricRenderQuality.ts）。
+ */
+export type LyricRenderScale = 0.5 | 0.75 | 1 | 1.5 | 2;
+/** 歌词画布的抗锯齿：auto 是各样式自己的默认（有的开 MSAA，有的靠后处理）。 */
+export type LyricAntialias = 'auto' | 'on' | 'off';
+/** 「动画与性能」里的全局挡位：各样式默认跟随它。 */
+export interface LyricRenderQuality {
+  scale: LyricRenderScale;
+  antialias: LyricAntialias;
+}
+/** 一个歌词样式自己的分辨率与抗锯齿（存在样式的 tuning 里）：global 跟随全局挡位。 */
+export interface LyricRenderOverride {
+  scale: 'global' | LyricRenderScale;
+  antialias: 'global' | 'on' | 'off';
+}
+
 
 export interface ClassicTuning {
   enableWordRotation: boolean;
   breathingFloatMultiplier: number;
   useLegacyLayout?: boolean;
   wordSpacing?: number;
+  /** Space the words by how far they are drawn when scaled, turned and offset, so none overlaps another. */
+  avoidOverlap?: boolean;
 }
 
 
@@ -118,10 +155,13 @@ export const DEFAULT_CLASSIC_TUNING: ClassicTuning = {
   breathingFloatMultiplier: 1,
   useLegacyLayout: false,
   wordSpacing: 0.7,
+  avoidOverlap: false,
 };
 
 
 export interface CadenzaTuning {
+  /** 分辨率与抗锯齿（#929）：默认跟随「动画与性能」里的全局挡位（utils/lyricRenderQuality.ts）。 */
+  render: LyricRenderOverride;
   fontScale: number;
   widthRatio: number;
   motionAmount: number;
@@ -131,6 +171,7 @@ export interface CadenzaTuning {
 
 
 export const DEFAULT_CADENZA_TUNING: CadenzaTuning = {
+  render: { scale: 'global', antialias: 'global' },
   fontScale: 1.12,
   widthRatio: 0.72,
   motionAmount: 1,
@@ -144,6 +185,8 @@ export interface PartitaTuning {
   useSemanticLayout: boolean;
   staggerMin: number;
   staggerMax: number;
+  /** Space the words and rows by how far they are drawn when scaled, so none overlaps another. */
+  avoidOverlap?: boolean;
 }
 
 
@@ -152,10 +195,13 @@ export const DEFAULT_PARTITA_TUNING: PartitaTuning = {
   useSemanticLayout: true,
   staggerMin: 20,
   staggerMax: 100,
+  avoidOverlap: false,
 };
 
 
 export interface FumeTuning {
+  /** 分辨率与抗锯齿（#929）：默认跟随「动画与性能」里的全局挡位（utils/lyricRenderQuality.ts）。 */
+  render: LyricRenderOverride;
   hidePrintSymbols: boolean;
   disableGeometricBackground: boolean;
   backgroundObjectOpacity: number;
@@ -168,6 +214,7 @@ export interface FumeTuning {
 
 
 export const DEFAULT_FUME_TUNING: FumeTuning = {
+  render: { scale: 'global', antialias: 'global' },
   hidePrintSymbols: false,
   disableGeometricBackground: true,
   backgroundObjectOpacity: 0.5,
@@ -234,6 +281,8 @@ export const DEFAULT_TILT_TUNING: TiltTuning = {
 
 
 export interface PendoloTuning {
+  /** 分辨率与抗锯齿（#929）：默认跟随「动画与性能」里的全局挡位（utils/lyricRenderQuality.ts）。 */
+  render: LyricRenderOverride;
   arcRadius: number;
   arcAngleDeg: number;
   wheelCenterX: number;
@@ -248,6 +297,7 @@ export interface PendoloTuning {
 
 
 export const DEFAULT_PENDOLO_TUNING: PendoloTuning = {
+  render: { scale: 'global', antialias: 'global' },
   arcRadius: 0.42,
   arcAngleDeg: 100,
   wheelCenterX: 0.0,
@@ -265,6 +315,8 @@ export type SonnetOuterFrameMode = 'none' | 'frame' | 'full';
 
 
 export interface SonnetTuning {
+  /** 分辨率与抗锯齿（#929）：默认跟随「动画与性能」里的全局挡位（utils/lyricRenderQuality.ts）。 */
+  render: LyricRenderOverride;
   cameraIntensity: number;
   typographyMotion: number;
   mgDensity: number;
@@ -296,6 +348,7 @@ export interface SonnetTuning {
 
 
 export const DEFAULT_SONNET_TUNING: SonnetTuning = {
+  render: { scale: 'global', antialias: 'global' },
   cameraIntensity: 1,
   typographyMotion: 1,
   mgDensity: 1,
@@ -352,6 +405,8 @@ export interface TemperaLayerImage {
 
 
 export interface TemperaTuning {
+  /** 分辨率与抗锯齿（#929）：默认跟随「动画与性能」里的全局挡位（utils/lyricRenderQuality.ts）。 */
+  render: LyricRenderOverride;
   cameraIntensity: number;
   /** Per-glyph entrance motion strength, 0..2. */
   glyphMotion: number;
@@ -364,6 +419,12 @@ export interface TemperaTuning {
    * lyric end - continuous, but nothing is ever still. See temperaLayout for the measurements.
    */
   glyphSettleStretch: number;
+  /** 墨染奥行 景深, 0..2: the depth blur and the layers' parallax. Only while 墨染奥行 is on. */
+  depthOfField: number;
+  /** 墨染奥行 镜头平移, 0..2: how far each shot slides in and drifts. Only while 墨染奥行 is on. */
+  depthPan: number;
+  /** 墨染奥行 歌词远近, 0..2: how far small glyphs fade back and big ones lead. Only while 墨染奥行 is on. */
+  glyphDepth: number;
   /** duo derives blocks from theme hues; mono collapses to a grayscale ink/paper ladder. */
   colorMode: TemperaColorMode;
   showBlocks: boolean;
@@ -406,10 +467,14 @@ export interface TemperaTuning {
 
 
 export const DEFAULT_TEMPERA_TUNING: TemperaTuning = {
+  render: { scale: 'global', antialias: 'global' },
   cameraIntensity: 1,
   glyphMotion: 1,
   wholeLineLyrics: false,
   glyphSettleStretch: 0.5,
+  depthOfField: 1,
+  depthPan: 1,
+  glyphDepth: 1,
   colorMode: 'duo',
   showBlocks: true,
   showDecor: true,
@@ -437,6 +502,8 @@ export type LumiereRenderQuality = 'full' | 'balanced' | 'low';
 
 
 export interface LumiereTuning {
+  /** 分辨率与抗锯齿（#929）：默认跟随「动画与性能」里的全局挡位（utils/lyricRenderQuality.ts）。 */
+  render: LyricRenderOverride;
   /** 光强倍率, 0.3..2. */
   lightIntensity: number;
   /** 随音乐变亮, 0..2 (0 = 不随音乐变). */
@@ -496,6 +563,7 @@ export interface LumiereTuning {
 
 
 export const DEFAULT_LUMIERE_TUNING: LumiereTuning = {
+  render: { scale: 'global', antialias: 'global' },
   lightIntensity: 1,
   audioResponse: 1,
   fogDensity: 1,
@@ -580,6 +648,8 @@ export const DIORAMA_MOTE_RADIAL_MAX = 4;
 
 
 export interface DioramaTuning {
+  /** 分辨率与抗锯齿（#929）：默认跟随「动画与性能」里的全局挡位（utils/lyricRenderQuality.ts）。 */
+  render: LyricRenderOverride;
   cameraSpeed: number;
   motionAmount: number;
   audioReactivity: number;
@@ -618,6 +688,7 @@ export interface DioramaTuning {
 
 
 export const DEFAULT_DIORAMA_TUNING: DioramaTuning = {
+  render: { scale: 'global', antialias: 'global' },
   cameraSpeed: 1,
   motionAmount: 1,
   audioReactivity: 1,
@@ -748,6 +819,8 @@ export const DEFAULT_SORA_BACKGROUND_TUNING: SoraBackgroundTuning = {
 
 
 export interface MonetTuning {
+  /** 分辨率与抗锯齿（#929）：默认跟随「动画与性能」里的全局挡位（utils/lyricRenderQuality.ts）。 */
+  render: LyricRenderOverride;
   keywordColoringEnabled: boolean;
   showDescription: boolean;
   showAudioVisualization: boolean;
@@ -823,6 +896,7 @@ export const DEFAULT_LATENT_BACKGROUND_TUNING: LatentBackgroundTuning = {
 
 
 export const DEFAULT_MONET_TUNING: MonetTuning = {
+  render: { scale: 'global', antialias: 'global' },
   keywordColoringEnabled: true,
   showDescription: true,
   showAudioVisualization: true,

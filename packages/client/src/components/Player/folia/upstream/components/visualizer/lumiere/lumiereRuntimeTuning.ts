@@ -1,5 +1,6 @@
 // Copyright (c) 2026 chthollyphile
-import type { LumiereRenderQuality, LumiereTuning } from '../../../types';
+import type { LumiereRenderQuality, LumiereTuning, LyricRenderScale } from '../../../types';
+import { resolveLyricPixelRatio } from '../../../utils/lyricRenderQuality';
 import { snapResolutionToTexturePool } from '../pixi/pixiTextureBudget';
 import type { LumiereProgramOptions } from './lumiereProgram';
 import type { LumiereSceneTuning } from './types';
@@ -43,6 +44,14 @@ export const resolveLumiereRenderResolution = (devicePixelRatio: number | undefi
     const ratio = typeof devicePixelRatio === 'number' && Number.isFinite(devicePixelRatio) ? devicePixelRatio : 1;
     return Math.min(LUMIERE_MAX_RENDER_RESOLUTION, Math.max(1, ratio));
 };
+
+/**
+ * 实际的渲染分辨率：上面的 base（dpr 钳在 1..2）乘上用户选的分辨率倍数（>1 时封顶 3，见 utils/lyricRenderQuality.ts）。
+ * 倍数为 1 时与没有这个设置时完全一样。
+ */
+export const resolveLumiereScaledRenderResolution = (devicePixelRatio: number | undefined, scale: LyricRenderScale) => (
+    resolveLyricPixelRatio(resolveLumiereRenderResolution(devicePixelRatio), scale)
+);
 
 /**
  * 图形组 filter 的分辨率：满画质时就是渲染分辨率；降档时乘上倍率，再按 Pixi 纹理池的 2 的幂分桶往下吸附

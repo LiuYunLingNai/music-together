@@ -32,4 +32,6 @@ export const FOLIA_MODE_RENDERERS: Record<FoliaModeId, ComponentType<FoliaShared
   partita: lazy(() => import('./upstream/components/visualizer/partita/VisualizerPartita')),
   tilt: lazy(() => import('./upstream/components/visualizer/tilt/VisualizerTilt')),
   cappella: lazy(() => import('./upstream/components/visualizer/cappella/VisualizerCappella')),
+  machi: lazy(() => import('./upstream/components/visualizer/machi/VisualizerMachi')),
+  nebbia: lazy(() => import('./upstream/components/visualizer/nebbia/VisualizerNebbia')),
 }

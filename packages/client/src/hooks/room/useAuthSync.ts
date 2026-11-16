@@ -1,9 +1,9 @@
 import { useSocketContext } from '@/providers/socket-context'
-import { useRoomStore } from '@/stores/roomStore'
+import { consumeAutoResend } from '@/lib/authAutoResend'
 import { storage } from '@/lib/storage'
 import { EVENTS } from '@music-together/shared'
 import type { MusicSource } from '@music-together/shared'
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { toast } from 'sonner'
 
 const PLATFORM_NAMES: Record<MusicSource, string> = {
@@ -29,9 +29,6 @@ const PLATFORM_NAMES: Record<MusicSource, string> = {
 export function useAuthSync() {
   const { socket } = useSocketContext()
 
-  // 跟踪待处理的自动恢复请求数，用于静默成功 toast
-  const pendingAutoResendRef = useRef(0)
-
   useEffect(() => {
     const onAuthCookieResult = (data: {
       success: boolean
@@ -47,18 +44,14 @@ export function useAuthSync() {
         }
 
         // 自动恢复成功时静默，手动操作时弹 toast
-        if (pendingAutoResendRef.current > 0) {
-          pendingAutoResendRef.current--
-        } else {
+        if (!consumeAutoResend()) {
           toast.success(data.message)
         }
       } else if (data.platform) {
         const name = PLATFORM_NAMES[data.platform] ?? data.platform
 
         // 自动恢复失败时消费计数
-        if (pendingAutoResendRef.current > 0) {
-          pendingAutoResendRef.current--
-        }
+        consumeAutoResend()
 
         if (data.reason === 'reauth_required') {
           storage.removeAuthCookie(data.platform)
@@ -75,25 +68,10 @@ export function useAuthSync() {
       }
     }
 
-    // 当收到 ROOM_STATE 时，useRoomState 会自动恢复 cookie
-    // 此处记录即将到来的恢复结果数量，以便静默成功 toast
-    const onRoomState = () => {
-      const stored = storage.getAuthCookies()
-      pendingAutoResendRef.current = stored.length
-    }
-
     socket.on(EVENTS.AUTH_SET_COOKIE_RESULT, onAuthCookieResult)
-    socket.on(EVENTS.ROOM_STATE, onRoomState)
-
-    // 如果组件挂载时已在房间中（如路由切换），也要初始化计数
-    if (useRoomStore.getState().room) {
-      const stored = storage.getAuthCookies()
-      pendingAutoResendRef.current = stored.length
-    }
 
     return () => {
       socket.off(EVENTS.AUTH_SET_COOKIE_RESULT, onAuthCookieResult)
-      socket.off(EVENTS.ROOM_STATE, onRoomState)
     }
   }, [socket])
 }

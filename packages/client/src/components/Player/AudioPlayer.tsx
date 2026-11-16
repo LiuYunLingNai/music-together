@@ -10,6 +10,7 @@ import type { VisualModeId } from './stages/VisualMode'
 import type { FoliaModeId } from './folia/registry'
 import { resolveStageFamily } from './stages/registry'
 import { isFoliaModeId } from './folia/registry'
+import { useFoliaStyleWindowStore } from './folia/stage/foliaStyleWindowStore'
 
 /**
  * Mineradio 舞台按需加载。
@@ -91,9 +92,9 @@ interface AudioPlayerProps {
   onPrev: () => void
   onOpenChat: () => void
   onOpenQueue: () => void
+  /** 舞台内齿轮：打开设置面板的「播放器」页 */
+  onOpenSettings?: () => void
   chatUnreadCount: number
-  view: 'player' | 'playlist'
-  onToggleView: () => void
   activeVote: VoteState | null
   onCastVote: (approve: boolean) => void
   onStartVote: (action: VoteAction, payload?: Record<string, unknown>) => void
@@ -109,19 +110,17 @@ interface AudioPlayerProps {
  * 1. 当前是经典播放器还是 Mineradio 舞台
  * 2. 舞台切换菜单
  * 3. 把既有播放回调透传给选中的舞台
- * 4. 歌单页切换
  *
  * 播放、暂停、切歌、跳转、权限、投票、房间同步等逻辑全部位于
  * `usePlayer` / `useHowl` / `usePlayerSync`，本组件不参与，
  * 因此切换舞台不会影响房间权威状态或播放进度。
  */
 export function AudioPlayer(props: AudioPlayerProps) {
-  const { view, onToggleView } = props
-
   const setVisualStage = useSettingsStore((s) => s.setVisualStage)
   const setFoliaSettings = useSettingsStore((s) => s.setFoliaSettings)
   const { disabled: visualDisabled, effectiveVisualStage } = useVisualStageSupport()
   const visualQuality = useSettingsStore((s) => s.visualQuality)
+  const styleWindowOpen = useFoliaStyleWindowStore((s) => s.open)
 
   // WebGL 上下文丢失或不可用时，回退到经典播放器。
   // 直接改持久化的舞台设置，不额外维护本地标志位，避免多一份状态需要同步。
@@ -170,26 +169,17 @@ export function AudioPlayer(props: AudioPlayerProps) {
   const handleSelectStage = useCallback(
     (next: StageMode) => {
       // ★ 移动端（触摸设备）**没有**视觉舞台入口，这里也必须拒绝写入。
-      //   菜单本身已不渲染，但 `AppearanceSection` 的「播放器模式」下拉仍在
-      //   同一份 store 上，且两处共享 `setVisualStage` —— 只藏菜单不拦写入，
-      //   会让设置面板成为绕过入口限制的后门（选了 → 存储变 emily → 回写
-      //   effect 再把它改回 classic，表现为"选了没反应"）。这里显式早退，
-      //   让"不可用"的语义在所有入口一致。
+      //   舞台切换器是唯一入口，但它与设置面板共享 `setVisualStage` ——
+      //   只藏菜单不拦写入，任何新入口都会成为绕过入口限制的后门（选了 →
+      //   存储变 emily → 回写 effect 再把它改回 classic，表现为"选了没反应"）。
+      //   这里显式早退，让"不可用"的语义在所有入口一致。
       if (visualDisabled) return
       setVisualStage(next)
       // 手动选具体样式即关掉「每首随机」（上游 handleSetVisualizerMode 的语义），
       // 否则下一次切歌会立刻把刚选的样式换掉。
       if (isFoliaModeId(next)) setFoliaSettings({ lyricMode: next, randomMode: false })
-      // ★ 视觉舞台只在 `view === 'player'` 时渲染（整页播放列表是经典舞台
-      //   独有的概念）。若用户当前停在经典舞台的整页歌单里再选视觉模式，
-      //   而这里不把视图切回来，渲染的仍是经典舞台 —— 菜单里视觉模式显示
-      //   已选中、画面却不变，看起来像"舞台切换坏了"。
-      //
-      //   用既有的 toggle 回调切回播放器视图（从 playlist 切换必然回到
-      //   player），避免为此新增一个 prop 或改动上层状态所有权。
-      if (next !== 'classic' && view !== 'player') onToggleView()
     },
-    [setVisualStage, setFoliaSettings, view, onToggleView, visualDisabled],
+    [setVisualStage, setFoliaSettings, visualDisabled],
   )
 
   const stageProps = {
@@ -201,6 +191,7 @@ export function AudioPlayer(props: AudioPlayerProps) {
     onPrev: props.onPrev,
     onOpenChat: props.onOpenChat,
     onOpenQueue: props.onOpenQueue,
+    onOpenSettings: props.onOpenSettings,
     chatUnreadCount: props.chatUnreadCount,
     activeVote: props.activeVote,
     onCastVote: props.onCastVote,
@@ -210,12 +201,16 @@ export function AudioPlayer(props: AudioPlayerProps) {
   return (
     <div className="relative h-full">
       {/* 歌词样式工作窗口挂在这里而不是舞台内部：舞台在 `visualStage` 变化时整棵重渲染，
-          窗口若挂在里面，切样式就会跟着闪退重进一次。窗口的开关在 store 里，未打开时不挂载。 */}
-      <Suspense fallback={null}>
-        <FoliaStyleWindowHost />
-      </Suspense>
+          窗口若挂在里面，切样式就会跟着闪退重进一次。窗口的开关在 store 里；**代码也只在
+          真正打开时才拉**（未打开就挂 lazy 组件会让整个窗口 chunk —— 连同各模式面板和
+          hostStores 的启动副作用 —— 在首屏就下载执行）。 */}
+      {styleWindowOpen && (
+        <Suspense fallback={null}>
+          <FoliaStyleWindowHost />
+        </Suspense>
+      )}
       {/* 舞台切换器：三段胶囊（经典 | 3D | Folia），点已激活段展开该族模式列表。
-          位于经典舞台歌单按钮的左侧，避免两个按钮重叠，保留相同的安全边距处理。
+          位于舞台设置按钮的左侧，避免两个按钮重叠，保留相同的安全边距处理。
 
           ★ 移动端（触摸设备）**整个容器不渲染**。
             这里是把条件写在容器外、连空壳一起省掉，而不是在容器内藏按钮：
@@ -229,9 +224,8 @@ export function AudioPlayer(props: AudioPlayerProps) {
         </div>
       )}
 
-      {isVisualStage && view === 'player' ? (
-        /* 视觉舞台只在播放器视图渲染：整页歌单是经典舞台独有的概念。
-           两族共用同一个错误边界与回退语义 —— 任何一族在挂载期抛错
+      {isVisualStage ? (
+        /* 两族共用同一个错误边界与回退语义 —— 任何一族在挂载期抛错
            （chunk 加载失败 / WebGL 上下文创建失败）都会把持久化舞台
            回写为 classic，播放本身不受影响（播放所有权在舞台之外）。 */
         <StageErrorBoundary stageKey={visualStage} onUnavailable={handleUnavailable}>
@@ -254,7 +248,7 @@ export function AudioPlayer(props: AudioPlayerProps) {
           </Suspense>
         </StageErrorBoundary>
       ) : (
-        <ClassicPlayerStage {...stageProps} view={view} onToggleView={onToggleView} />
+        <ClassicPlayerStage {...stageProps} />
       )}
     </div>
   )

@@ -22,7 +22,8 @@ function formatBackupName(): string {
 async function copyDataFiles(destination: string): Promise<void> {
   await mkdir(destination, { recursive: true })
   const databaseFileName = path.basename(databasePath)
-  const excludedFiles = new Set([databaseFileName, `${databaseFileName}-wal`, `${databaseFileName}-shm`])
+  // 分析模型权重约 133 MB 且可随时重新下载，不进备份。
+  const excludedFiles = new Set([databaseFileName, `${databaseFileName}-wal`, `${databaseFileName}-shm`, 'models'])
   const entries = await readdir(dataDirectory, { withFileTypes: true })
 
   for (const entry of entries) {

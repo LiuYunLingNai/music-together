@@ -139,6 +139,14 @@ export function getEffectiveQuality(
   return ladder[Math.min(ladder.indexOf(desired), ladder.indexOf(cap))]
 }
 
+/** One rung below the effective quality; returns the effective quality at the floor. */
+export function degradeQuality(source: MusicSource, requested: AudioQuality, vipType: MembershipTier): AudioQuality {
+  const ladder = PROVIDER_QUALITY_LADDERS[source]
+  const effective = getEffectiveQuality(source, requested, vipType)
+  const index = ladder.indexOf(effective)
+  return index > 0 ? ladder[index - 1] : effective
+}
+
 export function providerQualityRank(source: MusicSource, quality: AudioQuality): number {
   const exactRank = PROVIDER_QUALITY_LADDERS[source].indexOf(quality)
   if (exactRank !== -1) return exactRank

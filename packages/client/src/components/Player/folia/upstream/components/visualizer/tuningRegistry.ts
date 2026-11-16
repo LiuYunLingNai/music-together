@@ -14,8 +14,11 @@ import type {
     TiltTuning,
     VisualizerMode,
 } from '../../types';
+import type { MachiTuning } from './machi/types';
+import type { NebbiaTuning } from './nebbia/types';
 import type { VisualizerSharedProps } from './definition';
 import type { BackgroundSettingsSlice, BackgroundTuningDefinition, StoredTuning, StoredTuningAdapter, VisualizerTuningAdapter } from './tuningDefinition';
+import { normalizeNebbiaTuning } from './nebbia/nebbiaTuning';
 
 // src/components/visualizer/tuningRegistry.ts
 // Pure-data registry for transporting heterogeneous visualizer tuning without importing renderers.
@@ -36,6 +39,8 @@ export interface VisualizerTuningMap {
     sonnet: SonnetTuning;
     tempera: TemperaTuning;
     lumiere: LumiereTuning;
+    machi: MachiTuning;
+    nebbia: NebbiaTuning;
 }
 
 export type VisualizerTuningBundle = Partial<VisualizerTuningMap>;
@@ -46,7 +51,7 @@ export type VisualizerTuningBundle = Partial<VisualizerTuningMap>;
  * 这里给出同形状的适配器：`settingsKey` 等字段只为窗口的草稿机制服务，
  * `apply` 把调参挂到渲染器读的那个 prop 上（宿主 `FoliaModeId` 与上游 id 的映射同 windowRegistry）。
  */
-const TUNING_MODES = ['classic', 'cadenza', 'partita', 'fume', 'claddagh', 'cappella', 'tilt', 'monet', 'pendolo', 'sonnet', 'tempera', 'lumiere', 'hanabi', 'diorama'] as const;
+const TUNING_MODES = ['classic', 'cadenza', 'partita', 'fume', 'claddagh', 'cappella', 'tilt', 'monet', 'pendolo', 'sonnet', 'tempera', 'lumiere', 'hanabi', 'diorama', 'machi', 'nebbia'] as const;
 
 const propName = (mode: string) => (mode === 'classic' ? 'classicTuning' : `${mode}Tuning`);
 
@@ -68,7 +73,16 @@ const adapters: VisualizerTuningAdapter[] = TUNING_MODES.map(mode => ({
     storage: {
         key: `folia.tuning.${mode}`,
         read: (stored: unknown) => (stored && typeof stored === 'object' ? stored : {}) as never,
-        merge: (held: unknown, patch: unknown) => ({ ...(held as object), ...(patch as object) }) as never,
+        merge: (held: unknown, patch: unknown) => {
+            // 导入/同步来的旧雾笺配置只有 resolution：先迁成 render，否则 held.render 会把它盖掉。
+            const values = patch as Record<string, unknown>;
+            const migrated = mode === 'nebbia' && values.render === undefined && values.resolution !== undefined
+                ? { ...values, render: normalizeNebbiaTuning({ resolution: values.resolution }).render }
+                : values;
+            return mode === 'nebbia'
+                ? normalizeNebbiaTuning({ ...(held as object), ...migrated }) as never
+                : { ...(held as object), ...migrated } as never;
+        },
     },
 }));
 const adaptersByMode = new Map<string, VisualizerTuningAdapter>(adapters.map(adapter => [adapter.mode, adapter]));

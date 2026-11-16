@@ -1,19 +1,21 @@
 import Meting from '@meting/core'
-import type {
-  AudioQuality,
-  BilibiliStreamFormat,
-  MusicSource,
-  NeteaseRoamingMode,
-  Playlist,
-  RecommendationPagination,
-  RoamingSource,
-  Track,
+import {
+  type AudioQuality,
+  type BilibiliStreamFormat,
+  type MusicSource,
+  type NeteaseRoamingMode,
+  type PlaybackFailureReason,
+  type Playlist,
+  type RecommendationPagination,
+  type RoamingSource,
+  type Track,
 } from '@music-together/shared'
 import { LRUCache } from 'lru-cache'
 import { nanoid } from 'nanoid'
 import pLimit from 'p-limit'
 import ncmApi from '@neteasecloudmusicapienhanced/api'
 import * as kugouAuth from './kugouAuthService.js'
+import * as neteaseAuth from './neteaseAuthService.js'
 import * as tencentAuth from './tencentAuthService.js'
 import * as bilibiliAuth from './bilibiliAuthService.js'
 import { getKugouQualityFallbacks } from './audioQualityPolicy.js'
@@ -33,8 +35,13 @@ import { parseCookieString } from '../utils/cookieUtils.js'
 import { logger } from '../utils/logger.js'
 import { parseNeteaseRecommendedPlaylistPage } from './recommendationParsers.js'
 import { getCoverArtwork, normalizeHighQualityCoverUrl } from './coverArtwork.js'
-import { getKrcByHash, type KrcInfo } from './kugouLyricService.js'
-import { parseNeteaseTrack } from './neteaseTrackParser.js'
+import { getStreamUrlCacheTtl, isStreamUrlExpired } from './streamUrlLifetime.js'
+import { searchAlbums, searchArtists, searchPlaylists } from './catalogSearch.js'
+import { SearchError } from './catalogUtils.js'
+import { EMPTY_LYRIC, fetchLyric, type LyricResult } from './lyricFetch.js'
+import { kugouSongToTrack, navigatePath, rawToTrack } from './trackMapping.js'
+import { normalizeBilibiliCoverUrl, normalizeKugouCoverUrl } from './coverArtwork.js'
+import { withTimeoutOrNull as withTimeout } from '../utils/withTimeout.js'
 import crypto from 'node:crypto'
 import { createRequire } from 'node:module'
 
@@ -61,60 +68,7 @@ function ensureNeteaseEnhancedConfig(force = false): Promise<boolean> {
   return neteaseConfigReady
 }
 
-/** AMLL LyricLine 格式（与 @applemusic-like-lyrics/core 一致，避免引入 client 依赖） */
-export interface AmllLyricLine {
-  words: Array<{ word: string; startTime: number; endTime: number; romanWord: string; obscene: boolean }>
-  translatedLyric: string
-  romanLyric: string
-  startTime: number
-  endTime: number
-  isBG: boolean
-  isDuet: boolean
-}
-
-export interface LyricResult {
-  lyric: string
-  tlyric: string
-  romalrc: string
-  yrc: string
-  wordByWord?: AmllLyricLine[]
-}
-
-/** 将 KRC 解析结果转为 AMLL LyricLine 格式 */
-function krcToAmllLines(krcInfo: KrcInfo): AmllLyricLine[] {
-  if (!krcInfo.items?.length) return []
-  return krcInfo.items.map((line) => {
-    if (!line.length) {
-      return {
-        words: [],
-        translatedLyric: '',
-        romanLyric: '',
-        startTime: 0,
-        endTime: 0,
-        isBG: false,
-        isDuet: false,
-      }
-    }
-    const words = line.map((w) => ({
-      word: w.word,
-      startTime: Math.round(w.offset * 1000),
-      endTime: Math.round((w.offset + w.duration) * 1000),
-      romanWord: '',
-      obscene: false,
-    }))
-    const first = words[0]!
-    const last = words[words.length - 1]!
-    return {
-      words,
-      translatedLyric: '',
-      romanLyric: '',
-      startTime: first.startTime,
-      endTime: last.endTime,
-      isBG: false,
-      isDuet: false,
-    }
-  })
-}
+export type { AmllLyricLine, LyricResult } from './lyricFetch.js'
 
 // ---------------------------------------------------------------------------
 // Meting instance type (library has no TS declarations)
@@ -143,6 +97,29 @@ export interface StreamUrlResult {
 }
 
 type CachedStreamUrl = Omit<StreamUrlResult, 'fromCache'>
+
+/** Provider-level failure facts, mapped to the shared user-facing reason downstream. */
+export interface ProviderStreamFailure {
+  reason: PlaybackFailureReason
+  providerCode?: string
+  providerMessage?: string
+  httpStatus?: number
+  retryAfterMs?: number
+}
+
+export interface StreamResolutionOutcome {
+  result: StreamUrlResult | null
+  failure: ProviderStreamFailure | null
+}
+
+interface StreamFailureSink {
+  value: ProviderStreamFailure | null
+}
+
+function markStreamFailure(sink: StreamFailureSink | undefined, failure: ProviderStreamFailure): void {
+  if (!sink || sink.value) return
+  sink.value = failure
+}
 
 /** Loosely typed ncmApi response (the library has no TS declarations). */
 interface NcmApiResponse {
@@ -209,6 +186,11 @@ interface TencentTrackInfo {
   type?: number
   interval?: number
   vs?: unknown[]
+  pay?: {
+    pay_month?: number
+    pay_down?: number
+    price_track?: number
+  }
   file?: {
     media_mid?: string
     size_128mp3?: number
@@ -286,74 +268,6 @@ interface BilibiliPage {
   first_frame?: unknown
 }
 
-/** External API timeout (ms) */
-const API_TIMEOUT_MS = 15_000
-
-/** Race a promise against a timeout. Returns null on timeout. */
-async function withTimeout<T>(promise: Promise<T>, ms = API_TIMEOUT_MS): Promise<T | null> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const timeout = new Promise<null>((resolve) => {
-    timer = setTimeout(() => resolve(null), ms)
-  })
-  try {
-    return await Promise.race([promise, timeout])
-  } finally {
-    if (timer !== undefined) clearTimeout(timer)
-  }
-}
-
-/** QQ's legacy lyric endpoint can omit translations that its explicit lyric request provides. */
-async function getTencentTranslatedLyric(songMid: string): Promise<string> {
-  const response = await fetch('https://u.y.qq.com/cgi-bin/musicu.fcg', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Referer: 'https://y.qq.com/',
-    },
-    body: JSON.stringify({
-      comm: { ct: 24, cv: 0 },
-      lyric: {
-        module: 'music.musichallSong.PlayLyricInfo',
-        method: 'GetPlayLyricInfo',
-        param: { songMid, type: 1, crypt: 0, trans: 1, trans_t: 0, lrc_t: 0 },
-      },
-    }),
-    signal: AbortSignal.timeout(8_000),
-  })
-  if (!response.ok) throw new Error(`QQ lyric HTTP ${response.status}`)
-  const body = await response.json() as {
-    lyric?: { code?: number; data?: { trans?: string } }
-  }
-  if (body.lyric?.code !== 0) return ''
-  const encoded = body.lyric.data?.trans
-  if (!encoded || !/^[A-Za-z0-9+/=]+$/.test(encoded)) return ''
-  const translated = Buffer.from(encoded, 'base64').toString('utf8')
-  return /\[\d{2}:\d{2}(?:\.\d+)?\]/.test(translated) ? translated : ''
-}
-
-/** Normalize cover URLs returned by Kugou's mobile APIs. */
-function normalizeKugouCoverUrl(value: unknown, size = 300): string {
-  let url = String(value || '')
-    .trim()
-    .replace(/\{size\}/g, String(size))
-  if (!url) return ''
-  if (url.startsWith('//')) url = `https:${url}`
-  if (url.startsWith('http://')) url = url.replace(/^http:\/\//, 'https://')
-
-  // imgessl is already handled by the client's cover proxy and is equivalent
-  // to the older imge host returned in trans_param.union_cover.
-  return url.replace(/^https:\/\/imge\.kugou\.com/i, 'https://imgessl.kugou.com')
-}
-
-function normalizeBilibiliCoverUrl(value: unknown): string {
-  let url = String(value ?? '').trim()
-  if (!url) return ''
-  if (url.startsWith('//')) url = `https:${url}`
-  if (url.startsWith('http://')) url = url.replace(/^http:\/\//, 'https://')
-  if (!/^https?:\/\//i.test(url)) url = `https://${url.replace(/^\/+/, '')}`
-  return url
-}
-
 /** Normalize provider bitrate values (some APIs use bps, others use kbps). */
 function normalizeBitrate(value: unknown): number | null {
   const bitrate = Number(value)
@@ -362,15 +276,7 @@ function normalizeBitrate(value: unknown): number | null {
 }
 
 type NeteaseSoundQualityLevel =
-  | 'standard'
-  | 'higher'
-  | 'exhigh'
-  | 'lossless'
-  | 'dolby'
-  | 'hires'
-  | 'jyeffect'
-  | 'jymaster'
-  | 'sky'
+  'standard' | 'higher' | 'exhigh' | 'lossless' | 'dolby' | 'hires' | 'jyeffect' | 'jymaster' | 'sky'
 
 function neteaseQualityToLevel(quality: AudioQuality): NeteaseSoundQualityLevel | null {
   switch (quality) {
@@ -414,6 +320,16 @@ function neteaseLevelToQuality(level: unknown): AudioQuality | undefined {
 
 function qualityToBitrate(quality: AudioQuality): 128 | 192 | 320 | 999 {
   return typeof quality === 'number' ? quality : 999
+}
+
+/** 网易云 scrobble 使用的客户端词汇；未知档位按 exhigh 处理。 */
+function neteaseScrobbleQuality(quality: AudioQuality): { level: string; bitrate: number } {
+  if (quality === 128) return { level: 'standard', bitrate: 128 }
+  if (quality === 192) return { level: 'higher', bitrate: 192 }
+  if (quality === 320) return { level: 'exhigh', bitrate: 320 }
+  if (quality === 999 || quality === 'netease_master') return { level: 'lossless', bitrate: 999 }
+  if (quality === 'netease_hires') return { level: 'hires', bitrate: 1999 }
+  return { level: 'exhigh', bitrate: 320 }
 }
 
 function hashTencentGtk(value: string): number {
@@ -549,12 +465,19 @@ class MusicProvider {
     max: 200,
     ttl: 10 * MINUTE,
   })
+  private playlistInflight = new Map<string, Promise<{ ids: string[]; total: number }>>()
   private playlistIndex = new LRUCache<string, { source: MusicSource; ids: string[] }>({
     max: 50,
     ttl: 30 * MINUTE,
   })
   // Layer 3: Resource Caches — scalar values for stream URLs, covers, lyrics.
-  private streamUrlCache = new LRUCache<string, CachedStreamUrl>({ max: 500, ttl: 1 * HOUR })
+  private streamUrlCache = new LRUCache<string, CachedStreamUrl>({ max: 500, ttl: 20 * MINUTE })
+
+  /** 网易云链接按 CDN 路径里的过期时间缓存，已过期的不入缓存。 */
+  private cacheStreamUrl(source: MusicSource, key: string, result: CachedStreamUrl): void {
+    if (isStreamUrlExpired(source, result.url)) return
+    this.streamUrlCache.set(key, result, { ttl: getStreamUrlCacheTtl(source, result.url, 20 * MINUTE) })
+  }
   private coverCache = new LRUCache<string, string>({ max: 1000, ttl: 24 * HOUR })
   private lyricCache = new LRUCache<string, LyricResult>({
     max: 500,
@@ -626,6 +549,13 @@ class MusicProvider {
         this.trackRegistry.set(key, meta)
       }
     }
+  }
+
+  /** 按 ID 查到的曲目：与搜索结果一样补全并登记到注册表，之后的歌词、封面解析可以复用。 */
+  ingest(tracks: Track[]): Track[] {
+    for (const t of tracks) this.enrichFromRegistry(t)
+    this.registerTracks(tracks)
+    return tracks
   }
 
   /**
@@ -816,7 +746,7 @@ class MusicProvider {
         })
         response = await this.fetchBilibiliJson(`https://api.bilibili.com/x/web-interface/search/type?${params}`)
       }
-      if (!response || response.code !== 0) return []
+      if (!response || response.code !== 0) throw new SearchError()
       const videos = (response?.data?.result ?? []) as BilibiliSearchVideo[]
       const tracks: Track[] = videos.flatMap((video) => {
         const bvid = String(video.bvid ?? '').trim()
@@ -840,8 +770,9 @@ class MusicProvider {
       this.registerTracks(tracks)
       return tracks
     } catch (err) {
+      if (err instanceof SearchError) throw err
       logger.error('Bilibili search failed', err, { keyword, page })
-      return []
+      throw new SearchError()
     }
   }
 
@@ -979,12 +910,19 @@ class MusicProvider {
     urlId: string,
     quality: AudioQuality,
     cookie?: string,
+    sink?: StreamFailureSink,
   ): Promise<CachedStreamUrl | null> {
     const streamId = parseBilibiliStreamId(urlId)
-    if (!streamId) return null
+    if (!streamId) {
+      markStreamFailure(sink, { reason: 'not-playable', providerMessage: 'invalid bilibili video id' })
+      return null
+    }
     const { bvid } = streamId
     const view = await this.getBilibiliView(bvid)
-    if (!view) return null
+    if (!view) {
+      markStreamFailure(sink, { reason: 'taken-down', providerMessage: 'video info unavailable' })
+      return null
+    }
     const cid = streamId.cid ?? view.cid
     const requestCookie = await this.withBilibiliDeviceCookie(cookie)
     const query = await this.signBilibiliWbiParams(
@@ -1002,7 +940,10 @@ class MusicProvider {
       },
       requestCookie,
     )
-    if (!query) return null
+    if (!query) {
+      markStreamFailure(sink, { reason: 'upstream-unreachable', providerMessage: 'bilibili signing failed' })
+      return null
+    }
     let response = await this.fetchBilibiliJson(
       `https://api.bilibili.com/x/player/wbi/playurl?${query}`,
       `https://www.bilibili.com/video/${bvid}/`,
@@ -1081,7 +1022,23 @@ class MusicProvider {
 
     const audio = selectBilibiliAudioCandidate(candidates, quality)
     const url = audio ? findUsableUrl(audio.raw) : null
-    if (!audio || !url) return null
+    if (!audio || !url) {
+      const code = Number(response?.code)
+      const reason: PlaybackFailureReason =
+        code === -404
+          ? 'taken-down'
+          : code === -403 || code === -10403
+            ? 'region-restricted'
+            : code === 87007 || code === 87008
+              ? 'subscription-required'
+              : 'no-audio'
+      markStreamFailure(sink, {
+        reason,
+        providerCode: Number.isFinite(code) ? String(code) : undefined,
+        providerMessage: typeof response?.message === 'string' ? response.message.slice(0, 200) : undefined,
+      })
+      return null
+    }
 
     const actualBitrate = normalizeBitrate(audio.bandwidth)
     logger.info('Bilibili audio stream resolved', {
@@ -1180,7 +1137,7 @@ class MusicProvider {
       const songList = response?.data?.info ?? response?.data?.lists
       if (!response || (response.errcode !== 0 && response.status !== 1) || !Array.isArray(songList)) {
         logger.warn(`Kugou search failed: errcode=${response?.errcode ?? response?.error_code}`)
-        return []
+        throw new SearchError()
       }
 
       const tracks: Track[] = []
@@ -1203,6 +1160,7 @@ class MusicProvider {
           lyricId: fields.hash,
           picId: fields.hash,
           vip: fields.vip,
+          ...(fields.originalTitle ? { lyricAliases: { title: fields.originalTitle } } : {}),
         })
       }
 
@@ -1222,8 +1180,9 @@ class MusicProvider {
       })
       return tracks
     } catch (error) {
+      if (error instanceof SearchError) throw error
       logger.error('Kugou search failed:', error)
-      return []
+      throw new SearchError()
     }
   }
 
@@ -1258,7 +1217,7 @@ class MusicProvider {
 
       if (!response) {
         logger.warn(`QQ 音乐搜索 API 请求超时: "${keyword}"`)
-        return []
+        throw new SearchError()
       }
 
       if (!response.ok || response.body.code !== 200 || !Array.isArray(response.body.data)) {
@@ -1267,7 +1226,7 @@ class MusicProvider {
           code: response.body.code,
           message: response.body.msg,
         })
-        return []
+        throw new SearchError()
       }
 
       const tracks: Track[] = response.body.data.flatMap((value) => {
@@ -1307,8 +1266,9 @@ class MusicProvider {
       })
       return tracks
     } catch (error) {
+      if (error instanceof SearchError) throw error
       logger.error('QQ 音乐搜索 API 请求失败:', error)
-      return []
+      throw new SearchError()
     }
   }
 
@@ -1355,12 +1315,15 @@ class MusicProvider {
     const songList = result?.code === 0 ? result.data?.body?.song?.list : undefined
     if (!songList) {
       logger.warn(`QQ 原生搜索失败: code ${result?.code}`)
+      if (result?.code !== 0) throw new SearchError()
       return []
     }
 
     const tracks: Track[] = songList.flatMap((song) => {
       const mid = song.mid?.trim()
       if (!mid) return []
+      // `name` 是原名、`title` 带括号译名或版本；显示用 `name`，另一个留给歌词搜索。
+      const otherTitle = song.name && song.title && song.name !== song.title ? song.title.trim() : ''
       return [
         {
           id: nanoid(),
@@ -1377,6 +1340,7 @@ class MusicProvider {
           lyricId: mid,
           picId: song.album?.mid || '',
           vip: song.pay?.pay_month === 1 || song.pay?.pay_down === 1 || (song.action?.msgpay ?? 0) > 0,
+          ...(otherTitle ? { lyricAliases: { title: otherTitle } } : {}),
         },
       ]
     })
@@ -1397,221 +1361,12 @@ class MusicProvider {
    * then batch-resolves cover URLs.
    */
 
-  /**
-   * Search for albums. Returns a list of Playlist objects.
-   */
-  async searchAlbum(
-    source: MusicSource,
-    keyword: string,
-    limit = 20,
-    page = 1,
-    cookie?: string | null,
-  ): Promise<import('@music-together/shared').Playlist[]> {
-    if (!keyword.trim()) return []
-
-    try {
-      if (source === 'bilibili') return []
-
-      if (source === 'tencent') {
-        const url = 'https://u.y.qq.com/cgi-bin/musicu.fcg'
-        const payload = {
-          comm: { ct: '6', cv: '80600', tmeAppID: 'qqmusic' },
-          'music.search.SearchCgiService.DoSearchForQQMusicDesktop': {
-            module: 'music.search.SearchCgiService',
-            method: 'DoSearchForQQMusicDesktop',
-            param: { num_per_page: limit, page_num: page, search_type: 2, query: keyword, grp: 1 },
-          },
-        }
-
-        const headers: Record<string, string> = {
-          'Content-Type': 'application/json',
-          Referer: 'https://y.qq.com',
-          'User-Agent': 'QQ%E9%9F%B3%E4%B9%90/73222',
-        }
-        if (cookie) {
-          headers['Cookie'] = cookie
-        }
-
-        const response = await withTimeout(
-          fetch(url, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(payload),
-          }).then((res) => res.json()),
-        )
-
-        if (!response) return []
-
-        const result = response['music.search.SearchCgiService.DoSearchForQQMusicDesktop']
-        if (result?.code !== 0 || !result?.data?.body?.album?.list) return []
-
-        return result.data.body.album.list.map((album: any) => ({
-          id: String(album.albumMID || album.albumID),
-          name: album.albumName || 'Unknown Album',
-          ...getCoverArtwork('tencent', album.albumPic || ''),
-          trackCount: album.song_count || 0,
-          source: 'tencent',
-          creator: album.singerName || '',
-        }))
-      }
-
-      if (source === 'kugou') {
-        const url = `http://mobilecdn.kugou.com/api/v3/search/album?api_ver=1&area_code=1&correct=1&pagesize=${limit}&plat=2&tag=1&sver=5&showtype=10&page=${page}&keyword=${encodeURIComponent(keyword)}&version=8990`
-        const response = await withTimeout(fetch(url).then((res) => res.json()))
-
-        if (!response || response.errcode !== 0 || !response.data?.info) return []
-
-        return response.data.info.map((album: any) => ({
-          id: String(album.albumid),
-          name: album.albumname || 'Unknown Album',
-          ...getCoverArtwork('kugou', normalizeKugouCoverUrl(album.imgurl, 400)),
-          trackCount: album.songcount || 0,
-          source: 'kugou',
-          creator: album.singername || '',
-        }))
-      }
-
-      if (source === 'netease') {
-        const meting = new Meting('netease')
-        meting.format(false) // Important: don't format because format expects songs
-        const raw = await withTimeout(meting.search(keyword, { limit, page, type: 10 } as any))
-        if (!raw) return []
-
-        let data: any
-        try {
-          data = JSON.parse(raw as string)
-        } catch {
-          return []
-        }
-
-        const albums = data?.result?.albums
-        if (!Array.isArray(albums)) return []
-
-        return albums.map((album: any) => ({
-          id: String(album.id),
-          name: album.name || 'Unknown Album',
-          ...getCoverArtwork('netease', album.picUrl || album.blurPicUrl || ''),
-          trackCount: album.size || 0,
-          source: 'netease',
-          creator: album.artist?.name || '',
-        }))
-      }
-
-      return []
-    } catch (err) {
-      logger.error(`Search album failed for ${source}:`, err)
-      return []
-    }
+  searchAlbum(...args: Parameters<typeof searchAlbums>) {
+    return searchAlbums(...args)
   }
 
-  /**
-   * Search for playlists. Returns a list of Playlist objects.
-   */
-  async searchPlaylist(
-    source: MusicSource,
-    keyword: string,
-    limit = 20,
-    page = 1,
-    cookie?: string | null,
-  ): Promise<import('@music-together/shared').Playlist[]> {
-    if (!keyword.trim()) return []
-
-    try {
-      if (source === 'bilibili') return []
-
-      if (source === 'tencent') {
-        const url = 'https://u.y.qq.com/cgi-bin/musicu.fcg'
-        const payload = {
-          comm: { ct: '6', cv: '80600', tmeAppID: 'qqmusic' },
-          'music.search.SearchCgiService.DoSearchForQQMusicDesktop': {
-            module: 'music.search.SearchCgiService',
-            method: 'DoSearchForQQMusicDesktop',
-            param: { num_per_page: limit, page_num: page, search_type: 3, query: keyword, grp: 1 },
-          },
-        }
-
-        const headers: Record<string, string> = {
-          'Content-Type': 'application/json',
-          Referer: 'https://y.qq.com',
-          'User-Agent': 'QQ%E9%9F%B3%E4%B9%90/73222',
-        }
-        if (cookie) {
-          headers['Cookie'] = cookie
-        }
-
-        const response = await withTimeout(
-          fetch(url, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(payload),
-          }).then((res) => res.json()),
-        )
-
-        if (!response) return []
-
-        const result = response['music.search.SearchCgiService.DoSearchForQQMusicDesktop']
-        if (result?.code !== 0 || !result?.data?.body?.songlist?.list) return []
-
-        return result.data.body.songlist.list.map((playlist: any) => ({
-          id: String(playlist.dissid),
-          name: playlist.dissname || 'Unknown Playlist',
-          ...getCoverArtwork('tencent', playlist.imgurl || ''),
-          trackCount: playlist.song_count || 0,
-          source: 'tencent',
-          creator: playlist.creator?.name || '',
-          description: playlist.introduction || '',
-        }))
-      }
-
-      if (source === 'kugou') {
-        const url = `http://mobilecdn.kugou.com/api/v3/search/special?api_ver=1&area_code=1&correct=1&pagesize=${limit}&plat=2&tag=1&sver=5&showtype=10&page=${page}&keyword=${encodeURIComponent(keyword)}&version=8990`
-        const response = await withTimeout(fetch(url).then((res) => res.json()))
-
-        if (!response || response.errcode !== 0 || !response.data?.info) return []
-
-        return response.data.info.map((playlist: any) => ({
-          id: String(playlist.specialid),
-          name: playlist.specialname || 'Unknown Playlist',
-          ...getCoverArtwork('kugou', normalizeKugouCoverUrl(playlist.imgurl, 400)),
-          trackCount: playlist.songcount || 0,
-          source: 'kugou',
-          creator: playlist.nickname || '',
-          description: playlist.intro || '',
-        }))
-      }
-
-      if (source === 'netease') {
-        const meting = new Meting('netease')
-        meting.format(false) // Important: don't format because format expects songs
-        const raw = await withTimeout(meting.search(keyword, { limit, page, type: 1000 } as any))
-        if (!raw) return []
-
-        let data: any
-        try {
-          data = JSON.parse(raw as string)
-        } catch {
-          return []
-        }
-
-        const playlists = data?.result?.playlists
-        if (!Array.isArray(playlists)) return []
-
-        return playlists.map((playlist: any) => ({
-          id: String(playlist.id),
-          name: playlist.name || 'Unknown Playlist',
-          ...getCoverArtwork('netease', playlist.coverImgUrl || playlist.picUrl || ''),
-          trackCount: playlist.trackCount || 0,
-          source: 'netease',
-          creator: playlist.creator?.nickname || '',
-          description: playlist.description || '',
-        }))
-      }
-
-      return []
-    } catch (err) {
-      logger.error(`Search playlist failed for ${source}:`, err)
-      return []
-    }
+  searchPlaylist(...args: Parameters<typeof searchPlaylists>) {
+    return searchPlaylists(...args)
   }
 
   async search(source: MusicSource, keyword: string, limit = 20, page = 1, cookie?: string | null): Promise<Track[]> {
@@ -1640,10 +1395,12 @@ class MusicProvider {
       // QQ 音乐单曲搜索使用配置的 API；专辑和歌单搜索走各自的独立方法。
       if (source === 'tencent') {
         const tracks = await this.searchTencent(keyword, limit, page, cookie)
-        this.searchIndex.set(cacheKey, {
-          source,
-          ids: tracks.map((t) => t.sourceId),
-        })
+        if (tracks.length > 0) {
+          this.searchIndex.set(cacheKey, {
+            source,
+            ids: tracks.map((t) => t.sourceId),
+          })
+        }
         return tracks
       }
 
@@ -1662,7 +1419,7 @@ class MusicProvider {
       const raw = await withTimeout(meting.search(keyword, { limit, page }))
       if (raw === null) {
         logger.warn(`Search timeout for ${source}: "${keyword}"`)
-        return []
+        throw new SearchError()
       }
 
       let rawData: MetingJson
@@ -1674,13 +1431,17 @@ class MusicProvider {
         logger.error(`Full raw response:`, raw)
         logger.error(`Raw response type:`, typeof raw)
         logger.error(`Raw response length:`, raw?.length)
-        return []
+        throw new SearchError()
+      }
+      if (source === 'netease' && rawData?.code !== undefined && rawData.code !== 200) {
+        logger.warn('NetEase search returned business code', { code: rawData.code })
+        throw new SearchError()
       }
 
-      const songs = this.navigatePath(rawData, SEARCH_PATHS[source])
+      const songs = navigatePath(rawData, SEARCH_PATHS[source])
       if (!Array.isArray(songs) || songs.length === 0) return []
 
-      const tracks = songs.map((song: MetingJson) => this.rawToTrack(song, source))
+      const tracks = songs.map((song: MetingJson) => rawToTrack(song, source))
 
       // Batch resolve cover URLs for tracks that don't already have one
       await this.batchResolveCover(tracks, source)
@@ -1701,9 +1462,14 @@ class MusicProvider {
       })
       return tracks
     } catch (err) {
+      if (err instanceof SearchError) throw err
       logger.error(`Search failed for ${source}:`, err)
-      return []
+      throw new SearchError()
     }
+  }
+
+  searchArtist(...args: Parameters<typeof searchArtists>) {
+    return searchArtists(...args)
   }
 
   /** Fetch a platform's native logged-in recommendation feed. */
@@ -1717,9 +1483,10 @@ class MusicProvider {
 
     switch (source) {
       case 'netease': {
-        const [dailyResult, personalizedResult] = await Promise.allSettled([
+        const [dailyResult, personalizedResult, dailySongsResult] = await Promise.allSettled([
           withTimeout(ncmApi.recommend_resource({ cookie, timestamp: Date.now() })),
           withTimeout(ncmApi.personalized({ cookie, limit: 100, timestamp: Date.now() })),
+          withTimeout(ncmApi.recommend_songs({ cookie, timestamp: Date.now() })),
         ])
         const daily =
           dailyResult.status === 'fulfilled' &&
@@ -1739,6 +1506,19 @@ class MusicProvider {
         if (!daily) logger.warn('Netease daily recommendation feed failed')
         if (!personalized) logger.warn('Netease personalized recommendation feed failed')
 
+        const dailySongs =
+          dailySongsResult.status === 'fulfilled' &&
+          dailySongsResult.value?.body?.code === 200 &&
+          Array.isArray(dailySongsResult.value.body.data?.dailySongs)
+            ? dailySongsResult.value.body.data.dailySongs
+            : []
+        const tracks = dailySongs
+          .slice(0, limit)
+          .map((song) => rawToTrack(song, 'netease'))
+          .filter((track): track is Track => Boolean(track?.sourceId))
+        await this.batchResolveCover(tracks, 'netease')
+        this.registerTracks(tracks)
+
         const page = parseNeteaseRecommendedPlaylistPage(
           daily,
           personalized,
@@ -1746,7 +1526,7 @@ class MusicProvider {
           pagination.neteasePlaylistOffset ?? pagination.playlistOffset ?? 0,
         )
         return {
-          tracks: [],
+          tracks,
           playlists: page.playlists,
           pagination: { playlists: { hasMore: page.hasMore, nextOffset: page.nextOffset } },
         }
@@ -1768,7 +1548,7 @@ class MusicProvider {
 
         const radar = radarResult.status === 'fulfilled' ? radarResult.value : null
         const playlistPage = playlistResult.status === 'fulfilled' ? playlistResult.value : null
-        tracks = (radar?.songs ?? []).slice(0, limit).map((song) => this.rawToTrack(song, source))
+        tracks = (radar?.songs ?? []).slice(0, limit).map((song) => rawToTrack(song, source))
         await this.batchResolveCover(tracks, source)
         for (const track of tracks) this.enrichFromRegistry(track)
         this.registerTracks(tracks)
@@ -1833,32 +1613,75 @@ class MusicProvider {
     cookie: string,
     mode: NeteaseRoamingMode = 'DEFAULT',
     limit = 20,
-  ): Promise<Track[]> {
+    page = 1,
+  ): Promise<{ tracks: Track[]; nextPage?: number }> {
     const size = Math.max(1, Math.min(50, Math.floor(limit)))
     let rawSongs: Record<string, unknown>[]
+    let nextPage: number | undefined
 
     switch (source) {
       case 'netease': {
         const [neteaseMode, submode] = mode.split(':', 2)
-        const result = await withTimeout(
-          ncmApi.personal_fm_mode({
-            cookie,
-            timestamp: Date.now(),
-            mode: neteaseMode,
-            ...(submode ? { submode } : {}),
-            limit: size,
-          }),
-        )
-        const body = result?.body
-        if (body?.code !== 200 || !Array.isArray(body.data)) {
-          throw new Error('Netease roaming recommendation feed failed')
+        // 上游对 DEFAULT 固定走 /personal_fm：/personal/fm/mode 在部分账号/接口版本上
+        // 会直接回 405（操作频繁）。模式接口失败时也回退到 /personal_fm，和上游一致。
+        // 不传 limit：上游电台无论传什么都只返回 3 首，传了反而多一层参数校验。
+        const fetchDefaultFm = () =>
+          withTimeout(ncmApi.personal_fm({ cookie, timestamp: Date.now() }))
+        const readFmSongs = (body: { data?: unknown; result?: unknown } | undefined): Record<string, unknown>[] | null => {
+          const data = body?.data
+          if (Array.isArray(data)) return data
+          const result = body?.result
+          return Array.isArray(result) ? result : null
         }
-        rawSongs = body.data
+
+        if (!neteaseMode || neteaseMode === 'DEFAULT') {
+          const result = await fetchDefaultFm()
+          const songs = readFmSongs(result?.body)
+          if (!songs) {
+            throw new Error(`Netease roaming recommendation feed failed (code=${result?.body?.code ?? 'unknown'})`)
+          }
+          rawSongs = songs
+        } else {
+          let songs: Record<string, unknown>[] | null = null
+          try {
+            const result = await withTimeout(
+              ncmApi.personal_fm_mode({
+                cookie,
+                timestamp: Date.now(),
+                mode: neteaseMode,
+                ...(submode ? { submode } : {}),
+              }),
+            )
+            if (result?.body?.code === 200) songs = readFmSongs(result.body)
+            if (!songs) {
+              logger.warn('Netease personal fm mode unavailable, falling back to /personal_fm', {
+                mode: neteaseMode,
+                code: result?.body?.code,
+              })
+            }
+          } catch (error) {
+            logger.warn('Netease personal fm mode failed, falling back to /personal_fm', {
+              mode: neteaseMode,
+              error,
+            })
+          }
+          if (!songs) {
+            const fallback = await fetchDefaultFm()
+            songs = readFmSongs(fallback?.body)
+            if (!songs) {
+              throw new Error(
+                `Netease roaming recommendation feed failed (code=${fallback?.body?.code ?? 'unknown'})`,
+              )
+            }
+          }
+          rawSongs = songs
+        }
         break
       }
       case 'tencent': {
-        const result = await tencentAuth.getRadarRecommendations(cookie, 1)
+        const result = await tencentAuth.getRadarRecommendations(cookie, Math.max(1, Math.floor(page)))
         rawSongs = result.songs
+        nextPage = result.hasMore ? result.nextPage : 1
         break
       }
       case 'kugou':
@@ -1875,17 +1698,17 @@ class MusicProvider {
 
     const tracks = rawSongs
       .slice(0, size)
-      .map((song) => (
+      .map((song) =>
         source === 'kugou' || source === 'kugou_concept'
-          ? this.kugouSongToTrack(song, source)
-          : this.rawToTrack(song, source)
-      ))
+          ? kugouSongToTrack(song, source)
+          : rawToTrack(song, source),
+      )
       .filter((track): track is Track => track !== null)
       .filter((track) => Boolean(track.sourceId && track.sourceId !== 'undefined' && track.sourceId !== 'null'))
     await this.batchResolveCover(tracks, source)
     for (const track of tracks) this.enrichFromRegistry(track)
     this.registerTracks(tracks)
-    return tracks
+    return { tracks, ...(nextPage !== undefined ? { nextPage } : {}) }
   }
 
   // ---------------------------------------------------------------------------
@@ -1968,6 +1791,7 @@ class MusicProvider {
     cookie?: string,
     concept = false,
     vipType = 0,
+    sink?: StreamFailureSink,
   ): Promise<CachedStreamUrl | null> {
     const bitrate = qualityToBitrate(quality)
     const cookieObj = cookie ? parseCookieString(cookie) : {}
@@ -1977,6 +1801,10 @@ class MusicProvider {
     if (!token || !userid) {
       logger.warn('酷狗音源解析未找到有效会员凭证，会员歌曲可能无法播放')
     }
+    let lastFailure: ProviderStreamFailure =
+      token && userid
+        ? { reason: 'no-audio', providerMessage: 'no playable address' }
+        : { reason: 'sign-in-needed', providerMessage: 'no kugou credential' }
 
     try {
       // KuGouMusicApi resolves album_audio_id and the quality-specific hash
@@ -2240,6 +2068,21 @@ class MusicProvider {
             error: response.error ?? response.message,
             quality: selected.quality,
           })
+          lastFailure = {
+            reason: !token || !userid ? 'sign-in-needed' : 'no-audio',
+            providerCode:
+              response.error_code != null
+                ? String(response.error_code)
+                : response.errcode != null
+                  ? String(response.errcode)
+                  : undefined,
+            providerMessage:
+              typeof response.error === 'string'
+                ? response.error.slice(0, 200)
+                : typeof response.message === 'string'
+                  ? response.message.slice(0, 200)
+                  : undefined,
+          }
           continue
         }
 
@@ -2255,10 +2098,15 @@ class MusicProvider {
         return { url: playUrl, actualBitrate, actualQuality: selected.actualQuality }
       }
 
-      return this.getKugouStreamUrlLegacy(hash, bitrate, concept)
+      markStreamFailure(sink, lastFailure)
+      return this.getKugouStreamUrlLegacy(hash, bitrate, concept, sink)
     } catch (err) {
       logger.error('酷狗音源地址解析失败', err)
-      return this.getKugouStreamUrlLegacy(hash, bitrate, concept)
+      markStreamFailure(sink, {
+        reason: 'upstream-unreachable',
+        providerMessage: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200),
+      })
+      return this.getKugouStreamUrlLegacy(hash, bitrate, concept, sink)
     }
   }
 
@@ -2266,6 +2114,7 @@ class MusicProvider {
     hash: string,
     bitrate: number,
     proxyRequired = false,
+    sink?: StreamFailureSink,
   ): Promise<CachedStreamUrl | null> {
     try {
       const body = {
@@ -2306,7 +2155,10 @@ class MusicProvider {
         }
       }
 
-      if (!bestItem) return null
+      if (!bestItem) {
+        markStreamFailure(sink, { reason: 'no-audio', providerMessage: 'no matching kugou resource' })
+        return null
+      }
 
       // Get play URL from trackercdn
       const key = crypto
@@ -2321,11 +2173,18 @@ class MusicProvider {
       )
       if (!cdnRes || cdnRes.status !== 2) {
         logger.warn('酷狗旧版音源接口未返回地址', { status: cdnRes?.status })
+        markStreamFailure(sink, {
+          reason: 'no-audio',
+          providerMessage: cdnRes ? `trackercdn status ${String(cdnRes.status)}` : 'trackercdn unavailable',
+        })
         return null
       }
 
       const url = Array.isArray(cdnRes.url) ? cdnRes.url[0] : cdnRes.url
-      if (!url) return null
+      if (!url) {
+        markStreamFailure(sink, { reason: 'no-audio', providerMessage: 'trackercdn returned no url' })
+        return null
+      }
 
       // See the native tracker path above: preserve the upstream protocol for
       // the server-side Kugou audio proxy.
@@ -2336,6 +2195,10 @@ class MusicProvider {
       return { url: urlStr, actualBitrate }
     } catch (err) {
       logger.error('酷狗旧版音源地址解析失败', err)
+      markStreamFailure(sink, {
+        reason: 'upstream-unreachable',
+        providerMessage: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200),
+      })
       return null
     }
   }
@@ -2350,29 +2213,68 @@ class MusicProvider {
     quality: AudioQuality,
     cookie?: string,
     retried = false,
+    sink?: StreamFailureSink,
   ): Promise<CachedStreamUrl | null> {
     const level = neteaseQualityToLevel(quality)
-    if (!level) return null
+    if (!level) {
+      markStreamFailure(sink, { reason: 'unsupported-quality', providerMessage: 'quality not supported by netease' })
+      return null
+    }
 
     try {
       await ensureNeteaseEnhancedConfig()
       const res = await withTimeout(
         ncmApi.song_url_v1({ id: urlId, level, timestamp: Date.now(), ...(cookie ? { cookie } : {}) }),
       )
+      const bodyCode = Number(res?.body?.code)
       const data = res?.body?.data?.[0] as MetingJson | undefined
-      if (!data) return null
+      if (!data) {
+        markStreamFailure(sink, {
+          reason: bodyCode === 301 || bodyCode === 401 || bodyCode === 403 ? 'sign-in-needed' : 'not-playable',
+          providerCode: Number.isFinite(bodyCode) ? String(bodyCode) : undefined,
+        })
+        return null
+      }
       const url = String(data.url ?? '').replace(/^http:\/\//, 'https://')
-      if (!url) return null
+      if (!url) {
+        const fee = Number(data.fee)
+        const reason: PlaybackFailureReason =
+          bodyCode === 301 || bodyCode === 401 || bodyCode === 403
+            ? 'sign-in-needed'
+            : fee === 1 || fee === 8
+              ? 'subscription-required'
+              : fee === 4
+                ? 'purchase-required'
+                : 'not-playable'
+        markStreamFailure(sink, {
+          reason,
+          providerCode: Number.isFinite(bodyCode) ? String(bodyCode) : undefined,
+          providerMessage: typeof data.message === 'string' ? data.message.slice(0, 200) : undefined,
+        })
+        return null
+      }
+      // 上游 839a8b2：账号取流拿到的是试听片段时不能当完整曲目播放。
+      if (cookie && (data as { freeTrialInfo?: unknown }).freeTrialInfo != null) {
+        markStreamFailure(sink, { reason: 'subscription-required', providerMessage: 'trial clip only' })
+        return null
+      }
+      const reportedBitrate = normalizeBitrate(data.br)
       return {
         url,
-        actualBitrate: normalizeBitrate(data.br) ?? qualityToBitrate(quality),
-        actualQuality: neteaseLevelToQuality(data.level) ?? quality,
+        // 只上报上游真正返回的码率/档位；两者都缺失时宁可未知，也不拿请求档位冒充实际。
+        actualBitrate: reportedBitrate,
+        actualQuality: neteaseLevelToQuality(data.level),
       }
     } catch (err) {
       if (!retried && isXeapiPublicKeyMissing(err) && (await ensureNeteaseEnhancedConfig(true))) {
-        return this.getNeteaseStreamUrlV1(urlId, quality, cookie, true)
+        return this.getNeteaseStreamUrlV1(urlId, quality, cookie, true, sink)
       }
-      logger.warn('Netease song_url_v1 failed', { urlId, level, err })
+      // SDK 错误可能带着 cookie 与签名链接，只记错误类型。
+      logger.warn('Netease song_url_v1 failed', { urlId, level, errorName: err instanceof Error ? err.name : typeof err })
+      markStreamFailure(sink, {
+        reason: 'upstream-unreachable',
+        providerMessage: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200),
+      })
       return null
     }
   }
@@ -2408,16 +2310,24 @@ class MusicProvider {
     urlId: string,
     quality: AudioQuality,
     cookie?: string,
+    sink?: StreamFailureSink,
   ): Promise<CachedStreamUrl | null> {
-    if (typeof quality === 'string' && !cookie) return null
+    if (typeof quality === 'string' && !cookie) {
+      markStreamFailure(sink, { reason: 'sign-in-needed', providerMessage: 'lossless quality requires login' })
+      return null
+    }
 
     try {
       const track = await this.getTencentTrackInfo(urlId, cookie)
-      if (!track) return null
+      if (!track) {
+        markStreamFailure(sink, { reason: 'not-playable', providerMessage: 'track info unavailable' })
+        return null
+      }
 
       const spec = getTencentStreamSpec(track, quality)
       if (!spec) {
         logger.debug('QQ 音乐歌曲不提供请求的音质规格', { source: 'tencent', urlId, requestedQuality: quality })
+        markStreamFailure(sink, { reason: 'unsupported-quality', providerMessage: 'requested quality unavailable' })
         return null
       }
 
@@ -2478,6 +2388,24 @@ class MusicProvider {
           providerFormat: spec.prefix,
           result: urlInfo?.result ?? null,
         })
+        const reason: PlaybackFailureReason =
+          track.pay?.pay_month === 1
+            ? 'subscription-required'
+            : track.pay?.pay_down === 1
+              ? 'purchase-required'
+              : !cookie
+                ? 'sign-in-needed'
+                : 'not-playable'
+        markStreamFailure(sink, {
+          reason,
+          providerCode:
+            typeof urlInfo?.result === 'number'
+              ? String(urlInfo.result)
+              : typeof response?.req_0?.code === 'number'
+                ? String(response.req_0.code)
+                : undefined,
+          providerMessage: !purl ? 'no playable url' : undefined,
+        })
         return null
       }
 
@@ -2506,6 +2434,10 @@ class MusicProvider {
       }
     } catch (err) {
       logger.warn('QQ 音乐原生播放地址解析失败', { source: 'tencent', urlId, requestedQuality: quality, err })
+      markStreamFailure(sink, {
+        reason: 'upstream-unreachable',
+        providerMessage: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200),
+      })
       return null
     }
   }
@@ -2518,6 +2450,118 @@ class MusicProvider {
     forceRefresh = false,
     vipType = 0,
   ): Promise<StreamUrlResult | null> {
+    return (await this.getStreamInfoDetailed(source, urlId, quality, cookie, forceRefresh, vipType)).result
+  }
+
+  /** Same resolution as {@link getStreamInfo}, plus a structured failure reason when it returns null. */
+  async getStreamInfoDetailed(
+    source: MusicSource,
+    urlId: string,
+    quality: AudioQuality = 320,
+    cookie?: string,
+    forceRefresh = false,
+    vipType = 0,
+  ): Promise<StreamResolutionOutcome> {
+    const sink: StreamFailureSink = { value: null }
+    const result = await this.getStreamInfoInternal(source, urlId, quality, cookie, forceRefresh, vipType, sink)
+    return {
+      result,
+      failure: result ? null : (sink.value ?? { reason: 'unknown' }),
+    }
+  }
+
+  /** 网易云喜欢/取消喜欢；只允许数字歌曲 id。 */
+  async setNeteaseLiked(cookie: string, id: string, liked: boolean): Promise<boolean> {
+    if (!cookie || !/^\d+$/.test(id)) return false
+    try {
+      const response = await withTimeout(
+        ncmApi.like({ id, like: liked, cookie, timestamp: Date.now() }),
+        15_000,
+      )
+      return Number((response as { body?: { code?: unknown } })?.body?.code) === 200
+    } catch (error) {
+      logger.warn('网易云喜欢操作失败', { id, error: error instanceof Error ? error.message : String(error) })
+      return false
+    }
+  }
+
+  /** 当前账号是否已喜欢这首网易云歌曲。 */
+  async isNeteaseLiked(cookie: string, id: string): Promise<boolean> {
+    if (!cookie || !/^\d+$/.test(id)) return false
+    const uid = await neteaseAuth.getUserId(cookie)
+    if (!uid) return false
+    try {
+      const response = await withTimeout(
+        ncmApi.likelist({ uid, cookie, timestamp: Date.now() }),
+        15_000,
+      )
+      const ids = (response as { body?: { ids?: unknown } })?.body?.ids
+      return Array.isArray(ids) && ids.map(String).includes(id)
+    } catch (error) {
+      logger.warn('网易云喜欢列表查询失败', { id, error: error instanceof Error ? error.message : String(error) })
+      return false
+    }
+  }
+
+  /**
+   * 网易云听歌打卡。写入真实账号，调用方必须先确认账号主开启并在线；
+   * 这里只负责协议与结果判定，不做任何限流。
+   */
+  async reportNeteasePlay(
+    cookie: string,
+    report: {
+      id: string
+      playedSeconds: number
+      totalSeconds?: number
+      name?: string
+      artist?: string
+      quality: AudioQuality
+    },
+  ): Promise<boolean> {
+    if (!cookie) return false
+    const { level, bitrate } = neteaseScrobbleQuality(report.quality)
+    try {
+      const response = await withTimeout(
+        ncmApi.scrobble_v1({
+          id: report.id,
+          time: Math.round(report.playedSeconds),
+          ...(report.totalSeconds && report.totalSeconds > 0
+            ? { total: Math.round(report.totalSeconds) }
+            : {}),
+          ...(report.name ? { name: report.name } : {}),
+          ...(report.artist ? { artist: report.artist } : {}),
+          level,
+          bitrate,
+          cookie,
+          timestamp: Date.now(),
+        }),
+        15_000,
+      )
+      const body = (response as { body?: { code?: unknown } })?.body ?? (response as { code?: unknown })
+      const code = Number((body as { code?: unknown })?.code)
+      if (code !== 200) {
+        logger.warn('网易云听歌打卡未获接受', { trackId: report.id, code })
+        return false
+      }
+      return true
+    } catch (error) {
+      logger.warn('网易云听歌打卡请求失败', {
+        trackId: report.id,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return false
+    }
+  }
+
+  private async getStreamInfoInternal(
+    source: MusicSource,
+    urlId: string,
+    quality: AudioQuality = 320,
+    cookie?: string,
+    forceRefresh = false,
+    vipType = 0,
+    sink?: StreamFailureSink,
+  ): Promise<StreamUrlResult | null> {
     const bitrate = qualityToBitrate(quality)
     const qualityCacheKey = String(quality)
     // Skip cache when cookie is provided (VIP URLs are user-specific). Bilibili
@@ -2526,7 +2570,11 @@ class MusicProvider {
     if (!cookie && source !== 'bilibili') {
       const cacheKey = `${source}:${urlId}:${qualityCacheKey}`
       if (forceRefresh) this.streamUrlCache.delete(cacheKey)
-      const cached = this.streamUrlCache.get(cacheKey)
+      let cached = this.streamUrlCache.get(cacheKey)
+      if (cached && isStreamUrlExpired(source, cached.url)) {
+        this.streamUrlCache.delete(cacheKey)
+        cached = undefined
+      }
       if (!forceRefresh && cached) {
         logger.debug('命中播放地址缓存', {
           source,
@@ -2542,7 +2590,7 @@ class MusicProvider {
 
     try {
       if (source === 'bilibili') {
-        const result = await this.getBilibiliStreamUrl(urlId, quality, cookie)
+        const result = await this.getBilibiliStreamUrl(urlId, quality, cookie, sink)
         if (result) {
           return { ...result, fromCache: false }
         }
@@ -2550,9 +2598,9 @@ class MusicProvider {
       }
 
       if (source === 'tencent') {
-        const result = await this.getTencentStreamUrl(urlId, quality, cookie)
+        const result = await this.getTencentStreamUrl(urlId, quality, cookie, sink)
         if (result) {
-          if (!cookie) this.streamUrlCache.set(`${source}:${urlId}:${qualityCacheKey}`, result)
+          if (!cookie) this.cacheStreamUrl(source, `${source}:${urlId}:${qualityCacheKey}`, result)
           return { ...result, fromCache: false }
         }
         // Do not let exact/lossless QQ tiers fall through to Meting, which can
@@ -2561,9 +2609,9 @@ class MusicProvider {
       }
 
       if (source === 'netease') {
-        const result = await this.getNeteaseStreamUrlV1(urlId, quality, cookie)
-        if (result) {
-          if (!cookie) this.streamUrlCache.set(`${source}:${urlId}:${qualityCacheKey}`, result)
+        const result = await this.getNeteaseStreamUrlV1(urlId, quality, cookie, false, sink)
+        if (result && !isStreamUrlExpired(source, result.url)) {
+          if (!cookie) this.cacheStreamUrl(source, `${source}:${urlId}:${qualityCacheKey}`, result)
           return { ...result, fromCache: false }
         }
         if (typeof quality === 'string' || quality === 999) return null
@@ -2572,11 +2620,11 @@ class MusicProvider {
       // Kugou: use native API that properly handles VIP authentication.
       // Concept Edition has its own app ID, signature salt and tracker params.
       if (source === 'kugou' || source === 'kugou_concept') {
-        const result = await this.getKugouStreamUrl(urlId, quality, cookie, source === 'kugou_concept', vipType)
+        const result = await this.getKugouStreamUrl(urlId, quality, cookie, source === 'kugou_concept', vipType, sink)
         if (result) {
           registerIssuedKugouAudio(result.url)
           if (!cookie) {
-            this.streamUrlCache.set(`${source}:${urlId}:${qualityCacheKey}`, result)
+            this.cacheStreamUrl(source, `${source}:${urlId}:${qualityCacheKey}`, result)
           }
           return { ...result, fromCache: false }
         }
@@ -2595,12 +2643,14 @@ class MusicProvider {
       const raw = await withTimeout(meting.url(urlId, bitrate))
       if (raw === null || raw === undefined) {
         logger.warn(`URL fetch timeout for ${source}: ${urlId}`)
+        markStreamFailure(sink, { reason: 'upstream-unreachable', providerMessage: 'upstream timeout' })
         return null
       }
       let data: MetingJson
       try {
         data = JSON.parse(raw as string) as MetingJson
       } catch {
+        markStreamFailure(sink, { reason: 'not-playable', providerMessage: 'invalid upstream response' })
         return null
       }
       let url = (data.url as string) || null
@@ -2609,7 +2659,14 @@ class MusicProvider {
         url = url.replace(/^http:\/\//, 'https://')
       }
 
-      if (!url) return null
+      if (!url) {
+        markStreamFailure(sink, { reason: 'no-audio', providerMessage: 'upstream returned no URL' })
+        return null
+      }
+      if (isStreamUrlExpired(source, url)) {
+        markStreamFailure(sink, { reason: 'not-playable', providerMessage: 'upstream returned an expired URL' })
+        return null
+      }
 
       const result: CachedStreamUrl = {
         url,
@@ -2617,11 +2674,15 @@ class MusicProvider {
       }
 
       // Only cache non-cookie & successful results (null = transient failure, retry next time)
-      if (!cookie) this.streamUrlCache.set(`${source}:${urlId}:${qualityCacheKey}`, result)
+      if (!cookie) this.cacheStreamUrl(source, `${source}:${urlId}:${qualityCacheKey}`, result)
 
       return { ...result, fromCache: false }
     } catch (err) {
       logger.error('获取播放地址失败', err, { source, urlId, requestedBitrate: bitrate })
+      markStreamFailure(sink, {
+        reason: 'upstream-unreachable',
+        providerMessage: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200),
+      })
       return null
     }
   }
@@ -2655,99 +2716,12 @@ class MusicProvider {
   }
 
   private async resolveLyric(source: MusicSource, lyricId: string, cacheKey: string): Promise<LyricResult> {
-    const empty = { lyric: '', tlyric: '', romalrc: '', yrc: '' as string }
-
-    try {
-      if (source === 'bilibili') return empty
-
-      let result: LyricResult = {
-        ...empty,
-      }
-
-      if (source === 'netease') {
-        // 使用 ncmApi.lyric_new 获取包含逐词歌词 (YRC) 的完整响应
-        const res = await withTimeout(ncmApi.lyric_new({ id: lyricId }))
-        if (!res?.body) {
-          logger.warn(`Lyric fetch timeout for ${source}: ${lyricId}`)
-          return empty
-        }
-        const body = res.body
-        result = {
-          lyric: (body.lrc?.lyric as string) || '',
-          tlyric: (body.tlyric?.lyric as string) || '',
-          romalrc: ((body.romalrc as Record<string, unknown> | undefined)?.lyric as string) || '',
-          yrc: (body.yrc?.lyric as string) || '',
-        }
-        if (result.yrc) {
-          logger.debug('已获取网易云逐字歌词', { source: 'netease', lyricId })
-        }
-      } else if (source === 'kugou' || source === 'kugou_concept') {
-        // 酷狗：Meting 获取 LRC + kugou-lrc 获取 KRC 逐字歌词
-        const meting = this.createInstance('kugou')
-        const raw = await withTimeout(meting.lyric(lyricId))
-        if (raw === null || raw === undefined) {
-          logger.warn(`Lyric fetch timeout for ${source}: ${lyricId}`)
-          return empty
-        }
-        try {
-          const data = JSON.parse(raw as string) as MetingJson
-          result = {
-            lyric: (data.lyric as string) || '',
-            tlyric: (data.tlyric as string) || '',
-            romalrc: '',
-            yrc: '',
-          }
-        } catch {
-          return empty
-        }
-        // 尝试获取 KRC 逐字歌词
-        try {
-          const krcInfo = await withTimeout(getKrcByHash(lyricId))
-          if (krcInfo?.items?.length) {
-            result.wordByWord = krcToAmllLines(krcInfo)
-            logger.debug('已获取酷狗逐字歌词', { source: 'kugou', lyricId })
-          }
-        } catch {
-          /* 静默回退到 LRC */
-        }
-      } else {
-        // QQ 音乐：保留 Meting 原词，仅在其未提供译文时补取 QQ 的翻译轨道
-        const meting = this.createInstance(source)
-        const raw = await withTimeout(meting.lyric(lyricId))
-        if (raw === null || raw === undefined) {
-          logger.warn(`Lyric fetch timeout for ${source}: ${lyricId}`)
-          return empty
-        }
-        try {
-          const data = JSON.parse(raw as string) as MetingJson
-          result = {
-            lyric: (data.lyric as string) || '',
-            tlyric: (data.tlyric as string) || '',
-            romalrc: '',
-            yrc: '',
-          }
-        } catch {
-          return empty
-        }
-        if (source === 'tencent' && result.lyric && !result.tlyric) {
-          try {
-            result.tlyric = await getTencentTranslatedLyric(lyricId)
-          } catch (err) {
-            logger.debug('QQ 译文补取失败，保留原歌词', { lyricId, err })
-          }
-        }
-      }
-
-      // An empty result is usually a transient upstream problem rather than a
-      // song without lyrics. Caching it for 24h would hide the lyrics until
-      // restart, so give it a short TTL and let the next request retry.
-      const hasLyric = Boolean(result.lyric || result.yrc || result.wordByWord?.length)
-      this.lyricCache.set(cacheKey, result, hasLyric ? undefined : { ttl: EMPTY_LYRIC_TTL })
-      return result
-    } catch (err) {
-      logger.error(`Get lyric failed for ${source}:`, err)
-      return empty
-    }
+    const result = await fetchLyric(source, lyricId, (id) => this.createInstance(id))
+    if (!result) return { ...EMPTY_LYRIC }
+    // 空结果多半是上游临时故障而非无歌词，只短暂缓存，下次请求再重试。
+    const hasLyric = Boolean(result.lyric || result.yrc || result.wordLyric || result.wordByWord?.length)
+    this.lyricCache.set(cacheKey, result, hasLyric ? undefined : { ttl: EMPTY_LYRIC_TTL })
+    return result
   }
 
   async getCover(source: MusicSource, picId: string, size?: number): Promise<string> {
@@ -2767,7 +2741,12 @@ class MusicProvider {
     return task
   }
 
-  private async resolveCover(source: MusicSource, picId: string, requestSize: number, cacheKey: string): Promise<string> {
+  private async resolveCover(
+    source: MusicSource,
+    picId: string,
+    requestSize: number,
+    cacheKey: string,
+  ): Promise<string> {
     try {
       if (source === 'bilibili') {
         const streamId = parseBilibiliStreamId(picId)
@@ -2788,7 +2767,7 @@ class MusicProvider {
       }
       const url = normalizeHighQualityCoverUrl(source, (data.url as string) || '')
 
-      this.coverCache.set(cacheKey, url)
+      if (url) this.coverCache.set(cacheKey, url)
       return url
     } catch (err) {
       logger.error(`Get cover failed for ${source}:`, err)
@@ -2806,6 +2785,24 @@ class MusicProvider {
    * Returns the full sourceId list and total count.
    */
   async fetchFullPlaylist(
+    source: MusicSource,
+    playlistId: string,
+    playlistTotal?: number,
+    cookie?: string | null,
+    type: 'playlist' | 'album' = 'playlist',
+  ): Promise<{ ids: string[]; total: number }> {
+    // 同一歌单的并发请求合并为一次拉取：很多成员同时打开同一个歌单时不应成倍请求平台。
+    const key = playlistIndexKey(source, type, playlistId, cookie)
+    const running = this.playlistInflight.get(key)
+    if (running) return running
+    const started = this.loadFullPlaylist(source, playlistId, playlistTotal, cookie, type).finally(() => {
+      this.playlistInflight.delete(key)
+    })
+    this.playlistInflight.set(key, started)
+    return started
+  }
+
+  private async loadFullPlaylist(
     source: MusicSource,
     playlistId: string,
     playlistTotal?: number,
@@ -2831,7 +2828,7 @@ class MusicProvider {
       if (type === 'album') {
         return this.fetchNeteaseAlbum(playlistId, cacheKey)
       }
-      return this.fetchNeteasePlaylist(playlistId, cacheKey, playlistTotal, cookie)
+      return this.fetchNeteasePlaylist(playlistId, cacheKey, cookie)
     }
 
     // Kugou: try native API (works with global_collection_id from user playlists)
@@ -2879,7 +2876,7 @@ class MusicProvider {
         return { ids: [], total: 0 }
       }
 
-      const allTracks = songs.map((song: any) => this.rawToTrack(song, 'netease'))
+      const allTracks = songs.map((song: any) => rawToTrack(song, 'netease'))
 
       for (const t of allTracks) this.enrichFromRegistry(t)
       this.registerTracks(allTracks)
@@ -2902,24 +2899,25 @@ class MusicProvider {
   private async fetchNeteasePlaylist(
     playlistId: string,
     cacheKey: string,
-    playlistTotal?: number,
     cookie?: string | null,
   ): Promise<{ ids: string[]; total: number }> {
     // Netease /api/v3/song/detail can't handle more than ~1000 IDs per request,
     // so we paginate through playlist_track_all in chunks of 1000.
     const CHUNK_SIZE = 1000
-    const totalToFetch = playlistTotal || 100000
+    const MAX_TRACKS = 100000
     const baseParams = { id: playlistId, timestamp: Date.now(), ...(cookie ? { cookie } : {}) }
 
     try {
       const allTracks: Track[] = []
       let offset = 0
+      let complete = true
 
-      while (offset < totalToFetch) {
+      while (offset < MAX_TRACKS) {
         const res = await withTimeout(ncmApi.playlist_track_all({ ...baseParams, limit: CHUNK_SIZE, offset }), 60_000)
 
         if (res === null) {
           logger.warn(`Netease playlist_track_all timeout: ${playlistId} (offset=${offset})`)
+          complete = false
           break
         }
 
@@ -2932,7 +2930,7 @@ class MusicProvider {
           break
         }
 
-        const chunk = songs.map((song: Record<string, unknown>) => this.rawToTrack(song, 'netease'))
+        const chunk = songs.map((song: Record<string, unknown>) => rawToTrack(song, 'netease'))
         allTracks.push(...chunk)
 
         // If we got fewer than CHUNK_SIZE, we've reached the end
@@ -2946,7 +2944,7 @@ class MusicProvider {
       this.registerTracks(allTracks)
 
       const ids = allTracks.map((t) => t.sourceId)
-      this.playlistIndex.set(cacheKey, { source: 'netease', ids })
+      if (complete) this.playlistIndex.set(cacheKey, { source: 'netease', ids })
 
       logger.info(`已获取网易云歌单 ${playlistId}，共 ${ids.length} 首歌曲`, {
         source: 'netease',
@@ -2975,24 +2973,22 @@ class MusicProvider {
       const PAGE_SIZE = 300
       const allTracks: Track[] = []
       let page = 1
-      let totalFromApi = 0
+      const MAX_PAGES = 200
 
-      // Paginate until all tracks are fetched
+      // 总数字段可能缺失或偏小，只以短页作为结束条件
       while (true) {
-        const { songs, total } =
+        const { songs } =
           source === 'kugou_concept'
             ? await kugouAuth.getConceptPlaylistTracks(playlistId, page, PAGE_SIZE, cookie)
             : await kugouAuth.getPlaylistTracks(playlistId, page, PAGE_SIZE, cookie)
-        if (page === 1) totalFromApi = total
-
         if (songs.length === 0) break
 
         for (const song of songs) {
-          const track = this.kugouSongToTrack(song, source)
+          const track = kugouSongToTrack(song, source)
           if (track) allTracks.push(track)
         }
 
-        if (allTracks.length >= totalFromApi || songs.length < PAGE_SIZE) break
+        if (songs.length < PAGE_SIZE || page >= MAX_PAGES) break
         page++
       }
 
@@ -3030,20 +3026,18 @@ class MusicProvider {
       const PAGE_SIZE = 100
       const allTracks: Track[] = []
       let page = 1
-      let totalFromApi = 0
+      const MAX_PAGES = 200
 
       while (true) {
-        const { songs, total } = await tencentAuth.getPlaylistTracks(playlistId, page, PAGE_SIZE, cookie)
-        if (page === 1) totalFromApi = total
-
+        const { songs } = await tencentAuth.getPlaylistTracks(playlistId, page, PAGE_SIZE, cookie)
         if (songs.length === 0) break
 
         for (const song of songs) {
-          const track = this.rawToTrack(song, 'tencent')
+          const track = rawToTrack(song, 'tencent')
           if (track) allTracks.push(track)
         }
 
-        if (allTracks.length >= totalFromApi || songs.length < PAGE_SIZE) break
+        if (songs.length < PAGE_SIZE || page >= MAX_PAGES) break
         page++
       }
 
@@ -3065,28 +3059,6 @@ class MusicProvider {
     } catch (err) {
       logger.error(`Tencent playlist fetch failed: ${playlistId}`, err)
       return { ids: [], total: 0 }
-    }
-  }
-
-  /** Convert a kugou song object from getPlaylistTracks to a Track. */
-  private kugouSongToTrack(song: Record<string, unknown>, source: 'kugou' | 'kugou_concept' = 'kugou'): Track | null {
-    // 与搜索共用同一套字段解析：漫游/歌单同样可能拿到概念版的 PascalCase 行。
-    const fields = parseKugouSongFields(song)
-    if (!fields.hash) return null
-
-    return {
-      id: nanoid(),
-      source,
-      sourceId: fields.hash,
-      title: fields.title,
-      artist: fields.artists,
-      album: fields.album,
-      duration: fields.duration,
-      cover: normalizeKugouCoverUrl(fields.cover),
-      lyricId: fields.hash,
-      urlId: fields.hash,
-      picId: fields.hash,
-      vip: fields.vip,
     }
   }
 
@@ -3122,10 +3094,10 @@ class MusicProvider {
         if (source === 'tencent') path = 'data.getSongInfo'
         if (source === 'kugou') path = 'data.info'
       }
-      const songs = this.navigatePath(rawData, path)
+      const songs = navigatePath(rawData, path)
       if (!Array.isArray(songs) || songs.length === 0) return { ids: [], total: 0 }
 
-      const tracks = songs.map((song: MetingJson) => this.rawToTrack(song, source))
+      const tracks = songs.map((song: MetingJson) => rawToTrack(song, source))
       for (const t of tracks) this.enrichFromRegistry(t)
       this.registerTracks(tracks)
 
@@ -3221,97 +3193,6 @@ class MusicProvider {
   // Internal helpers
   // ---------------------------------------------------------------------------
 
-  /** Navigate a dot-separated path in an object */
-  private navigatePath(data: MetingJson, path: string): unknown {
-    let result: unknown = data
-    for (const key of path.split('.')) {
-      result = (result as Record<string, unknown>)?.[key]
-    }
-    return result
-  }
-
-  /**
-   * Convert raw platform-specific song data to our Track format.
-   * Each platform returns different field names, so we need per-platform parsing.
-   */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- platform API shapes are too dynamic for strict typing
-  private rawToTrack(song: Record<string, unknown>, source: MusicSource): Track {
-    // Cast to any for convenient dynamic property access on external API responses
-    const s = song as Record<string, any>
-    switch (source) {
-      case 'netease': {
-        return parseNeteaseTrack(song)
-      }
-
-      case 'tencent': {
-        // Tencent sometimes wraps data in musicData
-        const t = s.musicData || s
-        const mid = String(t.mid || t.songmid || t.songMid || '').trim()
-        const albumMid = String(t.album?.pmid || t.album?.mid || '').trim()
-        const artists = (t.singer || [])
-          .map((artist: Record<string, unknown>) => String(artist.name ?? '').trim())
-          .filter(Boolean)
-        return {
-          id: nanoid(),
-          title: t.name || t.title || 'Unknown',
-          artist: artists.length > 0 ? artists : ['Unknown'],
-          album: String(t.album?.title || t.album?.name || '').trim(),
-          duration: t.interval || 0, // already in seconds
-          cover: albumMid ? `https://y.gtimg.cn/music/photo_new/T002R300x300M000${albumMid}.jpg` : '',
-          source,
-          sourceId: mid,
-          urlId: mid,
-          lyricId: mid,
-          picId: albumMid,
-          // pay.pay_play=1 表示需要 VIP, pay.pay_month=1 表示月度VIP, pay.price_track>0 表示付费单曲
-          vip: t.pay?.pay_play === 1 || t.pay?.pay_month === 1 || (t.pay?.price_track ?? 0) > 0,
-        }
-      }
-
-      case 'kugou':
-      case 'kugou_concept': {
-        // Kugou encodes artist/title in filename: "Artist - Title"
-        const filename = s.filename || s.fileName || ''
-        const parts = filename.split(' - ')
-        let trackName = filename
-        let artists: string[] = []
-        if (parts.length >= 2) {
-          artists = parts[0]
-            .split(/[、,，&]/)
-            .map((a: string) => a.trim())
-            .filter(Boolean)
-          trackName = parts.slice(1).join(' - ')
-        }
-        return {
-          id: nanoid(),
-          title: trackName || 'Unknown',
-          artist: artists.length > 0 ? artists : ['Unknown'],
-          album: s.album_name || '',
-          duration: s.duration || 0, // seconds
-          cover: normalizeKugouCoverUrl(
-            s.trans_param?.union_cover || s.audio_info?.trans_param?.union_cover || s.imgurl || s.album_img,
-          ),
-          source,
-          sourceId: String(s.hash),
-          urlId: String(s.hash),
-          lyricId: String(s.hash),
-          picId: String(s.hash),
-          // privilege 位掩码: & 8 表示 VIP; pay_type > 0 也表示付费
-          vip: ((s.privilege ?? 0) & 8) !== 0 || (s.pay_type ?? 0) > 0,
-        }
-      }
-
-      case 'bilibili':
-        throw new Error('Bilibili tracks are created by the native video search')
-
-      default: {
-        // Exhaustive check — if a new MusicSource is added, TypeScript will error here
-        const _exhaustive: never = source
-        throw new Error(`Unsupported music source: ${_exhaustive}`)
-      }
-    }
-  }
-
   /**
    * Batch-resolve cover URLs for tracks that don't have one.
    * - netease/tencent: pic() is pure URL generation (instant, no API call)
@@ -3339,6 +3220,18 @@ class MusicProvider {
         }),
       ),
     )
+  }
+
+  /** 把网易云原始歌曲数组转成 Track 并登记到注册表，与搜索结果同等对待（歌手页、发现页使用）。 */
+  ingestNeteaseSongs(songs: unknown): Track[] {
+    if (!Array.isArray(songs)) return []
+    const tracks = songs
+      .filter((song): song is Record<string, unknown> => Boolean(song) && typeof song === 'object')
+      .map((song) => rawToTrack(song, 'netease'))
+      .filter((track) => Boolean(track.sourceId))
+    for (const track of tracks) this.enrichFromRegistry(track)
+    this.registerTracks(tracks)
+    return tracks
   }
 }
 

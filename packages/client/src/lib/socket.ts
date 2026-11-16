@@ -1,4 +1,4 @@
-import type { ClientToServerEvents, ServerToClientEvents } from '@music-together/shared'
+import { EVENTS, type ClientToServerEvents, type ServerToClientEvents } from '@music-together/shared'
 import { SERVER_URL } from './config'
 
 interface ConnectionEvents {
@@ -21,8 +21,14 @@ export type TypedSocket = {
 
 let socket: TypedSocket | null = null
 
-/** 首次重连等待（毫秒）—— 与旧的固定间隔一致，避免改变正常断网时的体感。 */
-const RECONNECT_BASE_MS = 2_000
+/** 连接空闲超过这个时间就主动探测一次；半开连接（切 WiFi、休眠恢复）浏览器可能很久才报断。 */
+const LIVENESS_IDLE_MS = 12_000
+/** 探测后仍无任何入站消息，判定连接已死并立即重连。 */
+const LIVENESS_DEAD_MS = 8_000
+const LIVENESS_TICK_MS = 4_000
+
+/** 首次重连等待（毫秒）。断线期间音频继续播放，越早接回时间线越好。 */
+const RECONNECT_BASE_MS = 500
 /** 退避上限（毫秒）。 */
 const RECONNECT_MAX_MS = 30_000
 
@@ -40,7 +46,7 @@ const RECONNECT_MAX_MS = 30_000
  *   跨站点 cookie 不发送），①会形成热循环 —— 每轮服务端打 2 行 warn，
  *   日志刷屏，且对服务端造成无意义的连接压力。
  *
- *   退避后：第 1 次仍等 2s（正常断网体感不变），之后 4s / 8s / 16s / 30s 封顶。
+ *   退避后：第 1 次等 0.5s，之后 1s / 2s / 4s / 8s / 16s，30s 封顶。
  *   恢复连接后计数归零，因此正常的"短暂断网→重连"不受影响。
  *
  * @param attempt 已失败的连续尝试次数（0 = 首次连接，立即尝试）
@@ -93,6 +99,78 @@ function createWebSocket(): TypedSocket {
   let failureCount = 0
   /** 上一次发起连接的时刻（`performance.now()`），用于退避节流。 */
   let lastAttemptAt = 0
+  /** 最近一次入站消息的时刻，用于探活。 */
+  let lastInboundAt = 0
+  let probeSentAt = 0
+  let livenessTimer: ReturnType<typeof setInterval> | null = null
+
+  const stopLiveness = () => {
+    if (livenessTimer !== null) clearInterval(livenessTimer)
+    livenessTimer = null
+    probeSentAt = 0
+  }
+
+  const handleClosed = (connection: WebSocket) => {
+    if (ws !== connection) return
+    stopLiveness()
+    connected = false
+    const disconnectHandlers = handlers.get('disconnect')
+    if (disconnectHandlers) {
+      for (const h of disconnectHandlers) h()
+    }
+
+    if (shouldReconnect) {
+      // 累计失败次数 → 下一次 connect() 走指数退避（0.5s / 1s / 2s … 封顶 30s）
+      failureCount += 1
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null
+        if (shouldReconnect) connect()
+      }, reconnectDelayMs(failureCount))
+    }
+  }
+
+  const startLiveness = () => {
+    stopLiveness()
+    lastInboundAt = performance.now()
+    livenessTimer = setInterval(() => {
+      if (!connected || !ws) return
+      const now = performance.now()
+      if (probeSentAt > 0 && lastInboundAt > probeSentAt) probeSentAt = 0
+      if (probeSentAt > 0) {
+        if (now - probeSentAt >= LIVENESS_DEAD_MS) {
+          // 连接已死：不等浏览器的关闭握手，直接按断线处理并重连。
+          const dead = ws
+          handleClosed(dead)
+          ws = null
+          try {
+            dead.close()
+          } catch {
+            // 已经关闭。
+          }
+        }
+        return
+      }
+      if (now - lastInboundAt >= LIVENESS_IDLE_MS) {
+        probeSentAt = now
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ event: EVENTS.NTP_PING, data: { clientPingId: 0 } }))
+        }
+      }
+    }, LIVENESS_TICK_MS)
+  }
+
+  /** 网络恢复或页面回到前台：跳过退避，立刻重试。 */
+  const retryNow = () => {
+    if (!shouldReconnect || connected) return
+    if (ws && ws.readyState === WebSocket.CONNECTING) return
+    failureCount = 0
+    lastAttemptAt = 0
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+    connect()
+  }
 
   const connect = () => {
     shouldReconnect = true
@@ -126,8 +204,9 @@ function createWebSocket(): TypedSocket {
     ws.onopen = () => {
       if (ws !== connection) return
       connected = true
-      // 连接成功 → 退避计数归零（下一次断网仍从 2s 起步）
+      // 连接成功 → 退避计数归零（下一次断网仍从 0.5s 起步）
       failureCount = 0
+      startLiveness()
       // 成功建连后清掉可能仍在排队的重连定时器，避免多开一条连接
       if (reconnectTimer) {
         clearTimeout(reconnectTimer)
@@ -141,6 +220,7 @@ function createWebSocket(): TypedSocket {
 
     ws.onmessage = (event) => {
       if (ws !== connection) return
+      lastInboundAt = performance.now()
       try {
         const msg = JSON.parse(event.data)
         if (msg && typeof msg.event === 'string') {
@@ -154,23 +234,7 @@ function createWebSocket(): TypedSocket {
       }
     }
 
-    ws.onclose = () => {
-      if (ws !== connection) return
-      connected = false
-      const disconnectHandlers = handlers.get('disconnect')
-      if (disconnectHandlers) {
-        for (const h of disconnectHandlers) h()
-      }
-
-      if (shouldReconnect) {
-        // 累计失败次数 → 下一次 connect() 走指数退避（2s / 4s / 8s … 封顶 30s）
-        failureCount += 1
-        reconnectTimer = setTimeout(() => {
-          reconnectTimer = null
-          if (shouldReconnect) connect()
-        }, reconnectDelayMs(failureCount))
-      }
-    }
+    ws.onclose = () => handleClosed(connection)
 
     ws.onerror = (err) => {
       if (ws !== connection) return
@@ -184,6 +248,7 @@ function createWebSocket(): TypedSocket {
 
   const disconnect = () => {
     shouldReconnect = false
+    stopLiveness()
     if (reconnectTimer) {
       clearTimeout(reconnectTimer)
       reconnectTimer = null
@@ -222,6 +287,13 @@ function createWebSocket(): TypedSocket {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ event, data: args[0] }))
     }
+  }
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('online', retryNow)
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') retryNow()
+    })
   }
 
   return {

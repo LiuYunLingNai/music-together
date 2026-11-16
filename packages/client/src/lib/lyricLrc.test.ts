@@ -58,7 +58,10 @@ describe('parseLRC', () => {
 
 describe('mergeLyrics', () => {
   it('pairs translations onto every occurrence of a repeated line', () => {
-    const merged = mergeLyrics('[00:12.00][01:30.00]副歌\n[01:40.00]尾声', '[00:12.00][01:30.00]chorus\n[01:40.00]outro')
+    const merged = mergeLyrics(
+      '[00:12.00][01:30.00]副歌\n[01:40.00]尾声',
+      '[00:12.00][01:30.00]chorus\n[01:40.00]outro',
+    )
 
     expect(merged.map((line) => line.translation)).toEqual(['chorus', 'chorus', 'outro'])
   })
@@ -78,5 +81,10 @@ describe('buildAMLLLinesFromLrc', () => {
 describe('parseLRC compatibility', () => {
   it('still finds a timestamp that is not at the start of the line', () => {
     expect(parseLRC('作词：[00:12.00]某某')).toEqual([{ time: 12, text: '某某', isBG: false }])
+  })
+
+  it('applies per-track offset tags and clamps at zero', () => {
+    expect(parseLRC('[offset:1000]\n[00:10.00]甲\n[00:00.50]乙').map((line) => line.time)).toEqual([0, 9])
+    expect(parseLRC('[offset:-500]\n[00:10.00]甲')[0]?.time).toBe(10.5)
   })
 })

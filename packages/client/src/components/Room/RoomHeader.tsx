@@ -1,4 +1,5 @@
 import {
+  CircleUserRound,
   Copy,
   Download,
   Ellipsis,
@@ -35,6 +36,7 @@ interface RoomHeaderProps {
   onOpenSearch: () => void
   onOpenChat: () => void
   onOpenSettings: () => void
+  onOpenAccounts: () => void
   onOpenMembers: () => void
   onOpenHotSongs: () => void
   onLeaveRoom: () => void
@@ -45,6 +47,7 @@ export function RoomHeader({
   onOpenSearch,
   onOpenChat,
   onOpenSettings,
+  onOpenAccounts,
   onOpenMembers,
   onOpenHotSongs,
   onLeaveRoom,
@@ -89,7 +92,7 @@ export function RoomHeader({
   }
 
   return (
-    <header className="flex items-center justify-between border-b border-border/50 bg-background/80 px-2 py-2 backdrop-blur-md sm:px-4">
+    <header className="flex items-center justify-between border-b border-border/50 bg-background/80 px-4 py-2 backdrop-blur-md">
       <div className="flex min-w-0 items-center gap-1.5 sm:gap-3">
         {roomId && (
           <>
@@ -133,7 +136,7 @@ export function RoomHeader({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-7 gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 text-sm text-primary"
+                  className="hidden h-7 gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 text-sm text-primary sm:flex"
                   onClick={onOpenMembers}
                   aria-label="查看成员"
                 >
@@ -160,7 +163,7 @@ export function RoomHeader({
                 <WifiOff className="h-4 w-4 animate-pulse text-destructive" />
               )}
               {isConnected && (
-                <span className={`font-mono text-xs tabular-nums ${rttColor}`}>{Math.round(displayedRtt)}ms</span>
+                <span className={`font-mono text-xs tabular-nums portrait:hidden ${rttColor}`}>{Math.round(displayedRtt)}ms</span>
               )}
             </span>
           </TooltipTrigger>
@@ -176,7 +179,7 @@ export function RoomHeader({
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 lg:hidden"
+              className="hidden h-8 w-8 min-h-11 min-w-11 sm:flex sm:min-h-0 sm:min-w-0 lg:hidden"
               onClick={onOpenHotSongs}
               aria-label="热歌榜"
             >
@@ -246,6 +249,21 @@ export function RoomHeader({
               variant="ghost"
               size="icon"
               className="hidden h-8 w-8 min-h-11 min-w-11 sm:flex sm:min-h-0 sm:min-w-0"
+              onClick={onOpenAccounts}
+              aria-label="音乐账号"
+            >
+              <CircleUserRound className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>音乐账号</TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="hidden h-8 w-8 min-h-11 min-w-11 sm:flex sm:min-h-0 sm:min-w-0"
               onClick={onOpenSettings}
               aria-label="设置"
             >
@@ -270,8 +288,11 @@ export function RoomHeader({
           <TooltipContent>离开房间</TooltipContent>
         </Tooltip>
 
-        {/* Mobile: dropdown menu */}
-        <DropdownMenu>
+        {/* Mobile: dropdown menu。
+            必须非模态：菜单项会直接打开抽屉/对话框，而菜单的退场动画期间
+            Radix 仍锁着 body 的 pointer-events；抽屉此时挂载会把 `none`
+            记作"原始值"，关闭后再写回来 —— 整页永久不可点击。 */}
+        <DropdownMenu modal={false}>
           <DropdownMenuTrigger asChild>
             <Button
               variant="ghost"
@@ -283,6 +304,19 @@ export function RoomHeader({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            <DropdownMenuItem disabled={!roomId} onClick={onOpenMembers}>
+              <Users className="mr-2 h-4 w-4" />
+              成员 {userCount}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={onOpenHotSongs}>
+              <Flame className="mr-2 h-4 w-4 text-orange-400" />
+              热歌榜
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={onOpenAccounts}>
+              <CircleUserRound className="mr-2 h-4 w-4" />
+              音乐账号
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={onOpenSettings}>
               <Settings className="mr-2 h-4 w-4" />
               设置

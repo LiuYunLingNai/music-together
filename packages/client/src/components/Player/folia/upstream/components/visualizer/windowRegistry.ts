@@ -6,6 +6,9 @@ import { createElement } from 'react'
 import { FOLIA_MODE_RENDERERS } from '../../../renderers'
 import { getFoliaTuningProps } from '../../../stage/foliaTunings'
 import type { Theme, VisualizerMode } from '../../types'
+import type { VisualizerTuningBundle } from './tuningRegistry'
+import { FOLIA_MODE_BEAT_EFFECTS } from '@/services/beatFx/beatClockTargets'
+import { nebbiaBeatEffectOnScreen, nebbiaShowsBackground } from './nebbia/nebbiaBehind'
 
 /**
  * 上游 `visualizer/registry.tsx` 的查询面 —— 设置窗口只用到这几项。
@@ -21,12 +24,24 @@ export interface WindowVisualizerEntry {
     previewSeed: string
     previewStartOffset: number
     ownFontSizeNoticeKey?: string
+    /** 上游 entry 里按整个歌词分词的样式（宿主无对应 UI，保留元数据）。 */
+    usesWordSegmentation?: boolean
+    /** 上游 entry 的条件背景与拍点效果（雾笺）。 */
+    showsBackground?: (tunings: VisualizerTuningBundle) => boolean
+    beatEffectOnScreen?: (effectId: string, tunings: VisualizerTuningBundle) => boolean
     /** 上游各 entry 的图标；宿主没有这套图标，给 undefined 让窗口回落到通用图标。 */
     glyph?: React.ReactNode
     /** 该模式自己的参数面板（上游 entry.tsx 的 renderSettingsPanel）。 */
     renderSettingsPanel?: (props: Record<string, unknown>) => React.ReactNode
     /** 该模式声明的拍点效果，窗口在「歌词动画」页顶部单列。 */
-    beatEffects?: readonly { id: string; nameKey: string; descKey: string; source: 'beats' | 'drums'; retired?: boolean }[]
+    beatEffects?: readonly {
+        id: string
+        nameKey: string
+        descKey: string
+        source: 'beats' | 'drums' | 'stems'
+        retired?: boolean
+        parts?: readonly { key: string; nameKey: string }[]
+    }[]
 }
 
 export type VisualizerRegistryEntry = WindowVisualizerEntry
@@ -36,11 +51,24 @@ const HOST_BY_UPSTREAM: Record<string, FoliaModeId> = {
     classic: 'luminous', cadenza: 'cadenza', partita: 'partita', fume: 'fume',
     claddagh: 'claddagh', cappella: 'cappella', tilt: 'tilt', monet: 'monet',
     pendolo: 'pendolo', sonnet: 'sonnet', tempera: 'tempera', lumiere: 'lumiere',
-    hanabi: 'hanabi', diorama: 'diorama', still: 'still',
+    hanabi: 'hanabi', diorama: 'diorama', still: 'still', machi: 'machi', nebbia: 'nebbia',
 }
+
+/** 上游各 entry 里按整句分词排版的样式（宿主没有分词编辑入口，元数据仍与上游一致）。 */
+const WORD_SEGMENTATION_MODES = new Set<FoliaModeId>([
+    'luminous', 'lumiere', 'partita', 'sonnet', 'tempera', 'nebbia', 'hanabi',
+])
 
 /** 只有 fume 在上游有预览起点偏移（见其 entry.tsx）；花火等其余都是 0。 */
 const PREVIEW_OFFSETS: Partial<Record<FoliaModeId, number>> = { fume: 18.4 }
+
+const OWN_FONT_SIZE_NOTICE: Partial<Record<FoliaModeId, string>> = {
+    hanabi: 'options.hanabiFontSizeAutoNotice',
+    machi: 'options.machiFontSizeAutoNotice',
+    lumiere: 'options.lumiereFontSizeAutoNotice',
+    sonnet: 'options.sonnetFontSizeAutoNotice',
+    tempera: 'options.temperaFontSizeAutoNotice',
+}
 
 export const WINDOW_VISUALIZER_ENTRIES: WindowVisualizerEntry[] = FOLIA_MODES.map((mode) => {
     const upstream = (Object.keys(HOST_BY_UPSTREAM).find((key) => HOST_BY_UPSTREAM[key] === mode.id) ?? 'classic') as VisualizerMode
@@ -50,7 +78,12 @@ export const WINDOW_VISUALIZER_ENTRIES: WindowVisualizerEntry[] = FOLIA_MODES.ma
         labelFallback: mode.label,
         previewSeed: upstream,
         previewStartOffset: PREVIEW_OFFSETS[mode.id] ?? 0,
-        ...(mode.id === 'hanabi' ? { ownFontSizeNoticeKey: 'options.hanabiFontSizeAutoNotice' } : {}),
+        ...(OWN_FONT_SIZE_NOTICE[mode.id] ? { ownFontSizeNoticeKey: OWN_FONT_SIZE_NOTICE[mode.id] } : {}),
+        ...(WORD_SEGMENTATION_MODES.has(mode.id) ? { usesWordSegmentation: true } : {}),
+        ...(mode.id === 'nebbia'
+            ? { showsBackground: nebbiaShowsBackground, beatEffectOnScreen: nebbiaBeatEffectOnScreen }
+            : {}),
+        ...(FOLIA_MODE_BEAT_EFFECTS[mode.id] ? { beatEffects: FOLIA_MODE_BEAT_EFFECTS[mode.id] } : {}),
         ...(MODE_SETTINGS_PANELS[upstream] ? { renderSettingsPanel: MODE_SETTINGS_PANELS[upstream] } : {}),
     }
 }).sort((left, right) => left.order - right.order)
@@ -88,7 +121,7 @@ export const applyVisualizerTuning = (
 ): Record<string, unknown> => {
     const host = HOST_BY_UPSTREAM[mode]
     if (!host || !props.theme) return props
-    return { ...props, ...getFoliaTuningProps(host, { tunings: {} } as never) }
+    return { ...props, ...getFoliaTuningProps(host, { fontScale: 1, tunings: {} } as never) }
 }
 
 export type { FoliaModeId }

@@ -6,7 +6,7 @@ import { detectHardwareProfile } from '../../stages/RenderPolicy'
 
 export function useFoliaRenderState() {
   const playing = usePlayerStore((s) => s.isPlaying)
-  const quality = useSettingsStore((s) => s.visualQuality)
+  const quality = useSettingsStore((s) => s.foliaVisualQuality)
   const reduced = useReducedMotion()
   const [lowSpec] = useState(() => detectHardwareProfile().lowSpec)
   const [visible, setVisible] = useState(() => typeof document === 'undefined' || !document.hidden)

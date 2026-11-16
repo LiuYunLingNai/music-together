@@ -88,3 +88,26 @@ export function getCoverArtwork(source: MusicSource, value: string): { cover: st
   const thumbnailCover = deriveThumbnailCoverUrl(source, cover)
   return thumbnailCover ? { cover, thumbnailCover } : { cover }
 }
+
+/** Normalize cover URLs returned by Kugou's mobile APIs. */
+export function normalizeKugouCoverUrl(value: unknown, size = 300): string {
+  let url = String(value || '')
+    .trim()
+    .replace(/\{size\}/g, String(size))
+  if (!url) return ''
+  if (url.startsWith('//')) url = `https:${url}`
+  if (url.startsWith('http://')) url = url.replace(/^http:\/\//, 'https://')
+
+  // imgessl is already handled by the client's cover proxy and is equivalent
+  // to the older imge host returned in trans_param.union_cover.
+  return url.replace(/^https:\/\/imge\.kugou\.com/i, 'https://imgessl.kugou.com')
+}
+
+export function normalizeBilibiliCoverUrl(value: unknown): string {
+  let url = String(value ?? '').trim()
+  if (!url) return ''
+  if (url.startsWith('//')) url = `https:${url}`
+  if (url.startsWith('http://')) url = url.replace(/^http:\/\//, 'https://')
+  if (!/^https?:\/\//i.test(url)) url = `https://${url.replace(/^\/+/, '')}`
+  return url
+}

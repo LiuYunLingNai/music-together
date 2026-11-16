@@ -1,15 +1,24 @@
 import {
   ERROR_CODE,
   EVENTS,
+  PASSWORD_LOCKED_MESSAGE,
   roomCreateSchema,
   roomJoinSchema,
   roomSettingsSchema,
   setRoleSchema,
+  kickMemberSchema,
+  unbanMemberSchema,
 } from '@music-together/shared'
 import type { TypedServer, TypedSocket } from '../middleware/types.js'
 import { createWithOwnerOnly } from '../middleware/withControl.js'
 import { createWithRoom } from '../middleware/withRoom.js'
-import { cleanupSocketRateLimit } from '../middleware/socketRateLimiter.js'
+import {
+  checkRoomEntryRateLimit,
+  clearJoinPasswordFailures,
+  cleanupSocketRateLimit,
+  isJoinPasswordLocked,
+  recordJoinPasswordFailure,
+} from '../middleware/socketRateLimiter.js'
 import { roomRepo } from '../repositories/roomRepository.js'
 import type { RoomData } from '../repositories/types.js'
 import { userRepo } from '../repositories/userRepository.js'
@@ -17,6 +26,8 @@ import * as chatService from '../services/chatService.js'
 import * as playerService from '../services/playerService.js'
 import { issueRejoinTicket, revokeRejoinTickets } from '../services/rejoinTicketService.js'
 import * as roomService from '../services/roomService.js'
+import * as queueService from '../services/queueService.js'
+import { roamingService } from '../services/roamingService.js'
 import { getClientInfo } from '../services/clientInfoService.js'
 import * as voteService from '../services/voteService.js'
 import { executeVoteAction } from '../services/voteActionService.js'
@@ -37,8 +48,9 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
   })
 
   // ---- Create room (含可选密码) ----
-  socket.on(EVENTS.ROOM_CREATE, (raw) => {
+  socket.on(EVENTS.ROOM_CREATE, async (raw) => {
     try {
+      if (!(await checkRoomEntryRateLimit(socket))) return
       const parsed = roomCreateSchema.safeParse(raw)
       if (!parsed.success) {
         socket.emit(EVENTS.ROOM_ERROR, {
@@ -69,7 +81,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
       // 创建者是 owner，发送含密码的完整状态
       socket.emit(EVENTS.ROOM_STATE, roomService.toPublicRoomStateForOwner(room))
       const rejoin = issueRejoinTicket(room.id, user.id)
-      socket.emit(EVENTS.ROOM_REJOIN_TOKEN, { roomId: room.id, token: rejoin.token, expiresAt: rejoin.expiresAt })
+      socket.emit(EVENTS.ROOM_REJOIN_TOKEN, { roomId: room.id, token: rejoin.token, expiresAt: rejoin.expiresAt, ttlMs: rejoin.ttlMs })
 
       // 广播房间列表给大厅用户
       roomService.broadcastRoomList(io)
@@ -91,21 +103,34 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         return
       }
       const { roomId, nickname, password, rejoinToken } = parsed.data
+      if (!rejoinToken && !(await checkRoomEntryRateLimit(socket))) return
+
+      const passwordLocked = await isJoinPasswordLocked(socket, roomId)
 
       // Validate join request (password, rejoin scenarios) — pure business logic
       const validation = roomService.validateJoinRequest(
         roomId,
         socket.id,
         socket.data.identityUserId,
-        password,
+        passwordLocked ? undefined : password,
         rejoinToken,
       )
       if (!validation.valid) {
+        if (validation.errorCode === 'WRONG_PASSWORD') {
+          if (passwordLocked) {
+            socket.emit(EVENTS.ROOM_ERROR, { code: ERROR_CODE.WRONG_PASSWORD, message: PASSWORD_LOCKED_MESSAGE })
+            return
+          }
+          await recordJoinPasswordFailure(socket, roomId)
+        }
         socket.emit(EVENTS.ROOM_ERROR, {
           code: ERROR_CODE[validation.errorCode as keyof typeof ERROR_CODE] ?? ERROR_CODE.JOIN_FAILED,
           message: validation.errorMessage ?? '加入房间失败',
         })
         return
+      }
+      if (password && !passwordLocked && !validation.skipPassword) {
+        await clearJoinPasswordFailures(socket, roomId)
       }
 
       // Auto-leave any previous room (different from target) before joining
@@ -154,13 +179,17 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
       // arrive before the room page mounts its player listener, so ROOM_STATE
       // must already describe the resumed state for client-side recovery.
       playerService.preparePlaybackForJoiningRoom(roomId, updatedRoom)
+      if (updatedRoom.playState.isPlaying) playerService.refreshAutomixScheduling(io, roomId)
 
       // Send full room state
       // Owner 收到含密码版本，其他成员收到不含密码版本
       const isOwner = user.role === 'owner'
+      const isModerator = !isOwner && userRepo.isServerAdmin(user.id)
       const stateForJoiner = isOwner
         ? roomService.toPublicRoomStateForOwner(updatedRoom)
-        : roomService.toPublicRoomState(updatedRoom)
+        : isModerator
+          ? roomService.toPublicRoomStateForModerator(updatedRoom)
+          : roomService.toPublicRoomState(updatedRoom)
       socket.emit(EVENTS.ROOM_STATE, stateForJoiner)
 
       // Broadcast role/conductor changes and rejoin updates so the roster's
@@ -168,7 +197,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
       if (hostChanged || roleChanged || validation.isRejoin) {
         socket.to(roomId).emit(EVENTS.ROOM_STATE, roomService.toPublicRoomState(updatedRoom))
       }
-      socket.emit(EVENTS.ROOM_REJOIN_TOKEN, { roomId, token: rejoin.token, expiresAt: rejoin.expiresAt })
+      socket.emit(EVENTS.ROOM_REJOIN_TOKEN, { roomId, token: rejoin.token, expiresAt: rejoin.expiresAt, ttlMs: rejoin.ttlMs })
       socket.emit(EVENTS.AUTH_MY_STATUS, authService.getUserAuthStatus(user.id, roomId))
       io.to(roomId).emit(EVENTS.AUTH_STATUS_UPDATE, authService.getAllPlatformStatus(roomId))
 
@@ -245,10 +274,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
       const nextRoamingSource = parsed.data.roamingSource ?? ctx.room.roamingSource
       const nextRoamingMode =
         nextRoamingSource === 'netease' ? (parsed.data.roamingMode ?? ctx.room.roamingMode) : 'DEFAULT'
-      if (
-        nextRoamingEnabled &&
-        !authService.getUserCookie(ctx.room.creatorId, nextRoamingSource, ctx.roomId)
-      ) {
+      if (nextRoamingEnabled && !authService.getUserCookie(ctx.room.creatorId, nextRoamingSource, ctx.roomId)) {
         ctx.socket.emit(EVENTS.ROOM_ERROR, {
           code: ERROR_CODE.INVALID_INPUT,
           message: '房主需先登录所选音乐平台，才能开启私人漫游',
@@ -256,6 +282,8 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         return
       }
 
+      const previousRoamingSource = ctx.room.roamingSource
+      const previousRoamingMode = ctx.room.roamingMode
       roomService.updateSettings(ctx.roomId, {
         name: parsed.data.name,
         password: parsed.data.password,
@@ -265,7 +293,12 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         allowTemporaryAdminTrackRemoval: parsed.data.allowTemporaryAdminTrackRemoval,
         allowTemporaryAdminQueueClear: parsed.data.allowTemporaryAdminQueueClear,
         removePlayedTracks: parsed.data.removePlayedTracks,
+        queueMode: parsed.data.queueMode,
         roamingEnabled: parsed.data.roamingEnabled,
+        automixEnabled: parsed.data.automixEnabled,
+        transitionMode: parsed.data.transitionMode,
+        crossfadeMaxSec: parsed.data.crossfadeMaxSec,
+        automixPerformance: parsed.data.automixPerformance,
         roamingSource: parsed.data.roamingSource,
         roamingMode:
           parsed.data.roamingMode !== undefined || parsed.data.roamingSource !== undefined
@@ -276,6 +309,15 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
       const updatedRoom = roomRepo.get(ctx.roomId)
       if (!updatedRoom) return
 
+      // 换漫游平台或模式后，旧批次不再符合设置；只清未播放的漫游曲目。
+      const roamingSelectionChanged =
+        (parsed.data.roamingSource !== undefined && parsed.data.roamingSource !== previousRoamingSource) ||
+        (parsed.data.roamingMode !== undefined && parsed.data.roamingMode !== previousRoamingMode)
+      if (roamingSelectionChanged && queueService.removePendingRoamingTracks(ctx.roomId) > 0) {
+        ctx.io.to(ctx.roomId).emit(EVENTS.QUEUE_UPDATED, { queue: updatedRoom.queue })
+      }
+      if (roamingSelectionChanged) roamingService.clearRoom(ctx.roomId)
+
       // 仅房主或服务器管理员操作时向操作者返回密码明文。
       const baseSettings = {
         name: updatedRoom.name,
@@ -285,7 +327,12 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         allowTemporaryAdminTrackRemoval: updatedRoom.allowTemporaryAdminTrackRemoval,
         allowTemporaryAdminQueueClear: updatedRoom.allowTemporaryAdminQueueClear,
         removePlayedTracks: updatedRoom.removePlayedTracks,
+        queueMode: updatedRoom.queueMode,
         roamingEnabled: updatedRoom.roamingEnabled,
+        automixEnabled: updatedRoom.automixEnabled,
+        transitionMode: updatedRoom.transitionMode,
+        crossfadeMaxSec: updatedRoom.crossfadeMaxSec,
+        automixPerformance: updatedRoom.automixPerformance,
         roamingSource: updatedRoom.roamingSource,
         roamingMode: updatedRoom.roamingMode,
         audioQuality: updatedRoom.audioQuality,
@@ -298,6 +345,26 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         ctx.socket.to(ctx.roomId).emit(EVENTS.ROOM_SETTINGS, baseSettings)
       } else {
         io.to(ctx.roomId).emit(EVENTS.ROOM_SETTINGS, baseSettings)
+      }
+
+      // 开启漫游时房间还没有任何可播内容：立刻取一首推荐开始，避免“打开了
+      // 却没有任何反应”。有队列/正在播放时保持现状，只在队尾自动续播。
+      if (nextRoamingEnabled && !updatedRoom.currentTrack && updatedRoom.queue.length === 0) {
+        void playerService.playNextTrackInRoom(io, ctx.roomId, updatedRoom.playMode, {
+          skipDebounce: true,
+          forceRoaming: true,
+        })
+      }
+
+      // 开关自动混音、或切换队列模式（决定下一首是谁）后，立即按当前播放状态重排或撤销过渡点。
+      if (
+        parsed.data.queueMode !== undefined ||
+        parsed.data.automixEnabled !== undefined ||
+        parsed.data.transitionMode !== undefined ||
+        parsed.data.crossfadeMaxSec !== undefined ||
+        parsed.data.automixPerformance !== undefined
+      ) {
+        playerService.refreshAutomixScheduling(io, ctx.roomId)
       }
 
       logger.info(`房间 ${ctx.roomId} 的设置已更新`, {
@@ -315,6 +382,7 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         allowTemporaryAdminQueueClear: updatedRoom.allowTemporaryAdminQueueClear,
         removePlayedTracks: updatedRoom.removePlayedTracks,
         roamingEnabled: updatedRoom.roamingEnabled,
+        automixEnabled: updatedRoom.automixEnabled,
         roamingSource: updatedRoom.roamingSource,
         roamingMode: updatedRoom.roamingMode,
         changedFields,
@@ -362,6 +430,58 @@ export function registerRoomController(io: TypedServer, socket: TypedSocket) {
         role,
         conductorChanged: result.hostChanged,
       })
+    }),
+  )
+
+  // ---- Kick member (仅房主) ----
+  socket.on(
+    EVENTS.ROOM_KICK,
+    withOwnerOnly((ctx, raw) => {
+      const parsed = kickMemberSchema.safeParse(raw)
+      if (!parsed.success) {
+        ctx.socket.emit(EVENTS.ROOM_ERROR, {
+          code: ERROR_CODE.INVALID_INPUT,
+          message: parsed.error.issues[0]?.message ?? '输入格式错误',
+        })
+        return
+      }
+      const result = roomService.kickRoomMember(ctx.roomId, parsed.data.userId, parsed.data.ban === true, ctx.io)
+      if (!result.kicked) {
+        ctx.socket.emit(EVENTS.ROOM_ERROR, {
+          code: ERROR_CODE.NO_PERMISSION,
+          message: '无法移出该成员',
+        })
+        return
+      }
+      // kickRoomMember 已广播房间状态；操作者再补一次含封禁名单的最新状态。
+      const room = roomRepo.get(ctx.roomId)
+      if (room) {
+        ctx.socket.emit(
+          EVENTS.ROOM_STATE,
+          ctx.user.id === room.creatorId
+            ? roomService.toPublicRoomStateForOwner(room)
+            : roomService.toPublicRoomStateForModerator(room),
+        )
+      }
+    }),
+  )
+
+  // ---- Unban member (仅房主) ----
+  socket.on(
+    EVENTS.ROOM_UNBAN,
+    withOwnerOnly((ctx, raw) => {
+      const parsed = unbanMemberSchema.safeParse(raw)
+      if (!parsed.success) return
+      if (!roomService.unbanRoomMember(ctx.roomId, parsed.data.userId)) return
+      const room = roomRepo.get(ctx.roomId)
+      if (room) {
+        ctx.socket.emit(
+          EVENTS.ROOM_STATE,
+          ctx.user.id === room.creatorId
+            ? roomService.toPublicRoomStateForOwner(room)
+            : roomService.toPublicRoomStateForModerator(room),
+        )
+      }
     }),
   )
 
@@ -429,6 +549,12 @@ function handleLeave(io: TypedServer, socket: TypedSocket, reason?: string, revo
   if (staleSocketOnly) {
     if (room) io.to(roomId).emit(EVENTS.ROOM_STATE, roomService.toPublicRoomState(room))
     return
+  }
+
+  // 主动离开（含切房/被移出）时撤回该用户共享给这个房间的平台账号；
+  // 断线、刷新等隐式断开不触发，保证锁屏/切后台时 VIP 播放不中断。
+  if (revokeTicket) {
+    authService.removeUserFromRoom(roomId, user.id)
   }
 
   io.to(roomId).emit(EVENTS.ROOM_USER_LEFT, user)

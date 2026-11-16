@@ -50,25 +50,29 @@ src/
 │   ├── Overlays/
 │   │   ├── QueueDrawer.tsx     #     播放队列抽屉（vaul Drawer，移动端底部/桌面端右侧；登录账号可逐曲/整队"加入我的歌单"）
 │   │   ├── AddToPlaylistDialog.tsx #  加入本地歌单选择器（accountPlaylistStore 驱动，内联新建 + 选择目标歌单，RoomPage 挂载一次）
+│   │   ├── AccountDialog.tsx   #     「音乐账号」弹窗（房间头部入口），承载 PlatformHub
+│   │   ├── ArtistDialog.tsx    #     全局歌手页（artistPageStore 打开；ArtistDetail 热门歌曲/专辑），所有歌手名经 ArtistNames 链接
 │   │   ├── SearchDialog.tsx    #     音乐搜索弹窗（VirtualTrackList 虚拟滚动 + 自动无限加载 + AbortController 竞态防护）
-│   │   ├── SettingsDialog.tsx  #     设置弹窗（壳，Tab 导航：房间/成员/播放/我的歌单/账号/音源账号/外观/歌词，移动端 nav scrollbar-hide）
+│   │   ├── SettingsDialog.tsx  #     设置弹窗（壳，Tab 导航：房间/成员/播放/播放器/歌词/我的歌单/账号，平台账号已拆到 AccountDialog，移动端 nav scrollbar-hide）
 │   │   └── Settings/
 │   │       ├── SettingRow.tsx              # 设置行共享组件
 │   │       ├── RoomSettingsSection.tsx     # 房间设置（名称、密码）
 │   │       ├── MembersSection.tsx          # 成员列表（角色管理；名册成员 + 在线访客合并展示，访客加徽标且角色下拉隐藏）
 │   │       ├── MyPlaylistsSection.tsx       # 我的歌单（本地账户歌单：增删改 + 详情 + 添加到房间/队列；访客显示设置密码引导）
 │   │       ├── PlatformAuthSection.tsx     # 平台账号认证（VIP Cookie，旧版，已被 PlatformHub 替代）
-│   │       ├── PlatformHub.tsx            # 平台中心（登录 + 歌单浏览 + 导入，替代 PlatformAuthSection）
+│   │       ├── PlatformHub.tsx            # 平台中心（登录 + 歌单浏览 + 导入 + 推荐与发现，挂在 AccountDialog）
+│   │       ├── AccountDiscover.tsx        # 账号主页推荐（复用 /recommendations）与网易云雷达/热门歌手/新碟区块
 │   │       ├── LoginSection.tsx           # 精简版平台登录区域（PlatformHub 子组件）
 │   │       ├── PlaylistSection.tsx        # 歌单列表 + 手动输入（PlatformHub 子组件）
 │   │       ├── PlaylistDetail.tsx         # 歌单详情（header + VirtualTrackList + queueKeys/addedIds 去重 + 动态全部添加过滤重复）
 │   │       ├── ProfileSettingsSection.tsx  # 个人设置（昵称）
-│   │       ├── AppearanceSection.tsx       # 外观设置（歌词 + 背景 + 布局）
-│   │       ├── OtherSettingsSection.tsx    # 其他设置
+│   │       ├── SettingsSection.tsx         # 设置分组外壳（标题 + 分隔线）
+│   │       ├── PlayerSettingsSection.tsx   # 播放器设置（经典 / 3D 视觉 / Folia 三族）
+│   │       ├── AmllLyricSettingsGroup.tsx  # AMLL 歌词控制（两族各持一份；敏感词遮罩与 WebGL 共用）
 │   │       ├── ManualCookieDialog.tsx      # 手动输入 Cookie 弹窗
 │   │       └── QrLoginDialog.tsx           # 通用 QR 扫码登录弹窗（网易云 + 酷狗 + QQ 音乐）
 │   ├── Player/
-│   │   ├── constants.ts        #     共享动画常量（SPRING / LAYOUT_TRANSITION），NowPlaying 和 SongInfoBar 统一导入
+│   │   ├── constants.ts        #     歌曲信息栏与竖屏歌词页共用的共享元素形变
 │   │   ├── AudioPlayer.tsx     #     播放器外壳：按舞台族路由（经典/Mineradio/Folia）+ 模式菜单 + 播放回调透传
 │   │   ├── classic/
 │   │   │   └── ClassicPlayerStage.tsx   # 经典播放器布局（桌面左右分栏；移动双模式封面/歌词切换）
@@ -178,12 +182,20 @@ src/
     ├── constants.ts            #   命名常量（定时器、阈值、布局尺寸）
     ├── clockSync.ts            #   NTP 时钟同步引擎（采样、offset 计算、getServerTime）
     ├── howlPosition.ts         #   HTML5 Howl 低延迟定位与安全回退
+    ├── playbackSource.ts       #   播放/分析 URL 的唯一构造出口（代理规则、曲目稳定键）
+    ├── audioBytes.ts           #   会话内音频字节复用（并发合并 + 小容量 LRU + 缓存落盘复核）
+    ├── mediaCache.ts           #   Cache Storage 媒体缓存（容量上限、LRU、写守卫、清空）
+    ├── wholeSongCheck.ts       #   试听片段判定（50%/95% 两档）
+    ├── prefetchService.ts      #   队列附近（前 2 后 1）播放地址预取与 20 分钟 TTL
+    ├── playbackDiagnostics.ts  #   本机取数/缓存命中计数（诊断面板用）
     ├── lyricPlayerBridge.ts    #   音频逐帧时钟到 AMLL 的桥接（含歌词偏移）
     ├── lyricTimeline.ts        #   歌词时间轴规范化、异常行修复与逐词质量评分
     ├── audioPlaybackLifecycle.ts #  断线时停止当前活动音频
     ├── playbackSync.ts         #   漂移阈值、计划位置和自适应同步纯函数
     ├── resetStores.ts          #   全局 store 重置工具
-    ├── socket.ts               #   原生 WebSocket 类型化客户端实例
+    ├── socket.ts               #   原生 WebSocket 类型化客户端实例（指数退避重连、online/前台立即重试、静默探活）
+    ├── playbackContinuity.ts   #   断线保留播放：宽限期与重连后“接回时间线”标记
+    ├── offlineTrackBuffer.ts   #   断网保护：当前歌曲整曲字节（仅一首）
     ├── storage.ts              #   localStorage 封装（带类型校验）
     ├── platform.ts             #   平台常量（PLATFORM_LABELS / PLATFORM_SHORT_LABELS / PLATFORM_COLORS / VIP_LABELS / 状态查找函数）
     ├── format.ts               #   格式化工具（时间、文本等）
@@ -207,25 +219,33 @@ src/
 │   ├── queueController.ts      #   队列管理（add/remove/reorder/clear）
 │   ├── chatController.ts       #   聊天消息（含限流反馈）
 │   ├── voteController.ts       #   投票系统（发起/投票/超时/执行，支持 set-mode / play-track / remove-track 投票）
-│   ├── authController.ts       #   平台认证（QR 登录/Cookie 管理/状态查询；支持网易云/酷狗/QQ 音乐三平台；策略模式——通过 AUTH_PROVIDERS 映射表统一处理；fast path: 内存池命中跳过 API；slow path: getUserInfo + 任意失败重试 1 次）
+│   ├── authController.ts       #   平台认证（QR 登录/Cookie 管理/状态查询/共享开关；支持网易云/酷狗/QQ 音乐三平台；策略模式——通过 AUTH_PROVIDERS 映射表统一处理；fast path: 内存池命中跳过 API；slow path: getUserInfo + 任意失败重试 1 次）
 │   └── playlistController.ts   #   歌单管理（获取用户歌单列表 via Socket，使用 getUserCookie 取请求者自己的 cookie，歌单私有）
 │
 ├── services/                   # 服务层：业务逻辑
-│   ├── roomService.ts          #   房间 CRUD + 角色管理 + 加入校验（validateJoinRequest）+ 管理员移出成员（kickUserFromRoom）与投票重协调（reconcileAndBroadcastVote）
+│   ├── roomService.ts          #   房间 CRUD + 角色管理 + 加入校验（validateJoinRequest）+ 房主移出/本房封禁 + 管理员移出成员（kickUserFromRoom）与投票重协调（reconcileAndBroadcastVote）
 │   ├── roomLifecycleService.ts #   房间生命周期定时器（空置删除）+ 防抖广播
 │   ├── kugouListeningApi.ts    #   普通酷狗账号时长查询/增量提交（HTTPS、RSA、超时；不含任务奖励）
 │   ├── kugouListeningService.ts #  听歌会话、实际增量限幅、账号级去重和不重试上报
 │   ├── playerService.ts        #   播放状态管理 + 流 URL 解析 + 切歌防抖 + 加入播放同步
+│   ├── listeningReportService.ts # 网易云听歌打卡（服务端时间线累计；30s 门槛 + 5s/60 次每小时闸门；仅在线且开启的供源账号）
 │   ├── queueService.ts         #   队列操作（含删除当前曲目前的后继选择）
 │   ├── queueNavigation.ts      #   无仓储副作用的队列导航算法
 │   ├── chatService.ts          #   聊天消息处理 + HTML 转义（含系统消息）
 │   ├── syncService.ts          #   播放位置估算工具（estimateCurrentTime）
+│   ├── artistService.ts        #   网易云歌手主页（artists/artist_songs/artist_album，10 秒超时、共享 TTL 缓存、CatalogError 脱敏）
+│   ├── discoverService.ts      #   账号主页公共发现区块（雷达歌单、热门歌手、新碟，区块独立失败）
+│   ├── catalogUtils.ts         #   目录类服务共用：CatalogError、网易云实体映射、sharedCache、withDeadline
+│   ├── catalogSearch.ts        #   专辑/歌单/歌手搜索（从 musicProvider 拆出，musicProvider 保留同名委托方法）
+│   ├── lyricFetch.ts           #   各平台歌词拉取（网易云 YRC、酷狗 KRC、QQ QRC 与译文），缓存仍由 musicProvider 负责
+│   ├── trackMapping.ts         #   各平台原始歌曲数据 → Track 映射（rawToTrack、kugouSongToTrack）
 │   ├── musicProvider.ts        #   音乐数据聚合（3 层引用式 LRU 缓存 + 外部 API 超时保护 + 歌单分页获取；Netease 歌单使用 ncmApi.playlist_track_all 分块请求突破 1000 首限制，Kugou 用户歌单使用原生 API (get_other_list_file_nofilt) + Meting fallback，Tencent 使用 Meting 原始模式保留 VIP/时长字段）
 │   ├── coverArtwork.ts         #   高分辨率封面规范化与列表缩略图派生
 │   ├── kugouLyricService.ts    #   基于原生 fetch/zlib 的 KRC 获取、解密与逐字解析
 │   ├── kugouTrackFields.ts     #   酷狗歌曲字段解析（标准版小写 + 概念版 PascalCase 双命名兼容：FileName/PayType/Singers/OriSongName；搜索、漫游、歌单三条路径共用同一套解析，避免概念版歌名落到占位名）
 │   ├── lyricSupplementService.ts # 严格匹配其他音乐平台并聚合 YRC/KRC/LRC 候选，含缓存、并发合并和超时降级
-│   ├── authService.ts          #   Cookie 池管理（房间级作用域；getAnyCookie 用于 VIP 播放共享，getUserCookie 用于歌单等用户私有操作）
+│   ├── authService.ts          #   Cookie 池管理（房间级作用域；房间外按连接身份读写持久化凭据；默认共享，账号主可关闭；getUserCookie 供本人私有操作；听歌打卡偏好）
+│   ├── tencentCredentialRefreshService.ts # 平台凭证自动续期（QQ login_refresh + 网易云 login_refresh；24h 间隔、失败保留旧凭证）
 │   ├── authProvider.ts         #   统一认证接口（AuthProvider 接口定义 + GetUserInfoResult/UserInfoData 共享类型 + AUTH_PROVIDERS 策略映射表）
 │   ├── neteaseAuthService.ts   #   网易云 API 认证（QR / Cookie 验证 / 用户信息 / 用户歌单列表；getUserInfo 返回 { ok, data? } | { ok: false, reason: 'expired' | 'error' } 区分过期与临时故障）
 │   ├── kugouAuthService.ts    #   酷狗 API 认证（QR 扫码登录 + VIP 检查 + 用户昵称(RSA) + 用户歌单列表 + 歌单歌曲获取；kugouRequest 含 HTTP 状态检查与 JSON 安全解析；自包含签名实现，状态码归一化为 800-803 与网易云统一）

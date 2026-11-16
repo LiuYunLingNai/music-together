@@ -1,5 +1,9 @@
 import type { LyricLine as AMLLLyricLine } from '@applemusic-like-lyrics/core'
-import { parseTTML, parseYrc } from '@applemusic-like-lyrics/lyric'
+import { type LyricLine as ParserLyricLine, parseEslrc, parseQrc, parseYrc } from '@applemusic-like-lyrics/lyric'
+import { TTMLParser, toAmllLyrics } from '@applemusic-like-lyrics/ttml'
+import type { LyricWordFormat, MusicSource } from '@music-together/shared'
+import { findHiddenLeadingStaffIndexes } from './lyrics/staffCredits'
+import type { LyricPreferredSource } from './storage'
 import {
   enrichLyricAuxiliary,
   enrichLyricStructure,
@@ -12,17 +16,48 @@ import {
 const TIMELINE_ALIGNED_TOLERANCE_MS = 120
 const UNALIGNED_SWITCH_MARGIN = 0.05
 
+/** AMLL line extended with the TTML structure fields Folia's visuals consume. */
+export interface LyricLine extends AMLLLyricLine {
+  songPart?: string
+  blockIndex?: number
+}
+
+const STAFF_MIN_DWELL_MS = 1_500
+const STAFF_TAIL_MARGIN_MS = 1_000
+
+/** Hide a leading credit block when the intro cannot hold it, as Folia's smart policy does. */
+function hideLeadingStaffLines(lines: LyricLine[]): LyricLine[] {
+  const removed = findHiddenLeadingStaffIndexes(
+    lines.map((line) => ({
+      fullText: (line.words ?? []).map((word) => word.word ?? '').join(''),
+      startTime: line.startTime,
+    })),
+    STAFF_MIN_DWELL_MS,
+    STAFF_TAIL_MARGIN_MS,
+  )
+  return removed ? lines.filter((_, index) => !removed.has(index)) : lines
+}
+
 export interface LyricData {
   lyric: string
   tlyric: string
   romalrc: string
   yrc: string
   wordByWord?: AMLLLyricLine[]
+  /** Structured word-timing payload; `wordFormat` selects the parser. */
+  wordLyric?: string
+  wordFormat?: LyricWordFormat
 }
+
+export type LyricOrigin = 'platform' | 'ttml' | 'supplement'
 
 export interface LyricPresentation {
   source: 'none' | 'native' | 'ttml'
-  lines: AMLLLyricLine[] | null
+  /** Where the winning lines came from; kept through rescoring and caching. */
+  origin?: LyricOrigin
+  /** Platform that supplied a native or supplement result. */
+  provider?: MusicSource
+  lines: LyricLine[] | null
   lyric: string
   tlyric: string
   unresolvedCount: number
@@ -30,26 +65,128 @@ export interface LyricPresentation {
 }
 
 /** TTML and YRC parser lines share the same conversion to the core's word shape. */
-export function toCoreLyricLines(lines: ReturnType<typeof parseTTML>['lines']): AMLLLyricLine[] {
-  return lines.map((line) => ({
-    words: line.words.map((word) => ({
-      word: word.word,
-      startTime: word.startTime,
-      endTime: word.endTime,
-      romanWord: word.romanWord ?? '',
-      obscene: false,
-    })),
-    translatedLyric: line.translatedLyric ?? '',
-    romanLyric: line.romanLyric ?? '',
-    startTime: line.startTime,
-    endTime: line.endTime,
-    isBG: line.isBG ?? false,
-    isDuet: line.isDuet ?? false,
-  }))
+export function toCoreLyricLines(lines: ParserLyricLine[]): LyricLine[] {
+  return lines.map((line) => {
+    const structured = line as typeof line & { songPart?: string; blockIndex?: number }
+    return {
+      words: line.words.map((word) => ({
+        word: word.word,
+        startTime: word.startTime,
+        endTime: word.endTime,
+        romanWord: word.romanWord ?? '',
+        obscene: false,
+      })),
+      translatedLyric: line.translatedLyric ?? '',
+      romanLyric: line.romanLyric ?? '',
+      startTime: line.startTime,
+      endTime: line.endTime,
+      isBG: line.isBG ?? false,
+      isDuet: line.isDuet ?? false,
+      ...(structured.songPart ? { songPart: structured.songPart } : {}),
+      ...(structured.blockIndex !== undefined ? { blockIndex: structured.blockIndex } : {}),
+    }
+  })
+}
+
+const ITUNES_TTML_NAMESPACE = 'http://music.apple.com/lyric-ttml-internal'
+
+const getLocalName = (node: { localName?: string | null; nodeName: string }): string =>
+  node.localName || node.nodeName.split(':').pop() || ''
+
+/**
+ * AMLL 的 TTML 解析器读不到 `<p>` 上的 `itunes:key` 就整行跳过。Apple Music 与
+ * AMLL TTML Tool 总会写 key，LRC 转换之类的工具通常不写，那种文件会解析成 0 行；
+ * 交给 AMLL 之前给没 key 的行补一个不与已有 key 冲突的 key。
+ */
+function ensureTtmlLineKeys(root: Element): void {
+  const lines = Array.from(root.getElementsByTagName('*')).filter((element) => getLocalName(element) === 'p')
+  const readKey = (element: Element) =>
+    Array.from(element.attributes).find((attribute) => getLocalName(attribute) === 'key')?.value
+  const usedKeys = new Set(lines.map(readKey).filter((key): key is string => Boolean(key)))
+  let nextIndex = 1
+  for (const line of lines) {
+    if (readKey(line)) continue
+    while (usedKeys.has(`L${nextIndex}`)) nextIndex += 1
+    const key = `L${nextIndex}`
+    usedKeys.add(key)
+    line.setAttributeNS(ITUNES_TTML_NAMESPACE, 'itunes:key', key)
+  }
+}
+
+/** Node 环境（测试、SSR）没有 DOMParser 时不注入，交给 AMLL 自己的默认实现。 */
+const ttmlDomParser =
+  typeof DOMParser === 'undefined'
+    ? undefined
+    : {
+        parseFromString: (source: string, mimeType: string) => {
+          const document = new DOMParser().parseFromString(source, mimeType as DOMParserSupportedType)
+          if (document.documentElement) ensureTtmlLineKeys(document.documentElement)
+          return document
+        },
+      }
+
+/**
+ * TTML 走与上游 amll-player 同一个解析器（`@applemusic-like-lyrics/ttml`）：
+ * 注音（ruby）、不雅词标记（obscene）、对唱与背景人声的判定都由它给出，
+ * 再补回 Folia 使用的 `songPart` / `blockIndex` 结构字段。
+ */
+export function parseTtmlLyricLines(text: string): LyricLine[] {
+  const result = TTMLParser.parse(text, ttmlDomParser ? { domParser: ttmlDomParser } : undefined)
+  const lines = toAmllLyrics(result).lines as LyricLine[]
+
+  let index = 0
+  const attachStructure = (source: (typeof result.lines)[number]) => {
+    const line = lines[index++]
+    if (!line) return
+    if (source.songPart) line.songPart = source.songPart
+    if (source.blockIndex !== undefined) line.blockIndex = source.blockIndex
+  }
+  for (const source of result.lines) {
+    attachStructure(source)
+    if (source.backgroundVocal) attachStructure(source)
+  }
+  return lines
 }
 
 export function hasUsablePlatformLyric(data: LyricData | null): data is LyricData {
-  return !!data && !!(data.lyric || data.yrc || data.wordByWord?.length)
+  return !!data && !!(data.lyric || data.yrc || data.wordLyric || data.wordByWord?.length)
+}
+
+function hasTimedWords(lines: AMLLLyricLine[]): boolean {
+  return lines.some(
+    (line) =>
+      line.endTime > line.startTime &&
+      line.words.some(
+        (word) => Number.isFinite(word.startTime) && Number.isFinite(word.endTime) && word.endTime > word.startTime,
+      ),
+  )
+}
+
+function parseStructuredWordLines(data: LyricData | null): AMLLLyricLine[] | null {
+  const text = data?.wordLyric
+  if (!text || !data?.wordFormat) return null
+  try {
+    let lines: AMLLLyricLine[]
+    switch (data.wordFormat) {
+      case 'yrc':
+        lines = toCoreLyricLines(parseYrc(text))
+        break
+      case 'qrc':
+        lines = toCoreLyricLines(parseQrc(text))
+        break
+      case 'ttml':
+        lines = parseTtmlLyricLines(text)
+        break
+      case 'enhanced-lrc':
+        lines = toCoreLyricLines(parseEslrc(text))
+        break
+      case 'krc':
+        return null
+    }
+    return hasTimedWords(lines) ? lines : null
+  } catch {
+    return null
+  }
 }
 
 function prepareNativePresentation(data: LyricData | null): LyricPresentation {
@@ -62,7 +199,11 @@ function prepareNativePresentation(data: LyricData | null): LyricPresentation {
     unresolvedCount = repaired.unresolvedCount
     return enrichLyricAuxiliary(repaired.lines, [data!]).lines
   }
-  if (data?.wordByWord?.length) {
+  const structured = parseStructuredWordLines(data)
+  if (structured?.length) {
+    const normalized = normalize(structured)
+    if (normalized.length > 0) lines = normalized
+  } else if (data?.wordByWord?.length) {
     const normalized = normalize(data.wordByWord)
     if (normalized.length > 0) lines = normalized
   } else if (data?.yrc) {
@@ -76,14 +217,21 @@ function prepareNativePresentation(data: LyricData | null): LyricPresentation {
       // Invalid word-by-word data still falls back to the provider's LRC.
     }
   }
+  const visibleLines = lines ? hideLeadingStaffLines(lines) : null
   return {
     source: hasUsablePlatformLyric(data) ? 'native' : 'none',
-    lines,
+    origin: 'platform',
+    lines: visibleLines,
     lyric: data?.lyric ?? '',
     tlyric: data?.tlyric ?? '',
     unresolvedCount,
-    quality: evaluateLyricAnimationQuality(lines ?? [], data?.lyric ?? ''),
+    quality: evaluateLyricAnimationQuality(visibleLines ?? [], data?.lyric ?? ''),
   }
+}
+
+/** Tag a native presentation built from another platform's lyric as a supplement result. */
+export function markSupplementPresentation(presentation: LyricPresentation, provider: MusicSource): LyricPresentation {
+  return { ...presentation, origin: 'supplement', provider }
 }
 
 export function createTtmlPresentation(
@@ -93,13 +241,15 @@ export function createTtmlPresentation(
   comparisonCharacterCount = 0,
 ): LyricPresentation {
   const enrichedLines = lyricData ? enrichLyricAuxiliary(lines, [lyricData]).lines : lines
+  const visibleLines = hideLeadingStaffLines(enrichedLines)
   return {
     source: 'ttml',
-    lines: enrichedLines.length > 0 ? enrichedLines : null,
+    origin: 'ttml',
+    lines: visibleLines.length > 0 ? visibleLines : null,
     lyric: lyricData?.lyric ?? '',
     tlyric: lyricData?.tlyric ?? '',
     unresolvedCount,
-    quality: evaluateLyricAnimationQuality(enrichedLines, lyricData?.lyric, comparisonCharacterCount),
+    quality: evaluateLyricAnimationQuality(visibleLines, lyricData?.lyric, comparisonCharacterCount),
   }
 }
 
@@ -115,7 +265,11 @@ function rescorePresentation(
   }
 }
 
-function chooseBetweenPresentations(native: LyricPresentation, ttml: LyricPresentation): LyricPresentation {
+function chooseBetweenPresentations(
+  native: LyricPresentation,
+  ttml: LyricPresentation,
+  preferredSource: LyricPreferredSource = 'auto',
+): LyricPresentation {
   const nativeStructure = native.quality.duetLineCount + native.quality.backgroundLineCount
   const ttmlStructure = ttml.quality.duetLineCount + ttml.quality.backgroundLineCount
   const nativeStructureUsable = native.quality.validTimingCoverage >= 0.85 && native.quality.textCoverage >= 0.8
@@ -123,6 +277,12 @@ function chooseBetweenPresentations(native: LyricPresentation, ttml: LyricPresen
   if (nativeStructure !== ttmlStructure) {
     if (ttmlStructure > nativeStructure && ttmlStructureUsable) return ttml
     if (nativeStructure > ttmlStructure && nativeStructureUsable) return native
+  }
+  // Preference is a tie-break: when both sides have the same word-timing capability,
+  // the user's source wins; a side that lacks word animation still loses to one that has it.
+  if (native.quality.hasWordAnimation === ttml.quality.hasWordAnimation) {
+    if (preferredSource === 'ttml' && ttml.lines?.length) return ttml
+    if (preferredSource === 'platform' && native.lines?.length) return native
   }
   if (native.quality.hasWordAnimation !== ttml.quality.hasWordAnimation) {
     return native.quality.hasWordAnimation ? native : ttml
@@ -175,6 +335,7 @@ export function createLyricPresentationBuilder() {
   const selectPreferredPresentation = (
     rawTtmlLines: AMLLLyricLine[] | null,
     lyricData: LyricData | null,
+    preferredSource: LyricPreferredSource = 'auto',
   ): LyricPresentation => {
     const preliminaryNative = buildNativePresentation(lyricData)
     const preliminaryTtml = buildTtmlPresentation(rawTtmlLines, lyricData)
@@ -185,7 +346,7 @@ export function createLyricPresentationBuilder() {
     )
     const native = buildNativePresentation(lyricData, comparisonCharacterCount)
     const ttml = buildTtmlPresentation(rawTtmlLines, lyricData, comparisonCharacterCount)!
-    return chooseBetweenPresentations(native, ttml)
+    return chooseBetweenPresentations(native, ttml, preferredSource)
   }
 
   return { buildNativePresentation, buildTtmlPresentation, selectPreferredPresentation }

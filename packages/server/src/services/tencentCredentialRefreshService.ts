@@ -1,47 +1,89 @@
 import pLimit from 'p-limit'
+import type { MusicSource } from '@music-together/shared'
 import { platformAuthRepo } from '../repositories/platformAuthRepository.js'
 import { logger } from '../utils/logger.js'
 import * as authService from './authService.js'
 import * as tencentAuth from './tencentAuthService.js'
+import * as neteaseAuth from './neteaseAuthService.js'
 
-export const TENCENT_CREDENTIAL_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1_000
-const TENCENT_CREDENTIAL_SCAN_INTERVAL_MS = 5 * 60 * 1_000
+/**
+ * 平台账号自动续期。
+ *
+ * - QQ 音乐：用 login_refresh 轮换播放凭证；
+ * - 网易云：用 login_refresh 换取新的 MUSIC_U；
+ * - 其他平台没有可靠的公开续期协议，交给 getUserInfo 判定过期并提示重新登录。
+ *
+ * 失败时保留旧凭证，调用前先写尝试时间，进程重启不会被失败任务反复打满。
+ */
+
+export const CREDENTIAL_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1_000
+export const TENCENT_CREDENTIAL_REFRESH_INTERVAL_MS = CREDENTIAL_REFRESH_INTERVAL_MS
+const CREDENTIAL_SCAN_INTERVAL_MS = 5 * 60 * 1_000
 const REFRESH_CONCURRENCY = 2
 
-export interface TencentCredentialRefreshSummary {
+export interface CredentialRefreshSummary {
   checked: number
   refreshed: number
   failed: number
   skipped: number
 }
 
-export type TencentCredentialRefresher = (cookie: string) => Promise<string>
+export type TencentCredentialRefreshSummary = CredentialRefreshSummary
+export type CredentialRefresher = (cookie: string) => Promise<string>
+export type TencentCredentialRefresher = CredentialRefresher
 
-export async function refreshDueTencentCredentials(
-  now = Date.now(),
-  refresh: TencentCredentialRefresher = tencentAuth.refreshCredential,
-): Promise<TencentCredentialRefreshSummary> {
-  const due = platformAuthRepo.loadDueTencent(now - TENCENT_CREDENTIAL_REFRESH_INTERVAL_MS)
-  const summary: TencentCredentialRefreshSummary = { checked: due.length, refreshed: 0, failed: 0, skipped: 0 }
+interface ProviderRefreshConfig {
+  platform: MusicSource
+  label: string
+  isRefreshable: (cookie: string) => boolean
+  refresh: CredentialRefresher
+}
+
+const PROVIDERS: ProviderRefreshConfig[] = [
+  {
+    platform: 'tencent',
+    label: 'QQ 音乐',
+    isRefreshable: tencentAuth.isRefreshableCredential,
+    refresh: tencentAuth.refreshCredential,
+  },
+  {
+    platform: 'netease',
+    label: '网易云音乐',
+    isRefreshable: neteaseAuth.isRefreshableCredential,
+    refresh: neteaseAuth.refreshCredential,
+  },
+]
+
+async function refreshDueProvider(
+  config: ProviderRefreshConfig,
+  now: number,
+  refresh: CredentialRefresher = config.refresh,
+): Promise<CredentialRefreshSummary> {
+  const due = platformAuthRepo.loadDue(config.platform, now - CREDENTIAL_REFRESH_INTERVAL_MS)
+  const summary: CredentialRefreshSummary = { checked: due.length, refreshed: 0, failed: 0, skipped: 0 }
   const limit = pLimit(REFRESH_CONCURRENCY)
 
   await Promise.all(
     due
-      .map((entry) => ({ entry, authorizationVersion: authService.getAuthorizationVersion(entry.userId, 'tencent') }))
+      .map((entry) => ({
+        entry,
+        authorizationVersion: authService.getAuthorizationVersion(entry.userId, config.platform),
+      }))
       .map(({ entry, authorizationVersion }) =>
         limit(async () => {
-          if (authService.getAuthorizationVersion(entry.userId, 'tencent') !== authorizationVersion) {
+          if (authService.getAuthorizationVersion(entry.userId, config.platform) !== authorizationVersion) {
             summary.skipped++
             return
           }
           // Persist the attempt before the network call so a restart cannot make
           // a failing credential retry continuously.
-          platformAuthRepo.markCredentialRefreshAttempt(entry.userId, 'tencent', now)
+          platformAuthRepo.markCredentialRefreshAttempt(entry.userId, config.platform, now)
 
-          if (!tencentAuth.isRefreshableCredential(entry.cookie)) {
+          if (!config.isRefreshable(entry.cookie)) {
             summary.skipped++
-            logger.warn('QQ 音乐凭证缺少刷新字段，已跳过自动刷新并等待用户重新扫码', {
-              event: 'auth.tencent_credential_refresh_skipped',
+            logger.warn(`${config.label}凭证缺少刷新字段，已跳过自动续期并等待用户重新登录`, {
+              event: 'auth.credential_refresh_skipped',
+              platform: config.platform,
               userId: entry.userId,
             })
             return
@@ -49,30 +91,35 @@ export async function refreshDueTencentCredentials(
 
           try {
             const refreshedCookie = await refresh(entry.cookie)
-            if (!tencentAuth.isRefreshableCredential(refreshedCookie)) {
-              throw new Error('刷新响应未包含可用的 refresh_token 或 refresh_key')
-            }
             if (
-              authService.getAuthorizationVersion(entry.userId, 'tencent') !== authorizationVersion ||
-              !authService.replaceCredentialCookie(entry.userId, 'tencent', entry.cookie, refreshedCookie)
+              authService.getAuthorizationVersion(entry.userId, config.platform) !== authorizationVersion ||
+              !authService.replaceCredentialCookie(
+                entry.userId,
+                config.platform,
+                entry.cookie,
+                refreshedCookie,
+              )
             ) {
               summary.skipped++
-              logger.info('QQ 音乐凭证在刷新期间已被替换，已丢弃旧刷新结果', {
-                event: 'auth.tencent_credential_refresh_stale',
+              logger.info(`${config.label}凭证在续期期间已被替换，已丢弃旧刷新结果`, {
+                event: 'auth.credential_refresh_stale',
+                platform: config.platform,
                 userId: entry.userId,
               })
               return
             }
 
             summary.refreshed++
-            logger.info('QQ 音乐播放凭证已自动刷新', {
-              event: 'auth.tencent_credential_refreshed',
+            logger.info(`${config.label}凭证已自动续期`, {
+              event: 'auth.credential_refreshed',
+              platform: config.platform,
               userId: entry.userId,
             })
           } catch (error) {
             summary.failed++
-            logger.warn('QQ 音乐播放凭证自动刷新失败，已保留原凭证', {
-              event: 'auth.tencent_credential_refresh_failed',
+            logger.warn(`${config.label}凭证自动续期失败，已保留原凭证`, {
+              event: 'auth.credential_refresh_failed',
+              platform: config.platform,
               userId: entry.userId,
               error: error instanceof Error ? error.message : String(error),
             })
@@ -82,31 +129,46 @@ export async function refreshDueTencentCredentials(
   )
 
   if (summary.checked > 0) {
-    logger.info('QQ 音乐凭证定时刷新完成', {
-      event: 'auth.tencent_credential_refresh_completed',
+    logger.info(`${config.label}凭证定时续期完成`, {
+      event: 'auth.credential_refresh_completed',
+      platform: config.platform,
       ...summary,
     })
   }
   return summary
 }
 
-let scheduledRun: Promise<TencentCredentialRefreshSummary> | null = null
+export function refreshDueTencentCredentials(
+  now = Date.now(),
+  refresh: CredentialRefresher = tencentAuth.refreshCredential,
+): Promise<CredentialRefreshSummary> {
+  return refreshDueProvider(PROVIDERS[0]!, now, refresh)
+}
 
-function runScheduledRefresh(): Promise<TencentCredentialRefreshSummary> {
+export function refreshDueNeteaseCredentials(
+  now = Date.now(),
+  refresh: CredentialRefresher = neteaseAuth.refreshCredential,
+): Promise<CredentialRefreshSummary> {
+  return refreshDueProvider(PROVIDERS[1]!, now, refresh)
+}
+
+let scheduledRun: Promise<CredentialRefreshSummary[]> | null = null
+
+function runScheduledRefresh(): Promise<CredentialRefreshSummary[]> {
   if (scheduledRun) return scheduledRun
-  scheduledRun = refreshDueTencentCredentials().finally(() => {
+  scheduledRun = Promise.all(PROVIDERS.map((config) => refreshDueProvider(config, Date.now()))).finally(() => {
     scheduledRun = null
   })
   return scheduledRun
 }
 
-export function startTencentCredentialRefreshScheduler(): ReturnType<typeof setInterval> {
+export function startCredentialRefreshScheduler(): ReturnType<typeof setInterval> {
   void runScheduledRefresh()
-  const timer = setInterval(() => void runScheduledRefresh(), TENCENT_CREDENTIAL_SCAN_INTERVAL_MS)
+  const timer = setInterval(() => void runScheduledRefresh(), CREDENTIAL_SCAN_INTERVAL_MS)
   timer.unref()
   return timer
 }
 
-export function stopTencentCredentialRefreshScheduler(timer: ReturnType<typeof setInterval>): void {
+export function stopCredentialRefreshScheduler(timer: ReturnType<typeof setInterval>): void {
   clearInterval(timer)
 }

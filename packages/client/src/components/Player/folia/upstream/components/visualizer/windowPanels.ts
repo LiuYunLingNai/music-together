@@ -34,10 +34,13 @@ export const MODE_SETTINGS_PANELS: Record<string, (props: Record<string, unknown
     diorama: lazyPanel(fromModule(sharedPanels, 'DioramaSettingsPanel')),
     claddagh: lazyPanel(fromModule(sharedPanels, 'CladdaghSettingsPanel')),
     // 独立面板文件的模式。
+    cadenza: lazyPanel(() => import('./cadenza/CadenzaSettingsPanel') as unknown as ReturnType<PanelLoader>),
     hanabi: lazyPanel(() => import('./hanabi/HanabiSettingsPanel') as unknown as ReturnType<PanelLoader>),
     sonnet: lazyPanel(() => import('./sonnet/SonnetSettingsPanel') as unknown as ReturnType<PanelLoader>),
     lumiere: lazyPanel(() => import('./lumiere/LumiereSettingsPanel') as unknown as ReturnType<PanelLoader>),
     tempera: lazyPanel(() => import('./tempera/TemperaSettingsPanel') as unknown as ReturnType<PanelLoader>),
     monet: lazyPanel(() => import('./monet/MonetSettingsPanel') as unknown as ReturnType<PanelLoader>),
     pendolo: lazyPanel(() => import('./pendolo/PendoloSettingsPanel') as unknown as ReturnType<PanelLoader>),
+    machi: lazyPanel(() => import('./machi/MachiSettingsPanel') as unknown as ReturnType<PanelLoader>),
+    nebbia: lazyPanel(() => import('./nebbia/NebbiaSettingsPanel') as unknown as ReturnType<PanelLoader>),
 }

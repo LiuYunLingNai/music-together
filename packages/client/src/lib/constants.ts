@@ -19,7 +19,14 @@ export const DRIFT_DEAD_ZONE_MS = 5
 export const DRIFT_TEMPO_KP = 0.15
 
 /** Maximum tempo correction; SoundTouch compensates pitch in the worklet. */
-export const MAX_TEMPO_ADJUSTMENT = 0.01
+export const MAX_TEMPO_ADJUSTMENT = 0.005
+
+/** 偏差超过此值才开始变速、低于 RELEASE 才停止（迟滞，避免在边界来回切换）。 */
+export const TEMPO_ENGAGE_MS = 25
+export const TEMPO_RELEASE_MS = 10
+
+/** 每次同步包最多改变的速度量（斜率限制）：0.1% 的台阶听不出来。 */
+export const TEMPO_SLEW_PER_SYNC = 0.001
 
 /** Drift threshold (ms) before hard-seeking to correct position */
 export const DRIFT_SEEK_THRESHOLD_MS = 500

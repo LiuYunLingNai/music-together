@@ -4,12 +4,15 @@ import type {
   ClientInfo,
   PlayMode,
   PlayState,
+  QueueMode,
   RoomListItem,
   RoomMember,
+  RoomBan,
   Track,
   User,
   RoamingSource,
   NeteaseRoamingMode,
+  TransitionMode,
 } from '@music-together/shared'
 
 /** 服务端内部房间数据模型 -- 含密码（仅通过 owner 专用 RoomState 发送给客户端） */
@@ -30,8 +33,18 @@ export interface RoomData {
   allowTemporaryAdminQueueClear: boolean
   /** Remove the previously played queue item after a successful next-track transition. */
   removePlayedTracks: boolean
+  /** `consume`: a track that was heard (or skipped) leaves the queue and nothing loops. */
+  queueMode: QueueMode
   /** Continue with personalized recommendations when the user queue has no successor. */
   roamingEnabled: boolean
+  /** Server-scheduled overlapping transition between consecutive tracks. */
+  automixEnabled: boolean
+  /** `automix` plans against the beat grid; `crossfade` is a fixed equal-power blend. */
+  transitionMode: TransitionMode
+  /** Fixed crossfade length in seconds (crossfade mode only). */
+  crossfadeMaxSec: number
+  /** automix performance mode: build into the drum handover. */
+  automixPerformance: boolean
   /** Logged-in platform used to fetch personalized roaming songs. */
   roamingSource: RoamingSource
   roamingMode: NeteaseRoamingMode
@@ -42,6 +55,8 @@ export interface RoomData {
   audioQuality: AudioQuality
   /** Full roster; users contains only the currently connected members. */
   members: RoomMember[]
+  /** 房主封禁名单；加入校验与 owner 状态使用。 */
+  bannedMembers: RoomBan[]
   users: User[]
   queue: Track[]
   currentTrack: Track | null

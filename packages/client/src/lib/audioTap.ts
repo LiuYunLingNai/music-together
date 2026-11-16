@@ -19,6 +19,13 @@
  */
 
 let analyser: AnalyserNode | null = null
+/**
+ * 低频专用分析节点：与 `analyser` 同源，但 `maxDecibels` 放宽到 0dB。
+ *
+ * 视觉背景要的是上游 Rust 侧那套「线性振幅 / 255」刻度；默认 `-30dB`
+ * 上限会把响段整体钳在满字节，算出来的低频电平恒定，鼓点不再跳动。
+ */
+let lowFreqAnalyser: AnalyserNode | null = null
 let revision = 0
 
 /** 由 `timeStretch` 在建立音频图时调用。 */
@@ -33,6 +40,15 @@ export function publishStretchAnalyser(node: AnalyserNode | null): void {
 /** 由视觉层读取。未接线时返回 null（此时应静默降级，而不是报错）。 */
 export function getAudioTapAnalyser(): AnalyserNode | null {
   return analyser
+}
+
+/** 与 `publishStretchAnalyser` 同生命周期发布，切歌时一并撤回。 */
+export function publishLowFreqAnalyser(node: AnalyserNode | null): void {
+  lowFreqAnalyser = node
+}
+
+export function getLowFreqAnalyser(): AnalyserNode | null {
+  return lowFreqAnalyser
 }
 
 /** 当前 tap 发布代次；用于区分“舞台重挂载”和“真实音频源切换”。 */

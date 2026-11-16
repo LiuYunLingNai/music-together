@@ -7,19 +7,24 @@ import { Loader2, PanelLeftOpen, PanelRightOpen } from 'lucide-react'
 import { InteractionGate } from '@/components/InteractionGate'
 import { GlobalBackground } from '@/components/GlobalBackground'
 import { AudioPlayer } from '@/components/Player/AudioPlayer'
-import { MiniPlayerBar } from '@/components/Player/MiniPlayerBar'
 import { ChatPanel } from '@/components/Chat/ChatPanel'
 import { HotSongsPanel } from '@/components/Room/HotSongsPanel'
 import { RoomHeader } from '@/components/Room/RoomHeader'
 import { SearchDialog } from '@/components/Overlays/SearchDialog'
 import { QueueDrawer } from '@/components/Overlays/QueueDrawer'
 import { SettingsDialog, type SettingsTab } from '@/components/Overlays/SettingsDialog'
+import { AccountDialog } from '@/components/Overlays/AccountDialog'
+import { ArtistDialog } from '@/components/Overlays/ArtistDialog'
+import { useArtistPageStore } from '@/stores/artistPageStore'
 import { AddToPlaylistDialog } from '@/components/Overlays/AddToPlaylistDialog'
+import { ManualFallbackDialog } from '@/components/Overlays/ManualFallbackDialog'
+import { PlaybackFailureDialog } from '@/components/Overlays/PlaybackFailureDialog'
 import { PasswordDialog } from '@/components/Lobby/PasswordDialog'
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from '@/components/ui/drawer'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { passwordErrorText } from '@/lib/passwordErrorText'
 import { isAudioUnlocked, unlockAudio } from '@/lib/audioUnlock'
 import { SERVER_URL } from '@/lib/config'
 import { useRoom } from '@/hooks/useRoom'
@@ -248,7 +253,7 @@ export default function RoomPage() {
   const { roomId } = useParams<{ roomId: string }>()
   const navigate = useNavigate()
   const { socket, isConnected } = useSocketContext()
-  const { leaveRoom, updateSettings, setUserRole } = useRoom()
+  const { leaveRoom, updateSettings, setUserRole, kickUser, unbanUser } = useRoom()
   const { play, pause, seek, requestSeek, next, prev } = usePlayer()
   const { addTrack, insertAfterCurrent, removeTrack, reorderTracks, updateBilibiliMetadata, clearQueue } = useQueue()
   // folia 舞台激活时播放列表走浮岛（浮岛本体在 FoliaPlayerStage 内渲染，
@@ -278,10 +283,11 @@ export default function RoomPage() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [queueOpen, setQueueOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [accountsOpen, setAccountsOpen] = useState(false)
+  const artistPageOpen = useArtistPageStore((s) => s.target !== null)
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab | undefined>(undefined)
   const [hotSongsOpen, setHotSongsOpen] = useState(true)
   const [hotSongsMobileOpen, setHotSongsMobileOpen] = useState(false)
-  const [playerView, setPlayerView] = useState<'player' | 'playlist'>('player')
   const { activeVote, startVote, castVote } = useVote()
   const hotSongsPanelVisible = showDesktopHotSongs && hotSongsOpen
   const chatPanelVisible = showDesktopChat && chatOpen
@@ -362,10 +368,14 @@ export default function RoomPage() {
         })
         if (cancelled) return
 
-        if (!res.ok) {
-          // Room not found
+        if (res.status === 404 || res.status === 400) {
           toast.error('房间不存在')
           navigate('/', { replace: true })
+          return
+        }
+        // 限流、5xx、反代短暂不可用不能说明房间不存在：和网络错误一样，仍允许尝试加入。
+        if (!res.ok) {
+          setRoomInfo(null)
           return
         }
 
@@ -445,14 +455,14 @@ export default function RoomPage() {
           // Password was sent from gate but rejected (e.g. race condition / password changed)
           // Reset gate so user can re-enter password
           setGateOpen(false)
-          setGatePasswordError('密码错误，请重试')
+          setGatePasswordError(passwordErrorText(error.message))
           passwordRef.current = undefined
           return
         }
 
         // Fallback password dialog path
         if (passwordNeeded) {
-          setPasswordError('密码错误，请重试')
+          setPasswordError(passwordErrorText(error.message))
           setPasswordLoading(false)
         } else {
           setPasswordNeeded(true)
@@ -518,6 +528,30 @@ export default function RoomPage() {
     setSettingsOpen(true)
   }, [])
 
+  const handleOpenPlayerSettings = useCallback(() => {
+    setSettingsInitialTab('player')
+    setSettingsOpen(true)
+  }, [])
+
+  // 页面卸载且不是主动离开（返回键、路由切换、错误边界重置）时离开房间，否则服务端仍把本机当成成员，
+  // 音频却已停止。延后一个宏任务判断：StrictMode 的模拟重挂载会在计时器触发前把 mountedRef 置回 true；
+  // 断线时服务端已移除本机且连接守卫已重置状态，此时发送会在重连后被补发，所以直接跳过。
+  const mountedRef = useRef(false)
+  const leaveRoomRef = useRef(leaveRoom)
+  leaveRoomRef.current = leaveRoom
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      setTimeout(() => {
+        if (mountedRef.current || isLeavingRef.current) return
+        if (!socket.connected) return
+        if (!useRoomStore.getState().room && !joiningRef.current) return
+        leaveRoomRef.current()
+      }, 0)
+    }
+  }, [socket])
+
   const handleLeaveRoom = useCallback(() => {
     isLeavingRef.current = true
     leaveRoom()
@@ -561,11 +595,13 @@ export default function RoomPage() {
     <AbilityProvider>
       <ClockSyncRunner />
       <PlaybackSpaceShortcut
-        enabled={supportsDesktopShortcuts && playerView === 'player'}
+        enabled={supportsDesktopShortcuts}
         blocked={
           searchOpen ||
           queueOpen ||
           settingsOpen ||
+          accountsOpen ||
+          artistPageOpen ||
           passwordNeeded ||
           activeVote !== null ||
           hotSongsMobileOpen ||
@@ -588,6 +624,7 @@ export default function RoomPage() {
             onOpenSearch={() => setSearchOpen(true)}
             onOpenChat={openChat}
             onOpenSettings={() => setSettingsOpen(true)}
+            onOpenAccounts={() => setAccountsOpen(true)}
             onOpenMembers={handleOpenMembers}
             onOpenHotSongs={openHotSongs}
             onLeaveRoom={handleLeaveRoom}
@@ -607,11 +644,10 @@ export default function RoomPage() {
                     onPrev={prev}
                     onOpenChat={toggleChat}
                     onOpenQueue={() => setQueueOpen(true)}
+                    onOpenSettings={handleOpenPlayerSettings}
                     queueOpen={queueOpen}
                     onQueueOpenChange={setQueueOpen}
                     chatUnreadCount={chatUnreadCount}
-                    view={playerView}
-                    onToggleView={() => setPlayerView((view) => (view === 'player' ? 'playlist' : 'player'))}
                     activeVote={activeVote}
                     onCastVote={castVote}
                     onStartVote={startVote}
@@ -681,17 +717,6 @@ export default function RoomPage() {
                   </Tooltip>
                 ) : null}
               </div>
-
-              {playerView === 'playlist' && (
-                <MiniPlayerBar
-                  onPlay={play}
-                  onPause={pause}
-                  onNext={next}
-                  onPrev={prev}
-                  onStartVote={startVote}
-                  onOpenPlaylist={() => setQueueOpen(true)}
-                />
-              )}
             </div>
           </div>
 
@@ -748,9 +773,15 @@ export default function RoomPage() {
             }}
             onUpdateSettings={updateSettings}
             onSetUserRole={setUserRole}
+            onKickUser={kickUser}
+            onUnbanUser={unbanUser}
             initialTab={settingsInitialTab}
           />
+          <AccountDialog open={accountsOpen} onOpenChange={setAccountsOpen} />
+          <ArtistDialog />
           <AddToPlaylistDialog />
+          <ManualFallbackDialog />
+          <PlaybackFailureDialog onOpenAccounts={() => setAccountsOpen(true)} />
         </div>
 
         {/* Fallback password dialog for edge cases (password changed after pre-check) */}

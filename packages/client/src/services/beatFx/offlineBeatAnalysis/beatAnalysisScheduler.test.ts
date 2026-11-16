@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { BEAT_ANALYSIS_CONFIG, scheduleBeatAnalysis, type BeatAnalysisEnv } from './beatAnalysisScheduler'
+import { BEAT_ANALYSIS_CONFIG, clearBeatMapCache, scheduleBeatAnalysis, type BeatAnalysisEnv } from './beatAnalysisScheduler'
 import { analyzeAudioBeats } from './analyzeAudioBeats'
 import type { BeatMap } from './beatAnalysisTypes'
 
@@ -26,6 +26,7 @@ const analyze = vi.mocked(analyzeAudioBeats)
  */
 beforeEach(() => {
   vi.useFakeTimers()
+  clearBeatMapCache()
   analyze.mockReset()
   analyze.mockImplementation(async () => null)
   ;(globalThis as unknown as { requestIdleCallback?: unknown }).requestIdleCallback = (
@@ -37,6 +38,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  clearBeatMapCache()
   vi.useRealTimers()
 })
 

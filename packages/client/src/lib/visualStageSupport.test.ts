@@ -21,7 +21,10 @@ const HERE = __dirname
 const SUPPORT = readFileSync(join(HERE, 'visualStageSupport.ts'), 'utf8')
 const HOOK = readFileSync(join(HERE, '..', 'hooks', 'useVisualStageSupport.ts'), 'utf8')
 const SHELL = readFileSync(join(HERE, '..', 'components', 'Player', 'AudioPlayer.tsx'), 'utf8')
-const APPEARANCE = readFileSync(join(HERE, '..', 'components', 'Overlays', 'Settings', 'AppearanceSection.tsx'), 'utf8')
+const PLAYER_SETTINGS = readFileSync(
+  join(HERE, '..', 'components', 'Overlays', 'Settings', 'PlayerSettingsSection.tsx'),
+  'utf8',
+)
 const RENDER_POLICY = readFileSync(
   join(HERE, '..', 'components', 'Player', 'stages', 'RenderPolicy.ts'),
   'utf8',
@@ -99,16 +102,20 @@ describe('视觉舞台可用性 · 接线契约', () => {
     expect(guardAt, '守卫必须在写入之前').toBeLessThan(writeAt)
   })
 
-  it('③ 设置面板：视觉舞台整块被门控，背景渲染块**保留**', () => {
-    const body = stripComments(APPEARANCE)
+  it('③ 设置面板：3D/Folia 分段被门控，经典（含背景渲染）**保留**', () => {
+    const body = stripComments(PLAYER_SETTINGS)
     expect(body, '设置面板未接入口判据').toMatch(/useVisualStageDisabled\(\)/)
-    expect(body).toMatch(/\{!visualStageDisabled && \(/)
-    // ★ 反向确认：背景渲染块必须仍在条件之外 —— 经典播放器也读这三个值
-    //   （classic/ClassicPlayerStage.tsx:78-80），一起藏掉会是功能回归。
-    const gateAt = body.indexOf('!visualStageDisabled')
-    expect(gateAt, '未找到门控').toBeGreaterThan(-1)
-    expect(body.slice(0, gateAt), '背景渲染块被误纳入门控').toMatch(/背景渲染/)
-    expect(body.slice(0, gateAt), '背景渲染的频率设置被误纳入门控').toMatch(/bgFps/)
+    // 禁用设备只显示经典分段
+    expect(body).toMatch(/visualStageDisabled \? FAMILY_TABS\.slice\(0, 1\) : FAMILY_TABS/)
+    // ★ 反向确认：经典族的背景设置必须仍在 —— 经典播放器也读这些值
+    //   （classic/ClassicPlayerStage.tsx），一起藏掉会是功能回归。
+    const classicAt = body.indexOf('function ClassicSettings')
+    const mineradioAt = body.indexOf('function MineradioSettings')
+    expect(classicAt, '未找到经典设置组').toBeGreaterThan(-1)
+    expect(mineradioAt, '未找到 3D 设置组').toBeGreaterThan(classicAt)
+    const classic = body.slice(classicAt, mineradioAt)
+    expect(classic, '经典设置组缺少背景频率设置').toMatch(/bgFps/)
+    expect(classic, '经典设置组缺少背景渲染器设置').toMatch(/bgRenderer/)
   })
 
   it('④ 持久化回写：禁用时必须把存储值写回 classic，且写在 effect 里', () => {

@@ -9,19 +9,36 @@ import {
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { VirtualTrackList, type VirtualTrackListRef } from '@/components/VirtualTrackList'
-import { PLATFORM_ACTIVE, PLATFORM_TEXT } from '@/lib/platform'
+import { QueueTrackCover } from '@/components/Room/QueueTrackCover'
+import { PLATFORM_ACTIVE, PLATFORM_LABELS, PLATFORM_SHORT_LABELS, PLATFORM_TEXT } from '@/lib/platform'
+import { formatDuration } from '@/lib/format'
 import { cn, trackKey } from '@/lib/utils'
 import { useRoomStore } from '@/stores/roomStore'
+import { openArtistPage } from '@/stores/artistPageStore'
+import { hasArtistPages } from '@/lib/artistLink'
 import { useSearch } from '@/hooks/useSearch'
+import { useUnifiedSearch } from '@/hooks/useUnifiedSearch'
 import { useRecommendations } from '@/hooks/useRecommendations'
 import { usePlaylist } from '@/hooks/usePlaylist'
 import { useAddToPlaylist } from '@/hooks/useAddToPlaylist'
+import { useQueueMembership } from '@/hooks/useQueueMembership'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useSocketContext } from '@/providers/socket-context'
 import { EVENTS, LIMITS } from '@music-together/shared'
-import type { MusicSource, Track, Playlist } from '@music-together/shared'
+import type { MusicSource, Track, Playlist, UnifiedSearchGroup } from '@music-together/shared'
 import type { BilibiliMetadataSource } from '@music-together/shared'
-import { Loader2, Music2, Search, ListMusic, Radio, RefreshCw, Sparkles } from 'lucide-react'
+import {
+  Loader2,
+  Music2,
+  Search,
+  ListMusic,
+  Radio,
+  RefreshCw,
+  Sparkles,
+  Check,
+  Plus,
+  ArrowUpToLine,
+} from 'lucide-react'
 import { motion } from 'motion/react'
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, useEffect } from 'react'
 import { toast } from 'sonner'
@@ -29,18 +46,25 @@ import { PlaylistDetail } from './Settings/PlaylistDetail'
 import { BilibiliCollectionDialog } from './BilibiliCollectionDialog'
 import { BilibiliMetadataDialog } from './BilibiliMetadataDialog'
 
-const EMPTY_QUEUE: Track[] = []
 type BilibiliQueueAction = 'add' | 'insert'
-type SearchMode = 'song' | 'album' | 'playlist' | 'recommend'
+type SearchMode = 'song' | 'album' | 'playlist' | 'artist' | 'recommend'
 type TencentRecommendationView = 'radar' | 'playlists'
 
-const SOURCES: { id: MusicSource; label: string }[] = [
+type SearchSource = MusicSource | 'all'
+
+const SOURCES: { id: SearchSource; label: string }[] = [
+  { id: 'all', label: '全部' },
   { id: 'netease', label: '网易云' },
   { id: 'tencent', label: 'QQ' },
   { id: 'kugou', label: '酷狗' },
   { id: 'kugou_concept', label: '概念版' },
   { id: 'bilibili', label: 'B站' },
 ]
+
+const platformActiveClass = (source: SearchSource): string =>
+  source === 'all' ? 'bg-primary' : PLATFORM_ACTIVE[source]
+const platformTextClass = (source: SearchSource): string =>
+  source === 'all' ? 'text-primary-foreground' : PLATFORM_TEXT[source]
 
 interface SearchDialogProps {
   open: boolean
@@ -106,8 +130,137 @@ function PlaylistList({ playlists, onSelect, hasMore, loadingMore, onLoadMore }:
   )
 }
 
+const VERSION_LABELS: Record<string, string> = {
+  live: '现场',
+  remix: '混音',
+  instrumental: '伴奏',
+  cover: '翻唱',
+}
+
+function UnifiedTrackList({
+  groups,
+  isTrackAdded,
+  onAddTrack,
+  onInsertAfterCurrent,
+  onAddToPlaylist,
+  onArtistClick,
+}: {
+  groups: UnifiedSearchGroup[]
+  isTrackAdded: (track: Track) => boolean
+  onAddTrack: (track: Track) => void
+  onInsertAfterCurrent: (track: Track) => void
+  onAddToPlaylist?: (track: Track) => void
+  onArtistClick: (artist: string) => void
+}) {
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto rounded-md border">
+      {groups.map((group, index) => {
+        const primary = group.candidates[0]
+        if (!primary) return null
+        const primaryAdded = isTrackAdded(primary)
+        return (
+          <div
+            key={group.key}
+            className={cn(
+              'flex items-start gap-3 px-3 py-3 transition-colors hover:bg-muted/40',
+              index > 0 && 'border-t',
+            )}
+          >
+            <QueueTrackCover track={primary} className="mt-0.5 h-11 w-11 shrink-0 rounded-md" />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5">
+                <span className="truncate text-sm font-medium">{group.title}</span>
+                {group.version && (
+                  <span className="shrink-0 rounded bg-sky-500/10 px-1 py-0.5 text-[10px] font-medium leading-none text-sky-600 dark:text-sky-400">
+                    {VERSION_LABELS[group.version]}
+                  </span>
+                )}
+                {primary.vip && (
+                  <span className="shrink-0 rounded bg-amber-500/10 px-1 py-0.5 text-[10px] font-bold leading-none text-amber-500 ring-1 ring-amber-500/30">
+                    VIP
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                className="mt-0.5 block max-w-full truncate text-left text-xs text-muted-foreground hover:text-foreground hover:underline"
+                onClick={() => {
+                  const artist = group.artist[0]
+                  if (artist) onArtistClick(artist)
+                }}
+              >
+                {group.artist.join(' / ')} · {formatDuration(group.duration)}
+              </button>
+              <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                {group.candidates.map((candidate) => {
+                  const added = isTrackAdded(candidate)
+                  return (
+                    <button
+                      key={trackKey(candidate)}
+                      type="button"
+                      disabled={added}
+                      onClick={() => onAddTrack(candidate)}
+                      title={`${PLATFORM_LABELS[candidate.source]}${candidate.vip ? ' · VIP' : ''}${
+                        added ? ' · 已加入' : ' · 点击加入'
+                      }`}
+                      className={cn(
+                        'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-colors',
+                        added ? 'border-transparent bg-muted text-muted-foreground' : 'bg-background hover:bg-muted',
+                      )}
+                    >
+                      <span className={cn('h-1.5 w-1.5 rounded-full', PLATFORM_ACTIVE[candidate.source])} />
+                      {PLATFORM_SHORT_LABELS[candidate.source]}
+                      {candidate.vip && <span className="text-[9px] font-bold text-amber-500">VIP</span>}
+                      {added ? <Check className="h-3 w-3" /> : <Plus className="h-3 w-3 opacity-60" />}
+                    </button>
+                  )
+                })}
+                {group.candidates.length > 1 && (
+                  <span className="ml-1 text-[10px] text-muted-foreground">{group.candidates.length} 个音源</span>
+                )}
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 px-2.5"
+                disabled={primaryAdded}
+                onClick={() => onAddTrack(primary)}
+              >
+                {primaryAdded ? <Check className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+                <span className="ml-1 hidden sm:inline">{primaryAdded ? '已加入' : '加入'}</span>
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                title="插播到当前歌曲之后"
+                onClick={() => onInsertAfterCurrent(primary)}
+              >
+                <ArrowUpToLine className="h-4 w-4" />
+              </Button>
+              {onAddToPlaylist && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="hidden h-8 w-8 sm:inline-flex"
+                  title="收藏到歌单"
+                  onClick={() => onAddToPlaylist(primary)}
+                >
+                  <ListMusic className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCurrent }: SearchDialogProps) {
-  const [source, setSource] = useState<MusicSource>('netease')
+  const [source, setSource] = useState<SearchSource>('netease')
   const [searchType, setSearchType] = useState<SearchMode>('song')
   const [tencentRecommendationView, setTencentRecommendationView] = useState<TencentRecommendationView>('radar')
   const [bilibiliMatch, setBilibiliMatch] = useState<{ track: Track; action: BilibiliQueueAction } | null>(null)
@@ -116,16 +269,14 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
     action: BilibiliQueueAction
   } | null>(null)
   const [keyword, setKeyword] = useState('')
-  const [addedIds, setAddedIds] = useState<Set<string>>(new Set())
   const { addToPlaylist, canUse: canAddToPlaylist } = useAddToPlaylist()
   const onAddToPlaylist = canAddToPlaylist ? (track: Track) => addToPlaylist(track, track.title) : undefined
   const listRef = useRef<VirtualTrackListRef>(null)
   const dialogContentRef = useRef<HTMLDivElement>(null)
   const sourceContainerRef = useRef<HTMLDivElement>(null)
   const [pillStyle, setPillStyle] = useState({ left: 0, width: 0 })
-  const queue = useRoomStore((s) => s.room?.queue ?? EMPTY_QUEUE)
   const roomId = useRoomStore((s) => s.room?.id)
-  const queueKeys = useMemo(() => new Set(queue.map(trackKey)), [queue])
+  const { queueKeys, pending, isAdded: isTrackAdded, markPending } = useQueueMembership()
   const { socket } = useSocketContext()
   const isMobile = useIsMobile()
 
@@ -179,10 +330,19 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
   } = usePlaylist()
 
   const { results, loading, loadingMore, hasMore, hasSearched, search, loadMore, resetState } = useSearch(
-    source,
+    source === 'all' ? 'netease' : source,
     searchType === 'recommend' ? 'song' : searchType,
     roomId,
   )
+  const {
+    groups: unifiedGroups,
+    loading: unifiedLoading,
+    hasSearched: unifiedHasSearched,
+    failedSources: unifiedFailedSources,
+    search: searchUnified,
+    reset: resetUnified,
+  } = useUnifiedSearch(roomId)
+  const activeLoading = source === 'all' ? unifiedLoading : loading
   const {
     recommendations,
     loading: recommendationsLoading,
@@ -200,7 +360,7 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
     if (searchType !== 'recommend') return SOURCES
     if (!recommendationsLoaded) return SOURCES
     const available = new Set(recommendations.map((recommendation) => recommendation.platform))
-    return SOURCES.filter((item) => available.has(item.id))
+    return SOURCES.filter((item) => item.id !== 'all' && available.has(item.id))
   }, [recommendations, recommendationsLoaded, searchType])
 
   // Auto re-search when source or type changes
@@ -212,10 +372,11 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
     prevSourceRef.current = source
     prevTypeRef.current = searchType
     if ((sourceChanged || typeChanged) && searchType !== 'recommend' && keyword.trim()) {
-      search(keyword.trim())
+      if (source === 'all') searchUnified(keyword.trim())
+      else search(keyword.trim())
       if (searchType === 'song') listRef.current?.scrollToTop()
     }
-  }, [source, searchType, keyword, search])
+  }, [source, searchType, keyword, search, searchUnified])
 
   useEffect(() => {
     if (open && searchType === 'recommend' && !recommendationsLoaded && !recommendationsLoading) {
@@ -262,8 +423,8 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
     const searchKeyword = (overrideKeyword ?? keyword).trim()
     if (!searchKeyword) return
     if (overrideKeyword !== undefined) setKeyword(overrideKeyword)
-    setAddedIds(new Set())
-    search(searchKeyword)
+    if (source === 'all') searchUnified(searchKeyword)
+    else search(searchKeyword)
     if (searchType === 'song') {
       listRef.current?.scrollToTop()
     }
@@ -312,10 +473,10 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
       } else {
         onAddToQueue(track)
       }
-      setAddedIds((prev) => new Set(prev).add(trackKey(track)))
+      markPending([track])
       setBilibiliMatch(null)
     },
-    [bilibiliMatch, onAddToQueue, onInsertAfterCurrent],
+    [bilibiliMatch, onAddToQueue, onInsertAfterCurrent, markPending],
   )
 
   const skipBilibiliMetadataMatch = useCallback(() => {
@@ -325,14 +486,14 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
     } else {
       onAddToQueue(bilibiliMatch.track)
     }
-    setAddedIds((prev) => new Set(prev).add(trackKey(bilibiliMatch.track)))
+    markPending([bilibiliMatch.track])
     setBilibiliMatch(null)
-  }, [bilibiliMatch, onAddToQueue, onInsertAfterCurrent])
+  }, [bilibiliMatch, onAddToQueue, onInsertAfterCurrent, markPending])
 
   const handleAdd = useCallback(
     (track: Track) => {
       const key = trackKey(track)
-      if (queueKeys.has(key) || addedIds.has(key)) {
+      if (queueKeys.has(key) || pending.has(key)) {
         toast.info(`「${track.title}」已在队列中`)
         return
       }
@@ -341,17 +502,17 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
         return
       }
       onAddToQueue(track)
-      setAddedIds((prev) => new Set(prev).add(key))
+      markPending([track])
       // Removed duplicate toast.success since onAddToQueue (from useQueue) usually already handles it
       // or the UI handles feedback.
     },
-    [onAddToQueue, queueKeys, addedIds, beginBilibiliCollectionMatch],
+    [onAddToQueue, queueKeys, pending, beginBilibiliCollectionMatch, markPending],
   )
 
   const handleInsertAfterCurrent = useCallback(
     (track: Track) => {
       const key = trackKey(track)
-      if (queueKeys.has(key) || addedIds.has(key)) {
+      if (queueKeys.has(key) || pending.has(key)) {
         toast.info(`「${track.title}」已在队列中`)
         return
       }
@@ -360,10 +521,10 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
         return
       }
       onInsertAfterCurrent(track)
-      setAddedIds((prev) => new Set(prev).add(key))
+      markPending([track])
       // Removed duplicate toast.success
     },
-    [onInsertAfterCurrent, queueKeys, addedIds, beginBilibiliCollectionMatch],
+    [onInsertAfterCurrent, queueKeys, pending, beginBilibiliCollectionMatch, markPending],
   )
 
   const handleAddBatch = useCallback(
@@ -375,22 +536,10 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
           playlistName,
         })
       }
-      setAddedIds((prev) => {
-        const next = new Set(prev)
-        for (const t of tracks) next.add(trackKey(t))
-        return next
-      })
+      markPending(tracks)
       toast.success(`已添加 ${tracks.length} 首歌曲`)
     },
-    [socket],
-  )
-
-  const isTrackAdded = useCallback(
-    (track: Track) => {
-      const key = trackKey(track)
-      return addedIds.has(key) || queueKeys.has(key)
-    },
-    [addedIds, queueKeys],
+    [socket, markPending],
   )
 
   const handleSelectAlbum = (playlist: Playlist, type?: 'album' | 'playlist') => {
@@ -417,7 +566,7 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
             {!selectedAlbum && visibleSources.length > 0 && (
               <div ref={sourceContainerRef} className="bg-muted/50 relative flex items-center rounded-lg p-0.5">
                 <motion.div
-                  className={cn('absolute inset-y-0.5 rounded-md', PLATFORM_ACTIVE[source])}
+                  className={cn('absolute inset-y-0.5 rounded-md', platformActiveClass(source))}
                   animate={{ left: pillStyle.left, width: pillStyle.width }}
                   transition={{ type: 'spring', bounce: 0.15, duration: 0.3 }}
                 />
@@ -427,18 +576,24 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                     data-source={s.id}
                     className={cn(
                       'relative z-10 rounded-md px-2.5 py-0.5 text-xs font-medium transition-colors',
-                      source === s.id ? PLATFORM_TEXT[s.id] : 'text-muted-foreground hover:text-foreground',
+                      source === s.id ? platformTextClass(s.id) : 'text-muted-foreground hover:text-foreground',
                     )}
                     onClick={() => {
                       setSource(s.id)
+                      if (s.id === 'all' && searchType !== 'song') {
+                        setSearchType('song')
+                      }
                       if (
                         (s.id === 'bilibili' || s.id === 'kugou_concept') &&
                         (searchType === 'album' || searchType === 'playlist')
                       ) {
                         setSearchType('song')
                       }
+                      if (s.id === 'bilibili' && searchType === 'artist') {
+                        setSearchType('song')
+                      }
                       resetState()
-                      setAddedIds(new Set())
+                      resetUnified()
                     }}
                   >
                     {s.label}
@@ -471,19 +626,22 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                 value={searchType}
                 onValueChange={(value) => {
                   setSearchType(value as SearchMode)
+                  if (value === 'recommend' && source === 'all') setSource('netease')
                   resetState()
-                  setAddedIds(new Set())
+                  resetUnified()
                 }}
               >
                 <TabsList className="w-full">
                   <TabsTrigger value="song" className="flex-1 text-xs sm:text-sm">
                     单曲
                   </TabsTrigger>
-                  <TabsTrigger value="recommend" className="flex-1 gap-1 text-xs sm:text-sm">
-                    <Sparkles className="h-3.5 w-3.5" />
-                    推荐
-                  </TabsTrigger>
-                  {source !== 'bilibili' && source !== 'kugou_concept' && (
+                  {source !== 'all' && (
+                    <TabsTrigger value="recommend" className="flex-1 gap-1 text-xs sm:text-sm">
+                      <Sparkles className="h-3.5 w-3.5" />
+                      推荐
+                    </TabsTrigger>
+                  )}
+                  {source !== 'all' && source !== 'bilibili' && source !== 'kugou_concept' && (
                     <>
                       <TabsTrigger value="album" className="flex-1 text-xs sm:text-sm">
                         专辑
@@ -493,13 +651,18 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                       </TabsTrigger>
                     </>
                   )}
+                  {source !== 'all' && source !== 'bilibili' && (
+                    <TabsTrigger value="artist" className="flex-1 text-xs sm:text-sm">
+                      歌手
+                    </TabsTrigger>
+                  )}
                 </TabsList>
               </Tabs>
 
               {searchType === 'recommend' ? (
                 <div className="bg-muted/40 flex items-center justify-between gap-3 rounded-lg border px-3 py-2">
                   <div className="flex min-w-0 items-center gap-2 text-sm">
-                    <Sparkles className={cn('h-4 w-4 shrink-0', PLATFORM_TEXT[source])} />
+                    <Sparkles className={cn('h-4 w-4 shrink-0', platformTextClass(source))} />
                     <span className="truncate">展示当前账号在平台上的原生推荐内容</span>
                   </div>
                   <Button
@@ -516,13 +679,17 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                 <div className="flex gap-2">
                   <Input
                     placeholder={
-                      source === 'bilibili'
-                        ? '搜索视频，或粘贴 B站链接 / BV号...'
-                        : searchType === 'song'
-                          ? '搜索歌曲、歌手...'
-                          : searchType === 'album'
-                            ? '搜索专辑...'
-                            : '搜索歌单...'
+                      source === 'all'
+                        ? '一次搜索网易云、QQ、酷狗，按歌曲合并结果...'
+                        : source === 'bilibili'
+                          ? '搜索视频，或粘贴 B站链接 / BV号...'
+                          : searchType === 'song'
+                            ? '搜索歌曲、歌手...'
+                            : searchType === 'album'
+                              ? '搜索专辑...'
+                              : searchType === 'artist'
+                                ? '搜索歌手...'
+                                : '搜索歌单...'
                     }
                     value={keyword}
                     onChange={(e) => setKeyword(e.target.value)}
@@ -531,8 +698,8 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                     autoFocus
                     aria-label="搜索关键词"
                   />
-                  <Button onClick={() => handleSearch()} disabled={loading} aria-label="搜索">
-                    {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                  <Button onClick={() => handleSearch()} disabled={activeLoading} aria-label="搜索">
+                    {activeLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
                   </Button>
                 </div>
               )}
@@ -547,7 +714,7 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                   <div className="flex min-h-0 flex-1 items-center justify-center rounded-md border">
                     <div className="text-muted-foreground flex h-48 flex-col items-center justify-center gap-2 px-6 text-center">
                       <Sparkles className="h-8 w-8" />
-                      <span className="text-sm">请先在设置中登录音乐平台，再查看平台推荐</span>
+                      <span className="text-sm">请先在「音乐账号」中登录音乐平台，再查看平台推荐</span>
                     </div>
                   </div>
                 ) : source === 'bilibili' ? (
@@ -636,13 +803,57 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                       )}
                     </TabsContent>
                   </Tabs>
+                ) : (source === 'netease' || (source === 'all' && activeRecommendation?.platform === 'netease')) &&
+                  ((activeRecommendation?.tracks?.length ?? 0) > 0 ||
+                    (activeRecommendation?.playlists?.length ?? 0) > 0) ? (
+                  <Tabs defaultValue="songs" className="flex min-h-0 flex-1 flex-col">
+                    <TabsList className="w-full">
+                      <TabsTrigger value="songs" className="flex-1 gap-1 text-xs sm:text-sm">
+                        <Sparkles className="h-3.5 w-3.5" />
+                        每日推荐
+                      </TabsTrigger>
+                      <TabsTrigger value="playlists" className="flex-1 gap-1 text-xs sm:text-sm">
+                        <ListMusic />
+                        推荐歌单
+                      </TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="songs" className="flex min-h-0 flex-1 flex-col">
+                      <VirtualTrackList
+                        ref={listRef}
+                        tracks={activeRecommendation?.tracks ?? []}
+                        loading={false}
+                        hasMore={false}
+                        loadingMore={false}
+                        onLoadMore={() => undefined}
+                        isTrackAdded={isTrackAdded}
+                        onAddTrack={handleAdd}
+                        onInsertAfterCurrent={handleInsertAfterCurrent}
+                        onAddToPlaylist={onAddToPlaylist}
+                        onArtistClick={(artist) => {
+                          setSearchType('song')
+                          handleSearch(artist)
+                        }}
+                        emptyIcon={<Sparkles className="h-8 w-8" />}
+                        emptyMessage="每日推荐暂时没有返回歌曲"
+                      />
+                    </TabsContent>
+                    <TabsContent value="playlists" className="flex min-h-0 flex-1 flex-col">
+                      <PlaylistList
+                        playlists={activeRecommendation?.playlists ?? []}
+                        onSelect={(playlist) => handleSelectAlbum(playlist, 'playlist')}
+                        hasMore={activeRecommendation?.pagination?.playlists?.hasMore ?? false}
+                        loadingMore={recommendationsLoadingMore}
+                        onLoadMore={() => loadMoreRecommendations('netease')}
+                      />
+                    </TabsContent>
+                  </Tabs>
                 ) : (activeRecommendation?.playlists?.length ?? 0) > 0 ? (
                   <PlaylistList
                     playlists={activeRecommendation?.playlists ?? []}
                     onSelect={(playlist) => handleSelectAlbum(playlist, 'playlist')}
                     hasMore={activeRecommendation?.pagination?.playlists?.hasMore ?? false}
                     loadingMore={recommendationsLoadingMore}
-                    onLoadMore={() => loadMoreRecommendations(source)}
+                    onLoadMore={() => loadMoreRecommendations(source === 'all' ? 'netease' : source)}
                   />
                 ) : (
                   <div className="flex min-h-0 flex-1 items-center justify-center rounded-md border">
@@ -656,8 +867,85 @@ export function SearchDialog({ open, onOpenChange, onAddToQueue, onInsertAfterCu
                     </div>
                   </div>
                 )
+              ) : source === 'all' ? (
+                unifiedLoading && unifiedGroups.length === 0 ? (
+                  <div className="flex min-h-0 flex-1 items-center justify-center rounded-md border">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                ) : !unifiedHasSearched ? (
+                  <div className="flex min-h-0 flex-1 items-center justify-center rounded-md border">
+                    <div className="flex h-48 flex-col items-center justify-center gap-2 text-muted-foreground">
+                      <Search className="h-8 w-8" />
+                      <span className="text-sm">输入关键词，一次比较全部音源</span>
+                    </div>
+                  </div>
+                ) : unifiedGroups.length === 0 ? (
+                  <div className="flex min-h-0 flex-1 items-center justify-center rounded-md border">
+                    <div className="flex h-48 flex-col items-center justify-center gap-2 text-muted-foreground">
+                      <Music2 className="h-8 w-8" />
+                      <span className="text-sm">暂无结果，换个关键词试试</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex min-h-0 flex-1 flex-col gap-2">
+                    {unifiedFailedSources.length > 0 && (
+                      <p className="px-1 text-xs text-muted-foreground">
+                        部分音源暂不可用：
+                        {unifiedFailedSources.map((item) => PLATFORM_LABELS[item]).join('、')}
+                      </p>
+                    )}
+                    <UnifiedTrackList
+                      groups={unifiedGroups}
+                      isTrackAdded={isTrackAdded}
+                      onAddTrack={handleAdd}
+                      onInsertAfterCurrent={handleInsertAfterCurrent}
+                      onAddToPlaylist={onAddToPlaylist}
+                      onArtistClick={(artist) => {
+                        setSource('netease')
+                        setSearchType('song')
+                        setKeyword(artist)
+                        search(artist)
+                      }}
+                    />
+                  </div>
+                )
               ) : hasSearched ? (
-                searchType === 'song' ? (
+                searchType === 'artist' ? (
+                  loading && results.length === 0 ? (
+                    <div className="flex min-h-0 flex-1 items-center justify-center rounded-md border">
+                      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : results.length === 0 ? (
+                    <div className="flex min-h-0 flex-1 items-center justify-center rounded-md border">
+                      <div className="flex h-48 flex-col items-center justify-center gap-2 text-muted-foreground">
+                        <Music2 className="h-8 w-8" />
+                        <span className="text-sm">暂无歌手结果，换个关键词试试</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <PlaylistList
+                      playlists={(results as Track[]).map((track) => ({
+                        id: track.urlId,
+                        name: track.title,
+                        cover: track.cover,
+                        trackCount: 0,
+                        source: track.source,
+                      }))}
+                      onSelect={(artist) => {
+                        if (hasArtistPages(artist.source)) {
+                          openArtistPage({ source: artist.source, id: artist.id, name: artist.name })
+                          return
+                        }
+                        setSearchType('song')
+                        setKeyword(artist.name)
+                        search(artist.name, 'song')
+                      }}
+                      hasMore={hasMore}
+                      loadingMore={loadingMore}
+                      onLoadMore={loadMore}
+                    />
+                  )
+                ) : searchType === 'song' ? (
                   <VirtualTrackList
                     ref={listRef}
                     tracks={results as Track[]}

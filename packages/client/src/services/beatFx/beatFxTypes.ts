@@ -13,6 +13,8 @@ export type SmartBeatMode = 'off' | 'cached' | 'on'
 export interface BeatEffectSetting {
   on: boolean
   strength: number
+  /** 带分项的效果（雾笺的雨/颠簸）：每项自己的强度，1 是没动过。 */
+  parts?: Readonly<Record<string, number>>
 }
 
 /**

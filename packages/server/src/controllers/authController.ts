@@ -1,4 +1,11 @@
-import { EVENTS, QR_STATUS } from '@music-together/shared'
+import {
+  authCheckQrSchema,
+  authSetCookieSchema,
+  authSetSharingSchema,
+  EVENTS,
+  platformEventSchema,
+  QR_STATUS,
+} from '@music-together/shared'
 import type { MusicSource, SavedAccountSummary } from '@music-together/shared'
 import * as authService from '../services/authService.js'
 import { AUTH_PROVIDERS } from '../services/authProvider.js'
@@ -13,16 +20,16 @@ import type { TypedServer, TypedSocket } from '../middleware/types.js'
 import { checkAuthRateLimit } from '../middleware/socketRateLimiter.js'
 import * as roomService from '../services/roomService.js'
 
+/**
+ * 房间外按身份操作账号时使用的作用域：空 roomId 不对应任何房间池，
+ * authService 的读取会回落到该身份的持久化凭据。
+ */
+const PERSONAL_SCOPE = ''
+
 /** 获取 socket 对应的房间映射（roomId + persistent userId） */
 function getSocketMapping(socketId: string) {
   return roomRepo.getSocketMapping(socketId) ?? null
 }
-
-/** 支持 QR 扫码登录的平台集合 */
-const QR_PLATFORMS = new Set<MusicSource>(['netease', 'kugou', 'kugou_concept', 'tencent', 'bilibili'])
-
-/** 支持 Cookie 登录的平台集合 */
-const VALID_PLATFORMS = new Set<MusicSource>(['netease', 'tencent', 'kugou', 'kugou_concept', 'bilibili'])
 
 /**
  * 判断某个对端地址是否与**服务端所在机器**相同。
@@ -94,11 +101,12 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
     qrCheckInFlight = false
     const requestVersion = ++qrRequestVersion
     try {
-      const platform = data?.platform as MusicSource
-      if (!platform || !QR_PLATFORMS.has(platform)) {
+      const parsed = platformEventSchema.safeParse(data)
+      if (!parsed.success) {
         socket.emit(EVENTS.AUTH_QR_STATUS, { status: QR_STATUS.EXPIRED, message: '暂不支持该平台扫码登录' })
         return
       }
+      const { platform } = parsed.data
 
       const provider = AUTH_PROVIDERS[platform]
       const authorization = captureAuthorization(platform)
@@ -116,6 +124,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
       // 附带已保存账号的展示信息，让弹窗能直接提供「继续使用该账号」的入口。
       // 只下发昵称/头像/会员等展示字段，凭据绝不出现在事件载荷里。
       const mapping = authorization.mapping
+      // 快捷登录需要把账号放进房间池，房间外不提供这个入口。
       const savedAccount = mapping ? getSavedAccountSummary(mapping.userId, platform) : null
       socket.emit(EVENTS.AUTH_QR_GENERATED, { key: result.key, qrimg: result.qrimg, savedAccount: savedAccount ?? undefined })
     } catch (err) {
@@ -129,18 +138,14 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
     if (!(await checkAuthRateLimit(socket))) return
     const requestVersion = qrRequestVersion
     try {
-      if (!data?.key) {
-        socket.emit(EVENTS.AUTH_QR_STATUS, { status: QR_STATUS.EXPIRED, message: '缺少二维码 key' })
+      const parsed = authCheckQrSchema.safeParse(data)
+      if (!parsed.success) {
+        socket.emit(EVENTS.AUTH_QR_STATUS, { status: QR_STATUS.EXPIRED, message: '二维码信息无效' })
         return
       }
+      const { key, platform } = parsed.data
 
-      const platform = data.platform as MusicSource
-      if (!platform || !QR_PLATFORMS.has(platform)) {
-        logger.warn('AUTH_CHECK_QR: invalid or missing platform', { platform })
-        return
-      }
-
-      if (!activeQr || activeQr.key !== data.key || activeQr.platform !== platform) {
+      if (!activeQr || activeQr.key !== key || activeQr.platform !== platform) {
         logger.debug('AUTH_CHECK_QR: ignoring stale QR session', { platform })
         return
       }
@@ -154,7 +159,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
       qrCheckInFlight = true
 
       const provider = AUTH_PROVIDERS[platform]
-      const result = await provider.checkQrStatus(data.key)
+      const result = await provider.checkQrStatus(key)
       if (activeQr !== session || requestVersion !== qrRequestVersion) return
       if (!session.authorization.current()) {
         activeQr = null
@@ -171,7 +176,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
       }
       if (result.status !== QR_STATUS.SUCCESS) {
         qrCheckInFlight = false
-        socket.emit(EVENTS.AUTH_QR_STATUS, { status: result.status, message: result.message, key: data.key })
+        socket.emit(EVENTS.AUTH_QR_STATUS, { status: result.status, message: result.message, key: key })
         return
       }
       if (!result.cookie) {
@@ -180,7 +185,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
         socket.emit(EVENTS.AUTH_QR_STATUS, {
           status: QR_STATUS.EXPIRED,
           message: '登录成功但未获取到凭据，请重新获取二维码',
-          key: data.key,
+          key: key,
         })
         return
       }
@@ -196,7 +201,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
         socket.emit(EVENTS.AUTH_QR_STATUS, {
           status: QR_STATUS.EXPIRED,
           message: '未获取到刷新凭证，请重新获取二维码',
-          key: data.key,
+          key: key,
         })
         return
       }
@@ -233,8 +238,18 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
               { vipLabel: userInfo.vipLabel, vipLevel: userInfo.vipLevel },
               userInfo.avatarUrl,
             )
-            broadcastAuthStatus(io, socket, mapping)
+          } else {
+            authService.saveUserCredential(
+              socket.data.identityUserId,
+              platform,
+              result.cookie,
+              userInfo.nickname,
+              userInfo.vipType,
+              { vipLabel: userInfo.vipLabel, vipLevel: userInfo.vipLevel },
+              userInfo.avatarUrl,
+            )
           }
+          broadcastAuthStatus(io, socket, mapping)
           socket.emit(EVENTS.AUTH_SET_COOKIE_RESULT, {
             success: true,
             message: `已登录为 ${userInfo.nickname}`,
@@ -243,7 +258,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
             nickname: userInfo.nickname,
             avatarUrl: userInfo.avatarUrl,
           })
-          socket.emit(EVENTS.AUTH_QR_STATUS, { status: QR_STATUS.SUCCESS, message: '登录成功', key: data.key })
+          socket.emit(EVENTS.AUTH_QR_STATUS, { status: QR_STATUS.SUCCESS, message: '登录成功', key: key })
           logger.info(`${platform} 扫码登录成功：${userInfo.nickname}`, {
             event: 'auth.qr_login_succeeded',
             platform,
@@ -260,7 +275,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
           socket.emit(EVENTS.AUTH_QR_STATUS, {
             status: QR_STATUS.EXPIRED,
             message: '登录凭据验证失败，请重新获取二维码',
-            key: data.key,
+            key: key,
           })
         }
       }
@@ -286,8 +301,8 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
   socket.on(EVENTS.AUTH_QUICK_LOGIN, async (data) => {
     if (!(await checkAuthRateLimit(socket))) return
     try {
-      const platform = data?.platform as MusicSource
-      if (!platform || !VALID_PLATFORMS.has(platform)) {
+      const parsed = platformEventSchema.safeParse(data)
+      if (!parsed.success) {
         socket.emit(EVENTS.AUTH_QUICK_LOGIN_RESULT, {
           success: false,
           message: '参数不完整',
@@ -295,6 +310,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
         })
         return
       }
+      const { platform } = parsed.data
 
       const mapping = getSocketMapping(socket.id)
       if (!mapping) {
@@ -517,13 +533,8 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
   socket.on(EVENTS.AUTH_SET_COOKIE, async (data) => {
     if (!(await checkAuthRateLimit(socket))) return
     try {
-      if (
-        !data?.platform ||
-        !VALID_PLATFORMS.has(data.platform) ||
-        !data?.cookie ||
-        typeof data.cookie !== 'string' ||
-        data.cookie.length > 8000
-      ) {
+      const parsed = authSetCookieSchema.safeParse(data)
+      if (!parsed.success) {
         socket.emit(EVENTS.AUTH_SET_COOKIE_RESULT, {
           success: false,
           message: '参数不完整',
@@ -533,7 +544,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
 
       // 用户常常直接粘贴 DevTools 的「Copy as cURL」结果或带 `Cookie:` 前缀，
       // 这里统一归一化成纯 Cookie 串再往下走。
-      const cookie = normalizeCookieInput(data.cookie)
+      const cookie = normalizeCookieInput(parsed.data.cookie)
       if (!cookie) {
         socket.emit(EVENTS.AUTH_SET_COOKIE_RESULT, {
           success: false,
@@ -542,11 +553,13 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
         return
       }
 
-      const platform = data.platform as MusicSource
+      const { platform } = parsed.data
       const authorization = captureAuthorization(platform)
       const mapping = authorization.mapping
       const roomId = mapping?.roomId ?? null
-      const serverCookie = mapping && roomId ? authService.getUserCookie(mapping.userId, platform, roomId) : null
+      const ownerId = mapping?.userId ?? socket.data.identityUserId
+      const persistOutsideRoom = !mapping && data.persist !== false
+      const serverCookie = authService.getUserCookie(ownerId, platform, roomId ?? PERSONAL_SCOPE)
       const incomingTencentCredential = platform === 'tencent' ? tencentAuth.parseTencentCredential(cookie) : null
       const serverTencentCredential =
         platform === 'tencent' && serverCookie ? tencentAuth.parseTencentCredential(serverCookie) : null
@@ -567,7 +580,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
           platform,
           cookie: serverCookie,
         })
-        if (mapping) broadcastAuthStatus(io, socket, mapping)
+        broadcastAuthStatus(io, socket, mapping)
         return
       }
 
@@ -582,7 +595,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
             platform,
             reason: 'reauth_required',
           })
-          if (mapping) broadcastAuthStatus(io, socket, mapping)
+          broadcastAuthStatus(io, socket, mapping)
           return
         }
 
@@ -597,7 +610,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
             platform,
             reason: sessionInfo.reason === 'expired' ? 'expired' : 'error',
           })
-          if (mapping) broadcastAuthStatus(io, socket, mapping)
+          broadcastAuthStatus(io, socket, mapping)
           return
         }
 
@@ -613,6 +626,16 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
             { vipLabel: sessionInfo.data.vipLabel, vipLevel: sessionInfo.data.vipLevel },
             sessionInfo.data.avatarUrl,
           )
+        } else if (persistOutsideRoom) {
+          authService.saveUserCredential(
+            ownerId,
+            platform,
+            sessionCookie,
+            sessionInfo.data.nickname,
+            sessionInfo.data.vipType,
+            { vipLabel: sessionInfo.data.vipLabel, vipLevel: sessionInfo.data.vipLevel },
+            sessionInfo.data.avatarUrl,
+          )
         }
         socket.emit(EVENTS.AUTH_SET_COOKIE_RESULT, {
           success: true,
@@ -622,7 +645,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
           nickname: sessionInfo.data.nickname,
           avatarUrl: sessionInfo.data.avatarUrl,
         })
-        if (mapping) broadcastAuthStatus(io, socket, mapping)
+        broadcastAuthStatus(io, socket, mapping)
         return
       }
 
@@ -643,6 +666,18 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
           cookie,
         })
         broadcastAuthStatus(io, socket, mapping)
+        return
+      }
+
+      // 房间外重发已保存的同一份凭据：无需再验证
+      if (!mapping && serverCookie === cookie) {
+        socket.emit(EVENTS.AUTH_SET_COOKIE_RESULT, {
+          success: true,
+          message: 'Cookie 已生效',
+          platform,
+          cookie,
+        })
+        broadcastAuthStatus(io, socket, null)
         return
       }
 
@@ -677,6 +712,19 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
               : { vipLabel: userInfo.vipLabel, vipLevel: userInfo.vipLevel },
             userInfo.avatarUrl,
           )
+        } else if (persistOutsideRoom) {
+          const retained = userInfo.membershipUnknown ? authService.getUserMembership(ownerId, platform) : null
+          authService.saveUserCredential(
+            ownerId,
+            platform,
+            cookie,
+            userInfo.nickname,
+            retained?.vipType ?? userInfo.vipType,
+            retained
+              ? { vipLabel: retained.vipLabel, vipLevel: retained.vipLevel }
+              : { vipLabel: userInfo.vipLabel, vipLevel: userInfo.vipLevel },
+            userInfo.avatarUrl,
+          )
         }
         socket.emit(EVENTS.AUTH_SET_COOKIE_RESULT, {
           success: true,
@@ -694,17 +742,14 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
           platform,
           reason: infoResult.reason,
         })
-        if (mapping) broadcastAuthStatus(io, socket, mapping)
+        broadcastAuthStatus(io, socket, mapping)
         return
       } else {
         // 酷狗/QQ 音乐：验证失败也保存（可能是 API 变动，播放时可能仍有效）。
         // 但已经有可用凭据时不能覆盖：昵称“手动登录”、等级 0 的记录会按
         // userId 顶掉原有的有效凭据（含会员等级），而这次失败很可能只是
         // 上游抖动，或者是另一台设备重发的旧 Cookie。
-        const hasExisting =
-          mapping && mapping.roomId
-            ? authService.hasExistingCredential(mapping.userId, platform, mapping.roomId)
-            : false
+        const hasExisting = authService.hasExistingCredential(ownerId, platform, roomId ?? undefined)
         if (hasExisting) {
           logger.info('Cookie 验证失败且已有可用凭据，保留原有凭据', {
             event: 'auth.unverified_cookie_ignored',
@@ -717,11 +762,13 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
             platform,
             reason: infoResult.reason,
           })
-          if (mapping) broadcastAuthStatus(io, socket, mapping)
+          broadcastAuthStatus(io, socket, mapping)
           return
         }
         if (mapping && mapping.roomId) {
           authService.addCookie(mapping.roomId, platform, mapping.userId, cookie, '手动登录', 0, data.persist !== false)
+        } else if (persistOutsideRoom) {
+          authService.saveUserCredential(ownerId, platform, cookie, '手动登录', 0)
         }
         socket.emit(EVENTS.AUTH_SET_COOKIE_RESULT, {
           success: true,
@@ -731,9 +778,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
         })
       }
 
-      if (mapping) {
-        broadcastAuthStatus(io, socket, mapping)
-      }
+      broadcastAuthStatus(io, socket, mapping)
     } catch (err) {
       logger.error('AUTH_SET_COOKIE error', err, { socketId: socket.id })
       socket.emit(EVENTS.AUTH_SET_COOKIE_RESULT, {
@@ -842,20 +887,22 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
 
   socket.on(EVENTS.AUTH_LOGOUT, (data) => {
     try {
-      if (!data?.platform || !VALID_PLATFORMS.has(data.platform)) return
-      if (activeQr?.platform === data.platform) {
+      const parsed = platformEventSchema.safeParse(data)
+      if (!parsed.success) return
+      const { platform } = parsed.data
+      if (activeQr?.platform === platform) {
         activeQr = null
         qrRequestVersion++
         qrCheckInFlight = false
       }
       const mapping = getSocketMapping(socket.id)
       if (mapping) {
-        authService.removeCookie(mapping.roomId, data.platform, mapping.userId)
+        authService.removeCookie(mapping.roomId, platform, mapping.userId)
         const room = roomRepo.get(mapping.roomId)
         if (
           room?.roamingEnabled &&
           room.creatorId === mapping.userId &&
-          room.roamingSource === data.platform &&
+          room.roamingSource === platform &&
           !authService.getUserCookie(room.creatorId, room.roamingSource, room.id)
         ) {
           room.roamingEnabled = false
@@ -865,9 +912,71 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
           })
         }
         broadcastAuthStatus(io, socket, mapping)
+      } else {
+        authService.removeCookie(PERSONAL_SCOPE, platform, socket.data.identityUserId)
+        broadcastAuthStatus(io, socket, null)
       }
     } catch (err) {
       logger.error('AUTH_LOGOUT handler error', err, { socketId: socket.id })
+    }
+  })
+
+  // -------------------------------------------------------------------------
+  // 账号主切换“共享给房间”
+  // -------------------------------------------------------------------------
+
+  socket.on(EVENTS.AUTH_SET_SHARING, (data) => {
+    try {
+      const parsed = authSetSharingSchema.safeParse(data)
+      const mapping = getSocketMapping(socket.id)
+      if (!parsed.success) {
+        const named = platformEventSchema.safeParse(data)
+        if (named.success) {
+          socket.emit(EVENTS.AUTH_SHARING_RESULT, { platform: named.data.platform, shareWithRoom: false, ok: false })
+        }
+        return
+      }
+      const { platform, shareWithRoom } = parsed.data
+
+      const ownerId = mapping?.userId ?? socket.data.identityUserId
+      const ok = authService.setShareWithRoom(ownerId, platform, shareWithRoom)
+      // 重新开启后把该用户其余共享账号一并恢复到当前房间；关闭只撤出房间池，
+      // 持久化凭据仍供本人点歌与私人歌单使用。
+      if (ok && shareWithRoom && mapping) authService.restoreUserCookies(mapping.roomId, mapping.userId)
+      socket.emit(EVENTS.AUTH_SHARING_RESULT, { platform, shareWithRoom, ok })
+      if (ok) broadcastAuthStatus(io, socket, mapping)
+    } catch (err) {
+      logger.error('AUTH_SET_SHARING handler error', err, { socketId: socket.id })
+    }
+  })
+
+  // -------------------------------------------------------------------------
+  // 账号主切换“听歌打卡”（仅网易云）
+  // -------------------------------------------------------------------------
+
+  socket.on(EVENTS.AUTH_SET_REPORTING, (data) => {
+    try {
+      const platform = data?.platform as MusicSource | undefined
+      const reportListening = data?.reportListening
+      const mapping = getSocketMapping(socket.id)
+      if (
+        platform !== 'netease' ||
+        typeof reportListening !== 'boolean'
+      ) {
+        if (platform === 'netease') {
+          socket.emit(EVENTS.AUTH_REPORTING_RESULT, { platform, reportListening: false, ok: false })
+        }
+        return
+      }
+      const ok = authService.setListeningReportEnabled(
+        mapping?.userId ?? socket.data.identityUserId,
+        platform,
+        reportListening,
+      )
+      socket.emit(EVENTS.AUTH_REPORTING_RESULT, { platform, reportListening, ok })
+      if (ok) broadcastAuthStatus(io, socket, mapping)
+    } catch (err) {
+      logger.error('AUTH_SET_REPORTING handler error', err, { socketId: socket.id })
     }
   })
 
@@ -877,10 +986,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
 
   socket.on(EVENTS.AUTH_GET_STATUS, () => {
     try {
-      const mapping = getSocketMapping(socket.id)
-      if (mapping) {
-        broadcastAuthStatus(io, socket, mapping)
-      }
+      broadcastAuthStatus(io, socket, getSocketMapping(socket.id))
     } catch (err) {
       logger.error('AUTH_GET_STATUS handler error', err, { socketId: socket.id })
     }
@@ -896,9 +1002,18 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
 
 /**
  * 广播认证状态（房间级作用域，非全局）
- * 向请求用户发送个人状态 + 向房间广播聚合状态
+ * 向请求用户发送个人状态 + 向房间广播聚合状态；
+ * 房间外只回传该身份已保存的账号。
  */
-function broadcastAuthStatus(io: TypedServer, socket: TypedSocket, mapping: { roomId: string; userId: string }) {
+function broadcastAuthStatus(
+  io: TypedServer,
+  socket: TypedSocket,
+  mapping: { roomId: string; userId: string } | null,
+) {
+  if (!mapping) {
+    socket.emit(EVENTS.AUTH_MY_STATUS, authService.getUserAuthStatus(socket.data.identityUserId, PERSONAL_SCOPE))
+    return
+  }
   socket.emit(EVENTS.AUTH_MY_STATUS, authService.getUserAuthStatus(mapping.userId, mapping.roomId))
   io.to(mapping.roomId).emit(EVENTS.AUTH_STATUS_UPDATE, authService.getAllPlatformStatus(mapping.roomId))
 }

@@ -30,6 +30,12 @@ interface PlatformAuthRenameRow {
   cookie_encrypted: string
   nickname_snapshot: string | null
   vip_type: number
+  vip_label: string | null
+  vip_level: number | null
+  avatar_url: string | null
+  share_with_room: number | null
+  report_listening: number | null
+  credential_refresh_attempted_at: number | null
   created_at: number
   updated_at: number
 }
@@ -87,7 +93,8 @@ const insertRenamedUser = db.prepare(`
   VALUES (@id, @nickname, @avatarUrl, @passwordHash, @role, @createdAt, @now, @now)
 `)
 const selectPlatformAuthForRename = db.prepare<[string], PlatformAuthRenameRow>(`
-  SELECT platform, cookie_encrypted, nickname_snapshot, vip_type, created_at, updated_at
+  SELECT platform, cookie_encrypted, nickname_snapshot, vip_type, vip_label, vip_level, avatar_url,
+    share_with_room, report_listening, credential_refresh_attempted_at, created_at, updated_at
   FROM platform_auth
   WHERE user_id = ?
   ORDER BY updated_at DESC
@@ -108,9 +115,13 @@ const insertRenamedPermanentRoomMembership = db.prepare(`
 `)
 const insertRenamedPlatformAuth = db.prepare(`
   INSERT INTO platform_auth (
-    id, user_id, platform, cookie_encrypted, nickname_snapshot, vip_type, created_at, updated_at
+    id, user_id, platform, cookie_encrypted, nickname_snapshot, vip_type, vip_label, vip_level, avatar_url,
+    share_with_room, report_listening, credential_refresh_attempted_at, created_at, updated_at
   )
-  VALUES (@id, @userId, @platform, @cookie, @nickname, @vipType, @createdAt, @updatedAt)
+  VALUES (
+    @id, @userId, @platform, @cookie, @nickname, @vipType, @vipLabel, @vipLevel, @avatarUrl,
+    COALESCE(@shareWithRoom, 1), COALESCE(@reportListening, 0), @refreshAttemptedAt, @createdAt, @updatedAt
+  )
 `)
 
 const renameUser = db.transaction((oldUserId: string, newUserId: string): RenameUserResult => {
@@ -146,6 +157,12 @@ const renameUser = db.transaction((oldUserId: string, newUserId: string): Rename
       cookie: row.cookie_encrypted,
       nickname: row.nickname_snapshot,
       vipType: row.vip_type,
+      vipLabel: row.vip_label,
+      vipLevel: row.vip_level,
+      avatarUrl: row.avatar_url,
+      shareWithRoom: row.share_with_room,
+      reportListening: row.report_listening,
+      refreshAttemptedAt: row.credential_refresh_attempted_at,
       createdAt: row.created_at,
       updatedAt: Math.max(row.updated_at, now),
     })

@@ -1,5 +1,5 @@
 import { RateLimiterMemory } from 'rate-limiter-flexible'
-import { EVENTS, ERROR_CODE } from '@music-together/shared'
+import { EVENTS, ERROR_CODE, LIMITS } from '@music-together/shared'
 import type { TypedSocket } from './types.js'
 
 const RATE_LIMIT_POINTS = 10
@@ -19,6 +19,16 @@ const socketEventLimiter = new RateLimiterMemory({
 
 const authEventLimiter = new RateLimiterMemory({
   points: 30,
+  duration: 60,
+})
+
+const roomEntryLimiter = new RateLimiterMemory({
+  points: 10,
+  duration: 10,
+})
+
+const joinPasswordFailureLimiter = new RateLimiterMemory({
+  points: LIMITS.ROOM_JOIN_PASSWORD_MAX_FAILURES,
   duration: 60,
 })
 
@@ -50,6 +60,11 @@ export function checkAuthRateLimit(socket: TypedSocket): Promise<boolean> {
   return consumeLimiter(socket, authEventLimiter, ':auth')
 }
 
+/** ROOM_CREATE / ROOM_JOIN 共用的额度；携带重连凭证的入房不经过它，弱网反复重连不会被误限。 */
+export function checkRoomEntryRateLimit(socket: TypedSocket): Promise<boolean> {
+  return consumeLimiter(socket, roomEntryLimiter, ':room-entry')
+}
+
 /**
  * Clean up rate limiter entries for a disconnected socket.
  * Call this in the disconnect handler to prevent memory growth.
@@ -60,5 +75,27 @@ export function cleanupSocketRateLimit(socket: TypedSocket): void {
   // automatically, so only socket-scoped anonymous entries are removed here.
   if (socket.data.identityUserId) return
   const key = socket.id
-  void Promise.all([socketEventLimiter.delete(key), authEventLimiter.delete(`${key}:auth`)]).catch(() => undefined)
+  void Promise.all([socketEventLimiter.delete(key), authEventLimiter.delete(`${key}:auth`), roomEntryLimiter.delete(`${key}:room-entry`)]).catch(() => undefined)
+}
+
+function joinFailureKey(socket: TypedSocket, roomId: string): string {
+  return `${socket.data.identityUserId ?? socket.id}:join-password:${roomId}`
+}
+
+/** 同一身份一分钟内对同一房间输错密码达上限后锁定；锁定期间不再校验任何密码。 */
+export async function isJoinPasswordLocked(socket: TypedSocket, roomId: string): Promise<boolean> {
+  const state = await joinPasswordFailureLimiter.get(joinFailureKey(socket, roomId))
+  return state !== null && state.consumedPoints >= LIMITS.ROOM_JOIN_PASSWORD_MAX_FAILURES
+}
+
+export async function recordJoinPasswordFailure(socket: TypedSocket, roomId: string): Promise<void> {
+  try {
+    await joinPasswordFailureLimiter.consume(joinFailureKey(socket, roomId))
+  } catch {
+    // 已达上限，锁定已生效
+  }
+}
+
+export async function clearJoinPasswordFailures(socket: TypedSocket, roomId: string): Promise<void> {
+  await joinPasswordFailureLimiter.delete(joinFailureKey(socket, roomId))
 }

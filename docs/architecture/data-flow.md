@@ -47,20 +47,29 @@ graph TB
 - 手动 Cookie 校验失败且该用户已有可用凭据时只回复失败，不写入。昵称"手动登录"、等级 0 的记录会按 userId 顶掉原有的有效凭据，而失败往往只是上游抖动或另一台设备重发的旧 Cookie。完全没有凭据时仍按原行为保存。
 - 登录有效但会员子请求失败时，provider 在 `UserInfoData` 上带 `membershipUnknown: true`，调用方保留已记录的会员等级，并且不写入刷新冷却，下次进房会重新核对。平台明确返回非会员时照实更新。
 - 后台删除账号会对全部音源调用 `revokeUserAuthorization` 并向受影响房间广播 `auth:status_update`。数据库里的 `platform_auth` 随外键级联删除，但房间内存池里的凭据不会，不撤销的话被删账号的会员 Cookie 会继续被用来播放和下载。
+- 平台账号默认共享给所在房间，账号主可用 `auth:set_sharing` 关闭；关闭后凭据仍加密持久化，仅本人点歌、私人歌单与漫游可用，且主动离开房间时自动撤出房间池。断线/刷新不撤出，避免锁屏或切后台导致队列里的 VIP 歌曲中断。个人歌单入口始终使用请求者自己的凭据，不回退到房间共享账号。
+- 房主可用 `room:kick` 移出成员，`ban: true` 时写入本房封禁名单并撤销重进票据；`room:unban` 解除。封禁名单只随 owner 版 `room:state` 下发，普通成员不可见。旧客户端不认识新事件时仍按普通权限错误处理。
+- 音源取数：客户端按队列前 2 后 1 预取播放地址（TTL 20 分钟），服务端 URL 缓存同为 20 分钟；平台 `rate-limited` 时 play/prefetch 一起冷却（上限 10 分钟），5xx/不可达只让预取退避 30 秒，用户主动点歌不受影响。
+- 音频字节：同一首歌在会话内只取一次，供拍点、画像与分轨共用；Cache Storage 持久缓存默认开启、上限 300 MB，写入前按声明时长识别试听片段（<50% 拒绝并删除旧副本，≥95% 允许覆盖），隐私模式或配额不足时全部降级为不缓存。
+- 网易云听歌打卡：默认关闭，账号主在平台账号行显式开启。服务端按房间时间线累计真实播放秒数（暂停、跳转、切歌不计），≥30 秒才会提交，并限制两次上报间隔 ≥5 秒、每账号每小时 ≤60 条；只写入“提供本次音源、当前在线且已开启”的网易云账号，失败不重试。其他平台不提供对应接口，不做上报。
+- 平台凭证续期：QQ 音乐与网易云每 24 小时用 `login_refresh` 轮换 cookie，成功后续期结果同步到所有房间池；调用前记录尝试时间，失败保留旧凭证，不会因重启反复打满上游。酷狗/B 站没有可靠公开续期协议，交给 `getUserInfo` 判定过期并提示重新登录。
+- 音频后处理默认不参与链路：EQ、效果链、ReplayGain、automix 音色/回声/deck 测量都按需创建和接入；全部关闭时信号只经过元素音量与增益节点。分析缓存键包含曲目时长、房间音质与流格式，换源/降档不会命中旧结果。
+- 实验性高精度模型（beat_this / htdemucs）共用一个 WebGPU worker，空闲 10 分钟卸载显存但保留 worker 客户端。卸载与新请求撞车时抛 `AnalysisModelUnloadedError`，模型层重载后重试一次，不会把“刚卸载”误报成“模型未加载”；WebGPU 探测只缓存成功结果，启动期临时失败由自动加载重试两次。权重由客户端按「加速镜像 → GitHub 官方」直连分块下载，校验 sha256 后写入浏览器 Cache Storage，服务端不保存权重；可用 `VITE_MODEL_BASE_URL` 换源，下载被接管时支持本地文件导入。
+- 私人漫游：QQ 雷达按房间维护分页游标，酷狗标准版与概念版都使用“每日推荐 + 随机推荐歌单”补池；漫游曲目带可选 `roaming` 标记，切换平台/模式时清理未播放的旧批次；队列剩余 ≤2 首时后台补货，平台失败按 30 秒冷却。显式“漫游一首”会先把推荐插入当前曲目之后再播放，队列高亮与 NEXT 顺序都以同一条队列项为准。推荐面板的网易云每日歌曲、搜索的歌手结果、网易云喜欢操作复用同一套房间成员与本人凭据校验。
 - WebSocket 仍使用 `/ws` 的原生 JSON 事件协议。`player:play` 保留空载荷续播及完整 Track 直播放，显式歌曲载荷增加运行时校验；定向发送通过 socket ID 查询连接，不将 socket ID 当作房间名。
 - 网页房间设置以已有 `room:settings` 服务端广播确认保存结果，不新增 ACK 协议；失败、断线或超时不会提示保存成功。
 
-| 分类         | 客户端 → 服务端                                                                                                                     | 服务端 → 客户端                                                                                                                            |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Room**     | `room:create`, `room:join`, `room:leave`, `room:list`, `room:settings`, `room:set_role`                                             | `room:created`, `room:state`, `room:user_joined`, `room:user_left`, `room:settings`, `room:error`, `room:list_update`, `room:role_changed` |
-| **Player**   | `player:play`, `player:pause`, `player:seek`, `player:next`（可选 `{ trackId }`）, `player:prev`, `player:sync`, `player:sync_request`, `player:set_mode` | `player:play`, `player:pause`, `player:resume`, `player:seek`, `player:sync_response`                                                      |
-| **Queue**    | `queue:add`, `queue:add_batch`, `queue:remove`, `queue:reorder`, `queue:clear`                                                      | `queue:updated`                                                                                                                            |
-| **Chat**     | `chat:message`                                                                                                                      | `chat:message`, `chat:history`                                                                                                             |
-| **Vote**     | `vote:start`, `vote:cast`                                                                                                           | `vote:started`, `vote:result`                                                                                                              |
-| **Auth**     | `auth:request_qr`, `auth:check_qr`, `auth:set_cookie`, `auth:logout`, `auth:get_status`                                             | `auth:qr_generated`, `auth:qr_status`, `auth:set_cookie_result`, `auth:status_update`, `auth:my_status`                                    |
-| **Playlist** | `playlist:get_my`                                                                                                                   | `playlist:my_list`                                                                                                                         |
-| **NTP**      | `ntp:ping`                                                                                                                          | `ntp:pong`                                                                                                                                 |
-| **Server**   | —                                                                                                                                   | `server:audio_proxy_policy`                                                                                                                |
+| 分类         | 客户端 → 服务端                                                                                                                                                                                                                                                        | 服务端 → 客户端                                                                                                                                                              |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Room**     | `room:create`, `room:join`, `room:leave`, `room:list`, `room:settings`, `room:set_role`, `room:kick`（可选 `{ ban }`）, `room:unban`                                                                                                                                     | `room:created`, `room:state`, `room:user_joined`, `room:user_left`, `room:settings`, `room:error`, `room:list_update`, `room:role_changed`                                   |
+| **Player**   | `player:play`, `player:pause`, `player:seek`, `player:next`（可选 `{ trackId }`）, `player:prev`, `player:sync`, `player:sync_request`, `player:set_mode`, `player:refresh_stream`（可选 `{ trackId, degrade }`）, `player:retry_track`（可选 `{ trackId, degrade }`） | `player:play`, `player:pause`, `player:resume`, `player:seek`, `player:sync_response`, `player:stream_refreshed`, `player:playback_failure`（结构化失败原因 + `nextAction`） |
+| **Queue**    | `queue:add`, `queue:add_batch`, `queue:remove`, `queue:reorder`, `queue:clear`, `queue:remove_played`                                                                                                                                                                  | `queue:updated`                                                                                                                                                              |
+| **Chat**     | `chat:message`                                                                                                                                                                                                                                                         | `chat:message`, `chat:history`                                                                                                                                               |
+| **Vote**     | `vote:start`, `vote:cast`                                                                                                                                                                                                                                              | `vote:started`, `vote:result`                                                                                                                                                |
+| **Auth**     | `auth:request_qr`, `auth:check_qr`, `auth:set_cookie`, `auth:logout`, `auth:get_status`, `auth:set_sharing`, `auth:set_reporting`                                                                                                                                    | `auth:qr_generated`, `auth:qr_status`, `auth:set_cookie_result`, `auth:status_update`, `auth:my_status`, `auth:sharing_result`, `auth:reporting_result`                        |
+| **Playlist** | `playlist:get_my`                                                                                                                                                                                                                                                      | `playlist:my_list`                                                                                                                                                           |
+| **NTP**      | `ntp:ping`                                                                                                                                                                                                                                                             | `ntp:pong`                                                                                                                                                                   |
+| **Server**   | —                                                                                                                                                                                                                                                                      | `server:audio_proxy_policy`                                                                                                                                                  |
 
 ## 关键数据模型
 
@@ -223,6 +232,15 @@ interface ChatMessage {
 
 房主可开启“播放后移除歌曲”。该设置默认关闭；开启后，手动下一首、投票下一首或歌曲自然结束触发下一首时，服务端只在新歌曲成功解析并开始播放后移除上一首并广播 `QUEUE_UPDATED`。切歌失败、停止播放和 `loop-one` 重播同一首不会删除当前歌曲。漫游歌曲切换时先移除上一首再把新漫游歌曲加入队列，避免队列已满导致新歌无法展示。`RoomState` 与 `room:settings` 使用可选 `removePlayedTracks` 字段，旧版 Web、Android 和 Windows 客户端可安全忽略；永久房间会持久化该设置。
 
+房主可在 设置→房间 选择**队列模式**（`queueMode`，`keep` 默认 / `consume`，只有房主可改；`RoomState` 与 `room:settings` 的可选字段，旧客户端缺省按 `keep`，永久房间持久化在房间状态 JSON 中，读取时无法识别的值回退 `keep`）。`consume`（播完即移除）下：
+
+- 循环类播放模式失效，`effectivePlayMode` 把 `loop-all`/`loop-one` 视为 `sequential`（存下的模式不改写，切回 `keep` 仍有效），`shuffle` 不受影响。
+- 移除发生在 `playerService.playNextTrackInRoom`（自动切歌、手动下一首、投票下一首同一入口，被切走的歌也会离开）：先以离开的那首为起点算出下一首（`getNextTrack(roomId, mode, fromTrackId)`），再移除它并广播 `queue:updated`，然后播放；没有下一首（含随机模式下只剩当前一首）就 `stopPlayback`。点队列里的歌直接播放、投票指定播放不会删除上一首。
+- 队列里排在当前歌前面、没听过的歌，在走到队尾后回到最前面那首没听过的；重试失败曲目时以失败的那首为起点继续往后。
+- 「上一首」：`getPreviousTrack` 不回绕；没有可回去的歌时 `playPrevTrackInRoom` 对 `consume` 房间 seek 到 0，`keep` 房间保持无操作。客户端 `PlayerControls` 在 `consume` 下隐藏上一首按钮（留同尺寸空位）并只循环切换顺序/随机；锁屏/媒体键触发时仍走服务端的从头重播。
+- 切换队列模式后立即重排自动混音过渡点；本 fork 的切歌在服务端互斥内同步提交 `currentTrack`，不存在上游「过渡未提交时再次切歌」的中间态，离开的曲目始终取 `currentTrack`。
+- 与「播放后移除歌曲」并存：后者只在成功切歌后删上一首、不改导航与循环；`consume` 下前者已先移除，后者为空操作。
+
 酷狗概念版私人漫游先从房主账号获取每日推荐，再从随机推荐歌单中选择一个歌单和分页补充候选，房间最终仍只播放其中一首；每日推荐或推荐歌单暂时不可用时按可用结果回退。候选池上限为 50 首，避免固定每日推荐在连续漫游后过早耗尽。
 
 房间支持 4 种播放模式（`PlayMode`），由 `room.playMode` 字段控制，默认 `loop-all`：
@@ -245,8 +263,9 @@ interface ChatMessage {
 
 房主可在房间设置中开启私人漫游，并选择网易云、QQ 音乐、酷狗或酷狗概念版。漫游请求始终使用永久房主 `creatorId` 自己保存的平台凭据，不会借用管理员或其他成员的账号；房主未登录所选平台时，服务端拒绝开启，房主退出当前漫游平台后服务端自动关闭漫游。
 
-- 顺序播放到队尾，或列表循环即将从队尾回绕时，`playerService` 会优先调用 `roamingService` 获取个性化推荐；当前歌曲已经来自漫游时，下一首会继续漫游。队列中尚有后继点歌时仍优先播放点歌，单曲循环与随机播放保持原语义；推荐或歌曲解析失败则回退原播放模式，确实没有下一首时才停止。
-- 漫游歌曲标记为 `requestedBy: '私人漫游'`，成功开始播放后追加到房间播放列表并广播 `queue:updated`；连续切歌会从当前漫游曲目继续请求推荐，有人在当前漫游曲目之后新增点歌时仍优先播放该点歌。服务端过滤当前歌曲、队列歌曲和房间最近漫游歌曲，避免重复推荐。
+- 顺序播放到队尾，或列表循环即将从队尾回绕时，`playerService` 会调用 `roamingService.getBatch` 一次取回最多 5 首推荐并整批入队，再由正常队列导航播放第一首。这样连续跳歌不必逐首等待推荐接口，也更接近上游 Personal FM 的连续电台体验。队列中尚有后继点歌时仍优先播放点歌，单曲循环与随机播放保持原语义；推荐失败则回退原播放模式，确实没有下一首时才停止。
+- 播放列表头部的“私人漫游”按钮可在房主开启漫游后立即播放一首推荐（`player:next` 携带 `forceRoaming: true`），不打断队列中的点歌顺序，只把当前播放切到推荐；房间空闲且队列为空时开启漫游会直接开始第一首推荐。
+- 漫游歌曲标记为 `requestedBy: '私人漫游'`，成功开始播放后追加到房间播放列表并广播 `queue:updated`；服务端过滤当前歌曲、队列歌曲和房间最近漫游歌曲，避免重复推荐。
 - 网易云支持 `DEFAULT`、`FAMILIAR`、`EXPLORE`、运动、专注、深夜和 `aidj` 模式，通过 `personal_fm_mode` 请求；场景值拆成 `mode=SCENE_RCMD` 与 `submode=EXERCISE|FOCUS|NIGHT_EMO`。上游没有可靠的模式发现接口，因此合法列表由 shared 维护，未知或旧持久化值回退到 `DEFAULT`。
 - QQ 音乐、酷狗和酷狗概念版当前固定使用默认个性化推荐，不接受网易云模式参数；概念版使用概念版独立账号和推荐接口。
 - `RoomState` 与 `room:settings` 增加可选 `roamingEnabled`、`roamingSource`、`roamingMode` 字段，旧版 Web、Android 和 Windows 客户端可安全忽略；永久房间会持久化这些设置。
@@ -254,7 +273,7 @@ interface ChatMessage {
 ## 普通酷狗账号听歌时长（实验性）
 
 - Web 的 `useHowl` 为 `source=kugou` 创建独立计时器；概念版、其他音源不参与。只有播放位置连续推进才累计，暂停、缓冲、Seek、超过 5 秒的采样间隔不补算。客户端每 15 秒发送累计毫秒数，暂停请求刷新，切歌、停止和 `pagehide` 尝试收尾。
-- `POST /api/music/kugou-listening` 使用共享 `kugouListeningSchema` 校验 `{ roomId, trackId, sessionId, listenedMs, ended?, flush? }`。HTTP 身份必须是在线房间成员，只使用该用户在该房间的普通酷狗凭据，绝不借用房间共享 VIP 或概念版账号。登录在播放中恢复时，可能需要下一首歌才建立新上报会话。
+- `POST /api/music/kugou-listening` 使用共享 `kugouListeningSchema` 校验 `{ roomId, trackId, sessionId, listenedMs, ended?, flush? }`。HTTP 身份必须是在线房间成员，只使用该用户自己的普通酷狗授权（房间池或本人持久授权，关闭共享也可用），绝不借用其他成员的共享 VIP 或概念版账号。登录在播放中恢复时，可能需要下一首歌才建立新上报会话。
 - 首次请求的 `listenedMs` 必须为 0，且曲目必须是房间当前普通酷狗曲目。后续累计单调递增，重复请求不重复计入；已登记会话可在房间切歌后发送结束请求。每次增量不超过服务端经过时间且上限 30 秒，同一酷狗账号跨身份、房间、标签页和设备按最近时间区间去重，不能倍增服务器内的累计时长。
 - 服务端通常累计 60 秒后，或收到暂停/结束请求时，查询平台累计基线并通过 `userinfo.user.kugou.com/v2/get_grade_info` 的兼容协议提交真实新增秒数。请求限定 HTTPS、禁止重定向且设 10 秒超时；凭据放在 RSA 加密载荷，不输出原始错误或凭据。兼容协议的内部 appid 是 3116，但业务入口仅接受普通版音源与普通版账号；不调用概念版任务、奖励或播放历史接口。
 - 响应 `accepted` 表示服务端已接收样本，`submitted` 表示上游确认请求，均不保证账号统计即时显示。上游失败返回 `upstream_unavailable`，不自动重放该次增量，冷却 60 秒再处理后续新增时长；这可能少计时间，避免超时后重复入账。
@@ -293,6 +312,7 @@ interface ChatMessage {
 B站没有与房间 128K、320K 完全对应的普通 DASH 音轨，因此分别映射为最接近的 132K、192K。Hi-Res 还要求视频本身提供 FLAC 音轨，否则直接从同一次响应选 192K，不再次请求其他音质。
 
 - 上游若返回歌曲实际可用的较低规格，服务端记录 `actualQuality` 和实际平均码率，不再逐档重新请求
+- 当前曲目的 `PLAYER_PLAY` / `ROOM_STATE` 会带可选 `audioQuality`、`audioBitrate`、`qualityDowngraded`（旧客户端忽略）。客户端据此显示实际音质标签；网易云按上游 `level` 自适应映射到臻音、杜比、沉浸环绕声、超清母带等非传统档位，未知档位回退到实际码率而不是房间设置
 - `musicProvider.streamUrlCache` 的 key 包含 bitrate，不同音质自动隔离缓存
 
 ## 音频代理策略
@@ -311,6 +331,7 @@ B站没有与房间 128K、320K 完全对应的普通 DASH 音轨，因此分别
 - Owner/Admin 可通过播放列表抽屉的「清空」按钮（`ListX` 图标）一次性清空队列
 - 采用二次确认防误操作：首次点击变为 destructive 提示，3 秒内再次点击才执行
 - 服务端 `queue:clear` handler 复用 `remove` on `Queue` 权限，清空后停止播放并广播 `QUEUE_UPDATED` + `PLAYER_PAUSE` + `ROOM_STATE`
+- `queue:remove_played` 复用 `remove` on `Queue` 权限，只删除当前曲之前的已播放项；当前曲与待播队列不动，成功后广播 `QUEUE_UPDATED`。播放列表头部在存在已播放项时提供该入口，不做自动清理。
 
 ## 其他同步机制
 
@@ -323,6 +344,10 @@ B站没有与房间 128K、320K 完全对应的普通 DASH 音轨，因此分别
 7. **持久化用户身份**：客户端通过 `storage.getUserId()` 生成并持久化 `nanoid`，每次 `ROOM_CREATE` / `ROOM_JOIN` 携带 `userId`，使服务端可跨 socket 重连识别同一用户。服务端通过 `roomRepo.getSocketMapping(socket.id)` 获取 `{ roomId, userId }` 映射——`socket.id` 仅用于 Socket 映射查找，所有涉及用户身份的操作（host 判断、auth cookie 归属、权限检查等）统一使用 `mapping.userId`
 8. **`currentUser` 自动推导**：`roomStore` 中 `currentUser` 始终从 `room.users` 自动推导（`deriveCurrentUser`），`setRoom` / `addUser` / `removeUser` / `updateRoom` 等 action 内部自动同步，不暴露 `setCurrentUser` 以避免脱节风险
 9. **断线时钟重置**：`resetAllRoomState()` 除重置 Zustand stores 外，还调用 `resetClockSync()` 清空 NTP 采样，确保重连后使用全新的时钟校准数据
+   - **断线保留播放**：`useConnectionGuard` 在断线时不再立即停止音频和重置房间，而是保留已加载的音频、房间与播放器状态，等待最长 120 秒（`OFFLINE_GRACE_MS`）。连接恢复后用重连令牌自动 `ROOM_JOIN`，服务端回放的 `PLAYER_PLAY` 若与本机已加载的是同一首歌，`usePlayer` 直接接回时间线（仍在播放则交给同步环微调，已停下才重新排期），不重新加载；超过宽限期仍未恢复才执行 `stopActiveAudio()` 与 `resetAllRoomState()`。
+   - **断线期间不替房间决策**：音频停滞或加载失败时，客户端不再发起流地址刷新、换源或“跳到下一首”，改为等待重新加入后再按原流程处理。
+   - **重连节奏与探活**：首次重连 0.5 秒起步，指数退避封顶 30 秒；浏览器 `online` 事件和页面回到前台会跳过退避立即重试；连接静默 12 秒后发送 `ntp:ping` 探测，8 秒内仍无任何入站消息则判定连接已死并重连。
+   - **断网保护（可选，默认关闭）**：音频设置 `bufferCurrentTrack` 开启后，`useCurrentTrackBuffer` 在曲目稳定播放后把当前歌曲整首取回内存；断线且音频停滞超过 3 秒时，`usePlayer` 改用本地副本从当前位置继续播放。酷狗与 Bilibili 经服务端代理，断网时无法取流。
 10. **Socket 断开竞态防护**：页面刷新时新旧 socket 的 join/disconnect 到达顺序不确定，`leaveRoom` 通过 `roomRepo.hasOtherSocketForUser()` 检测同一用户是否有更新的 socket 连接，避免旧 socket disconnect 误删活跃用户
 11. **投票安全网**：`voteController` 接收 `VOTE_START` 时，若检测到用户已有直接操作权限（owner/admin），不再返回错误，而是直接执行该操作，防止客户端-服务端角色不同步时操作失效。部分 VoteAction 通过 `PERM_MAP` 映射到不同的 CASL action+subject（如 `'play-track'` → `('play', 'Player')`，`'remove-track'` → `('remove', 'Queue')`）
 12. **切歌防抖**：500ms (`PLAYER_NEXT_DEBOUNCE_MS`) 内不重复触发同方向切歌，但允许立即反向操作。`playNextTrackInRoom` / `playPrevTrackInRoom` 将 debounce 检查和队列导航封装在 per-room mutex 内部，确保同 tick 的多个事件不会同时通过。投票执行、删除当前曲目等场景可使用 `{ skipDebounce: true }`。`player:next` 还接受可选的 `{ trackId }`：在 mutex 内核对它是否仍是当前曲目，不一致就丢弃这次请求——否则歌曲自然播完后，排队中的切歌会把刚开始的新歌一起跳掉。旧版 Web、Android 和 Windows 客户端不带这个字段，退回原有防抖行为
@@ -337,33 +362,45 @@ B站没有与房间 128K、320K 完全对应的普通 DASH 音轨，因此分别
 
 ## REST API
 
-| 路径                            | 方法  | 用途                                                                                                    |
-| ------------------------------- | ----- | ------------------------------------------------------------------------------------------------------- |
-| `/api/music/search`             | GET   | 搜索曲目（`source` + `keyword` + `page`）                                                               |
-| `/api/music/url`                | GET   | 解析流媒体 URL（`source` + `id`）                                                                       |
-| `/api/music/lyric`              | GET   | 获取歌词                                                                                                |
-| `/api/music/lyric-supplement`   | GET   | 当前来源缺少可靠逐词或时间轴需要修复时，并行搜索其他平台；按标准化曲名、全部歌手和 ±3 秒时长匹配后返回 YRC/KRC/LRC 候选，由客户端统一评分择优；结果按曲目缓存并合并并发请求 |
-| `/api/music/cover`              | GET   | 获取封面图                                                                                              |
-| `/api/music/cover-proxy`        | GET   | 代理受信音乐 CDN 封面；兼容升级白名单主机的旧 HTTP 地址，逐跳校验 HTTPS 重定向、图片类型和 10 MiB 上限                |
-| `/api/music/playlist`           | GET   | 获取歌单曲目列表（`source` + `id` + `limit` + `offset`），分页返回 `{ tracks, total, offset, hasMore }` |
-| `/api/music/hot`                | GET   | 获取房间内可见的官方热歌榜；校验 HTTP 身份和房间成员身份，支持 `source=netease|tencent|kugou` 及 `limit`/`offset` 分页，服务端分别缓存网易云热歌榜、QQ 热歌榜和酷狗热歌榜，`refresh=true` 可强制刷新 |
-| `/api/rooms/:roomId/check`      | GET   | 房间预检（存在性 + 是否需要密码），用于分享链接直接访问时的前置校验                                     |
-| `/api/rooms/:roomId/share/qr`   | GET   | 校验并生成当前浏览器访问域名下的 `/join?ROMMid=...` 房间分享二维码                                      |
-| `/api/playlists`                | GET   | 列出当前账号的本地歌单（元信息 + 派生封面 + 曲目数）；仅对已设置密码的账号开放，访客返回 403                |
-| `/api/playlists`                | POST  | 新建本地歌单（`{ name }`），封顶 `USER_PLAYLIST_MAX`                                                     |
-| `/api/playlists/:id`            | GET   | 获取歌单详情（含按顺序排列的 `tracks`）                                                                 |
-| `/api/playlists/:id`            | PATCH | 重命名歌单（`{ name }`）                                                                                |
-| `/api/playlists/:id`            | DELETE| 删除歌单及其曲目                                                                                        |
-| `/api/playlists/:id/tracks`     | POST  | 向歌单追加曲目（`{ tracks }`，单曲/整队通用）；按 `Track.id` 去重、封顶 `USER_PLAYLIST_TRACKS_MAX`、写入前剥离 `streamUrl` 等短时效字段 |
-| `/api/playlists/:id/tracks/:trackId` | DELETE | 从歌单移除单曲                                                                                    |
-| `/api/admin/audio-proxy-policy` | GET   | 服务器管理员读取酷狗全局强制代理策略                                                                    |
-| `/api/admin/audio-proxy-policy` | PATCH | 服务器管理员部分更新代理策略并广播完整结果                                                              |
-| `/api/health`                   | GET   | 健康检查                                                                                                |
+| 路径                                 | 方法   | 用途                                                                                                                                                             |
+| ------------------------------------ | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/api/music/search`                  | GET    | 搜索曲目（`source` + `keyword` + `page`）                                                                                                                        |
+| `/api/music/search-all`              | GET    | 跨源统一搜索：并行查询网易云/QQ/酷狗/概念版（单源 4 秒超时、失败隔离），按规范化标题+艺人聚合同曲的不同版本；无个人 cookie 时进程内缓存 60 秒                    |
+| `/api/music/url`                     | GET    | 解析流媒体 URL（`source` + `id`）；带 `roomId` 时使用房间内最高会员凭证，供下一首预热与降档重试复用                                                              |
+| `/api/music/lyric`                   | GET    | 获取平台歌词；返回 LRC/翻译/音译，以及 `wordLyric + wordFormat + source` 结构化逐字合同（yrc/qrc/krc/ttml/enhanced-lrc）                                         |
+| `/api/music/lyric-supplement`        | GET    | 当前来源缺少可靠逐词或时间轴需要修复时，并行搜索其他平台；按标题/歌手/专辑/时长加权评分返回 YRC/KRC/LRC 候选，由客户端统一评分择优；显示歌名搜不到时用平台给的 `originalTitle` / `alternateArtist`（原名、译名、音译）再搜一次，伴奏类版本不换名；结果按曲目缓存并合并并发请求 |
+| `/api/music/ttml`                    | GET    | 代理 AMLL TTML DB；仅允许配置的 HTTPS 主机，最多跟随 3 次重定向且每一跳重新校验白名单，限制 2 MiB/6 秒；进程内 24 小时缓存、并发合并与 ETag                      |
+| `/api/music/amll-ttml`               | GET    | 按 `ncmMusicId`/`qqMusicId` 精确查询 AMLL 官方 TTML API；固定上游域名、5 秒超时、2 MiB 上限、24 小时缓存与 ETag                                                  |
+| `/api/music/cover`                   | GET    | 获取封面图                                                                                                                                                       |
+| `/api/music/cover-proxy`             | GET    | 代理受信音乐 CDN 封面；兼容升级白名单主机的旧 HTTP 地址，逐跳校验 HTTPS 重定向、图片类型和 10 MiB 上限                                                           |
+| `/api/music/dynamic-cover`           | GET    | 换歌 350ms 后旁路查询视频封面；酷狗优先，网易云回退只在带 `roomId` 且请求者是该房成员时使用房间共享的最高档登录态，未登录直接返回空；结果按「曲目 + 登录态指纹」缓存 10 分钟，301/401/403 按空结果静默缓存 |
+| `/api/music/playlist`                | GET    | 获取歌单曲目列表（`source` + `id` + `limit` + `offset`），分页返回 `{ tracks, total, offset, hasMore }`                                                          |
+| `/api/music/hot`                     | GET    | 获取房间内可见的官方热歌榜；校验 HTTP 身份和房间成员身份，支持 `source=netease                                                                                   | tencent | kugou`及`limit`/`offset` 分页，服务端分别缓存网易云热歌榜、QQ 热歌榜和酷狗热歌榜，`refresh=true` 可强制刷新 |
+| `/api/music/artist`                  | GET    | 网易云歌手主页（`source` + `id`）：资料、热门歌曲首页与专辑首页；其他平台 400，上游失败 503（脱敏错误码），共享 TTL 缓存并合并并发请求                            |
+| `/api/music/artist/songs`            | GET    | 歌手热门歌曲分页（`offset` + `limit`）                                                                                                                           |
+| `/api/music/artist/albums`           | GET    | 歌手专辑分页（`offset` + `limit`）                                                                                                                               |
+| `/api/music/discover/home`           | GET    | 账号主页公共发现区块（网易云雷达歌单、热门歌手、新碟）；区块独立失败并在 `failed` 中列出；个性化推荐仍走 `/api/music/recommendations`                             |
+| `/api/rooms/:roomId/check`           | GET    | 房间预检（存在性 + 是否需要密码），用于分享链接直接访问时的前置校验                                                                                              |
+| `/api/rooms/:roomId/share/qr`        | GET    | 校验并生成当前浏览器访问域名下的 `/join?ROMMid=...` 房间分享二维码                                                                                               |
+| `/api/playlists`                     | GET    | 列出当前账号的本地歌单（元信息 + 派生封面 + 曲目数）；仅对已设置密码的账号开放，访客返回 403                                                                     |
+| `/api/playlists`                     | POST   | 新建本地歌单（`{ name }`），封顶 `USER_PLAYLIST_MAX`                                                                                                             |
+| `/api/playlists/:id`                 | GET    | 获取歌单详情（含按顺序排列的 `tracks`）                                                                                                                          |
+| `/api/playlists/:id`                 | PATCH  | 重命名歌单（`{ name }`）                                                                                                                                         |
+| `/api/playlists/:id`                 | DELETE | 删除歌单及其曲目                                                                                                                                                 |
+| `/api/playlists/:id/tracks`          | POST   | 向歌单追加曲目（`{ tracks }`，单曲/整队通用）；按 `Track.id` 去重、封顶 `USER_PLAYLIST_TRACKS_MAX`、写入前剥离 `streamUrl` 等短时效字段                          |
+| `/api/playlists/:id/tracks/:trackId` | DELETE | 从歌单移除单曲                                                                                                                                                   |
+| `/api/admin/audio-proxy-policy`      | GET    | 服务器管理员读取酷狗全局强制代理策略                                                                                                                             |
+| `/api/admin/audio-proxy-policy`      | PATCH  | 服务器管理员部分更新代理策略并广播完整结果                                                                                                                       |
+| `/api/health`                        | GET    | 健康检查                                                                                                                                                         |
 
 ---
 
 ### 2026-09 播放与资源优化
 
+- QQ 音乐歌词接口返回 3DES + deflate 加密的 QRC XML；服务端解密后以 `wordLyric + wordFormat=qrc` 返回，客户端用 AMLL 的 `parseQrc` 还原逐字、对唱与背景声结构。解密或格式校验失败时保留 Meting 的 LRC。
+- AMLL TTML 按平台 ID 未命中时，服务端用歌名 + 首位歌手搜索候选，按标题/歌手/专辑评分（≥75）后取最高分候选的 TTML；搜索页缓存 10 分钟，未命中同样缓存 10 分钟，避免重复打 AMLL。
+- Folia 视觉读取 `songPart` / `isChorus` / `chorusEffect`；适配层保留 TTML 的 songPart，并用上游同款“重复最多歌词行即副歌”规则补齐其他格式。这里只提供上游既有视觉分支所需的数据，不新增视觉设计。
+- 行级 LRC 在进入 Folia 前按上游规则估算逐词时间和行尾阅读时长；开头制作名单按 smart 策略在引子放不下时整块隐藏，经典播放器与 Folia 共用这份展示前过滤。
 - Web 在基础歌词缺少可靠逐字、外语歌词缺少翻译或韩日语歌词缺少音译时，提前启动一次跨源匹配；逐字时间、对唱和背景声继续使用质量最高的 AMLL 主时间轴，翻译与音译分别优先采用和主轴分行、顺序及时间匹配度最高的来源，再由其他来源补齐空缺。慢 TTML 未结束时仍可展示通过既有质量评估的补源结果。
 - 逐字质量同时检查全曲动画、文本、有效时间和重复段落覆盖；带对唱或背景声的候选必须先达到完整度与时间有效性门槛，避免残缺结构仅凭标记数量覆盖完整主轴。
 - 当完整逐字源替换残缺 TTML 时，仅将通过原文、顺序和时间共同验证的对唱/背景声标记迁移到新主轴；逐字内容与时间保持来源原值，无法匹配的结构不迁移。
@@ -380,3 +417,14 @@ B站没有与房间 128K、320K 完全对应的普通 DASH 音轨，因此分别
 - 新增账户级本地歌单：SQLite `user_playlists`（`id` / `user_id` / `name` / `cover` / 时间戳，`user_id` 外键级联删除）与 `user_playlist_tracks`（`(playlist_id, track_id)` 主键去重、`track_json` 存完整跨音源曲目、`position` 排序），两表均为 `CREATE TABLE IF NOT EXISTS` 幂等建表。歌单封面未显式设置时读取时派生自首曲 `thumbnailCover ?? cover`，不落库。
 - 歌单能力仅对已设置密码的账号开放（`/api/playlists*` 经 `requireAccount` 守卫，访客 401/403）；写入前经 `trackSchema` 校验并剥离 `streamUrl` / `requiresServerProxy` / `streamFormat` 等短时效字段，容量受 `USER_PLAYLIST_MAX` / `USER_PLAYLIST_TRACKS_MAX` / `USER_PLAYLIST_NAME_MAX` 限制。歌单 CRUD 走 REST，"加入房间"复用现有 `QUEUE_ADD_BATCH`（`{ tracks, playlistName }`），不新增 WS 事件，旧原生客户端不受影响。
 - 访客（无密码且非服务器管理员）不写入持久成员名册 `room.members`，仅存在于在线 `room.users`；房主与持久 admin 即使是访客也始终保留在名册，详见上文交互要点第 17 条。
+
+## 入房保护与重连凭证
+
+- `ROOM_CREATE`/`ROOM_JOIN` 共用按身份计的限流（10 次/10 秒，携带重连凭证的入房不计入，弱网反复重连不会被误限）；同一身份在同一房间 1 分钟内输错密码 5 次后锁定，期间不再校验任何密码，输对一次清零（重连凭证、已在房间、创建者、管理员不受影响），提示文案为 `PASSWORD_LOCKED_MESSAGE`。
+- `room:rejoin_token` 事件带可选 `ttlMs`，客户端用 `rejoinTicketExpiry` 从收到时刻起算有效期，缺失时退回 `expiresAt`。
+- 入队的曲目会丢弃客户端携带的 `streamUrl`，封面只接受 https（已知音乐 CDN 的 http 自动升级）。
+- 搜索没能得到回答（请求失败、超时、被限流、答复不可读）抛 `SearchError`，路由返回 503，客户端提示失败；只有成功且无命中才是空列表。统一搜索按来源标记 `failedSources`，兜底换源与歌词补全遇到失败按无候选处理。
+- `RoomPage` 卸载且不是主动离开时发送 `ROOM_LEAVE`；延后一个宏任务以排除 StrictMode 模拟重挂载，断线时跳过（由连接守卫保留状态并在宽限期后重置）。
+- 搜索关键词形如 ID 或平台分享链接（网易云、QQ、酷狗）时，路由先按 ID 精确查找，查到即返回，否则退回按词搜索；短数字与普通词仍按关键词处理。
+- 客户端时钟偏移断线时不清零：重连沿用 3 分钟内的校准并在后台刷新，新样本只信任低 RTT 的（NTP 最小 RTT 优先），避免弱网刚恢复时的不对称延迟把偏移拉偏、造成进度回退。重连后的纠偏采样错开 1 秒以上，硬跳转会打印 `[sync] hard seek` 诊断信息。
+- 客户端只在进房、重连、换房后补发已保存的平台 Cookie；`ROOM_STATE` 的后续广播（换歌、设置、成员变动）不再触发补发。`HomePage` 只在本页发起创建/加入后才响应 `ROOM_STATE` 跳转。

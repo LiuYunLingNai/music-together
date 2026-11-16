@@ -131,6 +131,9 @@ export const setBeatFxLiveEffects = (strengths: Readonly<Record<string, number>>
 /** The strength an effect plays at now, 0..2; 0 while it does not play (off, retired, not on screen). */
 export const getBeatEffectStrength = (id: string): number => liveEffects[id] ?? 0;
 
+/** 这个效果现在在播吗（强度调到 0 也算在播：雾笺的 0 是「不飘雨」，不是退回默认）。 */
+export const isBeatEffectPlaying = (id: string): boolean => id in liveEffects;
+
 /**
  * How many beats and downbeats the clock has fired since the app started - only ever growing, across
  * tracks and seeks - so a frame loop that remembers last frame's counts sees exactly the ones fired

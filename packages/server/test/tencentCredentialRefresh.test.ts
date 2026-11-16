@@ -86,8 +86,8 @@ test('refreshes due credentials every 24 hours and updates active room copies', 
   )
   assert.equal(authService.getUserCookie('qq-refresh-failure', 'tencent', 'refresh-room'), failureCookie)
 
-  assert.equal(platformAuthRepo.loadDueTencent(now - 1).length, 0)
-  assert.equal(platformAuthRepo.loadDueTencent(now).length, 2)
+  assert.equal(platformAuthRepo.loadDue('tencent', now - 1).length, 0)
+  assert.equal(platformAuthRepo.loadDue('tencent', now).length, 2)
 })
 
 test('scheduled refresh cannot overwrite a logout and new login reusing the same cookie', async () => {

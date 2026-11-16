@@ -34,7 +34,7 @@ export function MineradioLyricStage({ mode, onLyricSeek, accent }: MineradioLyri
       <div className="mt-mineradio-lyrics__plane">
         {/* `seekEnabled={false}`：上游 Mineradio 无"点击歌词跳转"，
             且视觉舞台的拖拽手势会被行命中判定误触发（见 LyricDisplay 说明）。 */}
-        <LyricDisplay onSeek={onLyricSeek} seekEnabled={false} />
+        <LyricDisplay onSeek={onLyricSeek} seekEnabled={false} family="mineradio" />
       </div>
     </div>
   )

@@ -68,27 +68,32 @@ let anchorServerTime = Date.now() // uncalibrated initially; updated on each pon
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Compute time-decayed weighted median of offset values.
- * Each sample's weight = exp(-age / halfLife), so recent samples dominate.
- * We find the offset where cumulative weight first exceeds 50% of total.
- */
-function computeWeightedMedian(now: number): number {
-  if (samples.length === 0) return 0
-  if (samples.length === 1) return samples[0].offsetMs
+/** 比窗口内最小 RTT 高出这个比例（再加固定余量）的样本，视为路径拥塞而不可信。 */
+const RTT_TRUST_RATIO = 1.5
+const RTT_TRUST_MARGIN_MS = 30
+/** 超过这个年龄的样本不再参与：设备休眠或长时间断网后，旧偏移不能当真。 */
+const SAMPLE_MAX_AGE_MS = 3 * 60_000
 
-  // Build (offset, weight) pairs
+/**
+ * 只信任低延迟样本（NTP 的最小 RTT 优先）：不对称路由引入的偏移误差正比于 RTT，
+ * 弱网刚恢复时的高 RTT 样本不应该把已经准确的偏移拉偏。
+ * 在可信样本里取时间衰减加权中位数，近期样本权重更大。
+ */
+function computeTrustedOffset(now: number): number {
+  if (samples.length === 0) return 0
+  let minRtt = Infinity
+  for (const s of samples) if (s.rttMs < minRtt) minRtt = s.rttMs
+  const limit = minRtt * RTT_TRUST_RATIO + RTT_TRUST_MARGIN_MS
+
   const pairs: { offset: number; weight: number }[] = []
   for (const s of samples) {
+    if (s.rttMs > limit) continue
     const age = now - s.timestamp
-    const weight = Math.exp((-age * Math.LN2) / DECAY_HALF_LIFE_MS)
-    pairs.push({ offset: s.offsetMs, weight })
+    pairs.push({ offset: s.offsetMs, weight: Math.exp((-age * Math.LN2) / DECAY_HALF_LIFE_MS) })
   }
+  if (pairs.length === 1) return pairs[0].offset
 
-  // Sort by offset ascending
   pairs.sort((a, b) => a.offset - b.offset)
-
-  // Find weighted median
   let totalWeight = 0
   for (const p of pairs) totalWeight += p.weight
   const halfWeight = totalWeight / 2
@@ -98,8 +103,6 @@ function computeWeightedMedian(now: number): number {
     cumWeight += p.weight
     if (cumWeight >= halfWeight) return p.offset
   }
-
-  // Fallback (should not reach here)
   return pairs[pairs.length - 1].offset
 }
 
@@ -178,8 +181,10 @@ export function processPong(clientPingId: number, serverTime: number): number | 
     samples.shift()
   }
 
-  // Recalculate time-decayed weighted median offset
-  medianOffset = computeWeightedMedian(now)
+  const expiredBefore = now - SAMPLE_MAX_AGE_MS
+  while (samples.length > 0 && samples[0].timestamp < expiredBefore) samples.shift()
+
+  medianOffset = computeTrustedOffset(now)
 
   // Refresh the monotonic anchor so getServerTime() stays accurate
   anchorPerfNow = performance.now()
@@ -192,7 +197,26 @@ export function processPong(clientPingId: number, serverTime: number): number | 
   return rttMs
 }
 
-/** Reset all state (useful on disconnect). */
+/** 最近一次样本距今多久；没有样本时为 Infinity。 */
+export function getLastSampleAgeMs(): number {
+  const last = samples[samples.length - 1]
+  return last ? Date.now() - last.timestamp : Infinity
+}
+
+/**
+ * 断线时只丢弃未完成的探测，保留已校准的偏移：本机单调时钟不受网络影响，
+ * 重连后不必回到"未校准"，也就不会在重新校准前后用错误的服务器时间对位。
+ */
+export function suspendClockSync(): void {
+  pending.clear()
+}
+
+/** 样本是否新到足以在重连后继续沿用已有校准。 */
+export function canReuseCalibration(): boolean {
+  return calibrated && getLastSampleAgeMs() < SAMPLE_MAX_AGE_MS
+}
+
+/** Reset all state. */
 export function resetClockSync(): void {
   samples.length = 0
   pending.clear()

@@ -1,5 +1,5 @@
-import { Suspense, lazy, useMemo, type CSSProperties } from 'react'
-import { MotionConfig } from 'motion/react'
+import { Suspense, lazy, useEffect, useMemo, useSyncExternalStore, type CSSProperties } from 'react'
+import { MotionConfig, useMotionValue } from 'motion/react'
 import { useShallow } from 'zustand/react/shallow'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -24,6 +24,12 @@ import { createFoliaTuningResolver } from './stage/foliaTunings'
 import { useFoliaAssetStore } from './stage/foliaAssetStore'
 import { getRecentCompletedLine, getUpcomingLine } from './upstream/components/visualizer/runtime'
 import { getLineRenderEndTime } from './upstream/utils/lyrics/renderHints'
+import {
+  getActiveTransitionCue,
+  getTransitionHandoffProgress,
+  subscribeTransitionCue,
+  transitionElapsedSec,
+} from '@/lib/automix/transitionCue'
 
 // 播放列表浮岛：folia 舞台的队列外壳。惰性加载 —— 只在第一次打开时拉代码，
 // 且不进主 chunk（与模式的懒加载同红线）。
@@ -75,9 +81,7 @@ export function FoliaPlayerStage({
   onLyricSeek,
   onNext,
   onPrev,
-  onOpenChat,
   onOpenQueue,
-  chatUnreadCount,
   activeVote,
   onCastVote,
   onStartVote,
@@ -87,12 +91,47 @@ export function FoliaPlayerStage({
   const currentTrack = usePlayerStore((s) => s.currentTrack)
   const lyricOffsetPreview = usePlayerStore((s) => s.lyricOffsetPreview)
   const lyricOffsets = useSettingsStore((s) => s.lyricOffsets)
-  const lyricFontSize = useSettingsStore((s) => s.lyricFontSize)
+  const lyricFontSize = useSettingsStore((s) => s.foliaLyricFontSize)
   const lyricTranslationFontSize = useSettingsStore((s) => s.lyricTranslationFontSize)
   const settings = useSettingsStore((s) => s.foliaSettings)
+  const setFoliaSettings = useSettingsStore((s) => s.setFoliaSettings)
+  // 画面里直接改的调参（町景的取景控制条、莫奈/回环/时计/商籁的拖动）：合并进当前模式的 tuning。
+  // 雾笺的着色器冷编约一秒：页面空闲时先在后台编好（上游 entry 的 prewarm）。
+  useEffect(() => {
+    const run = () => {
+      void import('./upstream/components/visualizer/nebbia/nebbiaShaderWarmup')
+        .then((module) => module.warmNebbiaShaders())
+        .catch((error) => console.warn('[Nebbia] shader warm-up did not load', error))
+    }
+    const idle = typeof window.requestIdleCallback === 'function'
+      ? window.requestIdleCallback(run, { timeout: 5000 })
+      : window.setTimeout(run, 2000)
+    return () => {
+      if (typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(idle)
+      else window.clearTimeout(idle)
+    }
+  }, [])
+
+  const onVisualizerTuningChange = useMemo(
+    () => (patch: object) => {
+      const latest = useSettingsStore.getState().foliaSettings
+      const held = latest.tunings[mode] ?? {}
+      setFoliaSettings({ tunings: { ...latest.tunings, [mode]: { ...held, ...patch } } })
+    },
+    [mode, setFoliaSettings],
+  )
+  /**
+   * 歌词字号 → folia 的 `lyricsFontScale`。
+   *
+   * 本项目用 `lyricFontSize`（百分数，出厂 90）表达字号，而 folia 用倍率。
+   * 以 90 为基准换算，因此出厂设置下倍率为 1（与上游默认观感一致）。
+   */
+  const lyricsFontScale = (lyricFontSize / 90) * settings.fontScale
+  // cadenza 的调参字号同样乘 `lyricsFontScale`（上游 `cadenza/entry.tsx`），
+  // 所以这里传最终倍率，只传 `settings.fontScale` 会漏掉歌词字号这一档。
   const tuningsFor = useMemo(
-    () => createFoliaTuningResolver({ tunings: settings.tunings, fontScale: settings.fontScale }),
-    [settings.tunings, settings.fontScale],
+    () => createFoliaTuningResolver({ tunings: settings.tunings, fontScale: lyricsFontScale }),
+    [settings.tunings, lyricsFontScale],
   )
   /**
    * 歌词样式窗口开着时，舞台上的歌词与几何背景不再画。
@@ -123,19 +162,36 @@ export function FoliaPlayerStage({
   )
   const theme = useFoliaTheme()
 
+  // 换歌交接：音频层写入 cue，这里按服务端时间推进进度，音频交叉点对应视觉 50%。
+  const handoff = useSyncExternalStore(subscribeTransitionCue, getActiveTransitionCue, getActiveTransitionCue)
+  const handoffProgress = useMotionValue(0)
+  useEffect(() => {
+    if (!handoff) {
+      handoffProgress.set(0)
+      return
+    }
+    let frame = 0
+    const tick = (): void => {
+      handoffProgress.set(getTransitionHandoffProgress(handoff))
+      if (transitionElapsedSec(handoff) < handoff.seconds) frame = requestAnimationFrame(tick)
+    }
+    tick()
+    return () => cancelAnimationFrame(frame)
+  }, [handoff, handoffProgress])
+
   // ---- 歌词偏移：校准预览优先，否则用持久化值（与 LyricDisplay 同判据）----
   const lyricOffsetKey = getLyricOffsetKey(currentTrack)
   const savedLyricOffsetMs = lyricOffsets[lyricOffsetKey ?? ''] ?? 0
   const isCalibrating = lyricOffsetPreview?.key === lyricOffsetKey
   const lyricOffsetMs = isCalibrating ? lyricOffsetPreview.offsetMs : savedLyricOffsetMs
 
-  const { currentTime } = useFoliaClock(lyricOffsetMs)
+  const { currentTime, mediaTime } = useFoliaClock(lyricOffsetMs)
   // 窗口的实时预览与视频层读同一组信号（上游 motionSignals 的宿主版本）。
-  useMirrorPreviewSignals(currentTime, audio)
+  useMirrorPreviewSignals(currentTime, mediaTime, audio)
   // 每首随机样式：换歌时从池里换一种（上游 useRandomVisualizerMode）。
   useRandomFoliaMode(currentTrack?.id ?? null)
   // 智能动感模式：把当前歌曲的拍点表装进实时时钟（不改变任何画面，只是备好数据）。
-  useBeatFxTrack()
+  useBeatFxTrack(renderState.staticMode)
 
   /**
    * 当前激活行下标。
@@ -158,13 +214,6 @@ export function FoliaPlayerStage({
   )
   const [currentLineIndex] = usePlayerStore(useShallow(selectLineContext))
 
-  /**
-   * 歌词字号 → folia 的 `lyricsFontScale`。
-   *
-   * 本项目用 `lyricFontSize`（百分数，出厂 90）表达字号，而 folia 用倍率。
-   * 以 90 为基准换算，因此出厂设置下倍率为 1（与上游默认观感一致）。
-   */
-  const lyricsFontScale = (lyricFontSize / 90) * settings.fontScale
   const subtitleFontScale = (lyricTranslationFontSize / 90) * settings.subtitleScale
 
   const coverUrl = currentTrack?.cover ? getProxiedCoverUrl(currentTrack.cover) : null
@@ -176,6 +225,9 @@ export function FoliaPlayerStage({
       ? { transparent: true }
       : {
           ...settings.backgroundConfig,
+          // `settings.background` 是宿主的独立设置；上游把所选背景写在 `config.mode`。
+          // 不补这一步，舞台永远画默认的 latent，样式窗口里换背景只在窗口内生效。
+          mode: settings.background,
           customImage: monetBackgroundImage ?? settings.backgroundConfig.customImage ?? null,
           ...(styleWindowOpen
             ? { common: { ...settings.backgroundConfig.common, disableGeometricBackground: true } }
@@ -184,10 +236,22 @@ export function FoliaPlayerStage({
     [settings.background, settings.backgroundConfig, monetBackgroundImage, styleWindowOpen],
   )
 
+  // 上游各 tuning.ts 把拖动回传挂在模式自己的 onXxxTuningChange 上；宿主统一写回同一个 store。
+  const tuningChangeProps: Partial<FoliaSharedProps> =
+    mode === 'claddagh' ? { onCladdaghTuningChange: onVisualizerTuningChange }
+      : mode === 'monet' ? { onMonetTuningChange: onVisualizerTuningChange }
+        : mode === 'pendolo' ? { onPendoloTuningChange: onVisualizerTuningChange }
+          : mode === 'sonnet' ? { onSonnetTuningChange: onVisualizerTuningChange }
+            : mode === 'tempera' ? { onTemperaTuningChange: onVisualizerTuningChange }
+              : mode === 'lumiere' ? { onLumiereTuningChange: onVisualizerTuningChange }
+                : mode === 'hanabi' ? { onHanabiTuningChange: onVisualizerTuningChange }
+                  : {}
+
   const modeProps: FoliaSharedProps = {
     ...audio,
     ...renderState,
     ...tuningsFor(mode),
+    ...tuningChangeProps,
     currentTime,
     duration: currentTrack?.duration ?? 0,
     currentLineIndex,
@@ -204,6 +268,20 @@ export function FoliaPlayerStage({
     // 同一首歌每次进入都得到同一份布局 / 同一批头像：种子优先用曲目身份，
     // 缺失时回退到标题（与 cappella 上游的 `seed ?? titleText` 一致）。
     seed: currentTrack?.lyricId ?? songTitle ?? 'folia',
+    songHandoff: handoff?.incoming
+      ? {
+          progress: handoffProgress,
+          seed: handoff.incoming.lyricId ?? handoff.incoming.title ?? 'folia',
+          songTitle: handoff.incoming.title ?? null,
+          songArtist: handoff.incoming.artist?.filter(Boolean).join(' / ') ?? null,
+          songAlbum: handoff.incoming.album ?? null,
+          coverUrl: handoff.incoming.cover ? getProxiedCoverUrl(handoff.incoming.cover) : null,
+          theme,
+          lines: [],
+          currentTime,
+          currentLineIndex: 0,
+        }
+      : null,
     cappellaCustomEmojiImages: cappellaEmojiImages,
     cappellaCustomAvatarImages: cappellaAvatarImages,
     monetPortraitImage,
@@ -216,6 +294,13 @@ export function FoliaPlayerStage({
       : settings.showRomanization
         ? 'romanization'
         : 'none',
+    // 底部共享字幕的行布局（上游 #990）：与「副字幕内容」分开；后者只给 Monet/Pendolo/Still 自排版用。
+    subtitleOverlayLayout: settings.subtitleOverlayLayout,
+    subtitleOverlayOpacity: settings.subtitleOverlayOpacity,
+    subtitleOverlayBackground: settings.subtitleOverlayBackground,
+    subtitleUpcomingLyricsBlur: settings.subtitleUpcomingLyricsBlur,
+    showHarmonySubtitle: settings.showHarmonySubtitle,
+    harmonySubtitleBackground: settings.harmonySubtitleBackground,
     // 莫奈/漫游的全局覆盖图来自素材 store（IndexedDB → objectURL，不进持久化设置）。
     // 窗口打开时与上游一样关掉几何背景那套常驻动画。
     background,
@@ -224,6 +309,7 @@ export function FoliaPlayerStage({
     // 本项目只有播放页，因此只剩用户自己的「背景动效」开关。
     backgroundStaticMode: !settings.backgroundMotion,
     onLyricLineSeek: onLyricSeek,
+    onVisualizerTuningChange,
   }
 
   return (
@@ -260,9 +346,7 @@ export function FoliaPlayerStage({
         onSeek={onSeek}
         onNext={onNext}
         onPrev={onPrev}
-        onOpenChat={onOpenChat}
         onOpenQueue={onOpenQueue}
-        chatUnreadCount={chatUnreadCount}
         activeVote={activeVote}
         onCastVote={onCastVote}
         onStartVote={onStartVote}

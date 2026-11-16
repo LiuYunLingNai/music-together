@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clampPlaybackPosition, getPlaybackRevision, isStalePlaybackAction, nextPlaybackRevision } from './playback'
+import { clampPlaybackPosition, getPlaybackRevision, isStalePlaybackAction, nextPlaybackRevision } from './playback.js'
 
 describe('playback revisions', () => {
   it('normalizes legacy and invalid revisions', () => {

@@ -1,3 +1,5 @@
+import type { TransitionMode } from './automix/transitionStrategy.js'
+
 /** Standardised error codes used across all server → client ROOM_ERROR emissions */
 export const ERROR_CODE = {
   INVALID_INPUT: 'INVALID_INPUT',
@@ -18,11 +20,21 @@ export const ERROR_CODE = {
   ALREADY_VOTED: 'ALREADY_VOTED',
   /** 被服务器管理员移出房间（旧客户端按普通错误提示处理） */
   KICKED_BY_ADMIN: 'KICKED_BY_ADMIN',
+  /** 被房主移出房间 */
+  KICKED_FROM_ROOM: 'KICKED_FROM_ROOM',
+  /** 已被房主封禁，无法再次加入 */
+  BANNED_FROM_ROOM: 'BANNED_FROM_ROOM',
 } as const
 
 export type ErrorCode = (typeof ERROR_CODE)[keyof typeof ERROR_CODE]
 
 export type MusicSource = 'netease' | 'tencent' | 'kugou' | 'kugou_concept' | 'bilibili'
+
+/** Raw word-timing formats a lyric response may carry. */
+export type LyricWordFormat = 'yrc' | 'qrc' | 'krc' | 'ttml' | 'enhanced-lrc'
+
+/** Where the lyric payload came from; `lrc` means line-only fallback. */
+export type LyricPayloadSource = 'platform' | 'amll' | 'lrc'
 
 /** Official hot-song chart providers exposed in the room sidebar. */
 export type HotSongsSource = Extract<MusicSource, 'netease' | 'tencent' | 'kugou'>
@@ -30,23 +42,68 @@ export type HotSongsSource = Extract<MusicSource, 'netease' | 'tencent' | 'kugou
 /** Logged-in providers that can supply automatic room roaming tracks. */
 export type RoamingSource = Extract<MusicSource, 'netease' | 'tencent' | 'kugou' | 'kugou_concept'>
 
+/** 网易云私人漫游的场景目录（`mode=SCENE_RCMD` 的 `submode`）。 */
+export const NETEASE_ROAMING_SCENES = [
+  { id: 'NIGHT_EMO', category: 'mood', label: '深夜情绪' },
+  { id: 'CURE', category: 'mood', label: '治愈' },
+  { id: 'CHEERFUL', category: 'mood', label: '轻快' },
+  { id: 'LYRICAL', category: 'mood', label: '抒情' },
+  { id: 'INSPIRATIONAL', category: 'mood', label: '励志' },
+  { id: 'RELAX', category: 'mood', label: '放松' },
+  { id: 'SWEET', category: 'mood', label: '甜蜜' },
+  { id: 'EXERCISE', category: 'activity', label: '运动' },
+  { id: 'FOCUS', category: 'activity', label: '专注' },
+  { id: 'SLEEP_HELP', category: 'activity', label: '助眠' },
+  { id: 'TAKE_SHOWER', category: 'activity', label: '洗澡' },
+  { id: 'COMMUTE', category: 'activity', label: '通勤' },
+  { id: 'COFFEE_SHOP', category: 'activity', label: '咖啡馆' },
+  { id: 'GAMES', category: 'activity', label: '游戏' },
+  { id: 'DANCE', category: 'activity', label: '舞蹈' },
+  { id: 'RAINY', category: 'activity', label: '雨天' },
+  { id: 'RHYTHM_BLUES', category: 'genre', label: 'R&B' },
+  { id: 'RAP', category: 'genre', label: '说唱' },
+  { id: 'K_POP', category: 'genre', label: 'K-Pop' },
+  { id: 'ELECTRONIC', category: 'genre', label: '电子' },
+  { id: 'ROCK', category: 'genre', label: '摇滚' },
+  { id: 'FOLK', category: 'genre', label: '民谣' },
+  { id: 'GUDIAN', category: 'genre', label: '古典' },
+  { id: 'JAZZ', category: 'genre', label: '爵士' },
+  { id: 'BLUE', category: 'genre', label: '蓝调' },
+  { id: 'PUNK', category: 'genre', label: '放克' },
+  { id: 'COUNTRY', category: 'genre', label: '乡村' },
+  { id: 'LIGHT', category: 'genre', label: '轻音乐' },
+  { id: 'GUOFENG', category: 'genre', label: '国风' },
+  { id: 'MANYAO', category: 'genre', label: '慢摇' },
+  { id: 'MUSICAL', category: 'genre', label: '音乐剧' },
+  { id: 'ACG', category: 'genre', label: 'ACG' },
+  { id: 'JINGDIAN', category: 'genre', label: '经典' },
+  { id: 'ORIGINAL_MUSICIAL', category: 'genre', label: '原创独立' },
+  { id: 'YINGSHI', category: 'genre', label: '影视原声' },
+  { id: 'CHINESE', category: 'language', label: '华语' },
+  { id: 'ENGLISH', category: 'language', label: '欧美' },
+  { id: 'YUEYU', category: 'language', label: '粤语' },
+  { id: 'JAPANESE', category: 'language', label: '日语' },
+  { id: 'FRANCH', category: 'language', label: '法语' },
+  { id: 'LATIN', category: 'language', label: '拉丁' },
+  { id: 'GLOBAL', category: 'language', label: '全球' },
+] as const
+
+export type NeteaseRoamingSceneId = (typeof NETEASE_ROAMING_SCENES)[number]['id']
+
 export const NETEASE_ROAMING_MODES = [
   'DEFAULT',
   'FAMILIAR',
   'EXPLORE',
-  'SCENE_RCMD:EXERCISE',
-  'SCENE_RCMD:FOCUS',
-  'SCENE_RCMD:NIGHT_EMO',
+  'PUZZLE_MODE_RCMD',
   'aidj',
+  ...NETEASE_ROAMING_SCENES.map((scene) => `SCENE_RCMD:${scene.id}` as const),
 ] as const
 
 /** 网易云私人漫游模式；其他平台目前固定使用 DEFAULT。 */
 export type NeteaseRoamingMode = (typeof NETEASE_ROAMING_MODES)[number]
 
 export function normalizeNeteaseRoamingMode(value: unknown): NeteaseRoamingMode {
-  return NETEASE_ROAMING_MODES.includes(value as NeteaseRoamingMode)
-    ? (value as NeteaseRoamingMode)
-    : 'DEFAULT'
+  return NETEASE_ROAMING_MODES.includes(value as NeteaseRoamingMode) ? (value as NeteaseRoamingMode) : 'DEFAULT'
 }
 
 /** Server-wide Kugou transport policy. Bilibili always uses the server proxy. */
@@ -97,6 +154,18 @@ export type UserRole = 'owner' | 'admin' | 'member'
 
 export type PlayMode = 'sequential' | 'loop-all' | 'loop-one' | 'shuffle'
 
+/**
+ * 队列模式（房主在设置里切换）：
+ * - keep：播完的歌留在队列里，按播放模式往下走——默认
+ * - consume：一首歌听完（或被切走）就从队列移除，队列只往前走、不会循环，后点的歌排在后面
+ */
+export type QueueMode = 'keep' | 'consume'
+
+/** 实际生效的播放模式：消耗队列里"列表循环"和"单曲循环"没有意义，按顺序播放；不改写已存的模式。 */
+export function effectivePlayMode(queueMode: QueueMode | undefined, playMode: PlayMode): PlayMode {
+  return queueMode === 'consume' && (playMode === 'loop-all' || playMode === 'loop-one') ? 'sequential' : playMode
+}
+
 /** 音频质量档位 (kbps)：标准 / 较高 / HQ / 无损 */
 export type AudioQuality =
   | 128
@@ -124,6 +193,8 @@ export interface Track {
   id: string
   title: string
   artist: string[]
+  /** 与 `artist` 下标对齐的平台歌手 ID（目前仅网易云提供），用于直接打开歌手主页；旧客户端忽略。 */
+  artistIds?: string[]
   album: string
   duration: number
   cover: string
@@ -146,10 +217,23 @@ export interface Track {
   requiresServerProxy?: boolean
   /** Codec family selected for Bilibili DASH playback. */
   streamFormat?: BilibiliStreamFormat
+  /** 服务端解析后的实际播放音质；仅当前播放曲目由服务端注入，旧客户端忽略。 */
+  audioQuality?: AudioQuality
+  /** 上游返回的实际码率（kbps）；未知时不填。 */
+  audioBitrate?: number | null
+  /** 实际音质低于房间请求档位（被平台/VIP 限制降级）。 */
+  qualityDowngraded?: boolean
   /** 是否为 VIP / 付费歌曲（可能无法播放或仅试听） */
   vip?: boolean
   /** 点歌人昵称（服务端在加入队列时注入） */
   requestedBy?: string
+  /** 服务端漫游补货的曲目；旧客户端忽略。 */
+  roaming?: boolean
+  /**
+   * 平台自己给出的另一种歌名/歌手写法（译名、原名、去掉版本后缀的名字）。
+   * 只用于跨源歌词搜索：按显示歌名搜不到逐字歌词时换这个名字再搜一次。旧客户端忽略。
+   */
+  lyricAliases?: { title?: string; artist?: string }
 }
 
 /** One provider-backed format that the current room can download. */
@@ -206,11 +290,21 @@ export interface RoomState {
   allowTemporaryAdminQueueClear: boolean
   /** Remove the previously played queue item after a successful next-track transition. */
   removePlayedTracks?: boolean
+  /** 队列模式；旧服务端缺省按 `keep`。 */
+  queueMode?: QueueMode
   /** Automatically continue with personalized recommendations when no user-queued successor exists. */
   roamingEnabled?: boolean
+  /** 自动混音：服务端提前推进并在重叠窗口内交接，所有成员使用同一过渡时长。 */
+  automixEnabled?: boolean
+  /** 过渡策略：`automix` 按节拍与段落规划，`crossfade` 固定等功率淡化。 */
+  transitionMode?: TransitionMode
+  /** `crossfade` 模式的固定淡化时长（秒）。 */
+  crossfadeMaxSec?: number
+  /** `automix` 的表演模式：在鼓组换手前做 build-up。 */
+  automixPerformance?: boolean
   /** Provider used for personalized room roaming. */
   roamingSource?: RoamingSource
-/** 网易云私人漫游模式；QQ/酷狗及酷狗概念版使用 DEFAULT。 */
+  /** 网易云私人漫游模式；QQ/酷狗及酷狗概念版使用 DEFAULT。 */
   roamingMode?: NeteaseRoamingMode
   /** 密码明文（仅 owner 可见；普通成员和临时管理员只收到 hasPassword） */
   password?: string | null
@@ -218,6 +312,8 @@ export interface RoomState {
   users: User[]
   /** Full room roster, including members who are currently offline. */
   members: RoomMember[]
+  /** 本房间封禁名单；仅房主收到的状态里包含。 */
+  bannedMembers?: RoomBan[]
   queue: Track[]
   currentTrack: Track | null
   playState: PlayState
@@ -272,6 +368,13 @@ export interface RoomMember extends User {
   lastSeenAt: number | null
   /** Last identified client, retained for offline members across server restarts. */
   lastClient?: ClientInfo
+}
+
+/** 房主封禁记录；仅房主可见。 */
+export interface RoomBan {
+  id: string
+  nickname: string
+  bannedAt: number
 }
 
 export interface ChatMessage {
@@ -360,6 +463,10 @@ export interface MyPlatformAuth {
   vipType?: number
   vipLabel?: string
   vipLevel?: number
+  /** 是否把该账号权益共享给所在房间；关闭后仅本人可用。旧客户端忽略该字段。 */
+  shareWithRoom?: boolean
+  /** 是否允许房间把完整播放的网易云歌曲写入该账号播放记录；默认关闭。 */
+  reportListening?: boolean
 }
 
 /** 歌单元数据（用于歌单列表展示） */
@@ -373,6 +480,114 @@ export interface Playlist {
   source: MusicSource
   creator?: string
   description?: string
+}
+
+/** 歌手元数据（歌手主页头部、推荐歌手） */
+export interface Artist {
+  id: string
+  name: string
+  cover: string
+  thumbnailCover?: string
+  source: MusicSource
+  albumCount?: number
+  songCount?: number
+  /** 简介，仅歌手主页提供 */
+  description?: string
+}
+
+export interface ArtistPage<T> {
+  items: T[]
+  hasMore: boolean
+  total?: number
+}
+
+/** `/api/music/artist` 的响应：资料、热门歌曲首页与专辑首页 */
+export interface ArtistHome {
+  artist: Artist
+  songs: ArtistPage<Track>
+  albums: ArtistPage<Playlist>
+}
+
+export type DiscoverHomeBlock = 'radar' | 'artists' | 'albums'
+
+/** `/api/music/discover/home` 的响应：雷达歌单、热门歌手、新碟；`failed` 列出加载失败的区块 */
+export interface DiscoverHome {
+  radar: Playlist[]
+  artists: Artist[]
+  albums: Playlist[]
+  failed: DiscoverHomeBlock[]
+}
+
+/**
+ * 跨源统一搜索结果：同一首歌在各平台的不同版本。
+ * `candidates` 按来源优先级排列，客户端可让用户挑一个可用的版本加进队列。
+ */
+export interface UnifiedSearchGroup {
+  key: string
+  title: string
+  artist: string[]
+  duration: number
+  /** 版本标签（live/remix/…），用于在结果里提示同名不同版本。 */
+  version?: import('./trackMatch.js').TrackVersionTag
+  candidates: Track[]
+}
+
+/** 在线音源解析失败的结构化原因，客户端据此决定提示与可执行动作。 */
+export type PlaybackFailureReason =
+  | 'sign-in-needed'
+  | 'subscription-required'
+  | 'purchase-required'
+  | 'region-restricted'
+  | 'taken-down'
+  | 'no-audio'
+  | 'not-playable'
+  | 'unsupported-quality'
+  | 'upstream-unreachable'
+  | 'rate-limited'
+  | 'unknown'
+
+export interface PlaybackFailure {
+  source: MusicSource
+  reason: PlaybackFailureReason
+  /** 稍后重试可能成功。 */
+  retryable: boolean
+  /** 登录、购买或换源等用户动作可以解决。 */
+  actionable: boolean
+  /** 平台自己的状态码/原话，已脱敏，不含 cookie/token。 */
+  providerCode?: string
+  providerMessage?: string
+  httpStatus?: number
+  retryAfterMs?: number
+}
+
+/** 服务端在某首歌无法播放时广播给房间的事件。 */
+export interface PlaybackFailureEvent {
+  trackId: string
+  track: Track
+  failure: PlaybackFailure
+  /** 房间接下来会做什么；`stop` 等用户处理，`skip` 会在倒计时后自动跳过。 */
+  nextAction: 'stop' | 'skip'
+  autoActionInMs?: number
+}
+
+/** 平台连接自检的一行；报告里绝不包含凭据。 */
+export interface PlatformDiagnostic {
+  platform: MusicSource
+  loggedIn: boolean
+  reachable: boolean
+  latencyMs: number | null
+  vipType?: number
+  vipLabel?: string
+  code?: string
+  message?: string
+  advice: string
+}
+
+export interface PlatformDiagnosticsReport {
+  generatedAt: number
+  platforms: PlatformDiagnostic[]
+  /** 可原样复制给他人排查的纯文本，不含 cookie/token。 */
+  report: string
 }
 
 /**
@@ -392,4 +607,54 @@ export interface UserPlaylist {
 /** 账户本地歌单详情（含完整曲目）。 */
 export interface UserPlaylistDetail extends UserPlaylist {
   tracks: Track[]
+}
+
+/** 调性估计（上游 `TrackProfile` 的 `introKey` / `outroKey`）。 */
+export interface AutomixKeyEstimate {
+  /** 0 = C, 1 = C#, … 11 = B。 */
+  key: number
+  major: boolean
+  /** 0–1；低于 0.25 时上游按“没有答案”处理。 */
+  confidence: number
+}
+
+/**
+ * 过渡用的曲目画像。上游 `automix/trackProfile.ts` 的线上子集：
+ * 客户端在离线分析时算好，随 `player:track_profile` 上报给服务端，
+ * 由服务端统一决定过渡点，保证房间内所有成员一致。
+ */
+export interface AutomixTrackProfile {
+  version: number
+  partial: boolean
+  gridless?: boolean
+  duration: number
+  leadIn: number
+  vocalStart: number | null
+  sectionStart: number | null
+  sections: number[]
+  leadOut: number | null
+  bodyOut: number | null
+  startsHot: boolean
+  endsHot: boolean | null
+  introSlope: number
+  outroSlope: number | null
+  loudness: number
+  programLoudness?: number | null
+  peak?: number | null
+  programFromHead?: boolean
+  headDb: number
+  tailDb: number | null
+  introTone: number[]
+  outroTone: number[] | null
+  bpm: number | null
+  outroBpm: number | null
+  beatOffset: number
+  downbeatOffset: number | null
+  headDownbeatOffset: number | null
+  beatsPerBar: number
+  key: number
+  major: boolean
+  keyConfidence: number
+  introKey: AutomixKeyEstimate
+  outroKey: AutomixKeyEstimate | null
 }

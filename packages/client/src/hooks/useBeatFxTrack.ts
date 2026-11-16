@@ -1,8 +1,9 @@
 import { useEffect, useRef } from 'react'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { useAudioSettingsStore } from '@/stores/audioSettingsStore'
 import { isFoliaModeId } from '@/components/Player/folia/registry'
-import { BEAT_EFFECT_IDS, resolveBeatEffectSetting } from '@/services/beatFx/beatEffects'
+import { BEAT_EFFECT_IDS, beatEffectPartId, resolveBeatEffectPartStrength, resolveBeatEffectSetting } from '@/services/beatFx/beatEffects'
 import {
   beginBeatFxTrack,
   setBeatFxEvents,
@@ -11,7 +12,7 @@ import {
   stopBeatFx,
 } from '@/services/beatFx/beatFxLive'
 import { currentBeatFxKey, loadBeatFxTrack } from '@/services/beatFx/beatFxSource'
-import { liveBeatEffects, liveBeatEffectStrength, visualizerWantsBeats } from '@/services/beatFx/beatClockTargets'
+import { liveBeatEffects, liveBeatEffectStrength, visualizerWantsBeats, visualizerWantsFeatures } from '@/services/beatFx/beatClockTargets'
 import { smartBeatActive } from '@/services/beatFx/beatEffects'
 
 /**
@@ -26,26 +27,42 @@ import { smartBeatActive } from '@/services/beatFx/beatEffects'
 const RETRY_ATTEMPTS = 4
 const RETRY_DELAY_MS = 3000
 
-export function useBeatFxTrack(): boolean {
+export function useBeatFxTrack(staticMode = false): boolean {
   const smartBeat = useSettingsStore((s) => s.smartBeat)
   const stage = useSettingsStore((s) => s.visualStage)
   const track = usePlayerStore((s) => s.currentTrack)
+  const trackFeaturesEnabled = useAudioSettingsStore((s) => s.trackFeaturesEnabled)
+  const replayGainMode = useAudioSettingsStore((s) => s.replayGainMode)
+  const highPrecisionBeats = useAudioSettingsStore((s) => s.highPrecisionBeats)
+  const highPrecisionStems = useAudioSettingsStore((s) => s.highPrecisionStems)
 
   const mode = isFoliaModeId(stage) ? stage : null
-  // `still` 自己画背景（不叠背景层），其余模式叠背景层；目前背景类没有在播的效果。
+  // `still` / `machi` 自己画背景（不叠背景层）；其余模式叠背景层；目前背景类没有在播的效果。
   const targets = mode
     ? {
         smartBeat,
         mode,
-        modeHasOwnBackground: mode === 'still',
+        modeHasOwnBackground: mode === 'still' || mode === 'machi',
         backgroundHasBeats: false,
       }
     : null
-  const wanted = targets ? visualizerWantsBeats(targets) : false
+  // 静止模式（省电 / 减弱动效 / 低配 / 后台）不跑拍点分析，也不下发效果强度（上游同判据）。
+  // 只开鼓点 / 分轨效果时也要分析一次，否则特征永远不会产出。
+  const featuresWanted = targets !== null && trackFeaturesEnabled && visualizerWantsFeatures(targets)
+  // 响度分析是音频功能（ReplayGain），与视觉特效开关、省电静止模式无关：
+  // 只靠它触发一次分析，否则关掉智能动感后 ReplayGain 会一直没数据。
+  const loudnessWanted = replayGainMode !== 'off'
+  const wanted = targets !== null && ((!staticMode && (visualizerWantsBeats(targets) || featuresWanted)) || loudnessWanted)
   const beatStrength = targets ? liveBeatEffectStrength(targets, 'beats', (id) => resolveBeatEffectSetting(smartBeat, id).strength) : 0
   // 效果与强度串成一个字符串，设置里别的地方变化不会触发重渲染。
-  const liveEffects = targets
-    ? liveBeatEffects(targets).map((effect) => `${effect.id}=${resolveBeatEffectSetting(smartBeat, effect.id).strength}`).join(',')
+  const liveEffects = targets && !staticMode
+    ? liveBeatEffects(targets).flatMap((effect) => {
+        const setting = resolveBeatEffectSetting(smartBeat, effect.id)
+        return [
+          `${effect.id}=${setting.strength}`,
+          ...(effect.parts ?? []).map((part) => `${beatEffectPartId(effect.id, part.key)}=${resolveBeatEffectPartStrength(setting, part.key)}`),
+        ]
+      }).join(',')
     : ''
   const identity = wanted && track ? currentBeatFxKey() : null
   /** 拍点表未就绪期间保持「就绪」的兜底；与上游 READY_HOLD_MS 同义，由 beatFxLive 内部管。 */
@@ -103,7 +120,7 @@ export function useBeatFxTrack(): boolean {
       cancelRef.current = null
     }
     // 只看歌曲身份与开关；`track` 对象会因为无关原因换引用。
-  }, [identity, wanted])
+  }, [identity, wanted, trackFeaturesEnabled, replayGainMode, highPrecisionBeats, highPrecisionStems])
 
   // 设置里换了「cached / on」要重新取一次（`on` 立刻分析，`cached` 停止在跑的）。
   const active = smartBeatActive(smartBeat)

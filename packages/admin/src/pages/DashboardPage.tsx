@@ -61,6 +61,20 @@ export default function DashboardPage() {
         </div>
       </SectionCard>
 
+      {overview.playback && (
+        <SectionCard label="播放与换源">
+          <div className="grid gap-x-12 gap-y-5 text-sm sm:grid-cols-2 lg:grid-cols-4">
+            <InfoItem label="自动回退尝试">{overview.playback.autoFallbackAttempts}</InfoItem>
+            <InfoItem label="自动回退成功">{overview.playback.autoFallbackSuccess}</InfoItem>
+            <InfoItem label="自动回退失败">{overview.playback.autoFallbackFailed}</InfoItem>
+            <InfoItem label="媒体失败换源请求">{overview.playback.mediaFallbackRequests}</InfoItem>
+            <InfoItem label="手动换源">{overview.playback.manualSourceSwitches}</InfoItem>
+            <InfoItem label="自动换源">{overview.playback.automaticSourceSwitches}</InfoItem>
+            <InfoItem label="换源失败">{overview.playback.sourceSwitchFailed}</InfoItem>
+          </div>
+        </SectionCard>
+      )}
+
       {/* 最近活跃用户 */}
       <SectionCard label="最近活跃用户">
         {recentUsers.length === 0 ? (

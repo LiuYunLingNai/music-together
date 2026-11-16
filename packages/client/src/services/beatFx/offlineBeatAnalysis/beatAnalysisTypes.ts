@@ -91,6 +91,28 @@ export interface BeatMap {
   /** 视觉主拍数（上游 toast 显示用）。 */
   visualBeatCount: number
   analyzedAt: number
+  /** 整曲响度（仅开启 ReplayGain 时测量）。 */
+  loudness?: { lufs: number; peak: number }
+  /** Folia 用的混音特征（仅开启「混音特征分析」时计算）。 */
+  features?: import('./trackFeatures').TrackFeatures
+  /** 自动混音用的曲目画像（仅房间开启自动混音时计算）。 */
+  profile?: import('@/lib/automix/upstream/trackProfile').TrackProfile
+  /** beat_this 的整曲拍网格；画像计算要用它替代本地估计的六字段。 */
+  beatGrid?: import('@/services/analysis/beatThis').BeatGrid | null
+  /**
+   * 模型逐拍量出的重音（beat_this）；顺序与 `cameraBeats` 一一对应。
+   * 有它时 beatFx 直接使用，本地拍点图没有这个字段，仍由 `cameraBeats` 换算。
+   */
+  modelAccents?: {
+    v: number
+    impact: number[]
+    low: number[]
+    mid: number[]
+    high: number[]
+    rhythmic: number[]
+    pulse: number[]
+    trackScale: number
+  }
 }
 
 /**

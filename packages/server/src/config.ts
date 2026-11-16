@@ -26,6 +26,11 @@ const envSchema = z.object({
     .refine((value) => !value || URL.canParse(value), 'QQ_MUSIC_API_URL must be a valid absolute URL')
     .default(''),
   QQ_MUSIC_API_KEY: z.string().trim().default(''),
+  TTML_ALLOWED_HOSTS: z
+    .string()
+    .trim()
+    .default('amlldb.bikonoo.com,api.beta.amllhub.bikonoo.com,raw.githubusercontent.com'),
+  TTML_PROXY_TIMEOUT_MS: z.coerce.number().int().positive().max(30_000).default(6_000),
   DATABASE_URL: z.string().default('file:./data/music-together.db'),
   SERVER_ADMIN_IDS: z.string().default(''),
 })
@@ -62,6 +67,14 @@ export const config = {
   qqMusicApi: {
     url: env.QQ_MUSIC_API_URL,
     key: env.QQ_MUSIC_API_KEY,
+  },
+  ttml: {
+    allowedHosts: new Set(
+      env.TTML_ALLOWED_HOSTS.split(',')
+        .map((host) => host.trim().toLowerCase())
+        .filter(Boolean),
+    ),
+    timeoutMs: env.TTML_PROXY_TIMEOUT_MS,
   },
   database: {
     url: env.DATABASE_URL,

@@ -4,14 +4,14 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { LyricLine } from '@applemusic-like-lyrics/core'
 import type { Track } from '@music-together/shared'
-import { parseTTML } from '@applemusic-like-lyrics/lyric'
+import { parseTtmlLyricLines } from '@/lib/lyricPresentation'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useLyric } from './useLyric'
 
-vi.mock('@applemusic-like-lyrics/lyric', async (importOriginal) => {
-  const original = await importOriginal<typeof import('@applemusic-like-lyrics/lyric')>()
-  return { ...original, parseTTML: vi.fn() }
+vi.mock('@/lib/lyricPresentation', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/lib/lyricPresentation')>()
+  return { ...original, parseTtmlLyricLines: vi.fn() }
 })
 
 const lines = (text: string): LyricLine[] => [{
@@ -58,7 +58,7 @@ afterEach(() => {
   container.remove()
   vi.useRealTimers()
   vi.unstubAllGlobals()
-  vi.mocked(parseTTML).mockReset()
+  vi.mocked(parseTtmlLyricLines).mockReset()
 })
 
 async function completeFetch(id: string) {
@@ -85,7 +85,7 @@ describe('lyric request publication and cancellation', () => {
 
   it('publishes native lyrics before slow TTML, then preserves arriving duet structure', async () => {
     const pending = deferred<Response>()
-    vi.mocked(parseTTML).mockReturnValue({ lines: lines('对唱歌词').map((line) => ({ ...line, isDuet: true })) } as ReturnType<typeof parseTTML>)
+    vi.mocked(parseTtmlLyricLines).mockReturnValue(lines('对唱歌词').map((line) => ({ ...line, isDuet: true })))
     vi.stubGlobal('fetch', vi.fn(async (input: string) => input.includes('.ttml')
       ? pending.promise
       : Response.json(native('对唱歌词'))))

@@ -4,6 +4,9 @@ export const FOLIA_MODES = [
   { id: 'tempera', upstreamId: 'tempera', label: '凝彩', description: '色块拼贴、反色文字与场景转场', order: 110 },
   { id: 'lumiere', upstreamId: 'lumiere', label: '绘光', description: '光场、辉光与歌词的动态构图', order: 120 },
   { id: 'hanabi', upstreamId: 'hanabi', label: '花火', description: '日式歌词 PV：色块字、烟花与持续上升的画面', order: 125 },
+  // 上游条目 order 是 27 / 29：排在花火之后、流光之前。
+  { id: 'machi', upstreamId: 'machi', label: '町景', description: 'three.js 雨夜街景，招牌上写着歌词', order: 126 },
+  { id: 'nebbia', upstreamId: 'nebbia', label: '雾笺', description: '在起雾的车窗上按笔顺写字，雨夜街景透出', order: 128 },
   { id: 'luminous', upstreamId: 'classic', label: '流光', description: '逐词辉光与漂浮排布', order: 130 },
   { id: 'cadenza', upstreamId: 'cadenza', label: '心象', description: '语义片段、镜像光束与文字层次', order: 140 },
   { id: 'partita', upstreamId: 'partita', label: '云阶', description: '分栏逐词歌词、错峰入场', order: 150 },

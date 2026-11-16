@@ -1,15 +1,31 @@
 import {
+  looksLikeMusicId,
+  normalizeMusicId,
+  supportsIdLookup,
+  type MusicRefKind,
   searchQuerySchema,
+  unifiedSearchQuerySchema,
   urlQuerySchema,
+  likedQuerySchema,
+  likedSetSchema,
   lyricQuerySchema,
   lyricSupplementQuerySchema,
+  lyricCandidatesQuerySchema,
+  fallbackCandidatesQuerySchema,
+  ttmlQuerySchema,
+  amllTtmlQuerySchema,
   coverQuerySchema,
+  dynamicCoverQuerySchema,
   downloadOptionsQuerySchema,
   downloadQuerySchema,
   playlistQuerySchema,
   recommendationsQuerySchema,
   hotSongsQuerySchema,
+  artistQuerySchema,
+  artistPageQuerySchema,
+  discoverQuerySchema,
   type Track,
+  type MusicSource,
   type PlatformRecommendation,
 } from '@music-together/shared'
 import { Router, type Router as RouterType, type Request, type Response } from 'express'
@@ -17,7 +33,12 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import type { ZodSchema } from 'zod'
 import { musicProvider } from '../services/musicProvider.js'
+import { resolveStream } from '../services/streamResolutionService.js'
+import * as trackFallbackService from '../services/trackFallbackService.js'
+import { searchAllSources } from '../services/unifiedSearchService.js'
 import * as authService from '../services/authService.js'
+import { getEffectiveQuality } from '../services/audioQualityPolicy.js'
+import { getDynamicCoverUrl } from '../services/dynamicCoverService.js'
 import { roomRepo } from '../repositories/roomRepository.js'
 import { audioProxyPolicyRepo } from '../repositories/audioProxyPolicyRepository.js'
 import { logger } from '../utils/logger.js'
@@ -39,6 +60,12 @@ import { createHotSongsService, hotSongsPlaylistId } from '../services/hotSongsS
 import { LyricSupplementService } from '../services/lyricSupplementService.js'
 import { createKugouListeningRouter } from '../controllers/kugouListeningController.js'
 import { createKugouListeningService } from '../services/kugouListeningService.js'
+import { getTtml, TtmlProxyError } from '../services/ttmlProxyService.js'
+import { getAmllTtml, searchAmllCandidates, searchAmllTtml } from '../services/amllLyricsService.js'
+import { artistService } from '../services/artistService.js'
+import { discoverService } from '../services/discoverService.js'
+import { CatalogError } from '../services/catalogUtils.js'
+import { lookupById } from '../services/idLookup.js'
 
 const router: RouterType = Router()
 const hotSongsService = createHotSongsService(musicProvider)
@@ -51,6 +78,20 @@ router.use(
     service: createKugouListeningService(),
   }),
 )
+
+const LYRIC_TIMING_TAG = /\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?\]|\[\d+,\d+\]|\(\d+,\d+,\d+\)|<[^>]+>/g
+const LYRIC_META_LINE = /^\s*\[[a-z][^\]]*:.*]\s*$/i
+
+function lyricPreview(text: string): string {
+  const qrc = text.match(/LyricContent="([\s\S]*?)"/)?.[1]
+  const content = (qrc ?? text).replace(/&quot;/g, '"').replace(/&#10;/g, '\n')
+  for (const raw of content.split(/\r?\n/)) {
+    const line = raw.replace(LYRIC_TIMING_TAG, '').trim()
+    if (!line || LYRIC_META_LINE.test(line) || /^[/.\s]+$/.test(line)) continue
+    return line.slice(0, 80)
+  }
+  return ''
+}
 
 /**
  * Wrap an async route handler with validation + error handling.
@@ -70,6 +111,10 @@ function validated<T>(
       }
       await handler(parsed.data, req, res)
     } catch (err) {
+      if (err instanceof CatalogError) {
+        res.status(err.status).json({ error: err.code })
+        return
+      }
       logger.error(`${label} failed`, err)
       res.status(500).json({ error: 'Internal server error' })
     }
@@ -93,9 +138,25 @@ router.get(
       }
     }
 
+    // 形如 ID（或分享链接）的关键词先按 ID 查：名称不一定搜得到，ID 一定查得到。
+    // 查到的就是全部答案；没查到或查询失败就退回按词搜索。
+    const refKind: MusicRefKind = type === 'album' || type === 'playlist' || type === 'artist' ? type : 'song'
+    const refId =
+      pageNum === 1 && looksLikeMusicId(source, refKind, keyword) ? normalizeMusicId(source, refKind, keyword) : null
+    if (refId && supportsIdLookup(source, refKind)) {
+      const found = await lookupById(source, refKind, refId).catch(() => [])
+      if (found.length > 0) {
+        res.json({ tracks: found, page: pageNum, hasMore: false })
+        return
+      }
+    }
+
     if (type === 'album') {
       const albums = await musicProvider.searchAlbum(source, keyword, pageSize, pageNum, cookie)
       res.json({ tracks: albums, page: pageNum, hasMore: albums.length >= pageSize })
+    } else if (type === 'artist') {
+      const artists = await musicProvider.searchArtist(source, keyword, pageSize, pageNum, cookie)
+      res.json({ tracks: artists, page: pageNum, hasMore: artists.length >= pageSize })
     } else if (type === 'playlist') {
       const playlists = await musicProvider.searchPlaylist(source, keyword, pageSize, pageNum, cookie)
       res.json({ tracks: playlists, page: pageNum, hasMore: playlists.length >= pageSize })
@@ -103,6 +164,20 @@ router.get(
       const tracks = await musicProvider.search(source, keyword, pageSize, pageNum, cookie)
       res.json({ tracks, page: pageNum, hasMore: tracks.length >= pageSize })
     }
+  }),
+)
+
+router.get(
+  '/search-all',
+  musicMetadataRateLimit,
+  validated(unifiedSearchQuerySchema, 'Unified search', async (data, _req, res) => {
+    const { keyword, limit, roomId } = data
+    const identityUserId = _req.identityUserId
+    const room = roomId ? roomRepo.get(roomId) : undefined
+    const canUseRoomAuth = Boolean(roomId && identityUserId && room?.users.some((user) => user.id === identityUserId))
+    const cookieFor = (source: MusicSource): string | null =>
+      canUseRoomAuth && identityUserId && roomId ? authService.getUserCookie(identityUserId, source, roomId) : null
+    res.json(await searchAllSources(keyword, limit, cookieFor))
   }),
 )
 
@@ -179,6 +254,50 @@ router.get(
   ),
 )
 
+/** 目录类接口（歌手、发现）：校验参数，CatalogError 以脱敏的状态码与固定错误码返回，结果可公共缓存。 */
+function catalogRoute<T>(
+  schema: ZodSchema<T>,
+  label: string,
+  maxAgeSeconds: number,
+  load: (data: T) => Promise<unknown>,
+) {
+  return validated(schema, label, async (data, _req, res) => {
+    try {
+      const body = await load(data)
+      res.setHeader('Cache-Control', `public, max-age=${maxAgeSeconds}`)
+      res.json(body)
+    } catch (error) {
+      if (!(error instanceof CatalogError)) throw error
+      res.status(error.status).json({ error: error.code })
+    }
+  })
+}
+
+router.get(
+  '/artist',
+  musicMetadataRateLimit,
+  catalogRoute(artistQuerySchema, 'Get artist', 300, ({ source, id }) => artistService.getArtist(source, id)),
+)
+router.get(
+  '/artist/songs',
+  musicMetadataRateLimit,
+  catalogRoute(artistPageQuerySchema, 'Get artist songs', 300, ({ source, id, offset, limit }) =>
+    artistService.getSongs(source, id, offset, limit),
+  ),
+)
+router.get(
+  '/artist/albums',
+  musicMetadataRateLimit,
+  catalogRoute(artistPageQuerySchema, 'Get artist albums', 300, ({ source, id, offset, limit }) =>
+    artistService.getAlbums(source, id, offset, limit),
+  ),
+)
+router.get(
+  '/discover/home',
+  musicMetadataRateLimit,
+  catalogRoute(discoverQuerySchema, 'Get discover home', 600, ({ source }) => discoverService.getHome(source)),
+)
+
 router.get(
   '/hot',
   musicMetadataRateLimit,
@@ -212,11 +331,80 @@ router.get(
   '/url',
   musicMetadataRateLimit,
   validated(urlQuerySchema, 'Get stream URL', async (data, _req, res) => {
-    const { source, urlId, bitrate } = data
-    const url = await musicProvider.getStreamUrl(source, urlId, bitrate)
-    res.json({ url })
+    const { source, urlId, bitrate, roomId, purpose } = data
+    let cookie: string | undefined
+    let vipType: 0 | 1 | 2 = 0
+    let quality = bitrate
+    if (roomId) {
+      const identityUserId = _req.identityUserId
+      const room = roomRepo.get(roomId)
+      const trackInRoom = Boolean(
+        room &&
+        ((room.currentTrack?.source === source && room.currentTrack.urlId === urlId) ||
+          room.queue.some((item) => item.source === source && item.urlId === urlId)),
+      )
+      if (identityUserId && trackInRoom && room?.users.some((user) => user.id === identityUserId)) {
+        const auth = authService.getBestAuth(source, roomId)
+        if (auth) {
+          cookie = auth.cookie
+          vipType = auth.vipType
+        }
+        quality = getEffectiveQuality(source, bitrate, vipType)
+      }
+    }
+    const stream = await resolveStream(source, urlId, quality, { cookie, vipType, purpose })
+    res.json({ url: stream?.url ?? null })
   }),
 )
+
+router.get(
+  '/liked',
+  musicMetadataRateLimit,
+  validated(likedQuerySchema, 'Get liked state', async ({ source, id, roomId }, req, res) => {
+    if (source !== 'netease') {
+      res.json({ liked: false })
+      return
+    }
+    const identityUserId = req.identityUserId
+    const room = roomRepo.get(roomId)
+    if (!identityUserId || !room || !room.users.some((user) => user.id === identityUserId)) {
+      res.status(403).json({ error: 'Forbidden' })
+      return
+    }
+    const cookie = authService.getUserCookie(identityUserId, source, roomId)
+    if (!cookie) {
+      res.json({ liked: false })
+      return
+    }
+    res.json({ liked: await musicProvider.isNeteaseLiked(cookie, id) })
+  }),
+)
+
+router.post('/liked', musicMetadataRateLimit, async (req, res) => {
+  const parsed = likedSetSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid request' })
+    return
+  }
+  const { source, id, roomId, liked } = parsed.data
+  if (source !== 'netease') {
+    res.status(400).json({ error: '该平台暂不支持喜欢操作' })
+    return
+  }
+  const identityUserId = req.identityUserId
+  const room = roomRepo.get(roomId)
+  if (!identityUserId || !room || !room.users.some((user) => user.id === identityUserId)) {
+    res.status(403).json({ error: 'Forbidden' })
+    return
+  }
+  const cookie = authService.getUserCookie(identityUserId, source, roomId)
+  if (!cookie) {
+    res.status(401).json({ error: '请先登录网易云账号' })
+    return
+  }
+  const ok = await musicProvider.setNeteaseLiked(cookie, id, liked)
+  res.status(ok ? 200 : 502).json({ liked: ok ? liked : !liked, ok })
+})
 
 function getAuthorizedCurrentTrack(roomId: string, trackId: string, req: Request, res: Response): Track | null {
   const identityUserId = req.identityUserId
@@ -284,7 +472,7 @@ router.get(
   validated(lyricQuerySchema, 'Get lyric', async (data, _req, res) => {
     const { source, lyricId } = data
     const result = await musicProvider.getLyric(source, lyricId)
-    const hasLyric = !!(result.lyric || result.yrc || result.wordByWord?.length)
+    const hasLyric = !!(result.lyric || result.yrc || result.wordLyric || result.wordByWord?.length)
     res.setHeader('Cache-Control', hasLyric ? 'private, max-age=3600' : 'private, no-store')
     res.json(result)
   }),
@@ -301,11 +489,152 @@ router.get(
 )
 
 router.get(
+  '/lyric-candidates',
+  musicMetadataRateLimit,
+  validated(lyricCandidatesQuerySchema, 'Get lyric candidates', async (data, _req, res) => {
+    const [result, ttmlCandidates] = await Promise.all([
+      data.source && data.lyricId
+        ? lyricSupplementService.getSupplement({
+            source: data.source,
+            lyricId: data.lyricId,
+            title: data.title,
+            artists: data.artists,
+            duration: data.duration,
+          })
+        : null,
+      searchAmllCandidates({ title: data.title, artists: data.artists, duration: data.duration }).catch(() => []),
+    ])
+    res.setHeader(
+      'Cache-Control',
+      result?.candidates?.length || ttmlCandidates.length ? 'private, max-age=600' : 'private, no-store',
+    )
+    res.json({
+      candidates: (result?.candidates ?? []).map(
+        ({ source, lyricId, title, artist, duration, lyric, wordLyric, yrc, wordByWord, matchScore }) => ({
+          source,
+          lyricId,
+          title,
+          artist,
+          duration,
+          preview: lyricPreview(lyric || wordLyric || yrc || ''),
+          hasWordTiming: Boolean(wordByWord?.length || wordLyric || yrc),
+          matchScore,
+        }),
+      ),
+      ttmlCandidates,
+    })
+  }),
+)
+
+router.get(
+  '/fallback-candidates',
+  musicMetadataRateLimit,
+  validated(fallbackCandidatesQuerySchema, 'Get fallback candidates', async (data, _req, res) => {
+    const original: Track = {
+      id: 'fallback-query',
+      title: data.title,
+      artist: data.artists,
+      album: data.album ?? '',
+      duration: data.duration,
+      cover: '',
+      source: data.source,
+      sourceId: '',
+      urlId: '',
+    }
+    const candidates = await trackFallbackService.findAlternativeTracks(original)
+    res.setHeader('Cache-Control', candidates.length ? 'private, max-age=120' : 'private, no-store')
+    res.json({ candidates })
+  }),
+)
+
+router.get(
+  '/ttml',
+  musicMetadataRateLimit,
+  validated(ttmlQuerySchema, 'Get TTML', async (data, req, res) => {
+    try {
+      const ifNoneMatch = typeof req.headers['if-none-match'] === 'string' ? req.headers['if-none-match'] : undefined
+      const result = await getTtml(data.url, ifNoneMatch)
+      if (!result) {
+        res.status(404).end()
+        return
+      }
+      res.setHeader('ETag', result.etag)
+      if (result.notModified) {
+        res.status(304).end()
+        return
+      }
+      res.setHeader('Content-Type', 'application/ttml+xml; charset=utf-8')
+      res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800')
+      res.status(200).send(result.body)
+    } catch (error) {
+      const statusCode = error instanceof TtmlProxyError ? error.statusCode : 502
+      let host = 'invalid'
+      try {
+        host = new URL(data.url).hostname
+      } catch {
+        // Keep the log useful even when the client sent an invalid URL.
+      }
+      logger.warn('TTML 代理请求失败', {
+        statusCode,
+        host,
+        message: error instanceof Error ? error.message : String(error),
+      })
+      res.status(statusCode).json({ error: 'TTML unavailable' })
+    }
+  }),
+)
+
+router.get(
+  '/amll-ttml',
+  musicMetadataRateLimit,
+  validated(amllTtmlQuerySchema, 'Get AMLL TTML', async (data, req, res) => {
+    const ifNoneMatch = typeof req.headers['if-none-match'] === 'string' ? req.headers['if-none-match'] : undefined
+    let result = await getAmllTtml(data.platform, data.id, ifNoneMatch)
+    if (!result && data.title) {
+      result = await searchAmllTtml(
+        data.platform,
+        { title: data.title, artists: data.artists ?? [], album: data.album, duration: data.duration },
+        ifNoneMatch,
+      )
+    }
+    if (!result) {
+      res.status(404).end()
+      return
+    }
+    res.setHeader('ETag', result.etag)
+    if (result.notModified) {
+      res.status(304).end()
+      return
+    }
+    res.setHeader('Content-Type', 'application/ttml+xml; charset=utf-8')
+    res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800')
+    res.status(200).send(result.body)
+  }),
+)
+
+router.get(
   '/cover',
   musicMetadataRateLimit,
   validated(coverQuerySchema, 'Get cover', async (data, _req, res) => {
     const { source, picId, size } = data
     const url = await musicProvider.getCover(source, picId, size)
+    res.json({ url })
+  }),
+)
+
+router.get(
+  '/dynamic-cover',
+  musicMetadataRateLimit,
+  validated(dynamicCoverQuerySchema, 'Get dynamic cover', async (data, _req, res) => {
+    const { source, id, roomId, title, artists, duration, album } = data
+    // 只读动态封面用房间里最高档的共享网易云登录态，既不暴露凭据，也不碰账号歌单。
+    const identityUserId = _req.identityUserId
+    const neteaseCookie =
+      roomId && identityUserId && roomRepo.get(roomId)?.users.some((user) => user.id === identityUserId)
+        ? authService.getBestAuth('netease', roomId)?.cookie ?? null
+        : null
+    const url = await getDynamicCoverUrl(source, id, { title, artists, duration, album, neteaseCookie })
+    res.setHeader('Cache-Control', 'no-store')
     res.json({ url })
   }),
 )
@@ -328,6 +657,7 @@ router.get(
         res.status(403).json({ error: 'Forbidden' })
         return
       }
+      // 歌单详情属于个人数据：只认请求者自己的凭据，不回退到房间共享账号。
       cookie = authService.getUserCookie(identityUserId, source, roomId)
     }
 

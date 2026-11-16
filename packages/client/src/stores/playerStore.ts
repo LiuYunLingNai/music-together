@@ -1,6 +1,6 @@
 import { create } from 'zustand'
-import type { Track } from '@music-together/shared'
-import type { LyricLine as AMLLLyricLine } from '@applemusic-like-lyrics/core'
+import type { MusicSource, Track } from '@music-together/shared'
+import type { LyricLine, LyricOrigin } from '@/lib/lyricPresentation'
 import { storage } from '@/lib/storage'
 
 interface PlayerStore {
@@ -11,8 +11,12 @@ interface PlayerStore {
   volume: number
   lyric: string
   tlyric: string
-  ttmlLines: AMLLLyricLine[] | null
+  ttmlLines: LyricLine[] | null
   lyricLoading: boolean
+  /** Where the lines currently shown came from, for diagnostics and the settings summary. */
+  lyricOrigin: LyricOrigin | null
+  lyricProvider: MusicSource | null
+  lyricConfidence: number | null
   /** Temporary lyric offset while the calibration slider is being dragged. */
   lyricOffsetPreview: { key: string; offsetMs: number } | null
   syncDrift: number
@@ -23,8 +27,9 @@ interface PlayerStore {
   setDuration: (duration: number) => void
   setVolume: (volume: number) => void
   setLyric: (lyric: string, tlyric?: string) => void
-  setTtmlLines: (lines: AMLLLyricLine[] | null) => void
+  setTtmlLines: (lines: LyricLine[] | null) => void
   setLyricLoading: (loading: boolean) => void
+  setLyricProvenance: (origin: LyricOrigin | null, provider: MusicSource | null, confidence: number | null) => void
   setLyricOffsetPreview: (preview: { key: string; offsetMs: number } | null) => void
   setSyncDrift: (drift: number) => void
   reset: () => void
@@ -40,6 +45,9 @@ export const usePlayerStore = create<PlayerStore>((set) => ({
   tlyric: '',
   ttmlLines: null,
   lyricLoading: false,
+  lyricOrigin: null,
+  lyricProvider: null,
+  lyricConfidence: null,
   lyricOffsetPreview: null,
   syncDrift: 0,
 
@@ -54,6 +62,8 @@ export const usePlayerStore = create<PlayerStore>((set) => ({
   setLyric: (lyric, tlyric) => set({ lyric, tlyric: tlyric ?? '' }),
   setTtmlLines: (lines) => set({ ttmlLines: lines }),
   setLyricLoading: (loading) => set({ lyricLoading: loading }),
+  setLyricProvenance: (lyricOrigin, lyricProvider, lyricConfidence) =>
+    set({ lyricOrigin, lyricProvider, lyricConfidence }),
   setLyricOffsetPreview: (preview) => set({ lyricOffsetPreview: preview }),
   setSyncDrift: (drift) => set({ syncDrift: drift }),
   reset: () =>
@@ -66,6 +76,9 @@ export const usePlayerStore = create<PlayerStore>((set) => ({
       tlyric: '',
       ttmlLines: null,
       lyricLoading: false,
+      lyricOrigin: null,
+      lyricProvider: null,
+      lyricConfidence: null,
       lyricOffsetPreview: null,
       syncDrift: 0,
     }),

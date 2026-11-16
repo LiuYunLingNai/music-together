@@ -4,6 +4,7 @@ import { BilibiliMetadataDialog } from '@/components/Overlays/BilibiliMetadataDi
 import { VirtualTrackList } from '@/components/VirtualTrackList'
 import { trackKey } from '@/lib/utils'
 import { useRoomStore } from '@/stores/roomStore'
+import { useQueueMembership } from '@/hooks/useQueueMembership'
 import type { BilibiliMetadataSource, Playlist, Track } from '@music-together/shared'
 import { LIMITS } from '@music-together/shared'
 import { ArrowLeft, ListPlus, Loader2, Music } from 'lucide-react'
@@ -42,25 +43,15 @@ export function PlaylistDetail({
   onLoadAll,
   onLoadMore,
 }: PlaylistDetailProps) {
-  const queue = useRoomStore((s) => s.room?.queue ?? EMPTY_QUEUE)
   const roomId = useRoomStore((s) => s.room?.id)
-  const [addedIds, setAddedIds] = useState<Set<string>>(new Set())
+  const { queue, queueKeys, pending, isAdded: isTrackAdded, markPending } = useQueueMembership()
   const [addingAll, setAddingAll] = useState(false)
   const [bilibiliMatch, setBilibiliMatch] = useState<{ track: Track; action: BilibiliQueueAction } | null>(null)
-  const queueKeys = useMemo(() => new Set(queue.map(trackKey)), [queue])
-
-  const isTrackAdded = useCallback(
-    (track: Track) => {
-      const key = trackKey(track)
-      return addedIds.has(key) || queueKeys.has(key)
-    },
-    [addedIds, queueKeys],
-  )
 
   const handleAddTrack = useCallback(
     (track: Track) => {
       const key = trackKey(track)
-      if (queueKeys.has(key) || addedIds.has(key)) {
+      if (queueKeys.has(key) || pending.has(key)) {
         toast.info(`「${track.title}」已在队列中`)
         return
       }
@@ -69,15 +60,15 @@ export function PlaylistDetail({
         return
       }
       onAddTrack(track)
-      setAddedIds((prev) => new Set(prev).add(key))
+      markPending([track])
     },
-    [onAddTrack, queueKeys, addedIds],
+    [onAddTrack, queueKeys, pending, markPending],
   )
 
   const handleInsertAfterCurrent = useCallback(
     (track: Track) => {
       const key = trackKey(track)
-      if (queueKeys.has(key) || addedIds.has(key)) {
+      if (queueKeys.has(key) || pending.has(key)) {
         toast.info(`「${track.title}」已在队列中`)
         return
       }
@@ -86,22 +77,22 @@ export function PlaylistDetail({
         return
       }
       onInsertAfterCurrent?.(track)
-      setAddedIds((prev) => new Set(prev).add(key))
+      markPending([track])
     },
-    [onInsertAfterCurrent, queueKeys, addedIds],
+    [onInsertAfterCurrent, queueKeys, pending, markPending],
   )
 
   // Dynamic "add all" logic — filter duplicates
   const availableSlots = LIMITS.QUEUE_MAX_SIZE - queue.length
   const uniqueTracks = useMemo(() => {
-    const seen = new Set([...queueKeys, ...addedIds])
+    const seen = new Set([...queueKeys, ...pending])
     return tracks.filter((track) => {
       const key = trackKey(track)
       if (seen.has(key)) return false
       seen.add(key)
       return true
     })
-  }, [tracks, queueKeys, addedIds])
+  }, [tracks, queueKeys, pending])
   const addCount = Math.min(availableSlots, uniqueTracks.length)
   const isQueueFull = availableSlots <= 0
 
@@ -113,7 +104,7 @@ export function PlaylistDetail({
       const allTracks = hasMore ? await onLoadAll() : tracks
       const currentQueue = useRoomStore.getState().room?.queue ?? EMPTY_QUEUE
       const seen = new Set(currentQueue.map(trackKey))
-      for (const id of addedIds) seen.add(id)
+      for (const id of pending) seen.add(id)
 
       const tracksToAdd = allTracks.filter((track) => {
         const key = trackKey(track)
@@ -130,11 +121,7 @@ export function PlaylistDetail({
       }
 
       onAddAll(toAdd, playlist?.name)
-      setAddedIds((prev) => {
-        const next = new Set(prev)
-        for (const track of toAdd) next.add(trackKey(track))
-        return next
-      })
+      markPending(toAdd)
 
       const skippedCount = tracksToAdd.length - toAdd.length
       if (skippedCount > 0) {
@@ -147,7 +134,7 @@ export function PlaylistDetail({
     } finally {
       setAddingAll(false)
     }
-  }, [addingAll, isQueueFull, hasMore, onLoadAll, tracks, addedIds, onAddAll, playlist?.name])
+  }, [addingAll, isQueueFull, hasMore, onLoadAll, tracks, pending, onAddAll, playlist?.name, markPending])
 
   const applyBilibiliMetadataMatch = useCallback(
     (metadataTrack: Track, metadataSource: BilibiliMetadataSource) => {
@@ -161,19 +148,19 @@ export function PlaylistDetail({
       }
       if (bilibiliMatch.action === 'insert') onInsertAfterCurrent?.(track)
       else onAddTrack(track)
-      setAddedIds((prev) => new Set(prev).add(trackKey(track)))
+      markPending([track])
       setBilibiliMatch(null)
     },
-    [bilibiliMatch, onAddTrack, onInsertAfterCurrent],
+    [bilibiliMatch, onAddTrack, onInsertAfterCurrent, markPending],
   )
 
   const skipBilibiliMetadataMatch = useCallback(() => {
     if (!bilibiliMatch) return
     if (bilibiliMatch.action === 'insert') onInsertAfterCurrent?.(bilibiliMatch.track)
     else onAddTrack(bilibiliMatch.track)
-    setAddedIds((prev) => new Set(prev).add(trackKey(bilibiliMatch.track)))
+    markPending([bilibiliMatch.track])
     setBilibiliMatch(null)
-  }, [bilibiliMatch, onAddTrack, onInsertAfterCurrent])
+  }, [bilibiliMatch, onAddTrack, onInsertAfterCurrent, markPending])
 
   // Button label
   let addAllLabel: string

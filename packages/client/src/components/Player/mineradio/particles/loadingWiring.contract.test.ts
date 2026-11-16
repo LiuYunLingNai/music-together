@@ -55,12 +55,21 @@ describe('uLoading 驱动链', () => {
   })
 
   it('① 每一条"放弃/完成"路径都撤掉加载态', () => {
+    const between = (start: string, end: string) => {
+      const from = howl.indexOf(start)
+      const to = howl.indexOf(end, from + start.length)
+      expect(from).toBeGreaterThan(-1)
+      return howl.slice(from, to === -1 ? undefined : to)
+    }
     // onload（内容可取）
-    expect(howl).toMatch(/onload:[\s\S]{0,900}hideLoading\(\)/)
+    expect(howl).toMatch(/onload: \(\) => handleHowlLoad\(/)
+    expect(between('const handleHowlLoad', 'const handleHowlPlay')).toContain('hideLoading()')
     // onplay（真正开播）
-    expect(howl).toMatch(/onplay:[\s\S]{0,400}hideLoading\(\)/)
+    expect(howl).toMatch(/onplay: \(soundId\) => handleHowlPlay\(/)
+    expect(between('const handleHowlPlay', 'const handleHowlPause')).toContain('hideLoading()')
     // 加载失败（重试之后）
-    expect(howl).toMatch(/onloaderror:[\s\S]{0,1400}hideLoading\(\)/)
+    expect(howl).toMatch(/onloaderror: \(_id, msg\) => handleHowlLoadError\(/)
+    expect(between('const handleHowlLoadError', 'const handleHowlPlayError')).toContain('hideLoading()')
     // 加载超时
     expect(howl).toMatch(/loadTimerRef\.current = setTimeout\([\s\S]{0,700}hideLoading\(\)/)
     // 停播
@@ -105,9 +114,7 @@ describe('uLoading 驱动链', () => {
   it('④ 着色器把 uLoading 声明为 uniform（而不是用字面量替代）', () => {
     expect(shader).toMatch(/uniform float uMouseActive, uPixel, uColorMixT, uLoading;/)
     // 泛光变体同样要带上它（上游 :1016 的 replace 同款处理）
-    expect(shader).toMatch(
-      /uniform float uMouseActive, uPixel, uColorMixT, uLoading, uBloomSize;/,
-    )
+    expect(shader).toMatch(/uniform float uMouseActive, uPixel, uColorMixT, uLoading, uBloomSize;/)
   })
 })
 

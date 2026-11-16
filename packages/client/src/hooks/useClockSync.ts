@@ -1,14 +1,23 @@
 import { useEffect, useRef } from 'react'
 import { EVENTS, NTP } from '@music-together/shared'
 import { useSocketContext } from '@/providers/socket-context'
-import { recordPing, processPong, resetClockSync, isCalibrated, getMedianRTT } from '@/lib/clockSync'
+import {
+  recordPing,
+  processPong,
+  resetClockSync,
+  suspendClockSync,
+  canReuseCalibration,
+  isCalibrated,
+  getMedianRTT,
+} from '@/lib/clockSync'
 import { useSettingsStore } from '@/stores/settingsStore'
 
 /**
  * Runs the NTP clock-sync loop for the lifetime of the socket connection.
  *
  * Phase 1 (calibration): rapid pings every `NTP.INITIAL_INTERVAL_MS` until
- *   `MAX_INITIAL_SAMPLES` are collected.
+ *   `MAX_INITIAL_SAMPLES` are collected. A reconnect reuses a recent calibration
+ *   and only refreshes it, so weak-network samples cannot pull a good offset.
  * Phase 2 (steady state): pings at the user-configured sync packet interval
  *   to track drift.
  */
@@ -40,6 +49,19 @@ export function useClockSync(): void {
       intervalRef.current = setInterval(sendPing, NTP.INITIAL_INTERVAL_MS)
     }
 
+    const startReconnectRefresh = () => {
+      for (let i = 0; i < 5; i++) {
+        burstTimers.push(setTimeout(sendPing, i * NTP.INITIAL_INTERVAL_MS))
+      }
+      switchedRef.current = true
+      startSteadyHeartbeat()
+    }
+
+    const onConnect = () => {
+      if (canReuseCalibration()) startReconnectRefresh()
+      else startFastCalibration()
+    }
+
     const onPong = (data: { clientPingId: number; serverTime: number }) => {
       const rtt = processPong(data.clientPingId, data.serverTime)
       if (rtt === null) return
@@ -57,7 +79,7 @@ export function useClockSync(): void {
     const onDisconnect = () => {
       if (intervalRef.current !== null) clearInterval(intervalRef.current)
       intervalRef.current = null
-      resetClockSync()
+      suspendClockSync()
     }
 
     const onVisibilityChange = () => {
@@ -71,14 +93,14 @@ export function useClockSync(): void {
     }
 
     socket.on(EVENTS.NTP_PONG, onPong)
-    socket.on('connect', startFastCalibration)
+    socket.on('connect', onConnect)
     socket.on('disconnect', onDisconnect)
     document.addEventListener('visibilitychange', onVisibilityChange)
-    if (socket.connected) startFastCalibration()
+    if (socket.connected) onConnect()
 
     return () => {
       socket.off(EVENTS.NTP_PONG, onPong)
-      socket.off('connect', startFastCalibration)
+      socket.off('connect', onConnect)
       socket.off('disconnect', onDisconnect)
       document.removeEventListener('visibilitychange', onVisibilityChange)
       unsubscribeSettings()

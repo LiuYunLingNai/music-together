@@ -57,11 +57,10 @@ function track(id: string, overrides: Partial<Track> = {}): Track {
 test('ignores resume while already playing so the timeline does not rewind', async () => {
   const { io, emitted } = createRecordingIo()
   const { room } = roomService.createRoom('resume-socket', '房主', '恢复播放', null, 'resume-user')
-  const original = musicProvider.getStreamInfo
-  musicProvider.getStreamInfo = async () => ({
-    url: 'https://example.test/audio',
-    requestedQuality: 320,
-    attemptedQuality: 320,
+  const original = musicProvider.getStreamInfoDetailed
+  musicProvider.getStreamInfoDetailed = async () => ({
+    result: { url: 'https://example.test/audio', requestedQuality: 320, attemptedQuality: 320 },
+    failure: null,
   })
   try {
     assert.equal(await playerService.playTrackInRoom(io, room.id, track('a')), true)
@@ -84,7 +83,7 @@ test('ignores resume while already playing so the timeline does not rewind', asy
     assert.ok(revisionAfterResume > revisionAfterPause)
     assert.equal(room.playState.currentTime, pausedAt)
   } finally {
-    musicProvider.getStreamInfo = original
+    musicProvider.getStreamInfoDetailed = original
     playerService.cleanupRoom(room.id)
     roomRepo.delete(room.id)
   }
@@ -93,11 +92,10 @@ test('ignores resume while already playing so the timeline does not rewind', asy
 test('stops playback when every remaining queue track fails to resolve', async () => {
   const { io } = createRecordingIo()
   const { room } = roomService.createRoom('exhaust-socket', '房主', '连续失败', null, 'exhaust-user')
-  const original = musicProvider.getStreamInfo
-  musicProvider.getStreamInfo = async () => ({
-    url: 'https://example.test/audio',
-    requestedQuality: 320,
-    attemptedQuality: 320,
+  const original = musicProvider.getStreamInfoDetailed
+  musicProvider.getStreamInfoDetailed = async () => ({
+    result: { url: 'https://example.test/audio', requestedQuality: 320, attemptedQuality: 320 },
+    failure: null,
   })
   try {
     assert.equal(await playerService.playTrackInRoom(io, room.id, track('playing')), true)
@@ -105,13 +103,16 @@ test('stops playback when every remaining queue track fails to resolve', async (
     queueService.addTrack(room.id, track('vip-2', { vip: true }))
 
     // 之后的解析全部失败：模拟 VIP 曲目且房间没人登录
-    musicProvider.getStreamInfo = async () => null
+    musicProvider.getStreamInfoDetailed = async () => ({
+      result: null,
+      failure: { reason: 'subscription-required' as const },
+    })
     await playerService.playNextTrackInRoom(io, room.id, 'sequential')
 
     assert.equal(room.playState.isPlaying, false)
     assert.equal(room.currentTrack, null)
   } finally {
-    musicProvider.getStreamInfo = original
+    musicProvider.getStreamInfoDetailed = original
     playerService.cleanupRoom(room.id)
     roomRepo.delete(room.id)
   }
@@ -120,11 +121,10 @@ test('stops playback when every remaining queue track fails to resolve', async (
 test('drops a next request whose track already finished playing', async () => {
   const { io } = createRecordingIo()
   const { room } = roomService.createRoom('stale-socket', '房主', '过期切歌', null, 'stale-user')
-  const original = musicProvider.getStreamInfo
-  musicProvider.getStreamInfo = async () => ({
-    url: 'https://example.test/audio',
-    requestedQuality: 320,
-    attemptedQuality: 320,
+  const original = musicProvider.getStreamInfoDetailed
+  musicProvider.getStreamInfoDetailed = async () => ({
+    result: { url: 'https://example.test/audio', requestedQuality: 320, attemptedQuality: 320 },
+    failure: null,
   })
   try {
     queueService.addTrack(room.id, track('b'))
@@ -141,7 +141,7 @@ test('drops a next request whose track already finished playing', async () => {
     await playerService.playNextTrackInRoom(io, room.id, 'sequential', { skipDebounce: true })
     assert.notEqual(room.currentTrack?.id, 'b')
   } finally {
-    musicProvider.getStreamInfo = original
+    musicProvider.getStreamInfoDetailed = original
     playerService.cleanupRoom(room.id)
     roomRepo.delete(room.id)
   }
@@ -165,8 +165,97 @@ test('keeps queue ids unique so navigation and removal stay addressable', () => 
     // 删除只命中一条
     queueService.removeTrack(room.id, 'same-id')
     assert.equal(room.queue.length, 5)
-    assert.equal(room.queue.some((entry) => entry.id === 'same-id'), false)
+    assert.equal(
+      room.queue.some((entry) => entry.id === 'same-id'),
+      false,
+    )
   } finally {
+    roomRepo.delete(room.id)
+  }
+})
+
+async function withConsumedRoom(
+  socketId: string,
+  run: (ctx: { io: TypedServer; room: ReturnType<typeof roomService.createRoom>['room'] }) => Promise<void>,
+) {
+  const { io } = createRecordingIo()
+  const { room } = roomService.createRoom(socketId, '房主', '消耗队列', null, `${socketId}-user`)
+  const original = musicProvider.getStreamInfoDetailed
+  musicProvider.getStreamInfoDetailed = async () => ({
+    result: { url: 'https://example.test/audio', requestedQuality: 320, attemptedQuality: 320 },
+    failure: null,
+  })
+  try {
+    roomService.updateSettings(room.id, { queueMode: 'consume' })
+    await run({ io, room })
+  } finally {
+    musicProvider.getStreamInfoDetailed = original
+    playerService.cleanupRoom(room.id)
+    roomRepo.delete(room.id)
+  }
+}
+
+test('a consumed queue drops each track it leaves and never loops back', async () => {
+  await withConsumedRoom('consume-socket', async ({ io, room }) => {
+    for (const id of ['a', 'b', 'c']) queueService.addTrack(room.id, track(id))
+    assert.equal(await playerService.playTrackInRoom(io, room.id, track('a')), true)
+
+    await playerService.playNextTrackInRoom(io, room.id, 'loop-all', { skipDebounce: true })
+    assert.equal(room.currentTrack?.id, 'b')
+    assert.deepEqual(room.queue.map((t) => t.id), ['b', 'c'])
+
+    await playerService.playNextTrackInRoom(io, room.id, 'loop-all', { skipDebounce: true })
+    assert.deepEqual(room.queue.map((t) => t.id), ['c'])
+
+    // The last track has no successor: it leaves too and the room stops instead of wrapping to the start.
+    await playerService.playNextTrackInRoom(io, room.id, 'loop-all', { skipDebounce: true })
+    assert.equal(room.queue.length, 0)
+    assert.equal(room.playState.isPlaying, false)
+  })
+})
+
+test('a consumed queue comes back to unheard tracks queued before the current one', async () => {
+  await withConsumedRoom('consume-back-socket', async ({ io, room }) => {
+    for (const id of ['a', 'b', 'c']) queueService.addTrack(room.id, track(id))
+    assert.equal(await playerService.playTrackInRoom(io, room.id, track('c')), true)
+
+    await playerService.playNextTrackInRoom(io, room.id, 'sequential', { skipDebounce: true })
+    assert.equal(room.currentTrack?.id, 'a')
+    assert.deepEqual(room.queue.map((t) => t.id), ['a', 'b'])
+  })
+})
+
+test('"previous" in a consumed queue restarts the current track', async () => {
+  await withConsumedRoom('consume-prev-socket', async ({ io, room }) => {
+    queueService.addTrack(room.id, track('a'))
+    assert.equal(await playerService.playTrackInRoom(io, room.id, track('a')), true)
+    room.playState = { ...room.playState, currentTime: 42 }
+
+    await playerService.playPrevTrackInRoom(io, room.id, { skipDebounce: true })
+    assert.equal(room.currentTrack?.id, 'a')
+    assert.equal(room.playState.currentTime, 0)
+  })
+})
+
+test('a room that keeps its queue still holds what was played', async () => {
+  const { io } = createRecordingIo()
+  const { room } = roomService.createRoom('keep-socket', '房主', '保留队列', null, 'keep-user')
+  const original = musicProvider.getStreamInfoDetailed
+  musicProvider.getStreamInfoDetailed = async () => ({
+    result: { url: 'https://example.test/audio', requestedQuality: 320, attemptedQuality: 320 },
+    failure: null,
+  })
+  try {
+    assert.equal(room.queueMode, 'keep')
+    for (const id of ['a', 'b']) queueService.addTrack(room.id, track(id))
+    assert.equal(await playerService.playTrackInRoom(io, room.id, track('a')), true)
+    await playerService.playNextTrackInRoom(io, room.id, 'loop-all', { skipDebounce: true })
+    assert.deepEqual(room.queue.map((t) => t.id), ['a', 'b'])
+    await playerService.playNextTrackInRoom(io, room.id, 'loop-all', { skipDebounce: true })
+    assert.equal(room.currentTrack?.id, 'a')
+  } finally {
+    musicProvider.getStreamInfoDetailed = original
+    playerService.cleanupRoom(room.id)
     roomRepo.delete(room.id)
   }
 })

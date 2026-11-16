@@ -3,10 +3,13 @@ import { DEFAULT_PENDOLO_TUNING, type PendoloTuning } from '../../../types';
 import { Group, Row, Segmented, type SettingsGroupDef } from '../../modal/settings/kit';
 import { type VisualizerSettingsPanelProps } from '../definition';
 import { percent, SliderRow, times, ToggleRow } from '../panelRows';
+import LyricRenderQualityRows from '../renderQuality/LyricRenderQualityRows';
 
 // src/components/visualizer/pendolo/PendoloSettingsPanel.tsx
-// Owns Pendolo-specific tuning controls, drawn as one group of the settings kit.
+// Owns Pendolo-specific tuning controls, drawn as groups of the settings kit.
 const PENDOLO_GROUP: SettingsGroupDef = { id: 'vis-pendolo', titleKey: 'options.pendoloSettings' };
+// 渲染（#929）：齿轮画布的分辨率与抗锯齿（WebGL 的 MSAA），默认跟随全局
+const PENDOLO_RENDER_GROUP: SettingsGroupDef = { id: 'vis-pendolo-render', titleKey: 'options.lyricRenderSection' };
 
 const PendoloSettingsPanel: React.FC<VisualizerSettingsPanelProps<PendoloTuning>> = ({
     t,
@@ -19,10 +22,11 @@ const PendoloSettingsPanel: React.FC<VisualizerSettingsPanelProps<PendoloTuning>
     const drag = { onDragStart: onSliderPointerDown, onDragEnd: onSliderCommit };
 
     return (
-        <Group def={PENDOLO_GROUP}>
-            <SliderRow
-                {...drag}
-                label={t('options.pendoloWheelCenterX')}
+        <>
+            <Group def={PENDOLO_GROUP}>
+                <SliderRow
+                    {...drag}
+                    label={t('options.pendoloWheelCenterX')}
                 value={resolvedTuning.wheelCenterX}
                 min={-0.2}
                 max={0.4}
@@ -96,7 +100,15 @@ const PendoloSettingsPanel: React.FC<VisualizerSettingsPanelProps<PendoloTuning>
                 checked={resolvedTuning.enableLineGlow ?? false}
                 onChange={(next) => onPendoloTuningChange?.({ enableLineGlow: next })}
             />
-        </Group>
+            </Group>
+
+            <Group def={PENDOLO_RENDER_GROUP}>
+                <LyricRenderQualityRows
+                    value={resolvedTuning.render ?? DEFAULT_PENDOLO_TUNING.render}
+                    onChange={(patch) => onPendoloTuningChange?.({ render: { ...(resolvedTuning.render ?? DEFAULT_PENDOLO_TUNING.render), ...patch } })}
+                />
+            </Group>
+        </>
     );
 };
 
