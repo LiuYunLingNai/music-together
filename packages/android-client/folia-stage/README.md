@@ -16,6 +16,10 @@
 
 设置使用舞台本地存储，不改变网络、房间或原生播放器偏好。滑条即时预览、松手持久化，关闭页面和失焦提交待写值；恢复默认只作用于当前分类。上传文件使用 Android 系统文件选择器，选择期间保留发起请求的 WebView，暂停原生帧/FFT 任务。
 
+舞台通过上游 entry.render 挂载，保留雾笺参数注入和心象字号适配。面板只启用当前舞台确实消费的选项：封面隐藏用于莫奈，未支持的静态/强度/画布质量选项禁用并说明，凝彩智能拍点相关的景深控制尚不可用。静止舞台的翻译与音译改用共享字幕配置；雾笺的共用背景选项接入背景层。静态背景会冻结只提供暂停接口的 Sonic/Particles 等背景。
+
+文件上传统一使用 ACTION_OPEN_DOCUMENT，并读取单文件 URI 和多选 ClipData；避免旧 WebView 无法消费 Android Photo Picker 的图片授权。设置面板按实际 CSS 宽高布局，旧 WebView 的 color-mix 不可用时使用深色设置令牌回退，滑条轨道仍可见。
+
 ## 构建与验证
 
 需要 Node.js 24、npm 和 tar（Windows 10+ 自带）。在本目录运行：
@@ -29,6 +33,8 @@ npm run test:render
 浏览器测试默认使用 Playwright Chromium；可用环境变量 PLAYWRIGHT_CHROMIUM_EXECUTABLE 指定已安装的 Chrome/Edge。首次使用默认浏览器先运行 npx playwright install chromium。截图与运行报告写入忽略目录 .work/。
 
 测试覆盖 20 个舞台及参数面板、横竖屏长歌词与放大字号、暂停后懒加载/异步分词、Seek、7 种背景、参数保存/恢复/重置、上传图片持久化和 JIZURA 编辑台加载。
+
+ADB 模拟器测试可运行 `FoliaWebViewTest` 和 `FoliaChosenFilesTest`；`FoliaSettingsDeviceTest` 仅在显式传入 `-e foliaSettingsAudit true` 时启动真实离线舞台检查会话，默认跳过。会话内的文件选择和本地数据仍属于该 WebView；测试结束会释放视图。
 
 Gradle preBuild 自动运行构建并将输出写入 app/build/generated/foliaAssets，避免提交 JS 编译产物。CI 安装同一 package-lock.json；Android Standard/vivo 均嵌入同一份资源。
 

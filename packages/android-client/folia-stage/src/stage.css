@@ -64,10 +64,31 @@ button {
   flex: 1;
   overscroll-behavior: contain;
 }
-@media (min-aspect-ratio: 1/1) {
-  .folia-settings {
-    height: 100%;
-    width: min(55%, 480px);
-    border-radius: 16px 0 0 16px;
+html[data-folia-orientation="landscape"] .folia-settings {
+  height: 100%;
+  width: min(55%, 480px);
+  border-radius: 16px 0 0 16px;
+}
+/* Chrome 110 WebViews cannot resolve color-mix. Keep Folia's dark settings
+   token hierarchy and range tracks visible without changing renderer colors. */
+@supports not (color: color-mix(in srgb, white, transparent)) {
+  .folia-settings,
+  .st-window {
+    --st-t2: #b6b6b8 !important;
+    --st-t3: #929295 !important;
+    --st-line: #343438 !important;
+    --st-line2: #48484d !important;
+    --st-fill: #303034 !important;
+    --st-fill2: #3d3d42 !important;
+    --st-track: #535359 !important;
   }
+}
+.st-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--st-accent) var(--st-p),
+    var(--st-track) var(--st-p)
+  );
 }

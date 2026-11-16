@@ -111,7 +111,7 @@ internal fun FoliaPlayer(
     var fileCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
     var returningFromFilePicker by remember { mutableStateOf(false) }
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        fileCallback?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data))
+        fileCallback?.onReceiveValue(foliaChosenFiles(result.resultCode, result.data))
         fileCallback = null
     }
     DisposableEffect(Unit) {
@@ -205,7 +205,7 @@ internal fun FoliaPlayer(
                         fileCallback?.onReceiveValue(null)
                         fileCallback = callback
                         returningFromFilePicker = true
-                        runCatching { filePicker.launch(params.createIntent()) }.onFailure {
+                        runCatching { filePicker.launch(foliaFileChooserIntent(params)) }.onFailure {
                             fileCallback?.onReceiveValue(null)
                             fileCallback = null
                             returningFromFilePicker = false

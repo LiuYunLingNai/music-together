@@ -147,6 +147,22 @@ for (const viewport of [
       await page.getByRole("dialog", { name: "舞台配置" }).waitFor();
       await page.waitForTimeout(100);
       const untranslated = await page.getByRole("dialog").innerText();
+      if (mode === "tempera") {
+        const panel = page.getByRole("dialog", { name: "舞台配置" });
+        for (const label of ["景深", "镜头平移", "歌词远近"]) {
+          const disabled = await panel
+            .getByRole("slider", { name: label, exact: true })
+            .evaluate((element) => Boolean(element.closest("[inert]")));
+          if (!disabled)
+            errors.push(`Unavailable beat effect ${label} is still enabled`);
+        }
+        if (
+          await panel
+            .getByRole("slider", { name: "镜头运动强度", exact: true })
+            .evaluate((element) => Boolean(element.closest("[inert]")))
+        )
+          errors.push("Available camera control is disabled");
+      }
       if (/options\.[A-Za-z]|ui\.[A-Za-z]/.test(untranslated))
         errors.push("Stage settings contain untranslated keys");
       await page.evaluate(() => window.FoliaStage.settings(false));
@@ -367,6 +383,14 @@ for (const viewport of [
   });
   const dialog = page.getByRole("dialog", { name: "舞台配置" });
   await dialog.waitFor();
+  const panelBounds = await dialog.boundingBox();
+  if (
+    !panelBounds ||
+    (viewport.width < viewport.height &&
+      (panelBounds.x !== 0 || panelBounds.height >= viewport.height)) ||
+    (viewport.width > viewport.height && panelBounds.width >= viewport.width)
+  )
+    errors.push("Settings panel orientation does not match measured viewport");
   const switches = dialog.getByRole("switch");
   const original = await switches.first().getAttribute("aria-checked");
   await switches.first().click();
@@ -440,6 +464,80 @@ for (const viewport of [
   }
   await dialog.getByRole("combobox").first().click();
   await page.getByRole("option").first().click();
+  // Entry-owned props are part of the renderer contract. Nebbia reads its
+  // tuning here rather than through the generic tuning.apply hook.
+  await page.evaluate(() => window.FoliaStage.mode("nebbia"));
+  await dialog.getByRole("button", { name: "舞台", exact: true }).click();
+  const scenery = dialog.getByRole("button", { name: "梦海流萤", exact: true });
+  await scenery.click();
+  await page.waitForTimeout(500);
+  const nebbiaTuning = await page.evaluate(() => {
+    const root = document.getElementById("root");
+    const fiber =
+      root[Object.keys(root).find((key) => key.startsWith("__reactContainer"))];
+    const visited = new Set();
+    let received;
+    function walk(node) {
+      if (!node || visited.has(node)) return;
+      visited.add(node);
+      if (node.memoizedProps?.nebbiaTuning)
+        received = node.memoizedProps.nebbiaTuning;
+      walk(node.child);
+      walk(node.sibling);
+    }
+    walk(fiber.stateNode?.current ?? fiber);
+    return received;
+  });
+  if (nebbiaTuning?.behind !== "aquarium")
+    errors.push("Nebbia settings did not reach the renderer entry");
+  await page.evaluate(() => window.FoliaStage.mode("still"));
+  await dialog.getByRole("button", { name: "字幕", exact: true }).click();
+  await page.evaluate(() =>
+    window.FoliaStage.document({
+      lines: [
+        {
+          fullText: "主歌词",
+          startTime: 0,
+          endTime: 30,
+          words: [{ text: "主歌词", startTime: 0, endTime: 30 }],
+          translation: "Translation",
+          romanization: "Romanization",
+        },
+      ],
+    }),
+  );
+  const rowCount = dialog
+    .locator(".st-row")
+    .filter({ hasText: "底部字幕行数" });
+  await rowCount.getByRole("button", { name: "双行", exact: true }).click();
+  await page.waitForTimeout(150);
+  const firstRow = dialog
+    .locator(".st-row")
+    .filter({ hasText: "第一行" })
+    .getByRole("combobox");
+  await firstRow.click();
+  await page
+    .getByRole("listbox", { name: "第一行", exact: true })
+    .getByRole("option", { name: "罗马音", exact: true })
+    .click();
+  const secondRow = dialog
+    .locator(".st-row")
+    .filter({ hasText: "第二行" })
+    .getByRole("combobox");
+  await secondRow.click();
+  await page
+    .getByRole("listbox", { name: "第二行", exact: true })
+    .getByRole("option", { name: "翻译", exact: true })
+    .click();
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector("[data-folia-stage-shell]")
+        ?.textContent.includes("Romanization") &&
+      document
+        .querySelector("[data-folia-stage-shell]")
+        ?.textContent.includes("Translation"),
+  );
   // Native file chooser calls the same input used by the browser. Verify the
   // binary image survives a new document and that its blob URL is rebuilt.
   await page.evaluate(() => window.FoliaStage.mode("cappella"));

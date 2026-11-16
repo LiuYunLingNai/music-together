@@ -9,6 +9,7 @@ import { createRoot } from "react-dom/client";
 import "./i18n";
 import StageBackdrop from "./StageBackdrop";
 import StageSettingsPanel from "./StageSettingsPanel";
+import { stageEntries } from "./runtimeRegistry";
 import {
   styleTunings as adapters,
   getStyleBundle,
@@ -36,66 +37,7 @@ import {
 import { applyPushedPhoneInsets } from "./phoneInsets";
 import { updateStageViewport } from "./stageViewport";
 import "./stage.css";
-import { BUILTIN_VISUALIZER_MODES } from "../.work/src/types/visualizerModes";
 import type { VisualizerSharedProps } from "../.work/src/components/visualizer/definition";
-const modules = import.meta.glob([
-  "../.work/src/components/visualizer/blank/VisualizerBlank.tsx",
-  "../.work/src/components/visualizer/cadenza/VisualizerCadenza.tsx",
-  "../.work/src/components/visualizer/cappella/VisualizerCappella.tsx",
-  "../.work/src/components/visualizer/claddagh/VisualizerCladdagh.tsx",
-  "../.work/src/components/visualizer/classic/Visualizer.tsx",
-  "../.work/src/components/visualizer/diorama/VisualizerDiorama.tsx",
-  "../.work/src/components/visualizer/fume/VisualizerFume.tsx",
-  "../.work/src/components/visualizer/hanabi/VisualizerHanabi.tsx",
-  "../.work/src/components/visualizer/kinetic/VisualizerKinetic.tsx",
-  "../.work/src/components/visualizer/lumiere/VisualizerLumiere.tsx",
-  "../.work/src/components/visualizer/machi/VisualizerMachi.tsx",
-  "../.work/src/components/visualizer/monet/VisualizerMonet.tsx",
-  "../.work/src/components/visualizer/nebbia/VisualizerNebbia.tsx",
-  "../.work/src/components/visualizer/partita/VisualizerPartita.tsx",
-  "../.work/src/components/visualizer/pendolo/VisualizerPendolo.tsx",
-  "../.work/src/components/visualizer/prompt/VisualizerPrompt.tsx",
-  "../.work/src/components/visualizer/sonnet/VisualizerSonnet.tsx",
-  "../.work/src/components/visualizer/still/VisualizerStill.tsx",
-  "../.work/src/components/visualizer/tempera/VisualizerTempera.tsx",
-  "../.work/src/components/visualizer/tilt/VisualizerTilt.tsx",
-]);
-const names: Record<string, string> = {
-  classic: "Visualizer",
-  blank: "VisualizerBlank",
-  cadenza: "VisualizerCadenza",
-  cappella: "VisualizerCappella",
-  claddagh: "VisualizerCladdagh",
-  diorama: "VisualizerDiorama",
-  fume: "VisualizerFume",
-  hanabi: "VisualizerHanabi",
-  kinetic: "VisualizerKinetic",
-  lumiere: "VisualizerLumiere",
-  machi: "VisualizerMachi",
-  monet: "VisualizerMonet",
-  nebbia: "VisualizerNebbia",
-  partita: "VisualizerPartita",
-  pendolo: "VisualizerPendolo",
-  prompt: "VisualizerPrompt",
-  sonnet: "VisualizerSonnet",
-  still: "VisualizerStill",
-  tempera: "VisualizerTempera",
-  tilt: "VisualizerTilt",
-};
-const renderers = Object.fromEntries(
-  BUILTIN_VISUALIZER_MODES.map((mode) => [
-    mode,
-    React.lazy(
-      modules[
-        "../.work/src/components/visualizer/" +
-          mode +
-          "/" +
-          names[mode] +
-          ".tsx"
-      ] as any,
-    ),
-  ]),
-);
 const initial: VisualizerSharedProps = {
   currentTime: time,
   currentLineIndex: -1,
@@ -194,7 +136,7 @@ function App() {
           });
       },
       mode: (id: string) => {
-        if (id in renderers) {
+        if (stageEntries.some((entry) => entry.mode === id)) {
           setMode(id);
           useVisualizerSettingsStore.setState({ visualizerMode: id });
         }
@@ -283,7 +225,7 @@ function App() {
     };
   }, []);
 
-  const Renderer = renderers[mode];
+  const entry = stageEntries.find((entry) => entry.mode === mode)!;
   const tunings = getStyleBundle(settings);
   const display = settings.display;
   const customSubtitles =
@@ -340,16 +282,20 @@ function App() {
     ...props,
     lines: displayedLines,
     nativeStageMode: mode,
-    theme,
+    theme: {
+      ...theme,
+      wordColors: display.keywordColoringEnabled ? theme.wordColors : undefined,
+    },
     subtitleTheme: {
       ...theme,
+      wordColors: display.keywordColoringEnabled ? theme.wordColors : undefined,
       fontWeight: display.subtitleFontWeight ?? theme.fontWeight,
       ...(display.subtitleFontName && fonts.subtitle
         ? { fontFamily: fonts.subtitle }
         : {}),
     },
     visualizerTunings: tunings,
-    showText: display.showText,
+    showText: mode !== "blank" && display.showText,
     hideCoverArt: display.hideCoverArt,
     lyricsFontScale: display.lyricsFontScale ?? props.lyricsFontScale,
     subtitleFontScale: display.subtitleFontScale ?? props.subtitleFontScale,
@@ -393,7 +339,7 @@ function App() {
             </div>
           }
         >
-          <Renderer {...resolved} />
+          {entry.render(resolved)}
           <VisualizerHarmonyOverlay {...resolved} />
         </Suspense>
       </StageBoundary>

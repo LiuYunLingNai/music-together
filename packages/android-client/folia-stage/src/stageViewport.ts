@@ -9,6 +9,10 @@ export function updateStageViewport(fallbackWidth = 0, fallbackHeight = 0) {
     "--folia-viewport-height",
     `${height}px`,
   );
+  // Some Android WebViews report an incorrect aspect-ratio media query even
+  // though their CSS pixel dimensions are valid. Use the measured stage here.
+  document.documentElement.dataset.foliaOrientation =
+    width >= height ? "landscape" : "portrait";
 }
 
 updateStageViewport();

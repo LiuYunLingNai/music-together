@@ -15,6 +15,12 @@ import {
 import SubtitleOverlayRowsSetting from "../.work/src/components/visualizer/window/SubtitleOverlayRowsSetting";
 import { DEFAULT_SUBTITLE_OVERLAY_LAYOUT } from "../.work/src/utils/lyrics/subtitleOverlayLayout";
 import StageFontUpload from "./StageFonts";
+import {
+  hasStaticStage,
+  hasCanvasQuality,
+  hasCanvasAntialias,
+  hasAnimationIntensity,
+} from "./stageCapabilities";
 
 // Generic display controls are separate from each upstream stage's own panel.
 export default function StageDisplayTabs({
@@ -77,7 +83,7 @@ export default function StageDisplayTabs({
                   { value: "serif", label: "衬线" },
                   { value: "mono", label: "等宽" },
                 ]}
-                onChange={(fontStyle) => set({ fontStyle })}
+                onChange={(fontStyle) => set({ fontStyle, fontName: null })}
               />
             </Row>
             <Row label="字重">
@@ -97,7 +103,15 @@ export default function StageDisplayTabs({
                 }
               />
             </Row>
-            <Row label="动画强度">
+            <Row
+              label="动画强度"
+              disabled={!hasAnimationIntensity(entry.mode)}
+              hint={
+                !hasAnimationIntensity(entry.mode)
+                  ? "请使用此舞台自己的镜头与动效参数"
+                  : undefined
+              }
+            >
               <Segmented
                 value={display.animationIntensity}
                 options={[
@@ -248,7 +262,15 @@ export default function StageDisplayTabs({
       )}
       {tab === "global" && (
         <Group def={{ id: "native-performance", titleKey: "动画与性能" }}>
-          <Row label="静态舞台">
+          <Row
+            label="静态舞台"
+            disabled={!hasStaticStage(entry.mode)}
+            hint={
+              !hasStaticStage(entry.mode)
+                ? "此舞台未提供独立静态模式"
+                : undefined
+            }
+          >
             <Toggle
               checked={display.staticMode}
               onChange={(staticMode) => set({ staticMode })}
@@ -260,7 +282,13 @@ export default function StageDisplayTabs({
               onChange={(backgroundStaticMode) => set({ backgroundStaticMode })}
             />
           </Row>
-          <Row label="关键词着色">
+          <Row
+            label="关键词着色"
+            disabled={!theme.wordColors?.length}
+            hint={
+              !theme.wordColors?.length ? "当前歌词没有关键词配色" : undefined
+            }
+          >
             <Toggle
               checked={display.keywordColoringEnabled}
               onChange={(keywordColoringEnabled) =>
@@ -268,7 +296,15 @@ export default function StageDisplayTabs({
               }
             />
           </Row>
-          <Row label="渲染分辨率">
+          <Row
+            label="渲染分辨率"
+            disabled={!hasCanvasQuality(entry.mode)}
+            hint={
+              !hasCanvasQuality(entry.mode)
+                ? "此舞台不用全局歌词画布分辨率"
+                : undefined
+            }
+          >
             <Select
               value={String(display.lyricRenderQuality.scale)}
               options={[0.5, 0.75, 1, 1.5, 2].map((value) => ({
@@ -285,7 +321,15 @@ export default function StageDisplayTabs({
               }
             />
           </Row>
-          <Row label="抗锯齿">
+          <Row
+            label="抗锯齿"
+            disabled={!hasCanvasAntialias(entry.mode)}
+            hint={
+              !hasCanvasAntialias(entry.mode)
+                ? "此舞台没有可切换的歌词画布抗锯齿"
+                : undefined
+            }
+          >
             <Segmented
               value={display.lyricRenderQuality.antialias}
               options={[

@@ -64,6 +64,7 @@ export default function StageSettingsPanel({
     if (tab === "stage") {
       settings[adapter?.settingsResetterKey]?.();
       set({ showText: true, hideCoverArt: false });
+      if (mode === "monet") set({ keywordColoringEnabled: true });
     } else if (tab === "background") {
       const adapter = backgroundTunings.find(
         (item) => item.mode === display.backgroundMode,
@@ -234,22 +235,47 @@ export default function StageSettingsPanel({
               <>
                 {entry?.renderSettingsPanel?.({
                   ...common,
-                  tuning: settings[adapter?.settingsKey] ?? {},
-                  onTuningChange:
-                    settings[adapter?.settingsSetterKey] ?? (() => {}),
+                  tuning:
+                    mode === "monet"
+                      ? {
+                          ...settings[adapter?.settingsKey],
+                          keywordColoringEnabled:
+                            display.keywordColoringEnabled,
+                        }
+                      : (settings[adapter?.settingsKey] ?? {}),
+                  onTuningChange: (patch: any) => {
+                    settings[adapter?.settingsSetterKey]?.(patch);
+                    if (
+                      mode === "monet" &&
+                      typeof patch.keywordColoringEnabled === "boolean"
+                    )
+                      set({
+                        keywordColoringEnabled: patch.keywordColoringEnabled,
+                      });
+                  },
                 }) ?? (
                   <p className="py-5 text-sm text-[var(--st-t2)]">
                     此舞台没有独立参数，可在其他分类调整显示。
                   </p>
                 )}
                 <Group def={{ id: "native-visible", titleKey: "显示" }}>
-                  <Row label="显示舞台歌词">
+                  <Row
+                    label="显示舞台歌词"
+                    disabled={mode === "blank"}
+                    hint={mode === "blank" ? "纯背景舞台不绘制歌词" : undefined}
+                  >
                     <Toggle
                       checked={display.showText}
                       onChange={(showText) => set({ showText })}
                     />
                   </Row>
-                  <Row label="隐藏封面">
+                  <Row
+                    label="隐藏封面"
+                    disabled={mode !== "monet"}
+                    hint={
+                      mode !== "monet" ? "此开关用于莫奈的封面列" : undefined
+                    }
+                  >
                     <Toggle
                       checked={display.hideCoverArt}
                       onChange={(hideCoverArt) => set({ hideCoverArt })}

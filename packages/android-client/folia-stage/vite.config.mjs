@@ -8,6 +8,7 @@ import { icuFoliaDataPlugin } from "./.work/dev/icuFolia/icuFoliaDataPlugin.mjs"
 const source = path.resolve(".work/src");
 const hostModules = {
   "components/visualizer/VisualizerShell.tsx": "VisualizerShell.tsx",
+  "components/visualizer/still/VisualizerStill.tsx": "StillStage.tsx",
   "components/visualizer/registry.tsx": "registry.tsx",
   "hooks/useReducedMotionFor.ts": "reducedMotion.ts",
   "components/visualizer/renderQuality/lyricRenderQualityPin.ts":
@@ -60,6 +61,26 @@ export default defineConfig({
         }
       },
       transform(code, id) {
+        if (
+          id.replaceAll("\\", "/").endsWith("/tempera/TemperaSettingsPanel.tsx")
+        ) {
+          const depthRow =
+            "{DEPTH_CONTROLS.map(control => (\n                    <SliderRow\n                        {...drag}\n                        sub\n                        key={control.key}";
+          if (!code.includes(depthRow))
+            throw new Error(
+              "Folia depth controls changed; review unavailable beat effect settings",
+            );
+          return code
+            .replace(
+              depthRow,
+              depthRow +
+                '\n                        disabled\n                        note="此效果依赖尚未接入的智能拍点分析"',
+            )
+            .replace(
+              "<Row label={t('options.temperaDepthStrength')} hint={t('options.temperaDepthStrengthHint')} />",
+              "<Row label={t('options.temperaDepthStrength')} hint=\"此效果依赖尚未接入的智能拍点分析\" />",
+            );
+        }
         if (id.replaceAll("\\", "/").endsWith("/partita/PartitaChunk.tsx")) {
           const initial =
             "useState<'waiting' | 'active' | 'passed'>('waiting')";
