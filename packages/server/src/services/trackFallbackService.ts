@@ -143,7 +143,7 @@ export async function findBestAlternativeTrack(
   if (!SUPPORTED_SOURCES.has(toSource)) return null
   if (original.source === toSource) return null
 
-  const scored = await searchScored(original, toSource)
+  const scored = await searchScored(original, toSource).catch((): FallbackCandidate[] => [])
   const best = scored[0]
   const second = scored[1]
 

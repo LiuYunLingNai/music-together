@@ -1,4 +1,8 @@
 import {
+  looksLikeMusicId,
+  normalizeMusicId,
+  supportsIdLookup,
+  type MusicRefKind,
   searchQuerySchema,
   unifiedSearchQuerySchema,
   urlQuerySchema,
@@ -59,6 +63,7 @@ import { getAmllTtml, searchAmllCandidates, searchAmllTtml } from '../services/a
 import { artistService } from '../services/artistService.js'
 import { discoverService } from '../services/discoverService.js'
 import { CatalogError } from '../services/catalogUtils.js'
+import { lookupById } from '../services/idLookup.js'
 
 const router: RouterType = Router()
 const hotSongsService = createHotSongsService(musicProvider)
@@ -96,6 +101,10 @@ function validated<T>(
       }
       await handler(parsed.data, req, res)
     } catch (err) {
+      if (err instanceof CatalogError) {
+        res.status(err.status).json({ error: err.code })
+        return
+      }
       logger.error(`${label} failed`, err)
       res.status(500).json({ error: 'Internal server error' })
     }
@@ -116,6 +125,19 @@ router.get(
         if (room && room.users.some((u) => u.id === identityUserId)) {
           cookie = authService.getUserCookie(identityUserId, source, roomId)
         }
+      }
+    }
+
+    // 形如 ID（或分享链接）的关键词先按 ID 查：名称不一定搜得到，ID 一定查得到。
+    // 查到的就是全部答案；没查到或查询失败就退回按词搜索。
+    const refKind: MusicRefKind = type === 'album' || type === 'playlist' || type === 'artist' ? type : 'song'
+    const refId =
+      pageNum === 1 && looksLikeMusicId(source, refKind, keyword) ? normalizeMusicId(source, refKind, keyword) : null
+    if (refId && supportsIdLookup(source, refKind)) {
+      const found = await lookupById(source, refKind, refId).catch(() => [])
+      if (found.length > 0) {
+        res.json({ tracks: found, page: pageNum, hasMore: false })
+        return
       }
     }
 

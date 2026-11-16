@@ -5,6 +5,32 @@ import { nanoid } from 'nanoid'
 import { logger } from '../utils/logger.js'
 import { getCoverArtwork, normalizeKugouCoverUrl } from './coverArtwork.js'
 import { withTimeoutOrNull as withTimeout } from '../utils/withTimeout.js'
+import { SearchError } from './catalogUtils.js'
+
+function failedSearch(label: string, err: unknown): never {
+  if (err instanceof SearchError) throw err
+  logger.error(label, err)
+  throw new SearchError()
+}
+
+/** Meting 的网易云原始答复：业务码非 200（限流等）是拒绝而不是"无结果"。 */
+async function neteaseRaw(type: number, keyword: string, limit: number, page: number): Promise<any> {
+  const meting = new Meting('netease')
+  meting.format(false) // Important: don't format because format expects songs
+  const raw = await withTimeout(meting.search(keyword, { limit, page, type } as any))
+  if (!raw) throw new SearchError()
+  let data: any
+  try {
+    data = JSON.parse(raw as string)
+  } catch {
+    throw new SearchError()
+  }
+  if (typeof data !== 'object' || data === null || (data.code !== undefined && data.code !== 200)) {
+    logger.warn('NetEase catalog search returned business code', { code: data?.code })
+    throw new SearchError()
+  }
+  return data
+}
 
 /**
  * Search for albums. Returns a list of Playlist objects.
@@ -49,10 +75,11 @@ export async function searchAlbums(
         }).then((res) => res.json()),
       )
 
-      if (!response) return []
+      if (!response) throw new SearchError()
 
       const result = response['music.search.SearchCgiService.DoSearchForQQMusicDesktop']
-      if (result?.code !== 0 || !result?.data?.body?.album?.list) return []
+      if (result?.code !== 0) throw new SearchError()
+      if (!result?.data?.body?.album?.list) return []
 
       return result.data.body.album.list.map((album: any) => ({
         id: String(album.albumMID || album.albumID),
@@ -68,7 +95,8 @@ export async function searchAlbums(
       const url = `http://mobilecdn.kugou.com/api/v3/search/album?api_ver=1&area_code=1&correct=1&pagesize=${limit}&plat=2&tag=1&sver=5&showtype=10&page=${page}&keyword=${encodeURIComponent(keyword)}&version=8990`
       const response = await withTimeout(fetch(url).then((res) => res.json()))
 
-      if (!response || response.errcode !== 0 || !response.data?.info) return []
+      if (!response || response.errcode !== 0) throw new SearchError()
+      if (!response.data?.info) return []
 
       return response.data.info.map((album: any) => ({
         id: String(album.albumid),
@@ -81,17 +109,7 @@ export async function searchAlbums(
     }
 
     if (source === 'netease') {
-      const meting = new Meting('netease')
-      meting.format(false) // Important: don't format because format expects songs
-      const raw = await withTimeout(meting.search(keyword, { limit, page, type: 10 } as any))
-      if (!raw) return []
-
-      let data: any
-      try {
-        data = JSON.parse(raw as string)
-      } catch {
-        return []
-      }
+      const data = await neteaseRaw(10, keyword, limit, page)
 
       const albums = data?.result?.albums
       if (!Array.isArray(albums)) return []
@@ -108,8 +126,7 @@ export async function searchAlbums(
 
     return []
   } catch (err) {
-    logger.error(`Search album failed for ${source}:`, err)
-    return []
+    return failedSearch(`Search album failed for ${source}:`, err)
   }
 }
 
@@ -156,10 +173,11 @@ export async function searchPlaylists(
         }).then((res) => res.json()),
       )
 
-      if (!response) return []
+      if (!response) throw new SearchError()
 
       const result = response['music.search.SearchCgiService.DoSearchForQQMusicDesktop']
-      if (result?.code !== 0 || !result?.data?.body?.songlist?.list) return []
+      if (result?.code !== 0) throw new SearchError()
+      if (!result?.data?.body?.songlist?.list) return []
 
       return result.data.body.songlist.list.map((playlist: any) => ({
         id: String(playlist.dissid),
@@ -176,7 +194,8 @@ export async function searchPlaylists(
       const url = `http://mobilecdn.kugou.com/api/v3/search/special?api_ver=1&area_code=1&correct=1&pagesize=${limit}&plat=2&tag=1&sver=5&showtype=10&page=${page}&keyword=${encodeURIComponent(keyword)}&version=8990`
       const response = await withTimeout(fetch(url).then((res) => res.json()))
 
-      if (!response || response.errcode !== 0 || !response.data?.info) return []
+      if (!response || response.errcode !== 0) throw new SearchError()
+      if (!response.data?.info) return []
 
       return response.data.info.map((playlist: any) => ({
         id: String(playlist.specialid),
@@ -190,17 +209,7 @@ export async function searchPlaylists(
     }
 
     if (source === 'netease') {
-      const meting = new Meting('netease')
-      meting.format(false) // Important: don't format because format expects songs
-      const raw = await withTimeout(meting.search(keyword, { limit, page, type: 1000 } as any))
-      if (!raw) return []
-
-      let data: any
-      try {
-        data = JSON.parse(raw as string)
-      } catch {
-        return []
-      }
+      const data = await neteaseRaw(1000, keyword, limit, page)
 
       const playlists = data?.result?.playlists
       if (!Array.isArray(playlists)) return []
@@ -218,8 +227,7 @@ export async function searchPlaylists(
 
     return []
   } catch (err) {
-    logger.error(`Search playlist failed for ${source}:`, err)
-    return []
+    return failedSearch(`Search playlist failed for ${source}:`, err)
   }
 }
 
@@ -247,7 +255,8 @@ export async function searchArtists(
           timestamp: Date.now(),
         }),
       )
-      const artists = result?.body?.code === 200 ? result.body.result?.artists : undefined
+      if (!result || result.body?.code !== 200) throw new SearchError()
+      const artists = result.body.result?.artists
       if (!Array.isArray(artists)) return []
       return artists.flatMap((artist) => {
         const id = String(artist.id ?? '').trim()
@@ -290,7 +299,9 @@ export async function searchArtists(
           body: JSON.stringify(payload),
         }).then((res) => res.json() as Promise<Record<string, any>>),
       )
-      const singers = response?.['music.search.SearchCgiService.DoSearchForQQMusicDesktop']?.data?.body?.singer?.list
+      const answer = response?.['music.search.SearchCgiService.DoSearchForQQMusicDesktop']
+      if (!answer || answer.code !== 0) throw new SearchError()
+      const singers = answer.data?.body?.singer?.list
       if (!Array.isArray(singers)) return []
       return singers.flatMap((singer: Record<string, any>) => {
         const mid = String(singer.singerMID ?? '').trim()
@@ -321,7 +332,8 @@ export async function searchArtists(
         (res) => res.json() as Promise<Record<string, any>>,
       ),
     )
-    const singers = Array.isArray(response?.data) ? response.data.slice(0, size) : []
+    if (!response) throw new SearchError()
+    const singers = Array.isArray(response.data) ? response.data.slice(0, size) : []
     return singers.flatMap((singer: Record<string, any>) => {
       const id = String(singer.singerid ?? '').trim()
       if (!id) return []
@@ -340,8 +352,7 @@ export async function searchArtists(
       ]
     })
   } catch (error) {
-    logger.warn(`Artist search failed for ${source}`, { keyword, error })
-    return []
+    return failedSearch(`Artist search failed for ${source}`, error)
   }
 }
 

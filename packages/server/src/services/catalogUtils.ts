@@ -23,6 +23,17 @@ export class CatalogError extends Error {
   }
 }
 
+/**
+ * 搜索没能得到回答（请求失败、超时、答复不可读、被限流）：与"没有结果"不同，调用方应提示失败而不是显示空列表。
+ * 搜索成功但没有命中仍是空列表。
+ */
+export class SearchError extends CatalogError {
+  constructor() {
+    super('upstream', 'SEARCH_UPSTREAM', 503)
+    this.name = 'SearchError'
+  }
+}
+
 export const isRecord = (value: unknown): value is Raw =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 export const text = (value: unknown): string => (typeof value === 'string' ? value.trim() : '')

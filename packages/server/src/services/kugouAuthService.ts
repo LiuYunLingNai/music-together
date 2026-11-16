@@ -213,7 +213,7 @@ async function kugouRequest(config: KugouRequestConfig): Promise<KugouApiRespons
     ...config.headers,
   }
 
-  const fetchOpts: RequestInit = { method, headers }
+  const fetchOpts: RequestInit = { method, headers, signal: AbortSignal.timeout(10_000) }
   if (method === 'POST' && bodyStr) {
     headers['Content-Type'] = 'application/json'
     fetchOpts.body = bodyStr

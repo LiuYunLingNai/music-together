@@ -37,6 +37,7 @@ import { parseNeteaseRecommendedPlaylistPage } from './recommendationParsers.js'
 import { getCoverArtwork, normalizeHighQualityCoverUrl } from './coverArtwork.js'
 import { getStreamUrlCacheTtl, isStreamUrlExpired } from './streamUrlLifetime.js'
 import { searchAlbums, searchArtists, searchPlaylists } from './catalogSearch.js'
+import { SearchError } from './catalogUtils.js'
 import { EMPTY_LYRIC, fetchLyric, type LyricResult } from './lyricFetch.js'
 import { kugouSongToTrack, navigatePath, rawToTrack } from './trackMapping.js'
 import { normalizeBilibiliCoverUrl, normalizeKugouCoverUrl } from './coverArtwork.js'
@@ -464,6 +465,7 @@ class MusicProvider {
     max: 200,
     ttl: 10 * MINUTE,
   })
+  private playlistInflight = new Map<string, Promise<{ ids: string[]; total: number }>>()
   private playlistIndex = new LRUCache<string, { source: MusicSource; ids: string[] }>({
     max: 50,
     ttl: 30 * MINUTE,
@@ -547,6 +549,13 @@ class MusicProvider {
         this.trackRegistry.set(key, meta)
       }
     }
+  }
+
+  /** 按 ID 查到的曲目：与搜索结果一样补全并登记到注册表，之后的歌词、封面解析可以复用。 */
+  ingest(tracks: Track[]): Track[] {
+    for (const t of tracks) this.enrichFromRegistry(t)
+    this.registerTracks(tracks)
+    return tracks
   }
 
   /**
@@ -737,7 +746,7 @@ class MusicProvider {
         })
         response = await this.fetchBilibiliJson(`https://api.bilibili.com/x/web-interface/search/type?${params}`)
       }
-      if (!response || response.code !== 0) return []
+      if (!response || response.code !== 0) throw new SearchError()
       const videos = (response?.data?.result ?? []) as BilibiliSearchVideo[]
       const tracks: Track[] = videos.flatMap((video) => {
         const bvid = String(video.bvid ?? '').trim()
@@ -761,8 +770,9 @@ class MusicProvider {
       this.registerTracks(tracks)
       return tracks
     } catch (err) {
+      if (err instanceof SearchError) throw err
       logger.error('Bilibili search failed', err, { keyword, page })
-      return []
+      throw new SearchError()
     }
   }
 
@@ -1127,7 +1137,7 @@ class MusicProvider {
       const songList = response?.data?.info ?? response?.data?.lists
       if (!response || (response.errcode !== 0 && response.status !== 1) || !Array.isArray(songList)) {
         logger.warn(`Kugou search failed: errcode=${response?.errcode ?? response?.error_code}`)
-        return []
+        throw new SearchError()
       }
 
       const tracks: Track[] = []
@@ -1170,8 +1180,9 @@ class MusicProvider {
       })
       return tracks
     } catch (error) {
+      if (error instanceof SearchError) throw error
       logger.error('Kugou search failed:', error)
-      return []
+      throw new SearchError()
     }
   }
 
@@ -1206,7 +1217,7 @@ class MusicProvider {
 
       if (!response) {
         logger.warn(`QQ 音乐搜索 API 请求超时: "${keyword}"`)
-        return []
+        throw new SearchError()
       }
 
       if (!response.ok || response.body.code !== 200 || !Array.isArray(response.body.data)) {
@@ -1215,7 +1226,7 @@ class MusicProvider {
           code: response.body.code,
           message: response.body.msg,
         })
-        return []
+        throw new SearchError()
       }
 
       const tracks: Track[] = response.body.data.flatMap((value) => {
@@ -1255,8 +1266,9 @@ class MusicProvider {
       })
       return tracks
     } catch (error) {
+      if (error instanceof SearchError) throw error
       logger.error('QQ 音乐搜索 API 请求失败:', error)
-      return []
+      throw new SearchError()
     }
   }
 
@@ -1303,6 +1315,7 @@ class MusicProvider {
     const songList = result?.code === 0 ? result.data?.body?.song?.list : undefined
     if (!songList) {
       logger.warn(`QQ 原生搜索失败: code ${result?.code}`)
+      if (result?.code !== 0) throw new SearchError()
       return []
     }
 
@@ -1382,10 +1395,12 @@ class MusicProvider {
       // QQ 音乐单曲搜索使用配置的 API；专辑和歌单搜索走各自的独立方法。
       if (source === 'tencent') {
         const tracks = await this.searchTencent(keyword, limit, page, cookie)
-        this.searchIndex.set(cacheKey, {
-          source,
-          ids: tracks.map((t) => t.sourceId),
-        })
+        if (tracks.length > 0) {
+          this.searchIndex.set(cacheKey, {
+            source,
+            ids: tracks.map((t) => t.sourceId),
+          })
+        }
         return tracks
       }
 
@@ -1404,7 +1419,7 @@ class MusicProvider {
       const raw = await withTimeout(meting.search(keyword, { limit, page }))
       if (raw === null) {
         logger.warn(`Search timeout for ${source}: "${keyword}"`)
-        return []
+        throw new SearchError()
       }
 
       let rawData: MetingJson
@@ -1416,7 +1431,11 @@ class MusicProvider {
         logger.error(`Full raw response:`, raw)
         logger.error(`Raw response type:`, typeof raw)
         logger.error(`Raw response length:`, raw?.length)
-        return []
+        throw new SearchError()
+      }
+      if (source === 'netease' && rawData?.code !== undefined && rawData.code !== 200) {
+        logger.warn('NetEase search returned business code', { code: rawData.code })
+        throw new SearchError()
       }
 
       const songs = navigatePath(rawData, SEARCH_PATHS[source])
@@ -1443,8 +1462,9 @@ class MusicProvider {
       })
       return tracks
     } catch (err) {
+      if (err instanceof SearchError) throw err
       logger.error(`Search failed for ${source}:`, err)
-      return []
+      throw new SearchError()
     }
   }
 
@@ -2747,7 +2767,7 @@ class MusicProvider {
       }
       const url = normalizeHighQualityCoverUrl(source, (data.url as string) || '')
 
-      this.coverCache.set(cacheKey, url)
+      if (url) this.coverCache.set(cacheKey, url)
       return url
     } catch (err) {
       logger.error(`Get cover failed for ${source}:`, err)
@@ -2765,6 +2785,24 @@ class MusicProvider {
    * Returns the full sourceId list and total count.
    */
   async fetchFullPlaylist(
+    source: MusicSource,
+    playlistId: string,
+    playlistTotal?: number,
+    cookie?: string | null,
+    type: 'playlist' | 'album' = 'playlist',
+  ): Promise<{ ids: string[]; total: number }> {
+    // 同一歌单的并发请求合并为一次拉取：很多成员同时打开同一个歌单时不应成倍请求平台。
+    const key = playlistIndexKey(source, type, playlistId, cookie)
+    const running = this.playlistInflight.get(key)
+    if (running) return running
+    const started = this.loadFullPlaylist(source, playlistId, playlistTotal, cookie, type).finally(() => {
+      this.playlistInflight.delete(key)
+    })
+    this.playlistInflight.set(key, started)
+    return started
+  }
+
+  private async loadFullPlaylist(
     source: MusicSource,
     playlistId: string,
     playlistTotal?: number,
@@ -2790,7 +2828,7 @@ class MusicProvider {
       if (type === 'album') {
         return this.fetchNeteaseAlbum(playlistId, cacheKey)
       }
-      return this.fetchNeteasePlaylist(playlistId, cacheKey, playlistTotal, cookie)
+      return this.fetchNeteasePlaylist(playlistId, cacheKey, cookie)
     }
 
     // Kugou: try native API (works with global_collection_id from user playlists)
@@ -2861,24 +2899,25 @@ class MusicProvider {
   private async fetchNeteasePlaylist(
     playlistId: string,
     cacheKey: string,
-    playlistTotal?: number,
     cookie?: string | null,
   ): Promise<{ ids: string[]; total: number }> {
     // Netease /api/v3/song/detail can't handle more than ~1000 IDs per request,
     // so we paginate through playlist_track_all in chunks of 1000.
     const CHUNK_SIZE = 1000
-    const totalToFetch = playlistTotal || 100000
+    const MAX_TRACKS = 100000
     const baseParams = { id: playlistId, timestamp: Date.now(), ...(cookie ? { cookie } : {}) }
 
     try {
       const allTracks: Track[] = []
       let offset = 0
+      let complete = true
 
-      while (offset < totalToFetch) {
+      while (offset < MAX_TRACKS) {
         const res = await withTimeout(ncmApi.playlist_track_all({ ...baseParams, limit: CHUNK_SIZE, offset }), 60_000)
 
         if (res === null) {
           logger.warn(`Netease playlist_track_all timeout: ${playlistId} (offset=${offset})`)
+          complete = false
           break
         }
 
@@ -2905,7 +2944,7 @@ class MusicProvider {
       this.registerTracks(allTracks)
 
       const ids = allTracks.map((t) => t.sourceId)
-      this.playlistIndex.set(cacheKey, { source: 'netease', ids })
+      if (complete) this.playlistIndex.set(cacheKey, { source: 'netease', ids })
 
       logger.info(`已获取网易云歌单 ${playlistId}，共 ${ids.length} 首歌曲`, {
         source: 'netease',
@@ -2934,16 +2973,14 @@ class MusicProvider {
       const PAGE_SIZE = 300
       const allTracks: Track[] = []
       let page = 1
-      let totalFromApi = 0
+      const MAX_PAGES = 200
 
-      // Paginate until all tracks are fetched
+      // 总数字段可能缺失或偏小，只以短页作为结束条件
       while (true) {
-        const { songs, total } =
+        const { songs } =
           source === 'kugou_concept'
             ? await kugouAuth.getConceptPlaylistTracks(playlistId, page, PAGE_SIZE, cookie)
             : await kugouAuth.getPlaylistTracks(playlistId, page, PAGE_SIZE, cookie)
-        if (page === 1) totalFromApi = total
-
         if (songs.length === 0) break
 
         for (const song of songs) {
@@ -2951,7 +2988,7 @@ class MusicProvider {
           if (track) allTracks.push(track)
         }
 
-        if (allTracks.length >= totalFromApi || songs.length < PAGE_SIZE) break
+        if (songs.length < PAGE_SIZE || page >= MAX_PAGES) break
         page++
       }
 
@@ -2989,12 +3026,10 @@ class MusicProvider {
       const PAGE_SIZE = 100
       const allTracks: Track[] = []
       let page = 1
-      let totalFromApi = 0
+      const MAX_PAGES = 200
 
       while (true) {
-        const { songs, total } = await tencentAuth.getPlaylistTracks(playlistId, page, PAGE_SIZE, cookie)
-        if (page === 1) totalFromApi = total
-
+        const { songs } = await tencentAuth.getPlaylistTracks(playlistId, page, PAGE_SIZE, cookie)
         if (songs.length === 0) break
 
         for (const song of songs) {
@@ -3002,7 +3037,7 @@ class MusicProvider {
           if (track) allTracks.push(track)
         }
 
-        if (allTracks.length >= totalFromApi || songs.length < PAGE_SIZE) break
+        if (songs.length < PAGE_SIZE || page >= MAX_PAGES) break
         page++
       }
 

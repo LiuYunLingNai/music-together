@@ -15,6 +15,7 @@ import { checkSocketRateLimit } from '../middleware/socketRateLimiter.js'
 import * as chatService from '../services/chatService.js'
 import * as playerService from '../services/playerService.js'
 import * as queueService from '../services/queueService.js'
+import { sanitizeIncomingTrack } from '../services/incomingTracks.js'
 import { userRepo } from '../repositories/userRepository.js'
 import { logger } from '../utils/logger.js'
 
@@ -35,7 +36,7 @@ export function registerQueueController(io: TypedServer, socket: TypedSocket) {
         socket.emit(EVENTS.ROOM_ERROR, { code: ERROR_CODE.INVALID_DATA, message: '无效的歌曲数据' })
         return
       }
-      const track: Track = { ...parsed.data.track, requestedBy: ctx.user.nickname }
+      const track: Track = { ...sanitizeIncomingTrack(parsed.data.track), requestedBy: ctx.user.nickname }
 
       const added = queueService.addTrack(ctx.roomId, track)
       if (!added) {
@@ -78,7 +79,7 @@ export function registerQueueController(io: TypedServer, socket: TypedSocket) {
         socket.emit(EVENTS.ROOM_ERROR, { code: ERROR_CODE.INVALID_DATA, message: '无效的歌曲数据' })
         return
       }
-      const track: Track = { ...parsed.data.track, requestedBy: ctx.user.nickname }
+      const track: Track = { ...sanitizeIncomingTrack(parsed.data.track), requestedBy: ctx.user.nickname }
 
       const inserted = queueService.insertTrackAfterCurrent(ctx.roomId, track)
       if (!inserted) {
@@ -119,7 +120,7 @@ export function registerQueueController(io: TypedServer, socket: TypedSocket) {
         return
       }
       const { tracks: rawTracks, playlistName } = parsed.data
-      const tracks: Track[] = rawTracks.map((t) => ({ ...t, requestedBy: ctx.user.nickname }))
+      const tracks: Track[] = rawTracks.map((t) => ({ ...sanitizeIncomingTrack(t), requestedBy: ctx.user.nickname }))
 
       const addedCount = queueService.addBatchTracks(ctx.roomId, tracks)
       if (addedCount === 0) {
