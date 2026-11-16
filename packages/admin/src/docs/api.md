@@ -37,6 +37,7 @@
 | GET | `/cover-proxy` | 封面图代理（绕过外部 CDN CORS，白名单域名），参数 `url` |
 | GET | `/bilibili-audio-proxy` | B 站音频 CDN 字节范围代理 |
 | GET | `/kugou-audio-proxy` | 酷狗音频字节范围代理 |
+| POST | `/kugou-listening` | 普通酷狗账号实际听歌时长，JSON `{ roomId, trackId, sessionId, listenedMs, ended?, flush? }`；仅当前用户自己的普通酷狗凭据，首次累计必须为 0 |
 
 ## 三、房间（/api/rooms）
 

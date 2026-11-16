@@ -36,6 +36,13 @@ export const musicMetadataRateLimit = createHttpRateLimit({
   suffix: 'music-metadata',
 })
 
+export const listeningReportRateLimit = createHttpRateLimit({
+  points: 60,
+  durationSeconds: 60,
+  message: '听歌时长上报过于频繁',
+  suffix: 'listening-report',
+})
+
 /**
  * Audio proxies serve byte ranges, so seeking and visualiser analysis issue
  * several requests per track. Native players often send no identity cookie and

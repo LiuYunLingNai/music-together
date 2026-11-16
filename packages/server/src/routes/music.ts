@@ -37,10 +37,20 @@ import { MusicDownloadError, resolveDownloadOptions, streamDownload } from '../s
 import { audioProxyRateLimit, musicMetadataRateLimit } from '../middleware/httpRateLimiter.js'
 import { createHotSongsService, hotSongsPlaylistId } from '../services/hotSongsService.js'
 import { LyricSupplementService } from '../services/lyricSupplementService.js'
+import { createKugouListeningRouter } from '../controllers/kugouListeningController.js'
+import { createKugouListeningService } from '../services/kugouListeningService.js'
 
 const router: RouterType = Router()
 const hotSongsService = createHotSongsService(musicProvider)
 const lyricSupplementService = new LyricSupplementService(musicProvider)
+
+router.use(
+  createKugouListeningRouter({
+    getRoom: (id) => roomRepo.get(id),
+    getCookie: (userId, roomId) => authService.getUserCookie(userId, 'kugou', roomId),
+    service: createKugouListeningService(),
+  }),
+)
 
 /**
  * Wrap an async route handler with validation + error handling.

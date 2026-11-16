@@ -19,6 +19,7 @@ import { registerActivePlaybackStop } from '@/lib/audioPlaybackLifecycle'
 import { lyricPlayerBridge } from '@/lib/lyricPlayerBridge'
 import { getScheduledPlaybackPosition } from '@/lib/playbackSync'
 import { hideLoading, showLoading } from '@/components/Player/mineradio/particles/loadingState'
+import { createKugouListeningTracker } from '@/lib/kugouListening'
 
 /** Max wait (ms) for Howler `unlock` event before giving up and skipping */
 const PLAY_ERROR_TIMEOUT_MS = 3000
@@ -75,6 +76,7 @@ export function useHowl(onTrackEnd: () => void) {
   const preparedTrackRef = useRef<Track | null>(null)
   const stretchRef = useRef<TimeStretchController | null>(null)
   const stretchReadyRef = useRef<Promise<TimeStretchController | null> | null>(null)
+  const listeningTrackersRef = useRef(new Map<Howl, ReturnType<typeof createKugouListeningTracker>>())
 
   // Use selectors for the one reactive value we need (volume sync effect)
   const volume = usePlayerStore((s) => s.volume)
@@ -130,6 +132,8 @@ export function useHowl(onTrackEnd: () => void) {
 
   const disposeHowl = useCallback((howl: Howl | null) => {
     if (!howl) return
+    listeningTrackersRef.current.get(howl)?.dispose()
+    listeningTrackersRef.current.delete(howl)
     // ★ 先撤回本图发布的分析节点（audioTap 单例），再 unload ——
     //   旧歌的死 tap 不再锁死视觉层的频谱来源（节拍丢失加固）
     const finalizeTimeStretchRelease = releaseTimeStretch(howl)
@@ -396,6 +400,7 @@ export function useHowl(onTrackEnd: () => void) {
             }, 20)
           }
           usePlayerStore.getState().setIsPlaying(true)
+          listeningTrackersRef.current.get(howl)?.play()
           const dur = howl.duration()
           if (Number.isFinite(dur) && dur > 0) {
             usePlayerStore.getState().setDuration(dur)
@@ -403,6 +408,7 @@ export function useHowl(onTrackEnd: () => void) {
           startTimeUpdate()
         },
         onpause: () => {
+          listeningTrackersRef.current.get(howl)?.pause()
           if (howlRef.current !== howl) return
           usePlayerStore.getState().setIsPlaying(false)
           stopTimeUpdate()
@@ -415,6 +421,8 @@ export function useHowl(onTrackEnd: () => void) {
           lyricPlayerBridge.clearFrameTime()
         },
         onend: () => {
+          listeningTrackersRef.current.get(howl)?.dispose()
+          listeningTrackersRef.current.delete(howl)
           if (howlRef.current !== howl) return
           usePlayerStore.getState().setIsPlaying(false)
           stopTimeUpdate()
@@ -464,6 +472,10 @@ export function useHowl(onTrackEnd: () => void) {
       })
 
       howlRef.current = howl
+      if (track.source === 'kugou' && roomId) {
+        listeningTrackersRef.current.set(howl, createKugouListeningTracker(roomId, track.id, () => howl))
+        howl.on('seek', () => listeningTrackersRef.current.get(howl)?.seek())
+      }
       loadTimerRef.current = setTimeout(() => {
         if (howlRef.current !== howl || syncReadyRef.current) return
         loadTimerRef.current = null

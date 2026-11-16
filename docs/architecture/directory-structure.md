@@ -134,7 +134,7 @@ src/
 ├── hooks/                      # 自定义 Hooks
 │   ├── useSocketEvent.ts       #   通用 Socket 事件订阅工具 Hook（自动 on/off，ref 稳定）
 │   ├── usePlayer.ts            #   播放器主 hook（组合 useHowl + useLyric + usePlayerSync）
-│   ├── useHowl.ts              #   Howler.js 音频实例管理
+│   ├── useHowl.ts              #   Howler.js 音频实例管理（组合 lib/kugouListening.ts 统计普通酷狗实际听歌时长）
 │   ├── useLyric.ts             #   歌词预取、并行加载、缓存与多平台逐词候选置信度择优
 │   ├── usePlayerSync.ts        #   播放同步（Scheduled Execution + 服务端权威时间轴 + 自适应漂移校正）
 │   ├── useClockSync.ts         #   NTP 时钟同步 hook（校准客户端时钟与服务器对齐）
@@ -200,7 +200,7 @@ src/
 ├── wss.ts                      # ws 类型化事件、房间广播和中间件兼容封装
 ├── config.ts                   # 环境变量配置（PORT, CLIENT_URL, CORS）
 │
-├── controllers/                # 控制器：注册 Socket 事件处理器（薄编排层，不含业务逻辑）
+├── controllers/                # 控制器：Socket/HTTP 薄编排层（kugouListeningController.ts 处理时长上报身份与输入）
 │   ├── index.ts                #   统一注册入口
 │   ├── roomController.ts       #   房间生命周期（创建/加入/离开/发现/设置/角色）
 │   ├── playerController.ts     #   播放控制（play/pause/seek/next/prev/sync/set_mode）+ NTP ping/pong
@@ -213,6 +213,8 @@ src/
 ├── services/                   # 服务层：业务逻辑
 │   ├── roomService.ts          #   房间 CRUD + 角色管理 + 加入校验（validateJoinRequest）+ 管理员移出成员（kickUserFromRoom）与投票重协调（reconcileAndBroadcastVote）
 │   ├── roomLifecycleService.ts #   房间生命周期定时器（空置删除）+ 防抖广播
+│   ├── kugouListeningApi.ts    #   普通酷狗账号时长查询/增量提交（HTTPS、RSA、超时；不含任务奖励）
+│   ├── kugouListeningService.ts #  听歌会话、实际增量限幅、账号级去重和不重试上报
 │   ├── playerService.ts        #   播放状态管理 + 流 URL 解析 + 切歌防抖 + 加入播放同步
 │   ├── queueService.ts         #   队列操作（含删除当前曲目前的后继选择）
 │   ├── queueNavigation.ts      #   无仓储副作用的队列导航算法
