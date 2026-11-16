@@ -29,11 +29,27 @@
 原因是现网和 Docker 基于 Node 22，原生客户端依赖当前协议，且这些升级会扩大回归面而不直接改善用户功能。安全补丁继续通过同主版本升级、`pnpm audit` 和 overrides 获取；后续若迁移，应独立建批次并同时验证非 Docker 部署、Docker、Web、Android 与 Windows。
 
 
+## 基线 02f9447da 的取舍记录
+
+已移植：房间密码试错锁定（同一身份同一房间 1 分钟内错 5 次）、`ROOM_CREATE`/`ROOM_JOIN` 限流、重连凭证 `ttlMs`（客户端从收到时刻起算）、歌单抓取不再信任调用方 `total` 且残缺歌单不写缓存、入队丢弃客户端 `streamUrl` 并限制封面为 https、搜索失败与无结果的区分（`SearchError`，含网易云业务码、酷狗 errcode）、页面卸载且非主动离开时发送 `ROOM_LEAVE`、按 ID/分享链接搜索（`shared/musicRef` + `server/idLookup`，歌手结果沿用 fork 的曲目外形）、队列模式（`queueMode`：保留已播放 / 播完即移除，含消耗队列里「上一首」从头重播与隐藏上一首按钮；与 fork 原有的「播放后移除歌曲」`removePlayedTracks` 并存，互不替代）。
+
+fork 已具备：封面批量解析的单次超时与重试释放、网易云二维码检查超时（`transient`）与 `getUserInfo` 超时记为 error、QQ 请求超时、队列项 id 去重、`resumeTrack` 不回拨正在播放的房间、`playerPlaySchema`、NTP RTT 异常值过滤。
+
+fork 不需要：酷狗登录 cookie 转 Meting 形式（fork 的酷狗取流完全走原生接口，不经过 Meting 的 `url()`）。
+
+已核对并处理：QQ 空搜索与空封面不再缓存、Cookie 只在进房/重连/换房后补发（自动补发应答计数移到 `lib/authAutoResend`）、`HomePage` 只响应本页发起的创建/加入；fork 已具备：登录验证期间房间已销毁时不写 cookie 池（`captureAuthorization`）、暂停/加载完成时读取最新音量、歌词空结果短缓存；不适用：雷达歌单推荐不做缓存。
+
+未同步，后续按需评估：`mapp` 相关改动。
+
+待办（安全类，暂缓）：`POST /api/auth/identity/bootstrap` 按 IP 限流与 `TRUST_PROXY` 环境变量（当前 Express 未设置 trust proxy，反代下 `req.ip` 为代理地址，既有按 IP 的限流也受影响，默认值待定：1 对应反代部署，0 最保守）、同一身份最多同时创建 5 个房间（管理员与持久管理员不受限）、聊天限流改按身份计、`deployment.md` 补充 Cloudflare Tunnel 加反代时的 `TRUST_PROXY` 填法。
+
+UI 重构评估：不移植设置项「提示图标 + tooltip」（上游随后的 51479941 又改回在标签下方显示说明，说明该方案被上游自己否定）；弹窗分页（`DialogNav`）与 fork 的独立弹窗结构冲突，且无功能收益，暂不移植。
+
 ## 基线 d2b2d06 的取舍记录
 
 已移植：歌手主页与独立「音乐账号」对话框（含发现首页、头像与会员徽章）、网易云播放链接有效期与 v1 授权取流、账号事件 schema 校验、房间预检限流、日志去敏、musicProvider 拆分、已添加状态跟随队列。
 
-未同步，后续按需评估：Discourse 迷你应用（`packages/mapp`、沙箱认证通道、宿主 API 表）、设置对话框改用 ui Tabs 与 Textarea、搜索失败与无结果的区分、平台认证服务与 `useAuth`/`useSearch` 的测试补充、依赖大版本批量升级、`.pi/` 忽略项。
+未同步，后续按需评估：Discourse 迷你应用（`packages/mapp`、沙箱认证通道、宿主 API 表）、设置对话框改用 ui Tabs 与 Textarea、平台认证服务与 `useAuth`/`useSearch` 的测试补充、依赖大版本批量升级、`.pi/` 忽略项。
 
 后续同步流程：`git fetch upstream` → `git log HEAD..upstream/main` 查看新提交 → 按上文策略移植 → 在同一提交或独立提交中 `git merge -s ours upstream/main` 并更新本节基线。
 

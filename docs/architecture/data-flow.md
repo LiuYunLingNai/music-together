@@ -232,6 +232,15 @@ interface ChatMessage {
 
 房主可开启“播放后移除歌曲”。该设置默认关闭；开启后，手动下一首、投票下一首或歌曲自然结束触发下一首时，服务端只在新歌曲成功解析并开始播放后移除上一首并广播 `QUEUE_UPDATED`。切歌失败、停止播放和 `loop-one` 重播同一首不会删除当前歌曲。漫游歌曲切换时先移除上一首再把新漫游歌曲加入队列，避免队列已满导致新歌无法展示。`RoomState` 与 `room:settings` 使用可选 `removePlayedTracks` 字段，旧版 Web、Android 和 Windows 客户端可安全忽略；永久房间会持久化该设置。
 
+房主可在 设置→房间 选择**队列模式**（`queueMode`，`keep` 默认 / `consume`，只有房主可改；`RoomState` 与 `room:settings` 的可选字段，旧客户端缺省按 `keep`，永久房间持久化在房间状态 JSON 中，读取时无法识别的值回退 `keep`）。`consume`（播完即移除）下：
+
+- 循环类播放模式失效，`effectivePlayMode` 把 `loop-all`/`loop-one` 视为 `sequential`（存下的模式不改写，切回 `keep` 仍有效），`shuffle` 不受影响。
+- 移除发生在 `playerService.playNextTrackInRoom`（自动切歌、手动下一首、投票下一首同一入口，被切走的歌也会离开）：先以离开的那首为起点算出下一首（`getNextTrack(roomId, mode, fromTrackId)`），再移除它并广播 `queue:updated`，然后播放；没有下一首（含随机模式下只剩当前一首）就 `stopPlayback`。点队列里的歌直接播放、投票指定播放不会删除上一首。
+- 队列里排在当前歌前面、没听过的歌，在走到队尾后回到最前面那首没听过的；重试失败曲目时以失败的那首为起点继续往后。
+- 「上一首」：`getPreviousTrack` 不回绕；没有可回去的歌时 `playPrevTrackInRoom` 对 `consume` 房间 seek 到 0，`keep` 房间保持无操作。客户端 `PlayerControls` 在 `consume` 下隐藏上一首按钮（留同尺寸空位）并只循环切换顺序/随机；锁屏/媒体键触发时仍走服务端的从头重播。
+- 切换队列模式后立即重排自动混音过渡点；本 fork 的切歌在服务端互斥内同步提交 `currentTrack`，不存在上游「过渡未提交时再次切歌」的中间态，离开的曲目始终取 `currentTrack`。
+- 与「播放后移除歌曲」并存：后者只在成功切歌后删上一首、不改导航与循环；`consume` 下前者已先移除，后者为空操作。
+
 酷狗概念版私人漫游先从房主账号获取每日推荐，再从随机推荐歌单中选择一个歌单和分页补充候选，房间最终仍只播放其中一首；每日推荐或推荐歌单暂时不可用时按可用结果回退。候选池上限为 50 首，避免固定每日推荐在连续漫游后过早耗尽。
 
 房间支持 4 种播放模式（`PlayMode`），由 `room.playMode` 字段控制，默认 `loop-all`：
@@ -398,3 +407,14 @@ B站没有与房间 128K、320K 完全对应的普通 DASH 音轨，因此分别
 - 新增账户级本地歌单：SQLite `user_playlists`（`id` / `user_id` / `name` / `cover` / 时间戳，`user_id` 外键级联删除）与 `user_playlist_tracks`（`(playlist_id, track_id)` 主键去重、`track_json` 存完整跨音源曲目、`position` 排序），两表均为 `CREATE TABLE IF NOT EXISTS` 幂等建表。歌单封面未显式设置时读取时派生自首曲 `thumbnailCover ?? cover`，不落库。
 - 歌单能力仅对已设置密码的账号开放（`/api/playlists*` 经 `requireAccount` 守卫，访客 401/403）；写入前经 `trackSchema` 校验并剥离 `streamUrl` / `requiresServerProxy` / `streamFormat` 等短时效字段，容量受 `USER_PLAYLIST_MAX` / `USER_PLAYLIST_TRACKS_MAX` / `USER_PLAYLIST_NAME_MAX` 限制。歌单 CRUD 走 REST，"加入房间"复用现有 `QUEUE_ADD_BATCH`（`{ tracks, playlistName }`），不新增 WS 事件，旧原生客户端不受影响。
 - 访客（无密码且非服务器管理员）不写入持久成员名册 `room.members`，仅存在于在线 `room.users`；房主与持久 admin 即使是访客也始终保留在名册，详见上文交互要点第 17 条。
+
+## 入房保护与重连凭证
+
+- `ROOM_CREATE`/`ROOM_JOIN` 共用按身份计的限流（10 次/10 秒，携带重连凭证的入房不计入，弱网反复重连不会被误限）；同一身份在同一房间 1 分钟内输错密码 5 次后锁定，期间不再校验任何密码，输对一次清零（重连凭证、已在房间、创建者、管理员不受影响），提示文案为 `PASSWORD_LOCKED_MESSAGE`。
+- `room:rejoin_token` 事件带可选 `ttlMs`，客户端用 `rejoinTicketExpiry` 从收到时刻起算有效期，缺失时退回 `expiresAt`。
+- 入队的曲目会丢弃客户端携带的 `streamUrl`，封面只接受 https（已知音乐 CDN 的 http 自动升级）。
+- 搜索没能得到回答（请求失败、超时、被限流、答复不可读）抛 `SearchError`，路由返回 503，客户端提示失败；只有成功且无命中才是空列表。统一搜索按来源标记 `failedSources`，兜底换源与歌词补全遇到失败按无候选处理。
+- `RoomPage` 卸载且不是主动离开时发送 `ROOM_LEAVE`；延后一个宏任务以排除 StrictMode 模拟重挂载，断线时跳过（由连接守卫保留状态并在宽限期后重置）。
+- 搜索关键词形如 ID 或平台分享链接（网易云、QQ、酷狗）时，路由先按 ID 精确查找，查到即返回，否则退回按词搜索；短数字与普通词仍按关键词处理。
+- 客户端时钟偏移断线时不清零：重连沿用 3 分钟内的校准并在后台刷新，新样本只信任低 RTT 的（NTP 最小 RTT 优先），避免弱网刚恢复时的不对称延迟把偏移拉偏、造成进度回退。重连后的纠偏采样错开 1 秒以上，硬跳转会打印 `[sync] hard seek` 诊断信息。
+- 客户端只在进房、重连、换房后补发已保存的平台 Cookie；`ROOM_STATE` 的后续广播（换歌、设置、成员变动）不再触发补发。`HomePage` 只在本页发起创建/加入后才响应 `ROOM_STATE` 跳转。
