@@ -1,4 +1,4 @@
-import { getServerTime, isCalibrated, getMedianRTT } from '@/lib/clockSync'
+import { getServerTime, isCalibrated, getMedianRTT, getClockOffset, getLastSampleAgeMs } from '@/lib/clockSync'
 import {
   DRIFT_SEEK_THRESHOLD_MS,
   DRIFT_DEAD_ZONE_MS,
@@ -321,6 +321,13 @@ export function usePlayerSync(
         if (hardSeekCountRef.current < HARD_SEEK_CONFIRM_COUNT) return
         // Confirmed: large sustained drift — hard seek
         hardSeekCountRef.current = 0
+        console.info('[sync] hard seek', {
+          driftMs: Math.round(sd * 1000),
+          thresholdMs: Math.round(hardSeekThreshold * 1000),
+          rttMs: Math.round(getMedianRTT()),
+          offsetMs: Math.round(getClockOffset()),
+          lastSampleAgeMs: Math.round(getLastSampleAgeMs()),
+        })
         const howl = howlRef.current
         const soundId = soundIdRef.current
         const restoreVolume = usePlayerStore.getState().volume

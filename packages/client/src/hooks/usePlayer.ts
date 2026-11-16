@@ -304,8 +304,9 @@ export function usePlayer() {
             if (!howl.playing()) {
               schedulePlayback(data.playState.currentTime, data.playState.serverTimeToExecute)
             } else {
-              // 时钟重新校准约需 1 秒；校准后马上取两次样本，不等下一个常规周期再纠偏。
-              for (const delay of [1_400, 2_400]) {
+              // 重连后时钟沿用断线前的校准并在后台刷新；两次样本错开 1 秒以上，
+              // 避免硬跳转的连续确认被同一份瞬时误差同时满足。
+              for (const delay of [1_000, 2_300]) {
                 setTimeout(() => {
                   if (socket.connected) socket.emit(EVENTS.PLAYER_SYNC_REQUEST)
                 }, delay)

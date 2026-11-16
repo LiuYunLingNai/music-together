@@ -62,6 +62,27 @@ function safeGetJSON<T>(key: string): T | null {
   }
 }
 
+/** 读出的数据必须是预期形状：损坏或被改写的存储不能让调用方在 `.filter`、`.token` 上抛错。 */
+function readAuthCookies(): StoredCookie[] {
+  const raw = safeGetJSON<unknown>('auth-cookies')
+  if (!Array.isArray(raw)) return []
+  return raw.filter(
+    (item): item is StoredCookie =>
+      typeof item === 'object' &&
+      item !== null &&
+      typeof (item as StoredCookie).platform === 'string' &&
+      typeof (item as StoredCookie).cookie === 'string',
+  )
+}
+
+function readRejoinToken(): StoredRejoinToken | null {
+  const raw = safeGetJSON<Partial<StoredRejoinToken>>('rejoin-token')
+  if (!raw || typeof raw.roomId !== 'string' || typeof raw.token !== 'string' || typeof raw.expiresAt !== 'number') {
+    return null
+  }
+  return raw as StoredRejoinToken
+}
+
 function safeSetJSON(key: string, value: unknown): void {
   safeSet(key, JSON.stringify(value))
 }
@@ -672,27 +693,27 @@ export const storage = {
   setLyricTranslationMode3d: (v: LyricTranslationSetting) => safeSet('lyricTranslationMode3d', v),
 
   // Auth cookie persistence
-  getAuthCookies: (): StoredCookie[] => safeGetJSON<StoredCookie[]>('auth-cookies') ?? [],
+  getAuthCookies: (): StoredCookie[] => readAuthCookies(),
   setAuthCookies: (cookies: StoredCookie[]) => safeSetJSON('auth-cookies', cookies),
 
   upsertAuthCookie: (platform: MusicSource, cookie: string) => {
-    const list = (safeGetJSON<StoredCookie[]>('auth-cookies') ?? []).filter((c) => c.platform !== platform)
+    const list = readAuthCookies().filter((c) => c.platform !== platform)
     list.push({ platform, cookie })
     safeSetJSON('auth-cookies', list)
   },
 
   removeAuthCookie: (platform: MusicSource) => {
-    const list = (safeGetJSON<StoredCookie[]>('auth-cookies') ?? []).filter((c) => c.platform !== platform)
+    const list = readAuthCookies().filter((c) => c.platform !== platform)
     safeSetJSON('auth-cookies', list)
   },
 
   hasAuthCookie: (platform: MusicSource): boolean => {
-    const list = safeGetJSON<StoredCookie[]>('auth-cookies') ?? []
+    const list = readAuthCookies()
     return list.some((c) => c.platform === platform)
   },
 
   getRejoinToken: (roomId: string): string | null => {
-    const data = safeGetJSON<StoredRejoinToken>('rejoin-token')
+    const data = readRejoinToken()
     if (!data) return null
     if (data.roomId !== roomId) return null
     if (data.expiresAt <= Date.now()) return null
@@ -701,7 +722,7 @@ export const storage = {
   setRejoinToken: (roomId: string, token: string, expiresAt: number) =>
     safeSetJSON('rejoin-token', { roomId, token, expiresAt } satisfies StoredRejoinToken),
   clearRejoinToken: (roomId?: string) => {
-    const data = safeGetJSON<StoredRejoinToken>('rejoin-token')
+    const data = readRejoinToken()
     if (!data) return
     if (roomId && data.roomId !== roomId) return
     safeRemove('rejoin-token')

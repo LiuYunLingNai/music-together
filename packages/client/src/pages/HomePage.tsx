@@ -5,6 +5,7 @@ import { UserPopover } from '@/components/Lobby/UserPopover'
 import { GlobalBackground } from '@/components/GlobalBackground'
 import { Separator } from '@/components/ui/separator'
 import { useLobby } from '@/hooks/useLobby'
+import { passwordErrorText } from '@/lib/passwordErrorText'
 import { unlockAudio } from '@/lib/audioUnlock'
 import { ACTION_LOADING_TIMEOUT_MS } from '@/lib/constants'
 import { storage } from '@/lib/storage'
@@ -12,7 +13,7 @@ import { useSocketContext } from '@/providers/socket-context'
 import { useRoomStore } from '@/stores/roomStore'
 import { useChatStore } from '@/stores/chatStore'
 import { useVersionCheck } from '@/hooks/useVersionCheck'
-import { EVENTS, ERROR_CODE, type RoomListItem, type RoomState } from '@music-together/shared'
+import { EVENTS, ERROR_CODE, rejoinTicketExpiry, type RoomListItem, type RoomState } from '@music-together/shared'
 import { Github, Headphones } from 'lucide-react'
 import { motion } from 'motion/react'
 import {
@@ -57,6 +58,11 @@ export default function HomePage() {
   })
   const [passwordError, setPasswordError] = useState<string | null>(null)
   const [actionLoading, setActionLoading] = useState(false)
+  // 只响应本页发起的创建/加入：从房间页返回后，服务端对房间的广播不能把人又带回房间。
+  const ownRoomActionRef = useRef(false)
+  useEffect(() => {
+    if (actionLoading) ownRoomActionRef.current = true
+  }, [actionLoading])
   const actionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [directRoomId, setDirectRoomId] = useState('')
   const [nicknameDialogOpen, setNicknameDialogOpen] = useState(false)
@@ -124,6 +130,7 @@ export default function HomePage() {
   const savedNickname = accountProfile?.nickname || storage.getNickname()
 
   const onRoomError = useEffectEvent((error: { code: string; message: string }) => {
+    ownRoomActionRef.current = false
     setActionLoading(false)
     if (error.code !== ERROR_CODE.WRONG_PASSWORD) {
       toast.error(error.message)
@@ -131,7 +138,7 @@ export default function HomePage() {
     }
 
     if (passwordDialog.open) {
-      setPasswordError('密码错误，请重试')
+      setPasswordError(passwordErrorText(error.message))
       return
     }
 
@@ -189,6 +196,8 @@ export default function HomePage() {
     }
 
     const onState = (roomState: RoomState) => {
+      if (!ownRoomActionRef.current) return
+      ownRoomActionRef.current = false
       // setRoom automatically derives currentUser from room.users
       setRoom(roomState)
       if ('password' in roomState) {
@@ -201,8 +210,8 @@ export default function HomePage() {
       navigate(`/room/${roomState.id}`)
     }
 
-    const onRejoinToken = (data: { roomId: string; token: string; expiresAt: number }) => {
-      storage.setRejoinToken(data.roomId, data.token, data.expiresAt)
+    const onRejoinToken = (data: { roomId: string; token: string; expiresAt: number; ttlMs?: number }) => {
+      storage.setRejoinToken(data.roomId, data.token, rejoinTicketExpiry(data))
     }
 
     // 服务端先发送 CHAT_HISTORY，再发送会触发页面跳转的 ROOM_STATE，

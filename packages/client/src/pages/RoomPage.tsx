@@ -24,6 +24,7 @@ import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from '@/components/u
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { passwordErrorText } from '@/lib/passwordErrorText'
 import { isAudioUnlocked, unlockAudio } from '@/lib/audioUnlock'
 import { SERVER_URL } from '@/lib/config'
 import { useRoom } from '@/hooks/useRoom'
@@ -367,10 +368,14 @@ export default function RoomPage() {
         })
         if (cancelled) return
 
-        if (!res.ok) {
-          // Room not found
+        if (res.status === 404 || res.status === 400) {
           toast.error('房间不存在')
           navigate('/', { replace: true })
+          return
+        }
+        // 限流、5xx、反代短暂不可用不能说明房间不存在：和网络错误一样，仍允许尝试加入。
+        if (!res.ok) {
+          setRoomInfo(null)
           return
         }
 
@@ -450,14 +455,14 @@ export default function RoomPage() {
           // Password was sent from gate but rejected (e.g. race condition / password changed)
           // Reset gate so user can re-enter password
           setGateOpen(false)
-          setGatePasswordError('密码错误，请重试')
+          setGatePasswordError(passwordErrorText(error.message))
           passwordRef.current = undefined
           return
         }
 
         // Fallback password dialog path
         if (passwordNeeded) {
-          setPasswordError('密码错误，请重试')
+          setPasswordError(passwordErrorText(error.message))
           setPasswordLoading(false)
         } else {
           setPasswordNeeded(true)
@@ -527,6 +532,25 @@ export default function RoomPage() {
     setSettingsInitialTab('player')
     setSettingsOpen(true)
   }, [])
+
+  // 页面卸载且不是主动离开（返回键、路由切换、错误边界重置）时离开房间，否则服务端仍把本机当成成员，
+  // 音频却已停止。延后一个宏任务判断：StrictMode 的模拟重挂载会在计时器触发前把 mountedRef 置回 true；
+  // 断线时服务端已移除本机且连接守卫已重置状态，此时发送会在重连后被补发，所以直接跳过。
+  const mountedRef = useRef(false)
+  const leaveRoomRef = useRef(leaveRoom)
+  leaveRoomRef.current = leaveRoom
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      setTimeout(() => {
+        if (mountedRef.current || isLeavingRef.current) return
+        if (!socket.connected) return
+        if (!useRoomStore.getState().room && !joiningRef.current) return
+        leaveRoomRef.current()
+      }, 0)
+    }
+  }, [socket])
 
   const handleLeaveRoom = useCallback(() => {
     isLeavingRef.current = true

@@ -1,8 +1,9 @@
 import { useSocketContext } from '@/providers/socket-context'
 import { useRoomStore } from '@/stores/roomStore'
 import { useManualFallbackStore } from '@/stores/manualFallbackStore'
+import { expectAutoResend } from '@/lib/authAutoResend'
 import { storage } from '@/lib/storage'
-import { ERROR_CODE, EVENTS } from '@music-together/shared'
+import { ERROR_CODE, EVENTS, rejoinTicketExpiry } from '@music-together/shared'
 import type {
   AudioQuality,
   MusicSource,
@@ -35,10 +36,13 @@ export function useRoomState() {
   // Guard against React Strict Mode double-mount sending cookies twice.
   // Persists across cleanup/re-setup so the second mount is a no-op.
   const mountResendDone = useRef(false)
+  const needsResendRef = useRef(false)
+  const resentRoomIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     const resendCookies = () => {
       const storedCookies = storage.getAuthCookies()
+      expectAutoResend(storedCookies.length)
       for (const { platform, cookie } of storedCookies) {
         socket.emit(EVENTS.AUTH_SET_COOKIE, { platform, cookie })
       }
@@ -53,16 +57,25 @@ export function useRoomState() {
       }
       void fetchCurrentProfile().catch(() => null)
 
-      // Auto-resend persisted auth cookies so the room's cookie pool is populated
-      resendCookies()
+      // 房间状态会因换歌、设置、成员变动被广播给所有人；Cookie 只需要在进房、重连、换房后补发一次，
+      // 否则每次广播都让每位成员重发全部平台 Cookie，服务端要逐个应答并再向全房间广播账号状态。
+      if (needsResendRef.current || resentRoomIdRef.current !== roomState.id) {
+        needsResendRef.current = false
+        resentRoomIdRef.current = roomState.id
+        resendCookies()
+      }
+    }
+
+    const onConnect = () => {
+      needsResendRef.current = true
     }
 
     const onUserJoined = (user: User) => {
       useRoomStore.getState().addUser(user)
     }
 
-    const onRejoinToken = (data: { roomId: string; token: string; expiresAt: number }) => {
-      storage.setRejoinToken(data.roomId, data.token, data.expiresAt)
+    const onRejoinToken = (data: { roomId: string; token: string; expiresAt: number; ttlMs?: number }) => {
+      storage.setRejoinToken(data.roomId, data.token, rejoinTicketExpiry(data))
     }
 
     const onUserLeft = (user: User) => {
@@ -77,6 +90,7 @@ export function useRoomState() {
       allowTemporaryAdminTrackRemoval: boolean
       allowTemporaryAdminQueueClear: boolean
       removePlayedTracks?: boolean
+      queueMode?: import('@music-together/shared').QueueMode
       roamingEnabled?: boolean
       automixEnabled?: boolean
       transitionMode?: import('@music-together/shared').TransitionMode
@@ -200,12 +214,16 @@ export function useRoomState() {
     // If room was already set before this hook mounted (e.g. HomePage consumed
     // ROOM_STATE and navigated here), resend cookies now. The ref guard prevents
     // React Strict Mode's double-mount from sending twice.
-    if (!mountResendDone.current && useRoomStore.getState().room) {
+    socket.on('connect', onConnect)
+    const currentRoom = useRoomStore.getState().room
+    if (!mountResendDone.current && currentRoom) {
       mountResendDone.current = true
+      resentRoomIdRef.current = currentRoom.id
       resendCookies()
     }
 
     return () => {
+      socket.off('connect', onConnect)
       socket.off(EVENTS.ROOM_STATE, onRoomState)
       socket.off(EVENTS.ROOM_REJOIN_TOKEN, onRejoinToken)
       socket.off(EVENTS.ROOM_USER_JOINED, onUserJoined)
