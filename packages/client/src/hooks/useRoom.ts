@@ -49,6 +49,7 @@ export function useRoom() {
       allowTemporaryAdminTrackRemoval?: boolean
       allowTemporaryAdminQueueClear?: boolean
       removePlayedTracks?: boolean
+      queueMode?: import('@music-together/shared').QueueMode
       roamingEnabled?: boolean
       automixEnabled?: boolean
       transitionMode?: import('@music-together/shared').TransitionMode

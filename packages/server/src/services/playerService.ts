@@ -7,7 +7,14 @@ import type {
   ScheduledPlayState,
   Track,
 } from '@music-together/shared'
-import { EVENTS, NTP, TIMING, clampPlaybackPosition, nextPlaybackRevision } from '@music-together/shared'
+import {
+  EVENTS,
+  NTP,
+  TIMING,
+  clampPlaybackPosition,
+  effectivePlayMode,
+  nextPlaybackRevision,
+} from '@music-together/shared'
 import { roomRepo } from '../repositories/roomRepository.js'
 import { nanoid } from 'nanoid'
 import { musicProvider } from './musicProvider.js'
@@ -362,7 +369,10 @@ async function preResolveNextStream(roomId: string): Promise<void> {
 function rescheduleAutomix(io: TypedServer, roomId: string): void {
   const room = roomRepo.get(roomId)
   if (!room) return
-  const next = room.playMode === 'loop-one' ? null : queueService.getNextTrack(room.id, room.playMode)
+  const next =
+    effectivePlayMode(room.queueMode, room.playMode) === 'loop-one'
+      ? null
+      : queueService.getNextTrack(room.id, room.playMode)
   const successor = next && next.id !== room.currentTrack?.id ? next : null
   automixService.scheduleAutomix(
     roomId,
@@ -1010,6 +1020,14 @@ export function playNextTrackInRoom(
     const room = roomRepo.get(roomId)
     if (!room) return
     const previousTrack = room.currentTrack
+    const consume = room.queueMode === 'consume'
+    // A consumed queue never loops, whatever play mode is stored.
+    playMode = effectivePlayMode(room.queueMode, playMode)
+    // Count on from the track being left: once it is removed the queue no longer holds it.
+    const pickNext = (from?: string): Track | null => {
+      const next = queueService.getNextTrack(roomId, playMode, consume ? (from ?? previousTrack?.id) : undefined)
+      return consume && next && next.id === (from ?? previousTrack?.id) ? null : next // a lone track has no "next"
+    }
 
     let roamingAttempted = false
     const tryRoaming = async (): Promise<boolean> => {
@@ -1097,10 +1115,19 @@ export function playNextTrackInRoom(
       else await tryRoaming()
     }
 
-    let nextTrack = queueService.getNextTrack(roomId, playMode)
+    let nextTrack = pickNext()
     if (!nextTrack && !roamingAttempted && room.roamingEnabled) {
-      if (await tryRoaming()) nextTrack = queueService.getNextTrack(roomId, playMode)
+      if (await tryRoaming()) nextTrack = pickNext()
     }
+
+    if (consume && previousTrack) {
+      // The track just heard (or skipped) is done with and leaves the queue for good, so nothing comes round again
+      // and what others queued is next in line.
+      if (queueService.removeTrack(roomId, previousTrack.id)) {
+        io.to(roomId).emit(EVENTS.QUEUE_UPDATED, { queue: room.queue })
+      }
+    }
+
     if (!nextTrack) {
       stopPlayback(io, roomId)
       return
@@ -1144,7 +1171,10 @@ export function playNextTrackInRoom(
     let attemptedTrackId = nextTrack.id
     for (let attempt = 1; !success && attempt < MAX_ADVANCE_ATTEMPTS; attempt += 1) {
       const retryMode = playMode === 'loop-one' ? 'sequential' : playMode
-      const skipTrack = queueService.getNextTrack(roomId, retryMode)
+      // Past the one that failed (the track left behind is no longer in a consumed queue to count from).
+      const skipTrack = consume
+        ? queueService.getNextTrack(roomId, retryMode, attemptedTrackId)
+        : queueService.getNextTrack(roomId, retryMode)
       if (!skipTrack || skipTrack.id === attemptedTrackId) break
       attemptedTrackId = skipTrack.id
       success = await _playTrackInRoom(io, roomId, skipTrack)
@@ -1188,7 +1218,13 @@ export function playPrevTrackInRoom(
     }
 
     const prevTrack = queueService.getPreviousTrack(roomId)
-    if (!prevTrack) return
+    if (!prevTrack) {
+      // In a consumed queue what was heard has left it, so there is nothing to go back to: "previous" starts the
+      // current track over instead of doing nothing.
+      const room = roomRepo.get(roomId)
+      if (room?.queueMode === 'consume' && room.currentTrack) seekTrack(io, roomId, 0)
+      return
+    }
 
     const success = await _playTrackInRoom(io, roomId, prevTrack)
     if (!success) {

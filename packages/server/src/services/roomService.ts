@@ -263,6 +263,7 @@ export function createRoom(
     allowTemporaryAdminTrackRemoval: false,
     allowTemporaryAdminQueueClear: false,
     removePlayedTracks: false,
+    queueMode: 'keep',
     roamingEnabled: false,
     automixEnabled: false,
     transitionMode: 'automix',
@@ -599,6 +600,7 @@ export function updateSettings(
     allowTemporaryAdminTrackRemoval?: boolean
     allowTemporaryAdminQueueClear?: boolean
     removePlayedTracks?: boolean
+    queueMode?: RoomData['queueMode']
     roamingEnabled?: boolean
     automixEnabled?: boolean
     transitionMode?: RoomData['transitionMode']
@@ -642,6 +644,10 @@ export function updateSettings(
 
   if (settings.removePlayedTracks !== undefined) {
     room.removePlayedTracks = settings.removePlayedTracks
+  }
+
+  if (settings.queueMode !== undefined) {
+    room.queueMode = settings.queueMode
   }
 
   if (settings.roamingEnabled !== undefined) {

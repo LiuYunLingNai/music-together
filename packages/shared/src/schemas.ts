@@ -54,6 +54,7 @@ export const roomSettingsSchema = z.object({
   allowTemporaryAdminTrackRemoval: z.boolean().optional(),
   allowTemporaryAdminQueueClear: z.boolean().optional(),
   removePlayedTracks: z.boolean().optional(),
+  queueMode: z.enum(['keep', 'consume']).optional(),
   roamingEnabled: z.boolean().optional(),
   automixEnabled: z.boolean().optional(),
   transitionMode: z.enum(['crossfade', 'automix']).optional(),

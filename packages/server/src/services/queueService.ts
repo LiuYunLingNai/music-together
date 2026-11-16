@@ -1,5 +1,5 @@
 import type { PlayMode, Track } from '@music-together/shared'
-import { LIMITS } from '@music-together/shared'
+import { effectivePlayMode, LIMITS } from '@music-together/shared'
 import { nanoid } from 'nanoid'
 import { roomRepo } from '../repositories/roomRepository.js'
 import { getSuccessorAfterRemovalFromQueue } from './queueNavigation.js'
@@ -106,7 +106,11 @@ export function removeTrack(roomId: string, trackId: string): boolean {
 export function getSuccessorAfterRemoval(roomId: string, trackId: string, playMode?: PlayMode): Track | null {
   const room = roomRepo.get(roomId)
   if (!room) return null
-  return getSuccessorAfterRemovalFromQueue(room.queue, trackId, playMode ?? room.playMode)
+  return getSuccessorAfterRemovalFromQueue(
+    room.queue,
+    trackId,
+    effectivePlayMode(room.queueMode, playMode ?? room.playMode),
+  )
 }
 
 export function clearQueue(roomId: string): void {
@@ -216,20 +220,23 @@ export function updateTrackArtwork(
  * - loop-one:   returns the current track itself
  * - shuffle:    random track from queue (excludes current; returns self if queue has 1 item)
  */
-export function getNextTrack(roomId: string, playMode?: PlayMode): Track | null {
+export function getNextTrack(roomId: string, playMode?: PlayMode, fromTrackId?: string): Track | null {
   const room = roomRepo.get(roomId)
   if (!room || room.queue.length === 0) return null
 
-  const mode = playMode ?? room.playMode ?? 'sequential'
+  // In a queue that is consumed as it plays, the looping modes mean nothing: it just goes forward.
+  const mode = effectivePlayMode(room.queueMode, playMode ?? room.playMode ?? 'sequential')
 
-  const currentIndex = room.currentTrack ? room.queue.findIndex((t) => t.id === room.currentTrack!.id) : -1
+  // `fromTrackId` lets a caller look past a transition that has been scheduled but not committed yet.
+  const fromId = fromTrackId ?? room.currentTrack?.id
+  const currentIndex = fromId ? room.queue.findIndex((t) => t.id === fromId) : -1
 
   switch (mode) {
     case 'loop-one':
       // Replay the current track, including a roaming track that is not stored
       // in the user queue.
-      if (room.currentTrack) return room.currentTrack
-      return room.queue[0] ?? null
+      if (fromTrackId === undefined && room.currentTrack) return room.currentTrack
+      return room.queue[currentIndex] ?? room.queue[0] ?? null
 
     case 'loop-all': {
       const nextIndex = currentIndex + 1
@@ -246,7 +253,11 @@ export function getNextTrack(roomId: string, playMode?: PlayMode): Track | null 
     case 'sequential':
     default: {
       const nextIndex = currentIndex + 1
-      return nextIndex < room.queue.length ? room.queue[nextIndex] : null
+      if (nextIndex < room.queue.length) return room.queue[nextIndex]
+      // A consumed queue only holds what has not been heard yet: whatever sits before the current track was jumped
+      // over, so it comes next instead of being left behind for good.
+      if (room.queueMode === 'consume') return room.queue.find((t) => t.id !== fromId) ?? null
+      return null
     }
   }
 }
@@ -258,7 +269,7 @@ export function getPreviousTrack(roomId: string): Track | null {
   const currentIndex = room.currentTrack ? room.queue.findIndex((t) => t.id === room.currentTrack!.id) : -1
 
   // For loop-all, wrap to last track when at the beginning
-  if (room.playMode === 'loop-all' && currentIndex <= 0) {
+  if (effectivePlayMode(room.queueMode, room.playMode) === 'loop-all' && currentIndex <= 0) {
     return room.queue[room.queue.length - 1]
   }
 

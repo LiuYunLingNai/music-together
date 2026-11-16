@@ -15,6 +15,7 @@ export function toPublicRoomState(data: RoomData): RoomState {
     allowTemporaryAdminTrackRemoval: data.allowTemporaryAdminTrackRemoval,
     allowTemporaryAdminQueueClear: data.allowTemporaryAdminQueueClear,
     removePlayedTracks: data.removePlayedTracks,
+    queueMode: data.queueMode,
     roamingEnabled: data.roamingEnabled,
     automixEnabled: data.automixEnabled,
     transitionMode: data.transitionMode,

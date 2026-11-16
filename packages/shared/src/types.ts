@@ -154,6 +154,18 @@ export type UserRole = 'owner' | 'admin' | 'member'
 
 export type PlayMode = 'sequential' | 'loop-all' | 'loop-one' | 'shuffle'
 
+/**
+ * 队列模式（房主在设置里切换）：
+ * - keep：播完的歌留在队列里，按播放模式往下走——默认
+ * - consume：一首歌听完（或被切走）就从队列移除，队列只往前走、不会循环，后点的歌排在后面
+ */
+export type QueueMode = 'keep' | 'consume'
+
+/** 实际生效的播放模式：消耗队列里"列表循环"和"单曲循环"没有意义，按顺序播放；不改写已存的模式。 */
+export function effectivePlayMode(queueMode: QueueMode | undefined, playMode: PlayMode): PlayMode {
+  return queueMode === 'consume' && (playMode === 'loop-all' || playMode === 'loop-one') ? 'sequential' : playMode
+}
+
 /** 音频质量档位 (kbps)：标准 / 较高 / HQ / 无损 */
 export type AudioQuality =
   | 128
@@ -278,6 +290,8 @@ export interface RoomState {
   allowTemporaryAdminQueueClear: boolean
   /** Remove the previously played queue item after a successful next-track transition. */
   removePlayedTracks?: boolean
+  /** 队列模式；旧服务端缺省按 `keep`。 */
+  queueMode?: QueueMode
   /** Automatically continue with personalized recommendations when no user-queued successor exists. */
   roamingEnabled?: boolean
   /** 自动混音：服务端提前推进并在重叠窗口内交接，所有成员使用同一过渡时长。 */

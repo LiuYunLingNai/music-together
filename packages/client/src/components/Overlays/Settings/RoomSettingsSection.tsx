@@ -10,7 +10,7 @@ import { storage } from '@/lib/storage'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
 import { useAccountStore } from '@/stores/accountStore'
-import type { AudioQuality, NeteaseRoamingMode, RoamingSource, TransitionMode } from '@music-together/shared'
+import type { AudioQuality, NeteaseRoamingMode, QueueMode, RoamingSource, TransitionMode } from '@music-together/shared'
 import { CROSSFADE_DEFAULT_SEC, CROSSFADE_MAX_SEC, CROSSFADE_MIN_SEC, LIMITS, NETEASE_ROAMING_SCENES } from '@music-together/shared'
 import { Check, Copy, Lock, LockOpen, Pencil, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
@@ -44,6 +44,11 @@ const ROAMING_SOURCE_LABELS: Record<RoamingSource, string> = {
   kugou_concept: '酷狗概念版',
 }
 
+const QUEUE_MODE_LABELS: Record<QueueMode, string> = {
+  keep: '保留已播放',
+  consume: '播完即移除',
+}
+
 interface RoomSettingsSectionProps {
   onUpdateSettings: (settings: {
     name?: string
@@ -54,6 +59,7 @@ interface RoomSettingsSectionProps {
     allowTemporaryAdminTrackRemoval?: boolean
     allowTemporaryAdminQueueClear?: boolean
     removePlayedTracks?: boolean
+    queueMode?: QueueMode
     roamingEnabled?: boolean
     automixEnabled?: boolean
     transitionMode?: TransitionMode
@@ -449,6 +455,30 @@ export function RoomSettingsSection({ onUpdateSettings }: RoomSettingsSectionPro
                 void submitSettings({ allowTemporaryAdminQueueClear }, allowTemporaryAdminQueueClear ? '已允许临时管理员清空歌单' : '已限制临时管理员清空歌单')
               }}
             />
+          </SettingRow>
+
+          <SettingRow
+            label="队列模式"
+            description="「播完即移除」：听完（或切走）的歌离开队列，不再循环，后点的歌依次排在后面"
+          >
+            <Select
+              value={room?.queueMode ?? 'keep'}
+              onValueChange={(value) => {
+                const queueMode = value as QueueMode
+                void submitSettings({ queueMode }, `队列模式已切换为「${QUEUE_MODE_LABELS[queueMode]}」`)
+              }}
+            >
+              <SelectTrigger className="h-8 w-[145px] text-sm" aria-label="队列模式">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(Object.keys(QUEUE_MODE_LABELS) as QueueMode[]).map((mode) => (
+                  <SelectItem key={mode} value={mode}>
+                    {QUEUE_MODE_LABELS[mode]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </SettingRow>
 
           <SettingRow label="播放后移除歌曲" description="切换到下一首成功后，自动从房间歌单移除上一首">

@@ -4,6 +4,7 @@ import type {
   ClientInfo,
   PlayMode,
   PlayState,
+  QueueMode,
   RoomListItem,
   RoomMember,
   RoomBan,
@@ -32,6 +33,8 @@ export interface RoomData {
   allowTemporaryAdminQueueClear: boolean
   /** Remove the previously played queue item after a successful next-track transition. */
   removePlayedTracks: boolean
+  /** `consume`: a track that was heard (or skipped) leaves the queue and nothing loops. */
+  queueMode: QueueMode
   /** Continue with personalized recommendations when the user queue has no successor. */
   roamingEnabled: boolean
   /** Server-scheduled overlapping transition between consecutive tracks. */

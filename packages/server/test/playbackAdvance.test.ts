@@ -173,3 +173,89 @@ test('keeps queue ids unique so navigation and removal stay addressable', () => 
     roomRepo.delete(room.id)
   }
 })
+
+async function withConsumedRoom(
+  socketId: string,
+  run: (ctx: { io: TypedServer; room: ReturnType<typeof roomService.createRoom>['room'] }) => Promise<void>,
+) {
+  const { io } = createRecordingIo()
+  const { room } = roomService.createRoom(socketId, '房主', '消耗队列', null, `${socketId}-user`)
+  const original = musicProvider.getStreamInfoDetailed
+  musicProvider.getStreamInfoDetailed = async () => ({
+    result: { url: 'https://example.test/audio', requestedQuality: 320, attemptedQuality: 320 },
+    failure: null,
+  })
+  try {
+    roomService.updateSettings(room.id, { queueMode: 'consume' })
+    await run({ io, room })
+  } finally {
+    musicProvider.getStreamInfoDetailed = original
+    playerService.cleanupRoom(room.id)
+    roomRepo.delete(room.id)
+  }
+}
+
+test('a consumed queue drops each track it leaves and never loops back', async () => {
+  await withConsumedRoom('consume-socket', async ({ io, room }) => {
+    for (const id of ['a', 'b', 'c']) queueService.addTrack(room.id, track(id))
+    assert.equal(await playerService.playTrackInRoom(io, room.id, track('a')), true)
+
+    await playerService.playNextTrackInRoom(io, room.id, 'loop-all', { skipDebounce: true })
+    assert.equal(room.currentTrack?.id, 'b')
+    assert.deepEqual(room.queue.map((t) => t.id), ['b', 'c'])
+
+    await playerService.playNextTrackInRoom(io, room.id, 'loop-all', { skipDebounce: true })
+    assert.deepEqual(room.queue.map((t) => t.id), ['c'])
+
+    // The last track has no successor: it leaves too and the room stops instead of wrapping to the start.
+    await playerService.playNextTrackInRoom(io, room.id, 'loop-all', { skipDebounce: true })
+    assert.equal(room.queue.length, 0)
+    assert.equal(room.playState.isPlaying, false)
+  })
+})
+
+test('a consumed queue comes back to unheard tracks queued before the current one', async () => {
+  await withConsumedRoom('consume-back-socket', async ({ io, room }) => {
+    for (const id of ['a', 'b', 'c']) queueService.addTrack(room.id, track(id))
+    assert.equal(await playerService.playTrackInRoom(io, room.id, track('c')), true)
+
+    await playerService.playNextTrackInRoom(io, room.id, 'sequential', { skipDebounce: true })
+    assert.equal(room.currentTrack?.id, 'a')
+    assert.deepEqual(room.queue.map((t) => t.id), ['a', 'b'])
+  })
+})
+
+test('"previous" in a consumed queue restarts the current track', async () => {
+  await withConsumedRoom('consume-prev-socket', async ({ io, room }) => {
+    queueService.addTrack(room.id, track('a'))
+    assert.equal(await playerService.playTrackInRoom(io, room.id, track('a')), true)
+    room.playState = { ...room.playState, currentTime: 42 }
+
+    await playerService.playPrevTrackInRoom(io, room.id, { skipDebounce: true })
+    assert.equal(room.currentTrack?.id, 'a')
+    assert.equal(room.playState.currentTime, 0)
+  })
+})
+
+test('a room that keeps its queue still holds what was played', async () => {
+  const { io } = createRecordingIo()
+  const { room } = roomService.createRoom('keep-socket', '房主', '保留队列', null, 'keep-user')
+  const original = musicProvider.getStreamInfoDetailed
+  musicProvider.getStreamInfoDetailed = async () => ({
+    result: { url: 'https://example.test/audio', requestedQuality: 320, attemptedQuality: 320 },
+    failure: null,
+  })
+  try {
+    assert.equal(room.queueMode, 'keep')
+    for (const id of ['a', 'b']) queueService.addTrack(room.id, track(id))
+    assert.equal(await playerService.playTrackInRoom(io, room.id, track('a')), true)
+    await playerService.playNextTrackInRoom(io, room.id, 'loop-all', { skipDebounce: true })
+    assert.deepEqual(room.queue.map((t) => t.id), ['a', 'b'])
+    await playerService.playNextTrackInRoom(io, room.id, 'loop-all', { skipDebounce: true })
+    assert.equal(room.currentTrack?.id, 'a')
+  } finally {
+    musicProvider.getStreamInfoDetailed = original
+    playerService.cleanupRoom(room.id)
+    roomRepo.delete(room.id)
+  }
+})

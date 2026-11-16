@@ -11,7 +11,7 @@ import { useRoomStore } from '@/stores/roomStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import type { CSSProperties } from 'react'
 import type { PlayMode, VoteAction } from '@music-together/shared'
-import { EVENTS, TIMING } from '@music-together/shared'
+import { EVENTS, TIMING, effectivePlayMode } from '@music-together/shared'
 import { ArrowRightToLine, ListMusic, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { memo, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
@@ -20,6 +20,8 @@ import { memo, useContext, useEffect, useLayoutEffect, useRef, useState, useSync
 const DESIGN_WIDTH = 300
 
 const PLAY_MODE_CYCLE: PlayMode[] = ['sequential', 'loop-all', 'loop-one', 'shuffle']
+/** A queue consumed as it plays never comes round again, so looping modes are not offered. */
+const CONSUMING_PLAY_MODE_CYCLE: PlayMode[] = ['sequential', 'shuffle']
 
 const PLAY_MODE_CONFIG: Record<PlayMode, { icon: typeof Repeat; label: string }> = {
   sequential: { icon: ArrowRightToLine, label: '顺序播放' },
@@ -121,7 +123,9 @@ export const PlayerControls = memo(function PlayerControls({
   const controlsFft = useSettingsStore((s) => s.classicControlsFft)
   const currentTrack = usePlayerStore((s) => s.currentTrack)
   const queueLength = useRoomStore((s) => s.room?.queue?.length ?? 0)
-  const playMode = useRoomStore((s) => s.room?.playMode ?? 'sequential')
+  const queueMode = useRoomStore((s) => s.room?.queueMode ?? 'keep')
+  // What actually plays: a consumed queue does not honour a stored looping mode.
+  const playMode = useRoomStore((s) => effectivePlayMode(s.room?.queueMode, s.room?.playMode ?? 'sequential'))
   const ability = useContext(AbilityContext)
   const canSeek = ability.can('seek', 'Player')
   const canPlay = ability.can('play', 'Player')
@@ -183,8 +187,8 @@ export const PlayerControls = memo(function PlayerControls({
   }
 
   const handlePlayModeToggle = () => {
-    const currentIdx = PLAY_MODE_CYCLE.indexOf(playMode)
-    const nextMode = PLAY_MODE_CYCLE[(currentIdx + 1) % PLAY_MODE_CYCLE.length]
+    const cycle = queueMode === 'consume' ? CONSUMING_PLAY_MODE_CYCLE : PLAY_MODE_CYCLE
+    const nextMode = cycle[(cycle.indexOf(playMode) + 1) % cycle.length]
     if (canSetMode) {
       socket.emit(EVENTS.PLAYER_SET_MODE, { mode: nextMode })
     } else if (canVote) {
@@ -239,23 +243,28 @@ export const PlayerControls = memo(function PlayerControls({
 
             {/* Center: prev + play/pause + next */}
             <div className="flex items-center gap-2">
-              <Tooltip delayDuration={300}>
-                <TooltipTrigger asChild>
-                  <motion.div whileTap={{ scale: 0.9 }}>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-9 w-9 text-primary/75 hover:bg-primary/10 hover:text-primary"
-                      disabled={disabled || skipCooldown}
-                      onClick={() => handleSkip(onPrev, 'prev')}
-                      aria-label="上一首"
-                    >
-                      <SkipBack className="size-5" fill="currentColor" />
-                    </Button>
-                  </motion.div>
-                </TooltipTrigger>
-                <TooltipContent>上一首</TooltipContent>
-              </Tooltip>
+              {queueMode === 'consume' ? (
+                // What was heard has left a consumed queue, so there is nothing to go back to; keep the slot's size.
+                <div className="h-9 w-9" aria-hidden="true" />
+              ) : (
+                <Tooltip delayDuration={300}>
+                  <TooltipTrigger asChild>
+                    <motion.div whileTap={{ scale: 0.9 }}>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9 text-primary/75 hover:bg-primary/10 hover:text-primary"
+                        disabled={disabled || skipCooldown}
+                        onClick={() => handleSkip(onPrev, 'prev')}
+                        aria-label="上一首"
+                      >
+                        <SkipBack className="size-5" fill="currentColor" />
+                      </Button>
+                    </motion.div>
+                  </TooltipTrigger>
+                  <TooltipContent>上一首</TooltipContent>
+                </Tooltip>
+              )}
 
               <Tooltip delayDuration={300}>
                 <TooltipTrigger asChild>

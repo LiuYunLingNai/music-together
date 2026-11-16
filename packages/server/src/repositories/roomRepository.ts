@@ -44,6 +44,7 @@ interface PersistedRoomState {
   allowTemporaryAdminTrackRemoval?: boolean
   allowTemporaryAdminQueueClear?: boolean
   removePlayedTracks?: boolean
+  queueMode?: RoomData['queueMode']
   roamingEnabled?: boolean
   automixEnabled?: boolean
   transitionMode?: RoomData['transitionMode']
@@ -286,6 +287,7 @@ export class InMemoryRoomRepository implements RoomRepository {
           allowTemporaryAdminQueueClear:
             state.allowTemporaryAdminQueueClear ?? state.allowTemporaryAdminQueueManagement ?? false,
           removePlayedTracks: state.removePlayedTracks ?? false,
+          queueMode: state.queueMode === 'consume' ? 'consume' : 'keep',
           roamingEnabled: state.roamingEnabled ?? false,
           automixEnabled: state.automixEnabled ?? false,
           transitionMode: isTransitionMode(state.transitionMode) ? state.transitionMode : 'automix',
@@ -351,6 +353,7 @@ export class InMemoryRoomRepository implements RoomRepository {
       allowTemporaryAdminTrackRemoval: room.allowTemporaryAdminTrackRemoval,
       allowTemporaryAdminQueueClear: room.allowTemporaryAdminQueueClear,
       removePlayedTracks: room.removePlayedTracks,
+      queueMode: room.queueMode,
       roamingEnabled: room.roamingEnabled,
       automixEnabled: room.automixEnabled,
       transitionMode: room.transitionMode,
