@@ -204,11 +204,7 @@ const VisualizerKinetic: React.FC<VisualizerKineticProps> = (props) => {
     const handshakeRef = useRef<number>(0);
     const handshakeTimeoutRef = useRef<number>(0);
     const projectRef = useRef(project);
-    const projectInputRef = useRef(project);
-    if (projectInputRef.current !== project) {
-        projectInputRef.current = project;
-        projectRef.current = project;
-    }
+    projectRef.current = project;
     const songKeyRef = useRef(songKey);
     songKeyRef.current = songKey;
     const projectRefKey = useRef(projectKey);
@@ -340,56 +336,6 @@ const VisualizerKinetic: React.FC<VisualizerKineticProps> = (props) => {
         });
     }, [frameReady, savedPlan, songKey, lrc, windowSize.width, windowSize.height]);
 
-    /* ---- 编辑台改完布局：收到 BroadcastChannel 的工程快照就推给渲染页 ---- */
-    useEffect(() => {
-        if (typeof BroadcastChannel === 'undefined') return undefined;
-        const channel = new BroadcastChannel('kinetic-project');
-        channel.onmessage = (event: MessageEvent) => {
-            const data = event.data;
-            const activeSong = usePlaybackStore.getState().currentSong;
-            const activeKey = activeSong ? getPlaybackSongKey(activeSong) : null;
-            if (!data || data.songKey !== activeKey) return;
-            const target = frameRef.current?.contentWindow;
-            if (!target) return;
-            // 编辑台算好的 plan：直接转给渲染页采用，播放页就不再自己重算，
-            // 画面必然与编辑台一致（重算会因 audio beats / 背景历史等运行时状态而不同）。
-            if (data.type === 'plan' && data.plan) {
-                if (data.sourceLyrics !== projectRef.current.sourceLyrics || !kineticPlanMatchesLyrics(data.plan, String(projectRef.current.lyrics))) return;
-                target.postMessage({
-                    target: 'jizura-render',
-                    type: 'plan',
-                    songKey: data.songKey,
-                    sourceLyrics: data.sourceLyrics,
-                    plan: data.plan,
-                    time: currentTime.get(),
-                    playing: !pausedRef.current,
-                }, '*');
-                console.log('[Kinetic] 已把编辑台的 plan 转给渲染页', {
-                    W: data.plan.W,
-                    H: data.plan.H,
-                    style: data.plan.styleKey,
-                });
-                return;
-            }
-            if (data.type !== 'project' || !data.project || data.project.sourceLyrics !== projectRef.current.sourceLyrics) return;
-            // 同步 ref，后续 ready/viewport 重发不能再覆盖回打开编辑台前的工程。
-            projectRef.current = { ...projectRef.current, ...data.project };
-            target.postMessage({
-                target: 'jizura-render',
-                type: 'project',
-                songKey: data.songKey,
-                project: projectRef.current,
-                viewport: viewportRef.current,
-                time: currentTime.get(),
-                frameCap: frameCapRef.current,
-            }, '*');
-            sentKeyRef.current = '';
-            console.log('[Kinetic] 渲染页已接收编辑台工程', { style: data.project.style });
-        };
-        return () => channel.close();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
-
     useEffect(() => {
         const onMessage = (event: MessageEvent) => {
             const data = event.data;
@@ -413,11 +359,8 @@ const VisualizerKinetic: React.FC<VisualizerKineticProps> = (props) => {
             }
         };
         window.addEventListener('message', onMessage);
-        const onEditorClosed = () => postSeek(currentTime.get(), !pausedRef.current);
-        window.addEventListener('kinetic:editor-closed', onEditorClosed);
         return () => {
             window.removeEventListener('message', onMessage);
-            window.removeEventListener('kinetic:editor-closed', onEditorClosed);
             if (handshakeRef.current) {
                 window.clearInterval(handshakeRef.current);
                 handshakeRef.current = 0;

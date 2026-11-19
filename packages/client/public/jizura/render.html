@@ -32,7 +32,7 @@
     /** 最近一次宿主给的工程：视口变化（横屏）时用它重建 plan。 */
     let currentProject = null;
     let currentSongKey = null;
-    /** 画布该按什么比例建：容器比例，与 plan 的构图比例无关（构图归编辑台管）。 */
+    /** 显示画布跟随容器比例，存档 plan 保留自己的构图比例。 */
     let viewAspect = null;
 
     const post = (type, body) => window.parent.postMessage(Object.assign({ source: 'jizura-render', type }, body || {}), '*');
@@ -40,7 +40,7 @@
     /** 按 plan 的输出尺寸建画布：像素与构图比例一致，不留黑边，显示交给 CSS 铺满。 */
     const ensureCanvas = () => {
         if (plan) {
-            // 画布像素按 plan 的构图比例建：比例与编辑台一致，draw 的 scale 恒等于 1，
+            // 画布像素按 plan 的构图比例建：与存档一致，draw 的 scale 恒等于 1，
             // 排版一模一样；铺满容器交给 CSS，不在像素层面缩放。
             const scaleK = 540 / Math.min(plan.W, plan.H);
             const width = Math.round(plan.W * scaleK);
@@ -199,18 +199,10 @@
     /** 探针：确认引擎与关键函数都在。 */
     const ready = () => typeof J !== 'undefined' && typeof J.Renderer === 'function' && typeof J.plan === 'function';
 
-    /*
-     * shared plan: use the plan the editor already computed.
-     *
-     * Previously the render page took the project and called J.plan again. J.plan depends on
-     * runtime state (audio beats, bg history, random history, lock order), so the same project
-     * computed twice can differ -- plus this page overrode aspect with the screen ratio.
-     * The plan is plain data (no functions, no Map), so it survives structured clone;
-     * adopting it makes the player show exactly what the editor shows.
-     */
+    /* Legacy saved plans preserve their original layout without re-planning. */
     let sharedPlan = null;
 
-    /** Adopt a plan pushed by the host (the editor). Returns whether it was usable. */
+    /** Adopt a saved plan pushed by the host. Returns whether it was usable. */
     const adoptSharedPlan = (incoming) => {
         if (!incoming || typeof incoming !== 'object') return false;
         if (typeof incoming.W !== 'number' || typeof incoming.H !== 'number') return false;
@@ -248,7 +240,7 @@
         plan = incoming;
         clock.fps = incoming.fps || 24;
         ensureCanvas();
-        console.log('[jizura-render] adopted shared plan from editor', {
+        console.log('[jizura-render] adopted saved plan', {
             W: incoming.W,
             H: incoming.H,
             cuts: incoming.cuts.length,
@@ -293,13 +285,7 @@
             }
         }
         const ratio = width / height;
-        /*
-         * 构图比例始终按容器（屏幕）走。
-         *
-         * 编辑台里的 aspect 绑的是导出比例（12_ui.js:1722 的 outAspect），决定导出视频多大，
-         * 不是播放时的显示比例。播放页是手机屏幕，只有按容器比例排版才不会变形、不留黑边。
-         * 用户在编辑台调的导出比例仍然保存着，只影响它自己导出。
-         */
+        // 新排版按容器比例构图，旧工程的导出比例不影响播放画面。
         merged.aspect = ratio >= 1.9 ? '21:9'
             : ratio >= 1.5 ? '16:9'
             : ratio >= 1.2 ? '4:3'
@@ -443,7 +429,7 @@
                 return;
             }
             if (data.type === 'plan') {
-                // The editor's plan: adopt it verbatim so the player matches the editor exactly.
+                // Adopt a legacy saved plan without changing its layout.
                 if (!ready()) { post('error', { reason: 'engine-missing' }); return; }
                 renderer = renderer || new J.Renderer();
                 if (adoptSharedPlan(data.plan)) {
@@ -485,10 +471,9 @@
                 const key = JSON.stringify(data.project || {});
                 if (key !== lastKey || !plan) {
                     lastKey = key;
-                    // Once a shared plan is in use, keep it: that plan is what the editor shows,
-                    // and re-planning here is exactly what made the two views diverge.
+                    // Keep the saved snapshot until the host explicitly invalidates it.
                     if (sharedPlan) {
-                        console.log('[jizura-render] keeping editor plan, ignoring project re-plan');
+                        console.log('[jizura-render] keeping saved plan, ignoring project re-plan');
                     } else {
                         buildPlan(data.project || {});
                     }
@@ -512,8 +497,7 @@
     });
 
     let hiddenPause = false;
-    let hostPause = false; // 宿主（folia）显式要求暂停（编辑台打开时置位）。
-    const shouldStop = () => hiddenPause || hostPause;
+    const shouldStop = () => hiddenPause;
 
     /* ---- 连续渲染循环 ----
        原版引擎是一帧一帧画的：宿主只在跨句时给一个基准时间，句内必须由本页按 fps 自己推进。
@@ -577,13 +561,7 @@
         loopHandle = window.requestAnimationFrame(tick);
     };
 
-    /**
-     * 启动循环；被宿主暂停时立刻退出，不再排下一帧。
-     *
-     * 之前 shouldStop() 只是让 tick 跳过 draw，rAF 照样每帧空转 ——
-     * 编辑台盖在上面时，两套渲染叠着跑，真机上就是明显掉帧。
-     * 现在真正停下来，恢复时再 startLoop。
-     */
+    /** 播放暂停或页面隐藏时退出循环，停止安排下一帧。 */
     const startLoop = () => {
         if (shouldStop() || !clock.playing) {
             stopLoop();
@@ -592,7 +570,7 @@
         if (!loopHandle) loopHandle = window.requestAnimationFrame(tick);
     };
 
-    /** 立刻停掉循环（编辑台打开时用，省下整份算力给编辑台）。 */
+    /** 立刻停止安排渲染帧。 */
     const stopLoop = () => {
         if (loopHandle) {
             window.cancelAnimationFrame(loopHandle);
@@ -618,7 +596,7 @@
             draw(currentTimeOf());
             return;
         }
-        // 没有共享 plan（还没进过编辑台）：按新尺寸重建画布与 plan。
+        // 没有旧排版快照：按新尺寸重建画布与 plan。
         ensureCanvas();
         lastKey = '';
         buildPlan(currentProject || {});
@@ -627,7 +605,7 @@
     window.addEventListener('resize', watchViewport);
     window.addEventListener('orientationchange', () => window.setTimeout(watchViewport, 120));
 
-    /* ---- 性能：页面不可见（编辑台盖在上面 / 切后台）时彻底停画，可见时恢复 ---- */
+    /* ---- 性能：页面不可见时停画，可见时恢复 ---- */
     document.addEventListener('visibilitychange', () => {
         hiddenPause = document.hidden;
         if (hiddenPause) {
@@ -646,38 +624,6 @@
             startLoop();
         }
     });
-    window.addEventListener('message', (event) => {
-        if (event.source === window.parent && event.data && event.data.target === 'jizura-render' && event.data.type === 'pause') {
-            const wasPaused = hostPause;
-            hostPause = Boolean(event.data.paused);
-            if (!wasPaused && hostPause) {
-                // 暂停前把时钟冻住，恢复时不会按流逝时间往前跳。
-                clock.baseTime = currentTimeOf();
-                clock.startedAt = nowMs();
-                // 编辑台打开：外层彻底停渲染。两套一起跑在真机上就是明显卡顿，
-                // 而且编辑台是全屏浮层，外面这层根本看不见，没有画的必要。
-                stopLoop();
-                console.log('[jizura-render] 编辑台打开，外层渲染已停');
-            } else if (wasPaused && !hostPause) {
-                clock.startedAt = nowMs();
-                /*
-                 * 关闭编辑台：先按当前 plan 重建画布，再补画一帧恢复循环。
-                 *
-                 * 必须重建画布。编辑台里可能换了 aspect / 重算了 plan，plan.W/H 变了；
-                 * 如果画布还是旧尺寸，就会靠 CSS 拉伸铺满容器 —— 画面糊、比例也不对，
-                 * 那就是"退出编辑台之后界面变得非常糊、被拉伸"的原因。
-                 */
-                ensureCanvas();
-                draw(currentTimeOf());
-                startLoop();
-                console.log('[jizura-render] 编辑台关闭，外层渲染恢复', {
-                    canvas: `${canvas ? canvas.width : 0}x${canvas ? canvas.height : 0}`,
-                    plan: plan ? `${plan.W}x${plan.H}` : null,
-                });
-            }
-        }
-    });
-
     post('boot', { ready: ready() });
 })();
 </script>

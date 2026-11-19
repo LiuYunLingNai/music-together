@@ -42,7 +42,11 @@ function createRendererHost() {
   const send = (data: Record<string, unknown>, source: unknown = parent) => {
     listeners.get('message')?.forEach(listener => listener({ source, data: { target: 'jizura-render', ...data } }))
   }
-  return { send, frames, parent, plan, frame }
+  const setHidden = (hidden: boolean) => {
+    document.hidden = hidden
+    listeners.get('visibilitychange')?.forEach(listener => listener({}))
+  }
+  return { send, frames, parent, plan, frame, setHidden }
 }
 
 describe('shipped JIZURA renderer bridge', () => {
@@ -64,10 +68,10 @@ describe('shipped JIZURA renderer bridge', () => {
     expect(host.frames.size).toBe(1)
     host.send({ type: 'seek', time: 20, playing: false })
     expect(host.frames.size).toBe(0)
-    host.send({ type: 'pause', paused: true })
+    host.setHidden(true)
     host.send({ type: 'seek', time: 25, playing: true })
     expect(host.frames.size).toBe(0)
-    host.send({ type: 'pause', paused: false })
+    host.setHidden(false)
     expect(host.frames.size).toBe(1)
   })
 

@@ -21,7 +21,7 @@ music-together/
 
 ## packages/client/src/ — 前端源码
 
-`packages/client/public/jizura/` 提供文字 PV 的本地 iframe 渲染页和引擎脚本，随前端静态文件发布；原版编辑页作为移植来源保留，本体面板不加载它。宿主设置面板、参数归一化与工程映射（`kineticSettings`）、渲染桥和逐曲存储位于 `Player/folia/upstream/components/visualizer/kinetic/`。
+`packages/client/public/jizura/` 提供文字 PV 的本地 iframe 渲染页、独立引擎脚本与 MIT 许可，随前端静态文件发布；原版完整编辑页及专属桥接代码已移除。宿主设置面板、参数归一化与工程映射（`kineticSettings`）、渲染桥和逐曲存储位于 `Player/folia/upstream/components/visualizer/kinetic/`。
 
 ```
 src/
@@ -102,7 +102,7 @@ src/
 │   │   │   ├── types.ts                 # Folia 的 Line/Word/Theme/各模式 tuning
 │   │   │   ├── definition.ts            # FoliaSharedProps 契约
 │   │   │   ├── lib/                     # 纯函数：字体栈 / 渲染提示 / 断句 / 分段 / pretext 垫片
-│   │   │   ├── stage/                   # 歌词适配、时钟、音频桥、模式参数、外壳与字幕；useKineticTransport 转发编辑台操作到房间权限入口
+│   │   │   ├── stage/                   # 歌词适配、时钟、音频桥、模式参数、外壳与字幕
 │   │   │   └── modes/                   # still / luminous / partita / tilt / cappella（含头像与表情 PNG）
 │   │   ├── LyricDisplay.tsx    #     AMLL 歌词渲染、逐词效果、歌词校准和可配置底栏
 │   │   ├── NowPlaying.tsx      #     当前曲目展示（支持 compact 小封面横排模式 + layoutId 共享动画）

@@ -20,7 +20,6 @@ import { useMirrorPreviewSignals } from './stage/foliaPreviewSignals'
 import { useRandomFoliaMode } from './stage/useRandomFoliaMode'
 import { useFoliaRenderState } from './stage/foliaRenderState'
 import { useFoliaStyleWindowStore } from './stage/foliaStyleWindowStore'
-import { useKineticTransport } from './stage/useKineticTransport'
 import { createFoliaTuningResolver } from './stage/foliaTunings'
 import { useFoliaAssetStore } from './stage/foliaAssetStore'
 import { getRecentCompletedLine, getUpcomingLine } from './upstream/components/visualizer/runtime'
@@ -187,7 +186,6 @@ export function FoliaPlayerStage({
   const lyricOffsetMs = isCalibrating ? lyricOffsetPreview.offsetMs : savedLyricOffsetMs
 
   const { currentTime, mediaTime } = useFoliaClock(lyricOffsetMs)
-  useKineticTransport(currentTime, onPlay, onPause, onLyricSeek, onStartVote)
   // 窗口的实时预览与视频层读同一组信号（上游 motionSignals 的宿主版本）。
   useMirrorPreviewSignals(currentTime, mediaTime, audio)
   // 每首随机样式：换歌时从池里换一种（上游 useRandomVisualizerMode）。

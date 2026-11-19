@@ -119,8 +119,5 @@ describe('kinetic renderer handshake', () => {
     expect(post).not.toHaveBeenCalled()
     act(() => time.set(20))
     expect(post).toHaveBeenCalledWith({ target: 'jizura-render', type: 'seek', time: 20, playing: false }, '*')
-    post.mockClear()
-    act(() => window.dispatchEvent(new Event('kinetic:editor-closed')))
-    expect(post).toHaveBeenCalledWith({ target: 'jizura-render', type: 'seek', time: 20, playing: false }, '*')
   })
 })

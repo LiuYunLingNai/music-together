@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 import { usePlayerStore } from '@/stores/playerStore'
 import { usePlaybackStore as useHostPlaybackStore } from './hostRuntime'
-import { PlayerState } from '../types'
 
 export const getPlaybackSongKey = (song: { id?: string; source?: string; urlId?: string; name?: string } | null) =>
   song?.source && song.urlId ? `${song.source}:${song.urlId}` : song?.id ?? song?.name ?? null
@@ -16,11 +15,7 @@ const currentSong = (track: HostTrack) => {
 const snapshot = () => {
   const state = useHostPlaybackStore.getState()
   const track = usePlayerStore.getState().currentTrack
-  return { currentSong: currentSong(track),
-    lyrics: state.lines, playerState: state.isPlaying ? PlayerState.PLAYING : PlayerState.PAUSED }
+  return { currentSong: currentSong(track), lyrics: state.lines }
 }
 export const usePlaybackStore = create(snapshot)
 useHostPlaybackStore.subscribe(() => usePlaybackStore.setState(snapshot()))
-export const useAudioSettingsStore = create(() => ({ handleSetVolume: (volume: number) => {
-  if (Number.isFinite(volume)) usePlayerStore.getState().setVolume(Math.max(0, Math.min(1, volume)))
-} }))

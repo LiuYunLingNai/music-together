@@ -276,7 +276,7 @@ Folia 的「文字 PV」使用本体歌词样式窗口编辑参数，JIZURA ifra
 
 配置范围存入 `foliaSettings.tunings.kinetic.scope`：`global` 使用全局参数并忽略逐曲工程；`song` 按 `source:urlId` 读取本设备 `kinetic_projects`（最多六十首），缺少工程时沿用全局值。旧 `useSongProject` 布尔值迁移为对应 scope，未设置时默认全局。`kineticScopedSettings` 为设置窗口提供当前范围的参数与绑定歌曲身份的保存/重置动作；逐曲调整只写歌曲工程，全局调整只写宿主设置。窗口已有草稿 gate 在松手时提交，保存闭包再次核对歌曲、源歌词及范围，避免切歌或切换范围后写入旧草稿。预览草稿使用仅内存的 `previewDraft` 跳过旧 plan，不持久化此标记。
 
-改词与导入核对源歌词及时间标签，异步导入结束时再次核对歌曲身份，避免切歌后写入错误歌曲。保存/清除通过本地 `kinetic:project-saved` 通知渲染器和窗口重读，播放仓库切歌/歌词更新时只刷新窗口的 kinetic 设置；旧 plan 在歌词与比例一致时仍可还原。原版编辑台文件和兼容桥保留为移植来源，但本体面板不加载它，不创建独立音频实例或新增 WebSocket 事件。暂停、隐藏页面、低性能及减少动态效果仍通过舞台 `paused/staticMode` 和帧率上限控制。
+改词与导入核对源歌词及时间标签，异步导入结束时再次核对歌曲身份，避免切歌后写入错误歌曲。保存/清除通过本地 `kinetic:project-saved` 通知渲染器和窗口重读，播放仓库切歌/歌词更新时只刷新窗口的 kinetic 设置；旧 plan 在歌词与比例一致时仍可还原。原版完整编辑页、编辑器 BroadcastChannel 和播放控制桥已移除；渲染器直接消费宿主歌词时钟，不创建独立音频实例或新增 WebSocket 事件。暂停、隐藏页面、低性能及减少动态效果仍通过舞台 `paused/staticMode` 和帧率上限控制。
 
 ## 音频质量
 
