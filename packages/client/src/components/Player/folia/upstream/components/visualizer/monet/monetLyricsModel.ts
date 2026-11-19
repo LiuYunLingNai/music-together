@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, react-hooks/refs, react-hooks/immutability, react-hooks/set-state-in-effect, react-hooks/purity, react-refresh/only-export-components -- Adapted upstream visual runtime and its existing imperative lifecycle. */
 import { clearCache, layoutWithLines, prepareWithSegments } from '@chenglou/pretext';
 import { measureRichInlineStats, prepareRichInline, type RichInlineItem } from '@chenglou/pretext/rich-inline';
 import type { Line, SubtitleContentMode, Word } from '../../../types';
@@ -256,8 +257,7 @@ const getMonetVerticalMeasureContext = () => {
 };
 
 /** Measures the tallest painted glyph bounds so descenders remain inside Monet's clipped line box. */
-const measureMonetLineHeight = (text: string, fontSpec: string, fontPx: number, defaultLineHeightPx: number): number => {
-    void fontPx;
+const measureMonetLineHeight = (text: string, fontSpec: string, _fontPx: number, defaultLineHeightPx: number): number => {
     const cacheKey = `${fontSpec}|${text}`;
     const cached = monetVerticalMetricsCache.get(cacheKey);
     if (cached !== undefined) {

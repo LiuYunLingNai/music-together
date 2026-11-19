@@ -58,8 +58,6 @@ import { MusicDownloadError, resolveDownloadOptions, streamDownload } from '../s
 import { audioProxyRateLimit, musicMetadataRateLimit } from '../middleware/httpRateLimiter.js'
 import { createHotSongsService, hotSongsPlaylistId } from '../services/hotSongsService.js'
 import { LyricSupplementService } from '../services/lyricSupplementService.js'
-import { createKugouListeningRouter } from '../controllers/kugouListeningController.js'
-import { createKugouListeningService } from '../services/kugouListeningService.js'
 import { getTtml, TtmlProxyError } from '../services/ttmlProxyService.js'
 import { getAmllTtml, searchAmllCandidates, searchAmllTtml } from '../services/amllLyricsService.js'
 import { artistService } from '../services/artistService.js'
@@ -70,14 +68,6 @@ import { lookupById } from '../services/idLookup.js'
 const router: RouterType = Router()
 const hotSongsService = createHotSongsService(musicProvider)
 const lyricSupplementService = new LyricSupplementService(musicProvider)
-
-router.use(
-  createKugouListeningRouter({
-    getRoom: (id) => roomRepo.get(id),
-    getCookie: (userId, roomId) => authService.getUserCookie(userId, 'kugou', roomId),
-    service: createKugouListeningService(),
-  }),
-)
 
 const LYRIC_TIMING_TAG = /\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?\]|\[\d+,\d+\]|\(\d+,\d+,\d+\)|<[^>]+>/g
 const LYRIC_META_LINE = /^\s*\[[a-z][^\]]*:.*]\s*$/i

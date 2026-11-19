@@ -50,6 +50,7 @@ export interface VisualizerTuningDefinition<T> {
     mode: string;
     /** The style's settings before the listener has changed anything. */
     defaults: T;
+    modKeys?: Record<string, unknown>;
     /** The settings store field that holds this tuning, and the store actions that change and reset it. */
     settingsKey: string;
     settingsSetterKey: string;

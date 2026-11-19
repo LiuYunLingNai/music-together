@@ -120,8 +120,8 @@ export function parseLRC(lrc: string): LrcLine[] {
 /**
  * 把原文 LRC 与译文 LRC 配成带翻译的行。
  *
- * 配对规则：先按 0.1s 取整的时间戳精确匹配，未命中则在 ±0.5s 内按 0.1s
- * 步进找最近的一行。歌词源之间常有几十毫秒的时间戳偏差，容差是必要的。
+ * 在 ±0.5s 内优先配对时间最接近的行。每条原文和译文最多使用一次，
+ * 保留同时间戳的对唱行，避免邻句借用同一条译文。
  */
 export function mergeLyrics(original: string, translated: string): MergedLyricLine[] {
   const origLines = parseLRC(original)
@@ -134,27 +134,23 @@ export function mergeLyrics(original: string, translated: string): MergedLyricLi
   const transLines = parseLRC(translated)
   if (transLines.length === 0) return result
 
-  const transMap = new Map<number, string>()
-  for (const tl of transLines) {
-    transMap.set(Math.round(tl.time * 10) / 10, tl.text)
+  const candidates: { line: number; entry: number; distance: number }[] = []
+  let first = 0
+  for (let line = 0; line < result.length; line++) {
+    const time = result[line].time
+    while (first < transLines.length && transLines[first].time < time - 0.5) first++
+    for (let entry = first; entry < transLines.length && transLines[entry].time <= time + 0.5; entry++) {
+      candidates.push({ line, entry, distance: Math.abs(time - transLines[entry].time) })
+    }
   }
-
-  for (const line of result) {
-    const key = Math.round(line.time * 10) / 10
-    const exact = transMap.get(key)
-    if (exact) {
-      line.translation = exact
-      continue
-    }
-    for (let offset = 1; offset <= 5; offset++) {
-      const near =
-        transMap.get(Math.round((line.time + offset * 0.1) * 10) / 10) ??
-        transMap.get(Math.round((line.time - offset * 0.1) * 10) / 10)
-      if (near) {
-        line.translation = near
-        break
-      }
-    }
+  candidates.sort((a, b) => a.distance - b.distance || a.line - b.line || a.entry - b.entry)
+  const usedLines = new Set<number>()
+  const usedEntries = new Set<number>()
+  for (const { line, entry } of candidates) {
+    if (usedLines.has(line) || usedEntries.has(entry)) continue
+    usedLines.add(line)
+    usedEntries.add(entry)
+    result[line].translation = transLines[entry].text
   }
 
   return result

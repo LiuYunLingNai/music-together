@@ -16,6 +16,9 @@ import type { FoliaModeId } from './registry'
  * `Suspense` 边界由 `FoliaPlayerStage` 提供（懒加载组件必须的调用方义务）。
  */
 export const FOLIA_MODE_RENDERERS: Record<FoliaModeId, ComponentType<FoliaSharedProps>> = {
+  metaphor: lazy(() => import('./upstream/components/visualizer/metaphor/VisualizerMetaphor')),
+  prompt: lazy(() => import('./upstream/components/visualizer/prompt/VisualizerPrompt')),
+  kinetic: lazy(() => import('./upstream/components/visualizer/kinetic/VisualizerKinetic')),
   cadenza: lazy(() => import('./upstream/components/visualizer/cadenza/VisualizerCadenza')),
   claddagh: lazy(() => import('./upstream/components/visualizer/claddagh/VisualizerCladdagh')),
   diorama: lazy(() => import('./upstream/components/visualizer/diorama/VisualizerDiorama')),

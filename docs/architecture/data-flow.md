@@ -270,15 +270,13 @@ interface ChatMessage {
 - QQ 音乐、酷狗和酷狗概念版当前固定使用默认个性化推荐，不接受网易云模式参数；概念版使用概念版独立账号和推荐接口。
 - `RoomState` 与 `room:settings` 增加可选 `roamingEnabled`、`roamingSource`、`roamingMode` 字段，旧版 Web、Android 和 Windows 客户端可安全忽略；永久房间会持久化这些设置。
 
-## 普通酷狗账号听歌时长（实验性）
+## Folia 文字 PV
 
-- Web 的 `useHowl` 为 `source=kugou` 创建独立计时器；概念版、其他音源不参与。只有播放位置连续推进才累计，暂停、缓冲、Seek、超过 5 秒的采样间隔不补算。客户端每 15 秒发送累计毫秒数，暂停请求刷新，切歌、停止和 `pagehide` 尝试收尾。
-- `POST /api/music/kugou-listening` 使用共享 `kugouListeningSchema` 校验 `{ roomId, trackId, sessionId, listenedMs, ended?, flush? }`。HTTP 身份必须是在线房间成员，只使用该用户自己的普通酷狗授权（房间池或本人持久授权，关闭共享也可用），绝不借用其他成员的共享 VIP 或概念版账号。登录在播放中恢复时，可能需要下一首歌才建立新上报会话。
-- 首次请求的 `listenedMs` 必须为 0，且曲目必须是房间当前普通酷狗曲目。后续累计单调递增，重复请求不重复计入；已登记会话可在房间切歌后发送结束请求。每次增量不超过服务端经过时间且上限 30 秒，同一酷狗账号跨身份、房间、标签页和设备按最近时间区间去重，不能倍增服务器内的累计时长。
-- 服务端通常累计 60 秒后，或收到暂停/结束请求时，查询平台累计基线并通过 `userinfo.user.kugou.com/v2/get_grade_info` 的兼容协议提交真实新增秒数。请求限定 HTTPS、禁止重定向且设 10 秒超时；凭据放在 RSA 加密载荷，不输出原始错误或凭据。兼容协议的内部 appid 是 3116，但业务入口仅接受普通版音源与普通版账号；不调用概念版任务、奖励或播放历史接口。
-- 响应 `accepted` 表示服务端已接收样本，`submitted` 表示上游确认请求，均不保证账号统计即时显示。上游失败返回 `upstream_unavailable`，不自动重放该次增量，冷却 60 秒再处理后续新增时长；这可能少计时间，避免超时后重复入账。
-- 会话与去重状态仅在单个服务进程内存中保存，10 分钟不活跃清理，每类最多 5000 条；服务重启、异常关页、断网、后台挂起、离房后收尾失败及多服务实例可能影响精度。与官方客户端同时播放的跨应用去重交由平台处理。接口是否实际计入账号需真实账号验证，常规测试仅 mock 平台请求。
-- `/ws` JSON 信封、房间权威时间线、Track 模型均保持兼容。Android 和 Windows 旧客户端无需发送此新增 REST 请求，继续原有播放行为，但暂不支持时长同步。
+Folia 的「文字 PV」使用本体歌词样式窗口编辑参数，JIZURA iframe 只负责渲染。`kineticSettings` 将 `foliaSettings.tunings.kinetic` 的已归一化参数映射到引擎 project，宿主将当前歌词、主题、帧率和歌词时间发送给本地 `/jizura/render.html`。调参沿用窗口草稿机制，`resetPlan` 使旧排版快照失效；指定布局由渲染页展开为完整引擎布局白名单。新工程保留宿主 LRC 时间，不额外对齐另一套节拍网格。
+
+配置范围存入 `foliaSettings.tunings.kinetic.scope`：`global` 使用全局参数并忽略逐曲工程；`song` 按 `source:urlId` 读取本设备 `kinetic_projects`（最多六十首），缺少工程时沿用全局值。旧 `useSongProject` 布尔值迁移为对应 scope，未设置时默认全局。`kineticScopedSettings` 为设置窗口提供当前范围的参数与绑定歌曲身份的保存/重置动作；逐曲调整只写歌曲工程，全局调整只写宿主设置。窗口已有草稿 gate 在松手时提交，保存闭包再次核对歌曲、源歌词及范围，避免切歌或切换范围后写入旧草稿。预览草稿使用仅内存的 `previewDraft` 跳过旧 plan，不持久化此标记。
+
+改词与导入核对源歌词及时间标签，异步导入结束时再次核对歌曲身份，避免切歌后写入错误歌曲。保存/清除通过本地 `kinetic:project-saved` 通知渲染器和窗口重读，播放仓库切歌/歌词更新时只刷新窗口的 kinetic 设置；旧 plan 在歌词与比例一致时仍可还原。原版编辑台文件和兼容桥保留为移植来源，但本体面板不加载它，不创建独立音频实例或新增 WebSocket 事件。暂停、隐藏页面、低性能及减少动态效果仍通过舞台 `paused/staticMode` 和帧率上限控制。
 
 ## 音频质量
 

@@ -40,6 +40,7 @@ const StyleOnStage: React.FC<{ mode: VisualizerMode; running: boolean }> = ({ mo
         coverUrl: clock.placeholder.coverUrl,
         showText: true,
         isPreviewMode: true,
+        paused: !running,
         background: NO_BACKGROUND,
         subtitleContentMode: 'none',
         showSubtitleTranslation: false,

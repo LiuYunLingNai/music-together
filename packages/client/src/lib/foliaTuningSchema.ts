@@ -7,6 +7,7 @@ export type FoliaControl = {
   max?: number
   step?: number
   options?: readonly { value: string; label: string }[]
+  maxLength?: number
 }
 const range = (key: string, label: string, min = 0, max = 2, step = 0.05): FoliaControl => ({
   key,
@@ -22,6 +23,9 @@ const select = (key: string, label: string, values: readonly string[]): FoliaCon
   options: values.map((value) => ({ value, label: value })),
 })
 export const FOLIA_MODE_CONTROLS: Record<FoliaModeId, readonly FoliaControl[]> = {
+  prompt: [],
+  kinetic: [],
+  metaphor: [range('cutPace', '切镜节奏', 0.4, 2), range('cameraMotion', '运镜'), range('flow', '流体'), range('blobs', '融球'), range('halftone', '网点', 0.5, 2.5), range('grain', '颗粒'), toggle('negative', '反相镜头'), toggle('flip', '画面反相'), toggle('keywordColors', '关键词着色'), toggle('transitions', '转场')],
   luminous: [
     toggle('enableWordRotation', '词语旋转'),
     range('breathingFloatMultiplier', '呼吸漂浮'),
@@ -64,6 +68,11 @@ export const FOLIA_MODE_CONTROLS: Record<FoliaModeId, readonly FoliaControl[]> =
     range('ellipseTiltDeg', '椭圆倾斜', 0, 60, 1),
     toggle('showAxisLine', '显示轴线'),
     range('letterSpacingOffset', '字间距', -5, 20, 0.5),
+    range('positionX', '横向位置', -40, 40, 1),
+    range('positionY', '纵向位置', -40, 40, 1),
+    toggle('showTranslation', '沿环翻译'),
+    range('translationScale', '翻译字号', 0.5, 2),
+    range('translationLetterSpacingOffset', '翻译字距', -5, 20, 0.5),
   ],
   cappella: [
     toggle('showEmoMessages', '表情回复'),
@@ -85,7 +94,11 @@ export const FOLIA_MODE_CONTROLS: Record<FoliaModeId, readonly FoliaControl[]> =
     // 上游 MonetTuning.fontScale clamp 0.7-1.5（settingsPanels → MonetSettingsPanel）。
     range('fontScale', '海报字号', 0.7, 1.5, 0.05),
     // 上游 MonetPortraitSource：cover | custom（custom = 用户上传的封面图）。
-    select('portraitSource', '封面来源', ['cover', 'custom']),
+    select('portraitSource', '封面来源', ['cover', 'custom', 'none']),
+    toggle('mirrorLayout', '镜像布局'),
+    select('descriptionVisibility', '描述显示', ['auto', 'always', 'hidden']),
+    select('portraitHangerVisibility', '拖动柄显示', ['auto', 'always', 'hidden']),
+    { key: 'customDescription', label: '自定义描述', maxLength: 120 },
     select('portraitStyle', '封面形状', ['square', 'rectangular']),
     // 上游 monet/tuning.ts：画面里拖封面时写入，clamp -150..0。
     range('portraitOffsetX', '封面横向位置', -150, 0, 1),
@@ -93,7 +106,15 @@ export const FOLIA_MODE_CONTROLS: Record<FoliaModeId, readonly FoliaControl[]> =
   ],
   pendolo: [
     // clamp 边界逐字对齐上游 PendoloSettingsPanel（-0.20-0.40 / 0.25-0.8 / 40-160 step 5 / 0.5-2 / 1-1.6）。
-    range('wheelCenterX', '表盘横向位置', -0.2, 0.4, 0.01),
+    range('wheelCenterX', '表盘横向位置', -0.3, 0.5, 0.01),
+    range('wheelCenterY', '表盘纵向位置', 0.2, 0.8, 0.01),
+    toggle('mirrorLayout', '镜像布局'),
+    range('tiltDeg', '表盘倾斜', -70, 70, 1),
+    range('tiltAxisDeg', '倾斜轴', -90, 90, 1),
+    range('parallaxDepth', '分层深度', 0, 2),
+    toggle('hubView', '轮心视角'),
+    range('hubViewHeight', '轮心高度', 0.4, 3),
+    range('hubViewBack', '轮心距离', 0.2, 3),
     range('arcRadius', '圆弧半径', 0.25, 0.8, 0.01),
     range('arcAngleDeg', '圆弧角度', 40, 160, 5),
     range('tickSnappiness', '机械回弹', 0.5, 2, 0.1),
@@ -270,6 +291,7 @@ export function setTuningPath(target: Record<string, unknown>, key: string, valu
 }
 
 export function validateControl(control: FoliaControl, value: unknown): unknown {
+  if (control.maxLength !== undefined) return typeof value === 'string' ? value.slice(0, control.maxLength) : undefined
   if (control.options) return control.options.some((item) => item.value === value) ? value : undefined
   if (control.min !== undefined && control.max !== undefined)
     return typeof value === 'number' && Number.isFinite(value)

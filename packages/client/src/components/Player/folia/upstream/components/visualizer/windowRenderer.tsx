@@ -2,7 +2,7 @@ import { FoliaRenderer } from '../../../FoliaRenderer'
 import { FOLIA_MODE_RENDERERS } from '../../../renderers'
 import { getFoliaTuningProps } from '../../../stage/foliaTunings'
 import type { VisualizerSharedProps } from './definition'
-import type { FoliaModeId } from '../../../registry'
+import { resolveFoliaUpstreamMode } from '../../../registry'
 import type { VisualizerTuningBundle } from './tuningRegistry'
 
 /**
@@ -15,13 +15,6 @@ import type { VisualizerTuningBundle } from './tuningRegistry'
  * 结果 16 张缩略图各自起了一套几何背景动画（实测窗口内 43 个常驻 CSS 动画，帧率从
  * 85 fps 掉到 10 fps）。
  */
-const HOST_MODE_BY_UPSTREAM: Record<string, FoliaModeId> = {
-    classic: 'luminous', cadenza: 'cadenza', partita: 'partita', fume: 'fume',
-    claddagh: 'claddagh', cappella: 'cappella', tilt: 'tilt', monet: 'monet',
-    pendolo: 'pendolo', sonnet: 'sonnet', tempera: 'tempera', lumiere: 'lumiere',
-    hanabi: 'hanabi', diorama: 'diorama', still: 'still', machi: 'machi', nebbia: 'nebbia',
-}
-
 /** 上游调参包按上游模式名索引，渲染器读的是宿主 prop 名（与 tuningRegistry 的 apply 一致）。 */
 const tuningProps = (mode: string, bundle: VisualizerTuningBundle | undefined) => {
     const tuning = (bundle as Record<string, unknown> | undefined)?.[mode]
@@ -39,7 +32,7 @@ export type WindowRendererProps = Omit<VisualizerSharedProps, 'theme'> & {
 export default function WindowRenderer({ mode, visualizerTunings, onVisualizerTuningChange, ...props }: WindowRendererProps) {
     // 窗口把整包调参挂在 props 上（上游 `applyVisualizerTuning(shownMode, …)`）：
     // 样例舞台要按当前调参（含滑块草稿）重画，否则调什么都不会变。
-    const hostMode = HOST_MODE_BY_UPSTREAM[mode] ?? 'luminous'
+    const hostMode = resolveFoliaUpstreamMode(mode) ?? 'luminous'
     // 画面里直接拖动调参（莫奈封面、回环环线等）经这些 prop 回传，宿主写回同一份草稿。
     const tuningChangeProps = onVisualizerTuningChange
         ? {
@@ -51,6 +44,7 @@ export default function WindowRenderer({ mode, visualizerTunings, onVisualizerTu
             onLumiereTuningChange: onVisualizerTuningChange,
             onHanabiTuningChange: onVisualizerTuningChange,
             onMachiTuningChange: onVisualizerTuningChange,
+            onMetaphorTuningChange: onVisualizerTuningChange,
         }
         : {}
     // 上游的样例舞台与缩略图都只该画样式本身：窗口里没有一处需要真实背景层

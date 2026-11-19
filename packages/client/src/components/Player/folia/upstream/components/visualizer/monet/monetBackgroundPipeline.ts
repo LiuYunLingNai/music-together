@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, react-hooks/refs, react-hooks/immutability, react-hooks/set-state-in-effect, react-hooks/purity, react-refresh/only-export-components -- Adapted upstream visual runtime and its existing imperative lifecycle. */
 import type { MonetBackgroundImage, MonetBackgroundTuning, Theme } from '../../../types';
 import type { MonetBackgroundPaintReply, MonetBackgroundPaintRequest } from './monetBackground.worker';
 
@@ -34,7 +35,10 @@ const resolveSourceUrl = ({
 
 const loadImage = async (src: string): Promise<HTMLImageElement> => {
     const image = new Image();
-    if (src.startsWith('http://') || src.startsWith('https://')) {
+    // Every image but the page's own blob:/data: ones is asked for with CORS, folia-cover:// too: the
+    // worker reads the picture's pixels, and an image taken without CORS from another origin cannot
+    // be read there (#1218: a restored local song's cover stayed the raw picture until the next song).
+    if (!src.startsWith('blob:') && !src.startsWith('data:')) {
         image.crossOrigin = 'anonymous';
     }
     image.decoding = 'async';
@@ -49,7 +53,7 @@ const loadImage = async (src: string): Promise<HTMLImageElement> => {
 
     try {
         await image.decode();
-    } catch {
+    } catch (e) {
         // Fallback to waiting for onload if decode() fails or is unsupported
         await loadPromise;
     }
@@ -181,6 +185,9 @@ const ensurePainter = (): Worker => {
     const worker = new Worker(new URL('./monetBackground.worker.ts', import.meta.url), { type: 'module' });
     worker.onmessage = (event: MessageEvent<MonetBackgroundPaintReply>) => {
         if (event.data.id === painting?.id) {
+            if ('error' in event.data) {
+                console.warn('[MonetBackground] The worker could not paint the picture:', event.data.error);
+            }
             finishPainting('picture' in event.data ? event.data.picture : null);
         }
     };
@@ -259,7 +266,24 @@ export const wantMonetBackgroundUrl = (options: BuildMonetBackgroundOptions): { 
             }
             return false;
         };
-        made.url = buildMonetBackgroundUrl(options, wanted).then(url => url ?? null, () => null);
+        // A picture that could not be made is not kept: the next layer to ask for it tries again
+        // rather than showing the raw cover for as long as the app runs.
+        const forget = () => {
+            if (monetBackgroundCache.get(cacheKey) === made) {
+                monetBackgroundCache.delete(cacheKey);
+            }
+        };
+        made.url = buildMonetBackgroundUrl(options, wanted).then(
+            (url) => {
+                if (url === null) forget();
+                return url ?? null;
+            },
+            (error: unknown) => {
+                console.warn('[MonetBackground] The picture could not be made:', error);
+                forget();
+                return null;
+            },
+        );
         monetBackgroundCache.set(cacheKey, made);
         entry = made;
     }

@@ -67,9 +67,20 @@ const isBlank = (canvas: HTMLCanvasElement): boolean => {
     }
 };
 
-/** The canvases of a stage that have a size, each with whether it reads empty at this moment. */
+/** Only local canvas-renderer frames opt in; arbitrary embedded websites are never inspected. */
+const CANVAS_FRAME_SELECTOR = 'iframe[data-picture-canvas-frame]';
+const frameCanvases = (frame: HTMLIFrameElement): HTMLCanvasElement[] => {
+    try {
+        return [...(frame.contentDocument?.querySelectorAll('canvas') ?? [])];
+    } catch {
+        // A frame that navigated away from our origin cannot be captured.
+        return [];
+    }
+};
+
+/** The canvases of a stage that have a size, including JIZURA's local frame. */
 const readCanvases = (stage: HTMLElement) => (
-    [...stage.querySelectorAll('canvas')]
+    [...stage.querySelectorAll('canvas'), ...[...stage.querySelectorAll<HTMLIFrameElement>(CANVAS_FRAME_SELECTOR)].flatMap(frameCanvases)]
         .filter(canvas => canvas.width > 0 && canvas.height > 0)
         .map(canvas => ({ canvas, blank: isBlank(canvas) }))
 );
@@ -102,6 +113,11 @@ const readStage = (stage: HTMLElement): { shows: boolean; whole: boolean; waits:
         return { shows: false, whole: false, waits: false };
     }
     const canvases = readCanvases(stage);
+    // Subtitle text alone must not become the poster before JIZURA has loaded and drawn.
+    const canvasFrames = [...stage.querySelectorAll<HTMLIFrameElement>(CANVAS_FRAME_SELECTOR)];
+    if (canvasFrames.some(frame => !frameCanvases(frame).some(canvas => canvases.some(entry => entry.canvas === canvas && !entry.blank)))) {
+        return { shows: false, whole: false, waits: true };
+    }
     const whole = canvases.every(entry => !entry.blank);
     const drew = canvases.some(entry => !entry.blank)
         || Boolean(stage.textContent?.trim())
@@ -241,6 +257,26 @@ export const freezeStage = (stage: HTMLElement): HTMLElement | null => {
         }
         copy.style.animation = 'none';
     }
+    // Freeze the frame's pixels as plain canvases. Cloning an iframe would reload its engine,
+    // lose the supplied project, and keep another animation loop alive in every cached picture.
+    const frameCopies = image.querySelectorAll<HTMLIFrameElement>(CANVAS_FRAME_SELECTOR);
+    stage.querySelectorAll<HTMLIFrameElement>(CANVAS_FRAME_SELECTOR).forEach((frame, index) => {
+        const twin = frameCopies[index];
+        const flat = document.createElement('div');
+        flat.className = twin.className;
+        flat.style.cssText = twin.style.cssText;
+        flat.style.overflow = 'hidden';
+        for (const canvas of frameCanvases(frame)) {
+            if (canvas.width <= 0 || canvas.height <= 0) continue;
+            const frozen = document.createElement('canvas');
+            frozen.style.cssText = canvas.style.cssText;
+            frozen.style.width = `${canvas.offsetWidth || parseFloat(canvas.style.width) || canvas.width}px`;
+            frozen.style.height = `${canvas.offsetHeight || parseFloat(canvas.style.height) || canvas.height}px`;
+            copyCanvas(canvas, frozen);
+            flat.appendChild(frozen);
+        }
+        twin.replaceWith(flat);
+    });
     return image;
 };
 

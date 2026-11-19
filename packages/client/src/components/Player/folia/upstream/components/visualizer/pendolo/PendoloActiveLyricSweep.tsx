@@ -1,4 +1,4 @@
-/* eslint-disable react-hooks/immutability -- 上游在 map 回调里累加外层游标得到逐字偏移；这是上游原样代码。 */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, react-hooks/refs, react-hooks/immutability, react-hooks/set-state-in-effect, react-hooks/purity, react-refresh/only-export-components -- Adapted upstream visual runtime and its existing imperative lifecycle. */
 import React, { useMemo } from 'react';
 import { motion, useTransform, type MotionValue } from 'motion/react';
 import { type Line, type Theme } from '../../../types';
@@ -24,6 +24,10 @@ interface PendoloActiveLyricSweepProps {
     isChorus?: boolean;
     accentMix?: number;
     chorusGlowMultiplier?: number;
+    /** 歌词左右镜像：每一行贴右边排。 */
+    alignRight?: boolean;
+    /** 轮心视角下句子立起来：每一行居中排，中点对着刻度针。优先于 alignRight。 */
+    alignCenter?: boolean;
 }
 
 interface PendoloSweepLineProps {
@@ -135,6 +139,8 @@ const PendoloActiveLyricSweep: React.FC<PendoloActiveLyricSweepProps> = ({
     isChorus = false,
     accentMix = 0.32,
     chorusGlowMultiplier = 0,
+    alignRight = false,
+    alignCenter = false,
 }) => {
     const text = line.fullText;
     const fontSpec = `${fontWeight} ${fontPx}px ${fontFamily}`;
@@ -188,6 +194,9 @@ const PendoloActiveLyricSweep: React.FC<PendoloActiveLyricSweepProps> = ({
         fontSize: `${fontPx}px`,
         lineHeight: `${lineHeight}px`,
         width: `${maxWidth}px`,
+        ...(alignCenter || alignRight
+            ? { display: 'flex', flexDirection: 'column' as const, alignItems: alignCenter ? 'center' : 'flex-end' }
+            : null),
     };
 
     return (

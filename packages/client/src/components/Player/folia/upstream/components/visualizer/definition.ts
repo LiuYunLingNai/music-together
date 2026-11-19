@@ -147,6 +147,9 @@ export interface VisualizerSharedProps {
     machiTuning?: import('./machi/types').MachiTuning;
     onMachiTuningChange?: (patch: Partial<import('./machi/types').MachiTuning>) => void;
     nebbiaTuning?: import('./nebbia/types').NebbiaTuning;
+    metaphorTuning?: import('./metaphor/types').MetaphorTuning;
+    kineticTuning?: import('./kinetic/kineticSettings').KineticTuning;
+    onMetaphorTuningChange?: (patch: Partial<import('./metaphor/types').MetaphorTuning>) => void;
     onNebbiaTuningChange?: (patch: Partial<import('./nebbia/types').NebbiaTuning>) => void;
 }
 

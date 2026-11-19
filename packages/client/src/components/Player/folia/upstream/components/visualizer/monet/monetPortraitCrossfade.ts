@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, react-hooks/refs, react-hooks/immutability, react-hooks/set-state-in-effect, react-hooks/purity, react-refresh/only-export-components -- Adapted upstream visual runtime and its existing imperative lifecycle. */
 // src/components/visualizer/monet/monetPortraitCrossfade.ts
 // The layer stack a Monet cover crossfade renders, kept pure so the ordering rules can be tested
 // without a DOM.

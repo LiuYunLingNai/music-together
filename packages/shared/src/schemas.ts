@@ -3,18 +3,6 @@ import { CROSSFADE_MAX_SEC, CROSSFADE_MIN_SEC } from './automix/crossfadePlanner
 import { LIMITS } from './constants.js'
 import { NETEASE_ROAMING_MODES } from './types.js'
 
-/** Optional REST capability; native clients may omit listening reports entirely. */
-export const kugouListeningSchema = z.object({
-  roomId: z.string().min(1).max(100),
-  trackId: z.string().min(1).max(200),
-  sessionId: z.uuid(),
-  listenedMs: z.number().int().min(0).max(43_200_000),
-  ended: z.boolean().default(false),
-  flush: z.boolean().optional(),
-})
-
-export type KugouListeningReport = z.infer<typeof kugouListeningSchema>
-
 // ---------------------------------------------------------------------------
 // Room
 // ---------------------------------------------------------------------------

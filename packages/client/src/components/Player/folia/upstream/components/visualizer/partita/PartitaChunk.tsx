@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion, useMotionValueEvent } from 'motion/react';
 import type { MotionValue, Variants } from 'motion/react';
 import type { Theme, Word as WordType } from '../../../types';
@@ -33,10 +33,19 @@ export const PartitaChunk: React.FC<{
     overlapSpacing?: PartitaRowSpacing;
     fontSize: string;
 }> = ({ chunkWords, displayWords, config, guideIndex, currentTime, theme, layoutVariants, bodyVariants, baseColor, renderProfile, isChorus, showGuideLines, overlapSpacing, fontSize }) => {
-    const [chunkStatus, setChunkStatus] = useState<'waiting' | 'active' | 'passed'>('waiting');
+    const [chunkStatus, setChunkStatus] = useState<'waiting' | 'active' | 'passed'>(() => {
+        const time = currentTime.get();
+        const end = getGlowWordActiveEndTime(chunkWords[chunkWords.length - 1], renderProfile);
+        return time > end ? 'passed' : time >= chunkWords[0].startTime - renderProfile.wordLookahead ? 'active' : 'waiting';
+    });
 
     const chunkStartTime = chunkWords[0].startTime;
     const chunkEndTime = getGlowWordActiveEndTime(chunkWords[chunkWords.length - 1], renderProfile);
+    useEffect(() => {
+        const time = currentTime.get();
+        const frame = requestAnimationFrame(() => setChunkStatus(time > chunkEndTime ? 'passed' : time >= chunkStartTime - renderProfile.wordLookahead ? 'active' : 'waiting'));
+        return () => cancelAnimationFrame(frame);
+    }, [chunkWords, renderProfile, currentTime, chunkStartTime, chunkEndTime]);
 
     useMotionValueEvent(currentTime, 'change', (latest: number) => {
         let newStatus: 'waiting' | 'active' | 'passed' = 'waiting';

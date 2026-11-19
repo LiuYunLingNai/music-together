@@ -11,6 +11,11 @@ import type { LyricRenderQuality, SubtitleOverlayLayout } from '@/components/Pla
 import { normalizeMachiTuning } from '@/components/Player/folia/upstream/components/visualizer/machi/machiTuning'
 import { normalizeNebbiaTuning } from '@/components/Player/folia/upstream/components/visualizer/nebbia/nebbiaTuning'
 import { normalizeTemperaTuning } from '@/components/Player/folia/upstream/components/visualizer/tempera/temperaTuning'
+import { normalizeMetaphorTuning } from '@/components/Player/folia/upstream/components/visualizer/metaphor/tuning'
+import { resolveStoredMonetTuning } from '@/components/Player/folia/upstream/components/visualizer/monet/tuning'
+import claddaghTuning from '@/components/Player/folia/upstream/components/visualizer/claddagh/tuning'
+import pendoloTuning from '@/components/Player/folia/upstream/components/visualizer/pendolo/tuning'
+import { normalizeKineticTuning } from '@/components/Player/folia/upstream/components/visualizer/kinetic/kineticSettings'
 import {
   parseSubtitleOverlayLayout,
   subtitleOverlayLayoutFromContentMode,
@@ -110,6 +115,16 @@ export function normalizeFoliaSettings(value: unknown): FoliaSettings {
     for (const mode of FOLIA_MODES) {
       const patch = (saved.tunings as Record<string, unknown>)[mode.id]
       if (!patch || typeof patch !== 'object' || Array.isArray(patch)) continue
+      if (mode.id === 'kinetic') {
+        result.tunings.kinetic = normalizeKineticTuning(patch)
+        continue
+      }
+      if (mode.id === 'metaphor' || mode.id === 'monet' || mode.id === 'claddagh' || mode.id === 'pendolo') {
+        result.tunings[mode.id] = (mode.id === 'metaphor' ? normalizeMetaphorTuning(patch)
+          : mode.id === 'monet' ? resolveStoredMonetTuning(patch as Record<string, unknown>)
+            : mode.id === 'claddagh' ? claddaghTuning.storage!.read(patch) : pendoloTuning.storage!.read(patch)) as unknown as Record<string, unknown>
+        continue
+      }
       if (mode.id === 'machi' || mode.id === 'nebbia' || mode.id === 'tempera') {
         // 这几个模式的 tuning 含数组 / 嵌套对象，声明式控件表表达不了：按上游的归一化读一次。
         result.tunings[mode.id] = (

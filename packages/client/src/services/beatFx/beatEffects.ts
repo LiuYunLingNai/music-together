@@ -55,6 +55,7 @@ export const BEAT_EFFECT_IDS = {
     machiScreenFlash: 'machi.screenFlash',
     nebbiaDrizzleRide: 'nebbia.drizzleRide',
     nebbiaAquaBeat: 'nebbia.aquaBeat',
+    metaphorAnnihilation: 'metaphor.annihilation',
 } as const;
 
 /** 分项在实时强度里用的 id。 */

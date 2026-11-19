@@ -34,6 +34,8 @@ export const MODE_SETTINGS_PANELS: Record<string, (props: Record<string, unknown
     diorama: lazyPanel(fromModule(sharedPanels, 'DioramaSettingsPanel')),
     claddagh: lazyPanel(fromModule(sharedPanels, 'CladdaghSettingsPanel')),
     // 独立面板文件的模式。
+    metaphor: lazyPanel(() => import('./metaphor/MetaphorSettingsPanel') as unknown as ReturnType<PanelLoader>),
+    kinetic: lazyPanel(() => import('./kinetic/KineticSettingsPanel') as unknown as ReturnType<PanelLoader>),
     cadenza: lazyPanel(() => import('./cadenza/CadenzaSettingsPanel') as unknown as ReturnType<PanelLoader>),
     hanabi: lazyPanel(() => import('./hanabi/HanabiSettingsPanel') as unknown as ReturnType<PanelLoader>),
     sonnet: lazyPanel(() => import('./sonnet/SonnetSettingsPanel') as unknown as ReturnType<PanelLoader>),

@@ -1,15 +1,18 @@
 // Folia's upstream classic id is luminous here, keeping the host classic player distinct.
 export const FOLIA_MODES = [
   { id: 'sonnet', upstreamId: 'sonnet', label: '商籁', description: '分镜排版、图形与文字的 Pixi 动画', order: 100 },
+  { id: 'prompt', upstreamId: 'prompt', label: '提示词', description: '逐句输入框、逐词落字与镜头推拉', order: 105 },
   { id: 'tempera', upstreamId: 'tempera', label: '凝彩', description: '色块拼贴、反色文字与场景转场', order: 110 },
   { id: 'lumiere', upstreamId: 'lumiere', label: '绘光', description: '光场、辉光与歌词的动态构图', order: 120 },
   { id: 'hanabi', upstreamId: 'hanabi', label: '花火', description: '日式歌词 PV：色块字、烟花与持续上升的画面', order: 125 },
   // 上游条目 order 是 27 / 29：排在花火之后、流光之前。
   { id: 'machi', upstreamId: 'machi', label: '町景', description: 'three.js 雨夜街景，招牌上写着歌词', order: 126 },
   { id: 'nebbia', upstreamId: 'nebbia', label: '雾笺', description: '在起雾的车窗上按笔顺写字，雨夜街景透出', order: 128 },
+  { id: 'metaphor', upstreamId: 'metaphor', label: '隐喻', description: '流体墨迹、融球、网点颗粒与硬切镜头', order: 129 },
   { id: 'luminous', upstreamId: 'classic', label: '流光', description: '逐词辉光与漂浮排布', order: 130 },
   { id: 'cadenza', upstreamId: 'cadenza', label: '心象', description: '语义片段、镜像光束与文字层次', order: 140 },
   { id: 'partita', upstreamId: 'partita', label: '云阶', description: '分栏逐词歌词、错峰入场', order: 150 },
+  { id: 'kinetic', upstreamId: 'kinetic', label: '文字 PV', description: 'JIZURA 动态文字与逐曲工程编辑', order: 155 },
   { id: 'fume', upstreamId: 'fume', label: '浮名', description: '歌词化为文章，镜头沿文字移动', order: 160 },
   { id: 'tilt', upstreamId: 'tilt', label: '倾诉', description: '语义切句、大小字错落与脉冲', order: 170 },
   { id: 'claddagh', upstreamId: 'claddagh', label: '回环', description: '椭圆歌词环与音频响应', order: 180 },
@@ -21,6 +24,10 @@ export const FOLIA_MODES = [
 ] as const
 export type FoliaModeId = (typeof FOLIA_MODES)[number]['id']
 export type FoliaModeMeta = (typeof FOLIA_MODES)[number]
+/** 所有宿主入口共用的上游 ID 解析；classic 在宿主中保留为 luminous。 */
+export function resolveFoliaUpstreamMode(upstreamId: string): FoliaModeId | null {
+  return FOLIA_MODES.find((mode) => mode.upstreamId === upstreamId)?.id ?? null
+}
 export function isFoliaModeId(value: string): value is FoliaModeId {
   return FOLIA_MODES.some((mode) => mode.id === value)
 }

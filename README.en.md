@@ -185,12 +185,15 @@ codex/windows-native-client
 
 ## Acknowledgements
 
-The immersive visual stage (particle shaders, camera motion, cover depth textures and audio-reactive driving) is adapted from the following open-source projects:
+The immersive visual stages, lyric styles, and kinetic lyric videos draw on or are ported from the following open-source projects. We thank their authors and contributors for their design, implementation, and open-source work:
 
 - [Mineradio](https://github.com/XxHuberrr/Mineradio) — by [@XxHuberrr](https://github.com/XxHuberrr), an immersive player built around cinematic camera work, particle visuals and a lyric stage. This project adapts its particle preset geometry and shader approach under the GPL-3.0 license.
 - [OpenMusic](https://github.com/qq01-hub/openmusic) — by [@qq01-hub](https://github.com/qq01-hub), which splits part of Mineradio's visual presets into React Three Fiber components; this project's uniform contracts and component boundaries reference its implementation.
+- [Folia major](https://github.com/chthollyphile/folia-major) — by [@chthollyphile](https://github.com/chthollyphile). This project ports Folia lyric styles, backgrounds, beat-driven effects, and settings panels under AGPL-3.0, including the Metaphor style and enhancements and fixes for Claddagh, Monet, and Pendolo.
+- [Folia sonnet Community Edition](https://github.com/Folia-CE/folia-sonnet) — a community Android port of Folia. This project ports its Prompt and Kinetic lyric visuals and editor integration to the web under AGPL-3.0, adapting them to the room playback timeline and permissions.
+- [JIZURA](https://github.com/852wa/JIZURA) — a kinetic lyric video creation tool by [hakoniwa (@852wa)](https://github.com/852wa), providing the rendering and editing engine for the Kinetic style. Its engine and editor pages are ported through Folia sonnet, with the original author's [MIT license and copyright notice](packages/client/public/jizura/LICENSE.txt) preserved.
 
-This project itself is distributed under [AGPL-3.0](LICENSE); the adaptations above follow each upstream's own license.
+This project itself is distributed under [AGPL-3.0](LICENSE); the adaptations above follow each upstream's own license. See the [upstream sync notes](docs/architecture/upstream-sync.md) for Folia reference versions, ported features, and host adaptations.
 
 ## License
 

@@ -1,4 +1,4 @@
-/* eslint-disable react-refresh/only-export-components, react-hooks/set-state-in-effect, react-hooks/refs, react-hooks/immutability, @typescript-eslint/no-explicit-any, no-control-regex -- 上游 folia-major 原样移植：这些规则是宿主 React Compiler 与 lint 的额外约束，逐条改写会偏离上游实现，故按文件豁免。 */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, react-hooks/refs, react-hooks/immutability, react-hooks/set-state-in-effect, react-hooks/purity, react-refresh/only-export-components -- Adapted upstream visual runtime and its existing imperative lifecycle. */
 import { useEffect, useMemo, useRef } from 'react';
 import { useMotionValue, type MotionValue } from 'motion/react';
 import { getBeatEffectStrength, getBeatFxBeatPeriod, getBeatFxHeard, isBeatFxReady } from '@/services/beatFx/beatFxLive';
@@ -173,7 +173,6 @@ const readDrumFrame = (hits: DrumHits, key: string | null, time: number | null, 
     cursor.time = time;
 };
 
-// 上游这里还导入了 PendoloBeatTriggers 类型（未使用）；删除它以通过 noUnusedLocals，行为不变。
 export const usePendoloBeatFx = (
     enabled: boolean,
     layout: PendoloBeatFxLayout,

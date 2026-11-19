@@ -18,6 +18,8 @@ import {
     getGlobalVisualizerFrameRate,
     setGlobalVisualizerFrameRate,
 } from '../utils/frameRateLimiter'
+import { kineticScopedSettings } from '../components/visualizer/kinetic/kineticScopedSettings'
+import { usePlaybackStore as useKineticPlaybackStore } from './kineticPlayback'
 
 /**
  * 上游设置窗口读写的三个 store 的宿主版本。
@@ -45,7 +47,7 @@ const HOST_MODE_BY_UPSTREAM: Record<string, FoliaModeId> = {
     diorama: 'diorama',
     still: 'still',
     machi: 'machi',
-    nebbia: 'nebbia',
+    nebbia: 'nebbia', metaphor: 'metaphor', prompt: 'prompt', kinetic: 'kinetic',
 }
 const UPSTREAM_BY_HOST = Object.fromEntries(
     Object.entries(HOST_MODE_BY_UPSTREAM).map(([upstream, host]) => [host, upstream]),
@@ -60,7 +62,7 @@ export const toUpstreamMode = (mode: FoliaModeId): VisualizerMode => UPSTREAM_BY
 const TUNING_MODES: FoliaModeId[] = [
     'luminous', 'cadenza', 'partita', 'fume', 'claddagh', 'cappella',
     'tilt', 'monet', 'pendolo', 'sonnet', 'tempera', 'lumiere', 'hanabi', 'diorama',
-    'machi', 'nebbia',
+    'machi', 'nebbia', 'metaphor', 'kinetic',
 ]
 
 const capitalize = (value: string) => value[0].toUpperCase() + value.slice(1)
@@ -77,6 +79,10 @@ const tuningState = () => {
     const settings = useSettingsStore.getState().foliaSettings
     const fields: Record<string, unknown> = {}
     for (const mode of TUNING_MODES) {
+        if (mode === 'kinetic') {
+            Object.assign(fields, kineticScopedSettings())
+            continue
+        }
         const name = mode === 'luminous' ? 'Classic' : capitalize(mode)
         fields[`${mode === 'luminous' ? 'classic' : mode}Tuning`] = resolveFoliaTuning(mode, settings.tunings)
         fields[`handleSet${name}Tuning`] = (patch: Record<string, unknown>) => patchTuning(mode, patch)
@@ -211,7 +217,7 @@ export const usePlayerChromeSettingsStore = create<HostPlayerChromeSettings>(() 
     enablePlayerPageNativeBlur: false,
 }))
 
-export type HostVisualizerSettings = ReturnType<typeof ownState> & ReturnType<typeof actions> & ReturnType<typeof tuningState>
+export type HostVisualizerSettings = ReturnType<typeof ownState> & ReturnType<typeof actions> & ReturnType<typeof tuningState> & import('../components/visualizer/tuningDefinition').VisualizerTuningSettings
 
 const build = (): HostVisualizerSettings => ({ ...ownState(), ...tuningState(), ...actions() }) as HostVisualizerSettings
 
@@ -252,6 +258,13 @@ const syncFromHost = () => {
     syncing = false
 }
 if (typeof window !== 'undefined') syncFromHost()
+if (typeof window !== 'undefined') {
+    const refreshKinetic = () => useVisualizerSettingsStore.setState(kineticScopedSettings())
+    window.addEventListener('kinetic:project-saved', refreshKinetic)
+    useKineticPlaybackStore.subscribe((state, before) => {
+        if (state.currentSong !== before.currentSong || state.lyrics !== before.lyrics) refreshKinetic()
+    })
+}
 
 export interface HostAssetState {
     cappellaCustomEmojiImages: unknown[]

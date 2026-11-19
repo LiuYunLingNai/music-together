@@ -21,6 +21,8 @@ music-together/
 
 ## packages/client/src/ — 前端源码
 
+`packages/client/public/jizura/` 提供文字 PV 的本地 iframe 渲染页和引擎脚本，随前端静态文件发布；原版编辑页作为移植来源保留，本体面板不加载它。宿主设置面板、参数归一化与工程映射（`kineticSettings`）、渲染桥和逐曲存储位于 `Player/folia/upstream/components/visualizer/kinetic/`。
+
 ```
 src/
 ├── main.tsx                    # 入口：ReactDOM.createRoot
@@ -94,13 +96,13 @@ src/
 │   │   │   ├── stage/useRandomFoliaMode.ts # 每首随机歌词样式（换歌时从池里换一种）
 │   │   │   ├── FoliaControlBar.tsx      # 自动隐藏/展开/离底距离 + 共用 Transport 行为
 │   │   │   ├── backgrounds/            # 六类上游背景的按需加载宿主 + 快捷背景
-│   │   │   ├── upstream/               # 上游十五个模式、六类背景、运行时、设置套件与歌词样式窗口
+│   │   │   ├── upstream/               # major 与 sonnet 二十个模式、六类背景、运行时、设置套件与歌词样式窗口
 │   │   │   ├── registry.ts              # 模式注册表（纯数据，不 import 组件）
 │   │   │   ├── renderers.ts             # 模式 → React.lazy 映射（仅宿主引用）
 │   │   │   ├── types.ts                 # Folia 的 Line/Word/Theme/各模式 tuning
 │   │   │   ├── definition.ts            # FoliaSharedProps 契约
 │   │   │   ├── lib/                     # 纯函数：字体栈 / 渲染提示 / 断句 / 分段 / pretext 垫片
-│   │   │   ├── stage/                   # 歌词适配、时钟、音频桥、模式参数、外壳与字幕
+│   │   │   ├── stage/                   # 歌词适配、时钟、音频桥、模式参数、外壳与字幕；useKineticTransport 转发编辑台操作到房间权限入口
 │   │   │   └── modes/                   # still / luminous / partita / tilt / cappella（含头像与表情 PNG）
 │   │   ├── LyricDisplay.tsx    #     AMLL 歌词渲染、逐词效果、歌词校准和可配置底栏
 │   │   ├── NowPlaying.tsx      #     当前曲目展示（支持 compact 小封面横排模式 + layoutId 共享动画）
@@ -138,7 +140,7 @@ src/
 ├── hooks/                      # 自定义 Hooks
 │   ├── useSocketEvent.ts       #   通用 Socket 事件订阅工具 Hook（自动 on/off，ref 稳定）
 │   ├── usePlayer.ts            #   播放器主 hook（组合 useHowl + useLyric + usePlayerSync）
-│   ├── useHowl.ts              #   Howler.js 音频实例管理（组合 lib/kugouListening.ts 统计普通酷狗实际听歌时长）
+│   ├── useHowl.ts              #   Howler.js 音频实例管理
 │   ├── useLyric.ts             #   歌词预取、并行加载、缓存与多平台逐词候选置信度择优
 │   ├── usePlayerSync.ts        #   播放同步（Scheduled Execution + 服务端权威时间轴 + 自适应漂移校正）
 │   ├── useClockSync.ts         #   NTP 时钟同步 hook（校准客户端时钟与服务器对齐）
@@ -212,7 +214,7 @@ src/
 ├── wss.ts                      # ws 类型化事件、房间广播和中间件兼容封装
 ├── config.ts                   # 环境变量配置（PORT, CLIENT_URL, CORS）
 │
-├── controllers/                # 控制器：Socket/HTTP 薄编排层（kugouListeningController.ts 处理时长上报身份与输入）
+├── controllers/                # 控制器：注册 Socket 事件处理器（薄编排层，不含业务逻辑）
 │   ├── index.ts                #   统一注册入口
 │   ├── roomController.ts       #   房间生命周期（创建/加入/离开/发现/设置/角色）
 │   ├── playerController.ts     #   播放控制（play/pause/seek/next/prev/sync/set_mode）+ NTP ping/pong
@@ -225,8 +227,6 @@ src/
 ├── services/                   # 服务层：业务逻辑
 │   ├── roomService.ts          #   房间 CRUD + 角色管理 + 加入校验（validateJoinRequest）+ 房主移出/本房封禁 + 管理员移出成员（kickUserFromRoom）与投票重协调（reconcileAndBroadcastVote）
 │   ├── roomLifecycleService.ts #   房间生命周期定时器（空置删除）+ 防抖广播
-│   ├── kugouListeningApi.ts    #   普通酷狗账号时长查询/增量提交（HTTPS、RSA、超时；不含任务奖励）
-│   ├── kugouListeningService.ts #  听歌会话、实际增量限幅、账号级去重和不重试上报
 │   ├── playerService.ts        #   播放状态管理 + 流 URL 解析 + 切歌防抖 + 加入播放同步
 │   ├── listeningReportService.ts # 网易云听歌打卡（服务端时间线累计；30s 门槛 + 5s/60 次每小时闸门；仅在线且开启的供源账号）
 │   ├── queueService.ts         #   队列操作（含删除当前曲目前的后继选择）

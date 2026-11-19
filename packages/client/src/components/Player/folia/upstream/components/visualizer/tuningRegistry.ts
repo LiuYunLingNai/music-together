@@ -19,6 +19,13 @@ import type { NebbiaTuning } from './nebbia/types';
 import type { VisualizerSharedProps } from './definition';
 import type { BackgroundSettingsSlice, BackgroundTuningDefinition, StoredTuning, StoredTuningAdapter, VisualizerTuningAdapter } from './tuningDefinition';
 import { normalizeNebbiaTuning } from './nebbia/nebbiaTuning';
+import type { MetaphorTuning } from './metaphor/types';
+import monetTuning from './monet/tuning';
+import pendoloTuning from './pendolo/tuning';
+import claddaghTuning from './claddagh/tuning';
+import metaphorTuning from './metaphor/tuning';
+import kineticTuning from './kinetic/tuning';
+import type { KineticTuning } from './kinetic/kineticSettings';
 
 // src/components/visualizer/tuningRegistry.ts
 // Pure-data registry for transporting heterogeneous visualizer tuning without importing renderers.
@@ -41,6 +48,8 @@ export interface VisualizerTuningMap {
     lumiere: LumiereTuning;
     machi: MachiTuning;
     nebbia: NebbiaTuning;
+    metaphor: MetaphorTuning;
+    kinetic: KineticTuning;
 }
 
 export type VisualizerTuningBundle = Partial<VisualizerTuningMap>;
@@ -51,7 +60,7 @@ export type VisualizerTuningBundle = Partial<VisualizerTuningMap>;
  * 这里给出同形状的适配器：`settingsKey` 等字段只为窗口的草稿机制服务，
  * `apply` 把调参挂到渲染器读的那个 prop 上（宿主 `FoliaModeId` 与上游 id 的映射同 windowRegistry）。
  */
-const TUNING_MODES = ['classic', 'cadenza', 'partita', 'fume', 'claddagh', 'cappella', 'tilt', 'monet', 'pendolo', 'sonnet', 'tempera', 'lumiere', 'hanabi', 'diorama', 'machi', 'nebbia'] as const;
+const TUNING_MODES = ['classic', 'cadenza', 'partita', 'fume', 'claddagh', 'cappella', 'tilt', 'monet', 'pendolo', 'sonnet', 'tempera', 'lumiere', 'hanabi', 'diorama', 'machi', 'nebbia', 'metaphor', 'kinetic'] as const;
 
 const propName = (mode: string) => (mode === 'classic' ? 'classicTuning' : `${mode}Tuning`);
 
@@ -86,6 +95,11 @@ const adapters: VisualizerTuningAdapter[] = TUNING_MODES.map(mode => ({
     },
 }));
 const adaptersByMode = new Map<string, VisualizerTuningAdapter>(adapters.map(adapter => [adapter.mode, adapter]));
+for (const tuning of [monetTuning, pendoloTuning, claddaghTuning, metaphorTuning, kineticTuning]) {
+    const adapter = adaptersByMode.get(tuning.mode);
+    if (adapter && tuning.storage) adapter.storage = { ...adapter.storage!, read: tuning.storage.read, merge: tuning.storage.merge } as never;
+}
+adaptersByMode.get('kinetic')!.preview = kineticTuning.preview as VisualizerTuningAdapter['preview'];
 
 export const getVisualizerTuningModes = (): string[] => [...adaptersByMode.keys()];
 

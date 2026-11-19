@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components, react-hooks/set-state-in-effect, react-hooks/refs, @typescript-eslint/no-empty-object-type, @typescript-eslint/no-unused-vars -- 上游 folia-major 原样移植：这些规则是宿主 React Compiler 的额外约束，逐条改写会偏离上游实现，故按文件豁免。 */
 import type React from 'react'
-import { FOLIA_MODES, type FoliaModeId } from '../../../registry'
+import { FOLIA_MODES, resolveFoliaUpstreamMode, type FoliaModeId } from '../../../registry'
 import { MODE_SETTINGS_PANELS } from './windowPanels'
 import { createElement } from 'react'
 import { FOLIA_MODE_RENDERERS } from '../../../renderers'
@@ -47,22 +47,16 @@ export interface WindowVisualizerEntry {
 export type VisualizerRegistryEntry = WindowVisualizerEntry
 export type VisualizerSettingsPanelProps = Record<string, unknown>
 
-const HOST_BY_UPSTREAM: Record<string, FoliaModeId> = {
-    classic: 'luminous', cadenza: 'cadenza', partita: 'partita', fume: 'fume',
-    claddagh: 'claddagh', cappella: 'cappella', tilt: 'tilt', monet: 'monet',
-    pendolo: 'pendolo', sonnet: 'sonnet', tempera: 'tempera', lumiere: 'lumiere',
-    hanabi: 'hanabi', diorama: 'diorama', still: 'still', machi: 'machi', nebbia: 'nebbia',
-}
-
 /** 上游各 entry 里按整句分词排版的样式（宿主没有分词编辑入口，元数据仍与上游一致）。 */
 const WORD_SEGMENTATION_MODES = new Set<FoliaModeId>([
-    'luminous', 'lumiere', 'partita', 'sonnet', 'tempera', 'nebbia', 'hanabi',
+    'luminous', 'lumiere', 'partita', 'sonnet', 'tempera', 'nebbia', 'hanabi', 'prompt', 'kinetic', 'metaphor',
 ])
 
 /** 只有 fume 在上游有预览起点偏移（见其 entry.tsx）；花火等其余都是 0。 */
 const PREVIEW_OFFSETS: Partial<Record<FoliaModeId, number>> = { fume: 18.4 }
 
 const OWN_FONT_SIZE_NOTICE: Partial<Record<FoliaModeId, string>> = {
+    metaphor: 'options.metaphorFontSizeAutoNotice',
     hanabi: 'options.hanabiFontSizeAutoNotice',
     machi: 'options.machiFontSizeAutoNotice',
     lumiere: 'options.lumiereFontSizeAutoNotice',
@@ -71,7 +65,7 @@ const OWN_FONT_SIZE_NOTICE: Partial<Record<FoliaModeId, string>> = {
 }
 
 export const WINDOW_VISUALIZER_ENTRIES: WindowVisualizerEntry[] = FOLIA_MODES.map((mode) => {
-    const upstream = (Object.keys(HOST_BY_UPSTREAM).find((key) => HOST_BY_UPSTREAM[key] === mode.id) ?? 'classic') as VisualizerMode
+    const upstream = mode.upstreamId
     return {
         mode: upstream,
         order: mode.order,
@@ -103,7 +97,7 @@ export const hasVisualizerMode = (mode: string | null | undefined): mode is Visu
 
 /** 上游 entry 的渲染函数：宿主按模式懒加载的同一个组件。 */
 export const renderVisualizerMode = (mode: string, props?: Record<string, unknown>) => {
-    const host = HOST_BY_UPSTREAM[mode] ?? 'luminous'
+    const host = resolveFoliaUpstreamMode(mode) ?? 'luminous'
     return createElement(FOLIA_MODE_RENDERERS[host as FoliaModeId] as never, props ?? null)
 }
 
@@ -119,7 +113,7 @@ export const applyVisualizerTuning = (
     mode: VisualizerMode,
     props: Record<string, unknown> & { theme?: Theme },
 ): Record<string, unknown> => {
-    const host = HOST_BY_UPSTREAM[mode]
+    const host = resolveFoliaUpstreamMode(mode)
     if (!host || !props.theme) return props
     return { ...props, ...getFoliaTuningProps(host, { fontScale: 1, tunings: {} } as never) }
 }

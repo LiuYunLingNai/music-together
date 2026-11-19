@@ -60,6 +60,8 @@ const FOLIA_TUNING_PROP_KEYS = [
   'hanabiTuning',
   'machiTuning',
   'nebbiaTuning',
+  'metaphorTuning',
+  'kineticTuning',
 ] as const satisfies readonly (keyof FoliaSharedProps)[]
 
 /** 模式自己指定的背景（上游各 `entry.tsx` 的 `background` 字段）。 */
@@ -72,6 +74,8 @@ const MODE_BACKGROUNDS: Partial<Record<FoliaModeId, FoliaModeBackground>> = {
   still: false,
   machi: false,
   nebbia: nebbiaBackgroundConfig,
+  metaphor: false,
+  kinetic: false,
 }
 
 /** 摘掉所有模式调参，再放上这一个模式的（上游按模式重新解析调参的等价物）。 */

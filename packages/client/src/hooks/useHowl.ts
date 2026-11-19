@@ -31,7 +31,6 @@ import { getSocket } from '@/lib/socket'
 import { lyricPlayerBridge } from '@/lib/lyricPlayerBridge'
 import { getScheduledPlaybackPosition } from '@/lib/playbackSync'
 import { hideLoading, showLoading } from '@/components/Player/mineradio/particles/loadingState'
-import { createKugouListeningTracker } from '@/lib/kugouListening'
 import { useAudioSettingsStore } from '@/stores/audioSettingsStore'
 import { useSleepTimerStore } from '@/stores/sleepTimerStore'
 import { classifyMediaElementFailure, isRecoverableStreamFailure, type MediaFailureKind } from '@/lib/mediaFailure'
@@ -142,7 +141,6 @@ export function useHowl(
   const preparedTrackRef = useRef<Track | null>(null)
   const stretchRef = useRef<TimeStretchController | null>(null)
   const stretchReadyRef = useRef<Promise<TimeStretchController | null> | null>(null)
-  const listeningTrackersRef = useRef(new Map<Howl, ReturnType<typeof createKugouListeningTracker>>())
   const preloadedRef = useRef<PreloadedHowl | null>(null)
   const stemStopRef = useRef<(() => void) | null>(null)
   const stemCleanupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -217,8 +215,6 @@ export function useHowl(
 
   const disposeHowl = useCallback((howl: Howl | null) => {
     if (!howl) return
-    listeningTrackersRef.current.get(howl)?.dispose()
-    listeningTrackersRef.current.delete(howl)
     // ★ 先撤回本图发布的分析节点（audioTap 单例），再 unload ——
     //   旧歌的死 tap 不再锁死视觉层的频谱来源（节拍丢失加固）
     const finalizeTimeStretchRelease = releaseTimeStretch(howl)
@@ -415,12 +411,6 @@ export function useHowl(
   const handleHowlPlay = useCallback(
     (howl: Howl, track: Track, soundId: number) => {
       if (howlRef.current !== howl) return
-      // Register only once audio actually starts; this also covers cache/preload promotion.
-      const roomId = useRoomStore.getState().room?.id
-      if (track.source === 'kugou' && roomId && !listeningTrackersRef.current.has(howl)) {
-        listeningTrackersRef.current.set(howl, createKugouListeningTracker(roomId, track.id, () => howl))
-        howl.on('seek', () => listeningTrackersRef.current.get(howl)?.seek())
-      }
       // 服务端下发的自动混音过渡参数只作用于这一次接歌；没有则回落到设置值。
       const takenTransition = takePendingAutomixTransition()
       styledBlendRef.current = false
@@ -695,7 +685,6 @@ export function useHowl(
         }, 20)
       }
       usePlayerStore.getState().setIsPlaying(true)
-      listeningTrackersRef.current.get(howl)?.play()
       const dur = howl.duration()
       if (Number.isFinite(dur) && dur > 0) {
         usePlayerStore.getState().setDuration(dur)
@@ -707,7 +696,6 @@ export function useHowl(
 
   const handleHowlPause = useCallback(
     (howl: Howl) => {
-      listeningTrackersRef.current.get(howl)?.pause()
       if (howlRef.current !== howl) return
       // 暂停时 deck 必须一起停：否则元素静音、分轨还在播。
       if (stemCleanupTimerRef.current) {
@@ -732,8 +720,6 @@ export function useHowl(
 
   const handleHowlEnd = useCallback(
     (howl: Howl) => {
-      listeningTrackersRef.current.get(howl)?.dispose()
-      listeningTrackersRef.current.delete(howl)
       if (howlRef.current !== howl) return
       usePlayerStore.getState().setIsPlaying(false)
       stopTimeUpdate()

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, react-hooks/refs, react-hooks/immutability, react-hooks/set-state-in-effect, react-hooks/purity, react-refresh/only-export-components -- Adapted upstream visual runtime and its existing imperative lifecycle. */
 import React, { useMemo } from 'react';
 import { motion, motionValue, useTransform, MotionValue } from 'motion/react';
 import { type GraphemeTiming } from '../../../utils/lyrics/graphemeTiming';
@@ -122,10 +123,9 @@ const MonetWordSweep: React.FC<{
     fontSpec,
     fontsEpoch,
     isChorus,
-    audioPower,
+    audioPower: _audioPower,
     rtl,
 }) => {
-    void audioPower;
         const isLineActive = lineStatus === 'active';
         const sweepAngle = rtl ? '270deg' : '90deg';
         const canRenderGlow = lineStatus === 'active' || lineStatus === 'passed';

@@ -57,6 +57,16 @@ describe('parseLRC', () => {
 })
 
 describe('mergeLyrics', () => {
+  it('does not give the same translation to a nearby untranslated line', () => {
+    expect(mergeLyrics('[00:10.00]第一句\n[00:10.40]第二句', '[00:10.00]译文').map(line => line.translation))
+      .toEqual(['译文', undefined])
+  })
+  it('pairs simultaneous duet lines in source order and gives closest matches priority', () => {
+    expect(mergeLyrics('[00:10.00]甲\n[00:10.00]乙', '[00:10.00]A\n[00:10.00]B').map(line => line.translation))
+      .toEqual(['A', 'B'])
+    expect(mergeLyrics('[00:09.70]甲\n[00:10.00]乙', '[00:10.00]B').map(line => line.translation))
+      .toEqual([undefined, 'B'])
+  })
   it('pairs translations onto every occurrence of a repeated line', () => {
     const merged = mergeLyrics(
       '[00:12.00][01:30.00]副歌\n[01:40.00]尾声',

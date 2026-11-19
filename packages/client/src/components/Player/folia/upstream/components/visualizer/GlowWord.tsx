@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence, useMotionValueEvent } from 'motion/react';
 import type { MotionValue, Variants } from 'motion/react';
 import type { Theme, Word as WordType } from '../../types';
@@ -42,13 +42,21 @@ export const GlowWord = <TConfig extends { id: string }>({
     fontSize,
     layoutStyle,
 }: GlowWordProps<TConfig>) => {
-    const [status, setStatus] = useState<'waiting' | 'active' | 'passed'>('waiting');
+    const stateAt = (time: number): 'waiting' | 'active' | 'passed' => time > getGlowWordActiveEndTime(word, renderProfile)
+        ? 'passed' : time >= word.startTime - renderProfile.wordLookahead ? 'active' : 'waiting';
+    const [status, setStatus] = useState<'waiting' | 'active' | 'passed'>(() => stateAt(currentTime.get()));
     // 上游原样：涟漪幅度在挂载时随机（渲染期读随机源，宿主 lint 的 purity 规则会报，故按行豁免）。
     // eslint-disable-next-line react-hooks/purity -- 上游原样代码。
     const rippleScale = useMemo(() => 1.5 + Math.random() * 2, []);
     const duration = getGlowWordDisplayDuration(word, renderProfile);
     const activeEndTime = getGlowWordActiveEndTime(word, renderProfile);
     const graphemeTimings = useMemo(() => buildWordGraphemeTimings(word), [word]);
+    useEffect(() => {
+        const time = currentTime.get();
+        // A paused clock may never emit after lazy mounting or late segmentation.
+        const frame = requestAnimationFrame(() => setStatus(time > activeEndTime ? 'passed' : time >= word.startTime - renderProfile.wordLookahead ? 'active' : 'waiting'));
+        return () => cancelAnimationFrame(frame);
+    }, [word, renderProfile, currentTime, activeEndTime]);
 
     /* eslint-disable-next-line no-warning-comments -- @AI: KEEP THIS EXACTLY AS IS */
     // @note Version Control: Project Folia version 0.5.27-a16525c

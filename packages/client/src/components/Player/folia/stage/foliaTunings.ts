@@ -14,6 +14,12 @@ import { DEFAULT_MACHI_TUNING } from '../upstream/components/visualizer/machi/ty
 import { normalizeNebbiaTuning } from '../upstream/components/visualizer/nebbia/nebbiaTuning'
 import { DEFAULT_NEBBIA_TUNING } from '../upstream/components/visualizer/nebbia/types'
 import { normalizeTemperaTuning } from '../upstream/components/visualizer/tempera/temperaTuning'
+import { DEFAULT_METAPHOR_TUNING } from '../upstream/components/visualizer/metaphor/types'
+import { normalizeMetaphorTuning } from '../upstream/components/visualizer/metaphor/tuning'
+import { resolveStoredMonetTuning } from '../upstream/components/visualizer/monet/tuning'
+import claddaghTuning from '../upstream/components/visualizer/claddagh/tuning'
+import pendoloTuning from '../upstream/components/visualizer/pendolo/tuning'
+import { DEFAULT_KINETIC_TUNING, normalizeKineticTuning } from '../upstream/components/visualizer/kinetic/kineticSettings'
 
 export const FOLIA_TUNING_DEFAULTS = {
   luminous: defaults.DEFAULT_CLASSIC_TUNING,
@@ -32,10 +38,18 @@ export const FOLIA_TUNING_DEFAULTS = {
   hanabi: defaults.DEFAULT_HANABI_TUNING,
   machi: DEFAULT_MACHI_TUNING,
   nebbia: DEFAULT_NEBBIA_TUNING,
+  metaphor: DEFAULT_METAPHOR_TUNING,
+  prompt: {},
+  kinetic: DEFAULT_KINETIC_TUNING,
 } as const
 
 /** Saved patches cannot replace a tuning object or introduce invalid primitive types. */
 export function resolveFoliaTuning(mode: FoliaModeId, saved: FoliaSettings['tunings']): Record<string, unknown> {
+  if (mode === 'kinetic') return normalizeKineticTuning(saved.kinetic)
+  if (mode === 'metaphor') return normalizeMetaphorTuning(saved.metaphor) as unknown as Record<string, unknown>
+  if (mode === 'monet') return resolveStoredMonetTuning(saved.monet ?? {}) as unknown as Record<string, unknown>
+  if (mode === 'claddagh') return claddaghTuning.storage!.read(saved.claddagh ?? {}) as unknown as Record<string, unknown>
+  if (mode === 'pendolo') return pendoloTuning.storage!.read(saved.pendolo ?? {}) as unknown as Record<string, unknown>
   if (mode === 'machi') return normalizeMachiTuning(saved.machi) as unknown as Record<string, unknown>
   if (mode === 'nebbia') return normalizeNebbiaTuning(saved.nebbia) as unknown as Record<string, unknown>
   // 凝彩带 `layerImages`（对象数组），声明式控件表表达不了：按上游的归一化读一次。
@@ -75,7 +89,7 @@ export function createFoliaTuningResolver(settings: FoliaTuningSettings) {
 }
 
 export function getFoliaTuningProps(mode: FoliaModeId, settings: FoliaTuningSettings): Partial<FoliaSharedProps> {
-  if (mode === 'still') return {}
+  if (mode === 'still' || mode === 'prompt') return {}
   const key = mode === 'luminous' ? 'classicTuning' : `${mode}Tuning`
   const tuning = resolveFoliaTuning(mode, settings.tunings)
   // 预览缩略图只传 `tunings`，缺 `fontScale` 时按 1 处理，否则 cadenza 会算出 NaN。

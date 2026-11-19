@@ -18,6 +18,7 @@ import { nebbiaBeatEffectOnScreen, nebbiaShowsBackground } from '@/components/Pl
  *   · 隐现的「潮汐脉动」与「齿轮随拍」上游已退役，同样不声明。
  */
 export const FOLIA_MODE_BEAT_EFFECTS: Partial<Record<FoliaModeId, readonly BeatEffectDef[]>> = {
+  metaphor: [{ id: 'metaphor.annihilation', nameKey: 'options.beatEffect_metaphorAnnihilation', descKey: 'options.beatEffect_metaphorAnnihilationDesc', source: 'beats' }],
   hanabi: [
     { id: 'hanabi.beatBursts', nameKey: 'options.beatEffect_hanabiBeatBursts', descKey: 'options.beatEffect_hanabiBeatBurstsDesc', source: 'beats' },
     { id: 'hanabi.beatPulse', nameKey: 'options.beatEffect_hanabiBeatPulse', descKey: 'options.beatEffect_hanabiBeatPulseDesc', source: 'beats' },

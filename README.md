@@ -273,12 +273,15 @@ codex/windows-native-client
 
 ## 致谢
 
-播放器的沉浸式视觉舞台（粒子着色器、镜头运动、封面深度纹理与音频驱动思路）参考并改编自以下开源项目，在此致谢：
+播放器的沉浸式视觉舞台、歌词样式与文字 PV 参考或移植自以下开源项目。感谢各项目作者与贡献者的设计、实现和开源工作：
 
 - [Mineradio](https://github.com/XxHuberrr/Mineradio) — 由 [@XxHuberrr](https://github.com/XxHuberrr) 开发，以电影镜头、粒子视觉与歌词舞台为核心的沉浸式播放器。本项目据其 GPL-3.0 许可改编了粒子预设的几何与着色器思路。
 - [OpenMusic](https://github.com/qq01-hub/openmusic) — 由 [@qq01-hub](https://github.com/qq01-hub) 开发，将 Mineradio 的部分视觉预设拆分为 React Three Fiber 组件，本项目的 uniform 契约与组件边界参考了它的实现。
+- [Folia major](https://github.com/chthollyphile/folia-major) — 由 [@chthollyphile](https://github.com/chthollyphile) 开发。本项目按其 AGPL-3.0 许可移植了 Folia 歌词样式、背景、动感效果与设置面板，并补入「隐喻」以及回环、莫奈、时计等样式的增强与修复。
+- [Folia sonnet 社区版](https://github.com/Folia-CE/folia-sonnet) — Folia 的社区 Android 移植项目。本项目按其 AGPL-3.0 许可将「提示词」和「文字 PV」的视觉实现及编辑台接入移植到 Web，并适配本项目的房间播放时间线与权限控制。
+- [JIZURA](https://github.com/852wa/JIZURA) — 由 [hakoniwa（@852wa）](https://github.com/852wa) 开发的歌词动态视频制作工具，是「文字 PV」的渲染与编辑引擎。本项目通过 Folia sonnet 移植其引擎与编辑页面，并保留原作者的 [MIT 许可与版权声明](packages/client/public/jizura/LICENSE.txt)。
 
-本项目自身以 [AGPL-3.0](LICENSE) 分发；上述改编遵循各自的上游许可。
+本项目自身以 [AGPL-3.0](LICENSE) 分发；上述改编遵循各自的上游许可。Folia 的参考版本、移植范围与宿主适配记录见[上游同步文档](docs/architecture/upstream-sync.md)。
 
 ## 协议
 

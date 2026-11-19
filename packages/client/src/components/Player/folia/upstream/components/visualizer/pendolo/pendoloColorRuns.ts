@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, react-hooks/refs, react-hooks/immutability, react-hooks/set-state-in-effect, react-hooks/purity, react-refresh/only-export-components -- Adapted upstream visual runtime and its existing imperative lifecycle. */
 import { splitLyricGraphemes } from '../../../utils/lyrics/graphemeTiming';
 
 // src/components/visualizer/pendolo/pendoloColorRuns.ts

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, react-hooks/refs, react-hooks/immutability, react-hooks/set-state-in-effect, react-hooks/purity, react-refresh/only-export-components -- Adapted upstream visual runtime and its existing imperative lifecycle. */
 import { parseColorChannels } from '../colorMix';
 import {
     getBeatFxFiredCounts,
@@ -442,8 +443,7 @@ export const resolvePendoloShake = (state: PendoloBeatFxState, random: () => num
 };
 
 /** Whether anything is still moving or lit, so a renderer can skip the overlay pass entirely. */
-export const isPendoloBeatFxIdle = (state: PendoloBeatFxState, now: number): boolean => {
-    void now; // 上游同签名保留了 `now`，目前未参与判断
+export const isPendoloBeatFxIdle = (state: PendoloBeatFxState, _now: number): boolean => {
     if (state.jewelFlare > 0.01 || state.smallJewelFlare > 0.01 || state.shake > 0.01) return false;
     if (state.tickDialLight > 0 || state.outerDialLight > 0) return false;
     if (state.waveStart >= 0) return false;
