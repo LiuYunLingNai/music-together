@@ -1,5 +1,5 @@
 # ---- 阶段 1: 安装依赖 ----
-FROM node:22-alpine AS deps
+FROM node:26-alpine AS deps
 RUN corepack enable
 RUN apk add --no-cache python3 make g++
 WORKDIR /app
@@ -22,7 +22,7 @@ RUN pnpm --filter @music-together/client run build
 RUN pnpm --filter @music-together/admin run build
 
 # ---- 阶段 3: 生产镜像 ----
-FROM node:22-alpine AS production
+FROM node:26-alpine AS production
 RUN corepack enable
 RUN apk add --no-cache python3 make g++ vips
 WORKDIR /app
