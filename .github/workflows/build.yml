@@ -66,7 +66,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GHCR_REBUILD_TOKEN || secrets.GITHUB_TOKEN }}
 
       - uses: docker/setup-buildx-action@v4
 
@@ -75,5 +75,6 @@ jobs:
           context: .
           push: true
           tags: ${{ env.IMAGE }}:latest,${{ env.IMAGE }}:${{ github.sha }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

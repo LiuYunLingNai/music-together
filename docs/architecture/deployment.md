@@ -18,7 +18,7 @@ Docker 容器 (:3001)
 2. **仅 main push 且验证通过** → 构建 Docker 镜像并推送到 GHCR（`ghcr.io`）
 3. **服务器上** Watchtower 每 5 分钟检查镜像更新 → 自动拉取并重启容器
 
-零人工干预，GitHub 零额外 Secrets（使用自带的 `GITHUB_TOKEN`）。
+日常发布使用自带的 `GITHUB_TOKEN`，镜像带 `org.opencontainers.image.source` 标签，关联到发布仓库。删除后同名重建仓库时，旧 GHCR 包可能成为未关联包，导致新仓库报 `permission_denied: write_package`；需要恢复包的仓库关联及 Actions 写入权限。重建恢复期间可临时配置 `GHCR_REBUILD_TOKEN`（账号拥有包写入权限），完成一次带来源标签的发布后删除该 Secret，再核验 `GITHUB_TOKEN` 能独立发布；不把个人令牌写入代码。
 
 ## Docker 多阶段构建
 
