@@ -86,6 +86,10 @@ npx shadcn@latest add <component-name>
 - Auth Cookie 服务端验证双路径：`authController` 收到 `AUTH_SET_COOKIE` 时先检查 `hasCookie()`——如果 cookie 已在内存池中（刷新页面场景），走 **fast path** 跳过 API 调用直接返回成功；否则走 **slow path** 调用 `getUserInfo()` → `ncmApi.login_status()`。slow path 对**任何失败原因**（`expired` 或 `error`）都自动重试 1 次（间隔 1.5 秒），因为网易云 `login_status` API 可能对有效 cookie 临时返回空 profile
 - `shared` 包修改后前后端会自动热重载（pnpm workspace 链接）
 
+## 原生安装包的手动构建入口
+
+`main` 中的 `.github/workflows/android.yml` 和 `build-windows.yml` 提供 Actions 手动入口，选择 debug/release 及是否发布后，将任务分派到 `codex/android-native-client` 或 `codex/windows-native-client` 的同名完整工作流。入口只需要 Actions 写入权限，实际编译、签名、测试和发布仍由原生分支负责；Android Release 沿用仓库的四项 `ANDROID_KEYSTORE_*` / `ANDROID_KEY_*` Secrets。这样新建仓库时无需先在原生分支制造提交才能注册工作流。入口任务完成只表示已分派，安装包是否成功以原生分支的后续运行结果为准。
+
 ## Folia 视觉移植验证
 
 本批参考版本与范围见 [上游同步策略](upstream-sync.md#2026-11-19-major--sonnet-视觉移植)。现有测试覆盖模式注册、调参边界和旧设置迁移、提示词分段与编排、隐喻节目单、文字 PV 全局/逐曲工程与歌词身份、渲染握手、暂停/后台释放和静态模式。原版编辑页与其专属桥已删除；旧排版快照还原和本体设置仍由独立渲染引擎验证。

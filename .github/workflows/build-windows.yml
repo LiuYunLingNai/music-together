@@ -1,0 +1,36 @@
+name: Windows CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: Windows build variant
+        required: true
+        default: release
+        type: choice
+        options: [debug, release]
+      publish_release:
+        description: Publish or update the release
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build the native Windows branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_VARIANT: ${{ inputs.variant }}
+          PUBLISH_RELEASE: ${{ inputs.publish_release }}
+        run: |
+          gh workflow run build-windows.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref codex/windows-native-client \
+            --field variant="$BUILD_VARIANT" \
+            --field publish_release="$PUBLISH_RELEASE"
