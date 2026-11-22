@@ -244,10 +244,10 @@ class MusicTogetherApi(private val client: OkHttpClient) {
         }
     }
 
-    suspend fun streamUrl(server: ServerAddress, track: Track, bitrate: String, roomId: String? = null): String? =
+    suspend fun streamUrl(server: ServerAddress, track: Track, bitrate: String, roomId: String? = null, forceRefresh: Boolean = false): String? =
         withContext(Dispatchers.IO) {
             if (track.urlId.isBlank()) return@withContext null
-            val url = streamRequestUrl(server, track, bitrate, roomId)
+            val url = streamRequestUrl(server, track, bitrate, roomId, forceRefresh)
             executeJson(url, "stream URL:${track.source}").stringOrNull("url")
         }
 

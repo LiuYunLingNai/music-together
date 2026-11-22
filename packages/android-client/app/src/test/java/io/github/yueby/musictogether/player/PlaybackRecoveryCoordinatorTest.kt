@@ -3,8 +3,10 @@ package io.github.yueby.musictogether.player
 import io.github.yueby.musictogether.model.Track
 import io.github.yueby.musictogether.network.Events
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -12,90 +14,108 @@ import org.junit.Test
 
 class PlaybackRecoveryCoordinatorTest {
     @Test
-    fun `healthy listeners ignore refresh broadcasts`() = scenario {
-        assertFalse(recovery.onStreamRefreshed(track))
+    fun `automatic recovery stays local even for owner and is bounded`() = scenario {
+        assertTrue(recovery.onMediaFailure(track.id, false))
+        assertTrue(recovery.onMediaFailure(track.id, false))
+        settle()
+        assertEquals(listOf(false), resolutions)
+        assertEquals(1, reloaded.size)
+        recovery.onMediaFailure(track.id, false)
+        settle()
+        assertEquals(listOf(false, true), resolutions)
+        recovery.onMediaFailure(track.id, true)
+        recovery.onMediaFailure(track.id, false)
+        assertEquals(2, reloaded.size)
+        assertEquals(1, failures.size)
         assertTrue(sent.isEmpty())
     }
 
     @Test
-    fun `network failure refreshes once then falls back if reload fails`() = scenario {
-        assertTrue(recovery.onMediaFailure(track.id, false))
-        assertTrue(recovery.onMediaFailure(track.id, false))
-        assertEquals(listOf(Events.PLAYER_REFRESH_STREAM), sent.map { it.first })
-        assertFalse(sent.single().second.optBoolean("degrade"))
-        assertTrue(recovery.onStreamRefreshed(track.copy(streamUrl = "https://audio.test/new")))
-        assertTrue(recovery.onMediaFailure(track.id, false))
-        assertEquals(Events.PLAYER_REQUEST_SOURCE_FALLBACK, sent.last().first)
-    }
-
-    @Test
-    fun `decode failure requests lower quality`() = scenario {
+    fun `decode failure requests lower quality only on this device`() = scenario {
         recovery.onMediaFailure(track.id, true)
-        assertTrue(sent.single().second.getBoolean("degrade"))
-        assertEquals(track.id, sent.single().second.getString("trackId"))
+        settle()
+        assertEquals(listOf(true), resolutions)
+        assertEquals(track.id, reloaded.single().id)
+        assertTrue(sent.isEmpty())
     }
 
     @Test
-    fun `ready prevents timeout and duplicate reload without resetting attempt budget`() = scenario {
+    fun `ready cancels timeout but preserves attempt budget`() = scenario {
         recovery.onMediaFailure(track.id, false)
-        assertTrue(recovery.onStreamRefreshed(track))
+        settle()
         recovery.onReady(track.id)
-        assertFalse(recovery.onStreamRefreshed(track))
-        yield()
+        tick()
         assertTrue(failures.isEmpty())
         recovery.onMediaFailure(track.id, false)
-        assertEquals(Events.PLAYER_REQUEST_SOURCE_FALLBACK, sent.last().first)
+        settle()
+        assertEquals(listOf(false, true), resolutions)
+        assertTrue(sent.isEmpty())
     }
 
     @Test
-    fun `old server times out with bounded requests and never skips room`() = scenario {
+    fun `load timeout ends local recovery without changing room`() = scenario {
         recovery.onMediaFailure(track.id, false)
         tick()
-        assertEquals(listOf(8_000L, 15_000L), timeouts)
-        tick()
+        assertEquals(listOf(15_000L), timeouts)
         assertEquals(1, failures.size)
         recovery.onMediaFailure(track.id, false)
-        assertEquals(2, sent.size)
-        assertFalse(sent.any { it.first == Events.PLAYER_NEXT })
+        settle()
+        assertEquals(1, resolutions.size)
+        assertTrue(sent.isEmpty())
     }
 
     @Test
-    fun `ordinary member cannot change room source or restart stopped room`() = scenario {
+    fun `ordinary member can recover locally but cannot switch source or restart room`() = scenario {
         current = current!!.copy(canControl = false)
         assertFalse(recovery.retry(false, roomStopped = true))
         assertFalse(recovery.requestFallback())
         recovery.onMediaFailure(track.id, false)
-        tick()
-        assertEquals(listOf(Events.PLAYER_REFRESH_STREAM), sent.map { it.first })
-        assertEquals(1, failures.size)
+        settle()
+        assertEquals(1, reloaded.size)
+        assertTrue(sent.isEmpty())
     }
 
     @Test
-    fun `pause and release cancel pending fallback`() = scenario {
+    fun `cancellation ignores an uncancellable late resolution`() = scenario {
+        deferResolution = true
         recovery.onMediaFailure(track.id, false)
-        yield()
+        settle()
         recovery.cancelPending()
-        yield()
-        assertEquals(1, sent.size)
-        assertFalse(recovery.onStreamRefreshed(track))
-        recovery.reset()
-        assertFalse(recovery.onStreamRefreshed(track))
+        resolved.send(track)
+        settle()
+        assertTrue(reloaded.isEmpty())
         assertTrue(failures.isEmpty())
+        assertTrue(sent.isEmpty())
     }
 
     @Test
-    fun `same track id in another server or room cannot receive old recovery`() = scenario {
+    fun `same queue id in another room rejects old resolution`() = scenario {
+        deferResolution = true
         recovery.onMediaFailure(track.id, false)
+        settle()
         current = current!!.copy(key = current!!.key.copy(server = "https://other.test", roomId = "other"))
-        assertFalse(recovery.onStreamRefreshed(track))
-        tick()
-        assertEquals(1, sent.size)
+        resolved.send(track)
+        settle()
+        assertTrue(reloaded.isEmpty())
         assertTrue(failures.isEmpty())
     }
 
     @Test
-    fun `disconnect cancels context and cannot report failure in next room`() = scenario {
+    fun `source identity change rejects former source response`() = scenario {
+        deferResolution = true
         recovery.onMediaFailure(track.id, false)
+        settle()
+        current = current!!.copy(key = current!!.key.copy(source = "tencent", urlId = "qq-1"))
+        resolved.send(track)
+        settle()
+        assertTrue(reloaded.isEmpty())
+        assertTrue(failures.isEmpty())
+    }
+
+    @Test
+    fun `disconnect suppresses old timeout and further recovery`() = scenario {
+        recovery.onMediaFailure(track.id, false)
+        settle()
         current = null
         tick()
         assertTrue(failures.isEmpty())
@@ -103,20 +123,44 @@ class PlaybackRecoveryCoordinatorTest {
     }
 
     @Test
-    fun `switched source keeps recovery bounded and rejects old source response`() = scenario {
+    fun `invalid local resolution cannot trigger fallback`() = scenario {
+        deferResolution = true
         recovery.onMediaFailure(track.id, false)
-        tick()
-        val replacement = track.copy(source = "tencent", urlId = "qq-1")
-        current = current!!.copy(track = replacement, key = current!!.key.copy(source = "tencent", urlId = "qq-1"))
-        recovery.onSourceSwitched(current!!)
-        assertFalse(recovery.onStreamRefreshed(track))
-        recovery.onMediaFailure(track.id, true)
+        settle()
+        resolved.send(track.copy(source = "tencent"))
+        settle()
         assertEquals(1, failures.size)
-        assertEquals(2, sent.size)
+        assertTrue(reloaded.isEmpty())
+        assertTrue(sent.isEmpty())
     }
 
     @Test
-    fun `explicit retry targets parked track with optional downgrade`() = scenario {
+    fun `resolver exception reports only local failure`() = scenario {
+        resolveFailure = true
+        recovery.onMediaFailure(track.id, false)
+        settle()
+        assertEquals(1, failures.size)
+        assertTrue(reloaded.isEmpty())
+        assertTrue(sent.isEmpty())
+    }
+
+    @Test
+    fun `explicit fallback changes room and waits for source switch`() = scenario {
+        assertTrue(recovery.requestFallback())
+        assertFalse(recovery.requestFallback())
+        assertEquals(Events.PLAYER_REQUEST_SOURCE_FALLBACK, sent.single().first)
+        assertEquals(track.id, sent.single().second.getString("trackId"))
+        val replacement = track.copy(source = "tencent", urlId = "qq-1")
+        current = current!!.copy(track = replacement, key = current!!.key.copy(source = "tencent", urlId = "qq-1"))
+        recovery.onSourceSwitched(current!!)
+        recovery.onReady(track.id)
+        tick()
+        assertTrue(failures.isEmpty())
+        assertTrue(resolutions.isEmpty())
+    }
+
+    @Test
+    fun `explicit retry targets parked track with downgrade`() = scenario {
         assertTrue(recovery.retry(true, roomStopped = true))
         assertFalse(recovery.retry(true, roomStopped = true))
         assertEquals(Events.PLAYER_RETRY_TRACK, sent.single().first)
@@ -126,10 +170,10 @@ class PlaybackRecoveryCoordinatorTest {
     }
 
     @Test
-    fun `failed send stops timers and reports connection error`() = scenario {
+    fun `failed explicit send reports connection error without timeout`() = scenario {
         sendOk = false
-        assertFalse(recovery.onMediaFailure(track.id, false))
-        yield()
+        assertFalse(recovery.retry(false, roomStopped = true))
+        settle()
         assertTrue(timeouts.isEmpty())
         assertEquals(1, failures.size)
     }
@@ -139,6 +183,7 @@ class PlaybackRecoveryCoordinatorTest {
         try {
             fixture.block()
         } finally {
+            fixture.resolved.trySend(null)
             fixture.recovery.reset()
         }
     }
@@ -150,18 +195,32 @@ class PlaybackRecoveryCoordinatorTest {
         )
         val sent = mutableListOf<Pair<String, JSONObject>>()
         val failures = mutableListOf<String>()
+        val resolutions = mutableListOf<Boolean>()
+        val reloaded = mutableListOf<Track>()
         val timeouts = mutableListOf<Long>()
-        private val ticks = Channel<Unit>(Channel.UNLIMITED)
+        val resolved = Channel<Track?>(Channel.UNLIMITED)
+        private val ticks = Channel<Unit>(Channel.RENDEZVOUS)
         var sendOk = true
+        var deferResolution = false
+        var resolveFailure = false
         val recovery = PlaybackRecoveryCoordinator(
             scope, { current }, { event, data -> sent += event to data; sendOk },
-            { failures += it }, { timeouts += it; ticks.receive() },
+            { failures += it },
+            resolveLocal = { context, degrade ->
+                resolutions += degrade
+                if (resolveFailure) error("resolver unavailable")
+                if (deferResolution) withContext(NonCancellable) { resolved.receive() }
+                else context.track.copy(streamUrl = "https://audio.test/fresh")
+            },
+            reloadLocal = { reloaded += it; true },
+            wait = { timeouts += it; ticks.receive() },
         )
 
+        suspend fun settle() { repeat(5) { yield() } }
         suspend fun tick() {
-            yield()
-            ticks.send(Unit)
-            repeat(3) { yield() }
+            settle()
+            ticks.trySend(Unit)
+            settle()
         }
     }
 }

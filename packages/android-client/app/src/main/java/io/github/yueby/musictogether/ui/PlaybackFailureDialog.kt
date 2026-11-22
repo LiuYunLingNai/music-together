@@ -48,7 +48,12 @@ internal fun PlaybackFailureDialog(
     AppDialog(
         title = "歌曲无法播放",
         onDismissRequest = onDismiss,
-        confirmText = if (state.busy) "处理中…" else if (canRetry) "重试" else "关闭",
+        confirmText = when {
+            state.busy -> "处理中…"
+            canRetry && state.localOnly -> "重试本机"
+            canRetry -> "重试"
+            else -> "关闭"
+        },
         onConfirm = if (canRetry) onRetry else onDismiss,
         confirmEnabled = !state.busy,
         dismissText = "关闭",
@@ -57,13 +62,14 @@ internal fun PlaybackFailureDialog(
             Text("《${failure.track.title}》")
             Text(reason)
             state.message?.let { Text(it) }
+            if (state.localOnly) Text("本机重试不影响其他成员；切换房间音源或切歌会影响整个房间。")
             if (failure.nextAction == "skip") Text("服务端将自动跳过此曲，以房间播放状态为准。")
             if (canRetry) {
                 AppButton("降低音质后重试", onDegrade, enabled = !state.busy, primary = false)
             } else {
                 Text("请房主或管理员重试，或发起切歌投票。")
             }
-            if (canControl) AppButton("尝试其他音源", onSwitchSource, enabled = !state.busy, primary = false)
+            if (canControl) AppButton("切换房间音源", onSwitchSource, enabled = !state.busy, primary = false)
             AppButton(if (canControl) "下一首" else "投票切歌", onSkip, enabled = !state.busy, primary = false)
         }
     }

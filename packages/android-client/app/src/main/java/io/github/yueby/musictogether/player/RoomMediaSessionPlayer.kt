@@ -5,6 +5,8 @@ import androidx.media3.common.ForwardingSimpleBasePlayer
 import androidx.media3.common.Player
 import androidx.media3.common.SimpleBasePlayer
 import androidx.media3.common.util.UnstableApi
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
 
 internal val roomTransportCommands = intArrayOf(
     Player.COMMAND_SEEK_TO_PREVIOUS,
@@ -19,13 +21,32 @@ internal val roomTransportCommands = intArrayOf(
  */
 @OptIn(markerClass = [UnstableApi::class])
 internal class RoomMediaSessionPlayer(
-    player: Player,
-) : ForwardingSimpleBasePlayer(player) {
+    private val delegatePlayer: Player,
+    private val onExternalPlayback: (Boolean) -> Boolean,
+    private val onExternalSeek: (Long) -> Boolean,
+) : ForwardingSimpleBasePlayer(delegatePlayer) {
     override fun getState(): SimpleBasePlayer.State {
         val state = super.getState()
         return state.buildUpon()
             .setAvailableCommands(withRoomTransportCommands(state.availableCommands))
             .build()
+    }
+
+    override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
+        if (onExternalPlayback(playWhenReady)) return Futures.immediateVoidFuture()
+        return super.handleSetPlayWhenReady(playWhenReady)
+    }
+
+    override fun handleSeek(mediaItemIndex: Int, positionMs: Long, seekCommand: Int): ListenableFuture<*> {
+        val target = when (seekCommand) {
+            Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM, Player.COMMAND_SEEK_TO_MEDIA_ITEM -> positionMs
+            Player.COMMAND_SEEK_TO_DEFAULT_POSITION -> 0L
+            Player.COMMAND_SEEK_BACK -> delegatePlayer.currentPosition - delegatePlayer.seekBackIncrement
+            Player.COMMAND_SEEK_FORWARD -> delegatePlayer.currentPosition + delegatePlayer.seekForwardIncrement
+            else -> return super.handleSeek(mediaItemIndex, positionMs, seekCommand)
+        }
+        if (onExternalSeek(target.coerceAtLeast(0))) return Futures.immediateVoidFuture()
+        return super.handleSeek(mediaItemIndex, positionMs, seekCommand)
     }
 }
 

@@ -41,7 +41,27 @@ data class PlayerUiState(
     val error: String? = null,
     val connectedToMediaSession: Boolean = false,
     val transitionCue: TransitionCue? = null,
-)
+    val intendedPlaying: Boolean = false,
+    val interruption: LocalPlaybackInterruption? = null,
+    val resumingLocally: Boolean = false,
+) {
+    val controlPlaying: Boolean get() = interruption == null && !resumingLocally &&
+        if (localPlayback) playing else intendedPlaying
+    val controlDescription: String get() = when {
+        resumingLocally -> "正在恢复本机播放"
+        interruption != null -> "恢复本机播放"
+        localPlayback && controlPlaying -> "暂停本机播放"
+        controlPlaying -> "暂停房间播放"
+        else -> "播放"
+    }
+    val localPlaybackStatus: String? get() = when {
+        resumingLocally -> "正在恢复本机播放…"
+        interruption == LocalPlaybackInterruption.AudioRoute -> "耳机已断开，点播放恢复本机"
+        interruption == LocalPlaybackInterruption.AudioFocus -> "音频被其他应用打断，点播放恢复本机"
+        interruption != null -> "本机已暂停，点播放恢复"
+        else -> null
+    }
+}
 
 /** A blend in progress, for the progress bar hint (web `transitionCue`). */
 data class TransitionCue(val seconds: Double, val periodSec: Double?)
@@ -55,6 +75,7 @@ class NativePlayer(
     private val onTrackEnded: () -> Unit,
     private val onPlaybackFailure: (trackId: String, degrade: Boolean) -> Boolean,
     private val onPlaybackReady: (trackId: String) -> Unit,
+    private val onLocalInterruption: () -> Unit = {},
 ) {
     private companion object {
         const val HARD_SEEK_FADE_MS = 60L
@@ -69,6 +90,7 @@ class NativePlayer(
         val serverTimestamp: Long,
         val executeAt: Long?,
         val autoPlay: Boolean,
+        val resumeToken: Long? = null,
     )
 
     private val appContext = context.applicationContext
@@ -90,7 +112,8 @@ class NativePlayer(
     private var hardSeekJob: Job? = null
     private var hardSeekRestoreVolume: Float? = null
     private var correctionGeneration = 0L
-    private var localHold = false
+    private val localGate = LocalPlaybackGate()
+    private var playbackGeneration = 0L
     private var pendingTransition: AutomixTransition? = null
     private var transitionJob: Job? = null
 
@@ -123,8 +146,19 @@ class NativePlayer(
         override fun onIsPlayingChanged(isPlaying: Boolean) = publish()
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-            // Sleep timer: this device stays stopped whatever the room does, until the user resumes.
-            if (localHold && playWhenReady) player?.pause()
+            when (reason) {
+                Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY ->
+                    holdLocal(LocalPlaybackInterruption.AudioRoute)
+                Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS ->
+                    if (!playWhenReady) holdLocal(LocalPlaybackInterruption.AudioFocus)
+            }
+            if (localGate.held && playWhenReady) player?.pause()
+        }
+
+        override fun onPlaybackSuppressionReasonChanged(playbackSuppressionReason: Int) {
+            if (playbackSuppressionReason == Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS) {
+                holdLocal(LocalPlaybackInterruption.AudioFocus)
+            }
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -134,7 +168,7 @@ class NativePlayer(
                 _state.value = _state.value.copy(error = null)
                 player?.currentMediaItem?.mediaId?.let(onPlaybackReady)
             }
-            if (playbackState == Player.STATE_ENDED) onTrackEnded()
+            if (playbackState == Player.STATE_ENDED && !localGate.held && !_state.value.resumingLocally) onTrackEnded()
         }
 
         override fun onPlayerError(error: PlaybackException) {
@@ -178,12 +212,16 @@ class NativePlayer(
             return
         }
         scheduledAction?.cancel()
+        playbackGeneration++
+        localGate.cancelResume()
         pendingLoad = null
         fallbackPlaybackUrl = fallbackUrl?.takeIf { it != streamUrl }
         resetPlaybackCorrection()
         _state.value = PlayerUiState(
             track = track,
             localPlayback = localPlayback,
+            intendedPlaying = playState.isPlaying,
+            interruption = localGate.reason,
             connectedToMediaSession = player != null,
         )
         val elapsed = if (playState.isPlaying && playState.serverTimestamp > 0) {
@@ -304,6 +342,7 @@ class NativePlayer(
     }
 
     fun pause(playState: PlayState) {
+        _state.value = _state.value.copy(intendedPlaying = playState.isPlaying)
         updatePendingPlayback(playState)
         schedule(playState.serverTimeToExecute) {
             resetPlaybackCorrection(it)
@@ -313,15 +352,17 @@ class NativePlayer(
     }
 
     fun resume(playState: PlayState) {
+        _state.value = _state.value.copy(intendedPlaying = playState.isPlaying)
         updatePendingPlayback(playState)
         schedule(playState.serverTimeToExecute) {
             resetPlaybackCorrection(it)
             it.seekTo(positionAtExecution(playState, advanceIfLate = true))
-            it.play()
+            if (localGate.held) it.pause() else it.play()
         }
     }
 
     fun seek(playState: PlayState) {
+        _state.value = _state.value.copy(intendedPlaying = playState.isPlaying)
         updatePendingPlayback(playState)
         schedule(playState.serverTimeToExecute) {
             resetPlaybackCorrection(it)
@@ -351,19 +392,62 @@ class NativePlayer(
         withPlayer { it.seekTo((seconds * 1_000).toLong().coerceAtLeast(0L)) }
     }
 
-    fun holdLocal() {
-        localHold = true
+    fun holdLocal(reason: LocalPlaybackInterruption = LocalPlaybackInterruption.SleepTimer) {
+        if (!localGate.hold(reason) && !_state.value.resumingLocally) return
+        cancelTransition()
+        cancelLocalResume()
+        _state.value = _state.value.copy(interruption = localGate.reason)
         withPlayer {
             resetPlaybackCorrection(it)
             it.pause()
         }
+        onLocalInterruption()
     }
 
-    /** Drops the sleep hold; drift correction pulls the position back onto the room timeline. */
-    fun releaseLocalHold(resume: Boolean) {
-        if (!localHold) return
-        localHold = false
-        if (resume) withPlayer { it.play() }
+    fun beginLocalResume() {
+        localGate.beginResume()
+        cancelTransition()
+        resetPlaybackCorrection()
+        _state.value = _state.value.copy(interruption = localGate.reason, resumingLocally = true)
+        withPlayer { it.pause() }
+    }
+
+    fun cancelLocalResume() {
+        localGate.cancelResume()
+        _state.value = _state.value.copy(resumingLocally = false)
+    }
+
+    fun resumeLocalFile() {
+        if (!_state.value.localPlayback) return
+        localGate.release()
+        _state.value = _state.value.copy(interruption = null, resumingLocally = false)
+        withPlayer { it.play() }
+    }
+
+    fun resumeFromRoomSnapshot(trackId: String, playState: PlayState) {
+        if (!_state.value.resumingLocally || _state.value.track?.id != trackId) return
+        _state.value = _state.value.copy(intendedPlaying = playState.isPlaying)
+        if (pendingLoad != null) {
+            updatePendingPlayback(playState)
+            pendingLoad = pendingLoad?.copy(resumeToken = localGate.resumeToken)
+            withPlayer {
+                when (it.playbackState) {
+                    Player.STATE_READY -> finishPendingLoad()
+                    Player.STATE_IDLE, Player.STATE_ENDED -> {
+                        it.seekTo(roomPlaybackPositionMs(playState, clock.serverTime()))
+                        it.prepare()
+                    }
+                }
+            }
+            return
+        }
+        pendingLoad = PendingLoad(trackId, (playState.currentTime * 1_000).toLong(),
+            playState.serverTimestamp, null, playState.isPlaying, localGate.resumeToken)
+        withPlayer {
+            it.pause()
+            it.seekTo(roomPlaybackPositionMs(playState, clock.serverTime()))
+            if (it.playbackState == Player.STATE_READY) finishPendingLoad() else it.prepare()
+        }
     }
 
     fun setTempoSyncEnabled(enabled: Boolean) {
@@ -409,6 +493,8 @@ class NativePlayer(
     }
 
     fun stop() {
+        playbackGeneration++
+        localGate.cancelResume()
         cancelTransition()
         scheduledAction?.cancel()
         pendingLoad = null
@@ -418,10 +504,11 @@ class NativePlayer(
             it.stop()
             it.clearMediaItems()
         }
-        _state.value = PlayerUiState(connectedToMediaSession = player != null)
+        _state.value = PlayerUiState(connectedToMediaSession = player != null, interruption = localGate.reason)
     }
 
     fun release() {
+        playbackGeneration++
         cancelTransition()
         progressJob?.cancel()
         scheduledAction?.cancel()
@@ -435,11 +522,13 @@ class NativePlayer(
 
     private fun schedule(serverTime: Long?, action: (MediaController) -> Unit) {
         scheduledAction?.cancel()
+        val generation = playbackGeneration
         scheduledAction = scope.launch {
             val waitMs = if (serverTime != null && clock.calibrated) {
                 (serverTime - clock.serverTime()).coerceAtLeast(0)
             } else 0
             if (waitMs > 0) delay(waitMs)
+            if (generation != playbackGeneration) return@launch
             withPlayer(action)
             publish()
         }
@@ -507,12 +596,14 @@ class NativePlayer(
         val controller = player ?: return
         if (controller.currentMediaItem?.mediaId != pending.trackId) return
         pendingLoad = null
+        val generation = playbackGeneration
         scheduledAction?.cancel()
         scheduledAction = scope.launch {
             val waitMs = if (pending.autoPlay && pending.executeAt != null && clock.calibrated) {
                 (pending.executeAt - clock.serverTime()).coerceAtLeast(0)
             } else 0
             if (waitMs > 0) delay(waitMs)
+            if (generation != playbackGeneration) return@launch
 
             val elapsedMs = if (pending.autoPlay && pending.serverTimestamp > 0) {
                 (clock.serverTime() - pending.serverTimestamp).coerceAtLeast(0)
@@ -526,9 +617,12 @@ class NativePlayer(
             withPlayer {
                 resetPlaybackCorrection(it)
                 it.seekTo(expectedPositionMs)
-                if (pending.autoPlay) it.play() else it.pause()
+                if (pending.resumeToken != null && localGate.completeResume(pending.resumeToken)) {
+                    _state.value = _state.value.copy(interruption = null, resumingLocally = false)
+                }
+                if (pending.autoPlay && !localGate.held) it.play() else it.pause()
             }
-            if (pending.autoPlay) startTransitionFade() else cancelTransition()
+            if (pending.autoPlay && !localGate.held) startTransitionFade() else cancelTransition()
             publish()
         }
     }
@@ -606,7 +700,10 @@ class NativePlayer(
 
     private fun withPlayer(action: (MediaController) -> Unit) {
         val current = player
-        if (current != null) action(current) else pendingOperations += { action(this) }
+        val generation = playbackGeneration
+        if (current != null) action(current) else pendingOperations += {
+            if (generation == playbackGeneration) action(this)
+        }
     }
 
     private fun currentPlaybackTarget(): String {

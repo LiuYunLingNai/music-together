@@ -14,5 +14,8 @@ class StreamRequestTest {
         assertEquals("room1", url.queryParameter("roomId"))
         assertEquals("tencent_flac", url.queryParameter("bitrate"))
         assertNull(streamRequestUrl(server, track, "320", null).queryParameter("roomId"))
+        assertNull(url.queryParameter("forceRefresh"))
+        assertEquals("true", streamRequestUrl(server, track, "128", "room1", forceRefresh = true)
+            .queryParameter("forceRefresh"))
     }
 }

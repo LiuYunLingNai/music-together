@@ -398,7 +398,7 @@ internal fun ClassicPortraitStage(
                         lyricOffsetMs = lyricOffsetMs,
                         player = player,
                         slots = slots,
-                        onSeek = viewModel::seek,
+                        onSeek = { seconds -> track?.id?.let { viewModel.seekTrack(seconds, it) } },
                     )
                 }
                 Column(
@@ -602,7 +602,9 @@ internal fun ClassicLandscapeStage(
                     positionSeconds = player.positionSeconds,
                     lyricOffsetMs = lyricOffsetMs,
                     isPlaying = player.playing,
-                    onSeek = { lyricTimeSeconds -> viewModel.seek(lyricTimeSeconds + lyricOffsetMs / 1_000.0) },
+                    onSeek = { lyricTimeSeconds -> track?.id?.let {
+                        viewModel.seekTrack(lyricTimeSeconds + lyricOffsetMs / 1_000.0, it)
+                    } },
                 )
             }
             AnimatedPlayerVotePrompt(

@@ -26,7 +26,25 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-        decks = PlaybackDecks(this) { mediaSession.player = it }
+        fun externalController(): Boolean {
+            val controller = mediaSession.controllerForCurrentRequest ?: return false
+            return controller.packageName != packageName ||
+                controller.controllerVersion == MediaSession.ControllerInfo.LEGACY_CONTROLLER_VERSION
+        }
+        decks = PlaybackDecks(this, onHandOver = { mediaSession.player = it },
+            onExternalPlayback = { playing ->
+                val external = externalController()
+                if (external) PlaybackCommandBridge.listener?.onPlaybackRequested(playing)
+                external
+            },
+            onExternalSeek = { positionMs ->
+                val external = externalController()
+                if (external) decks.active.player.currentMediaItem?.mediaId?.let {
+                    PlaybackCommandBridge.listener?.onSeek(it, positionMs / 1_000.0)
+                }
+                external
+            },
+        )
         PlaybackCommandBridge.decks = decks
         configureAudioFocus(PlaybackCommandBridge.audioFocusEnabled)
         PlaybackCommandBridge.audioFocusListener = ::configureAudioFocus
@@ -44,7 +62,8 @@ class PlaybackService : MediaSessionService() {
                     val isInternalMedia3Controller =
                         controller.packageName == packageName &&
                             controller.controllerVersion != MediaSession.ControllerInfo.LEGACY_CONTROLLER_VERSION
-                    if (shouldRouteMediaCommandToRoom(roomCommand, isInternalMedia3Controller)) {
+                    if (roomCommand != RoomMediaCommand.TogglePlayback &&
+                        shouldRouteMediaCommandToRoom(roomCommand, isInternalMedia3Controller)) {
                         AppLogger.info(
                             "MediaSession",
                             "room command=$roomCommand playerCommand=$playerCommand " +

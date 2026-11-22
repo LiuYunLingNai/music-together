@@ -223,8 +223,8 @@ internal fun FoliaPlayer(
                                     viewModel.seek((position + latestOffset / 1_000.0).coerceIn(0.0, latestPlayer.durationSeconds.coerceAtLeast(0.0)))
                                 }
                             }
-                            "play" -> if (!latestPlayer.playing) viewModel.togglePlayback()
-                            "pause" -> if (latestPlayer.playing) viewModel.togglePlayback()
+                            "play" -> viewModel.requestPlayback(true)
+                            "pause" -> viewModel.requestPlayback(false)
                             "settingsOpen" -> { settingsVisible = true; reveal() }
                             "settingsClose" -> { settingsVisible = false; reveal() }
                             "tap" -> { chromeVisible = !chromeVisible; interaction++ }

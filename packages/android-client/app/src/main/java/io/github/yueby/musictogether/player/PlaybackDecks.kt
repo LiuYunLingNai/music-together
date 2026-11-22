@@ -49,9 +49,15 @@ private class DeckSpectrumSink(private val state: DeckState) : TeeAudioProcessor
  * while the first keeps playing the outgoing song untouched, so the handover has no seam to hide.
  */
 @OptIn(markerClass = [UnstableApi::class])
-internal class PlaybackDecks(private val context: Context, private val onHandOver: (Player) -> Unit) {
-    class Deck(val player: ExoPlayer, val state: DeckState) {
-        val sessionPlayer: Player = RoomMediaSessionPlayer(player)
+internal class PlaybackDecks(
+    private val context: Context,
+    private val onHandOver: (Player) -> Unit,
+    private val onExternalPlayback: (Boolean) -> Boolean,
+    private val onExternalSeek: (Long) -> Boolean,
+) {
+    class Deck(val player: ExoPlayer, val state: DeckState,
+        onExternalPlayback: (Boolean) -> Boolean, onExternalSeek: (Long) -> Boolean) {
+        val sessionPlayer: Player = RoomMediaSessionPlayer(player, onExternalPlayback, onExternalSeek)
     }
 
     private val decks = List(2) { build() }
@@ -106,9 +112,10 @@ internal class PlaybackDecks(private val context: Context, private val onHandOve
                 .build()
         }
         val player = ExoPlayer.Builder(context, renderersFactory)
+            .setHandleAudioBecomingNoisy(true)
             .setMediaSourceFactory(DefaultMediaSourceFactory(PlaybackCache.playbackFactory(context)))
             .build()
-        return Deck(player, state)
+        return Deck(player, state, onExternalPlayback, onExternalSeek)
     }
 
     fun configureAudioFocus(attributes: AudioAttributes, enabled: Boolean) {

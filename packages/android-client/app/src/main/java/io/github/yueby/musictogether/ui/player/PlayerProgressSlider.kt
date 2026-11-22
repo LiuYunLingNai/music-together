@@ -89,9 +89,12 @@ internal fun PlayerProgressSlider(
     onValueChangeFinished: () -> Unit,
     modifier: Modifier = Modifier,
     breath: TransitionBreath? = null,
+    gestureKey: Any? = null,
+    onValueChangeCancelled: () -> Unit = {},
 ) {
     val latestChange by rememberUpdatedState(onValueChange)
     val latestFinished by rememberUpdatedState(onValueChangeFinished)
+    val latestCancelled by rememberUpdatedState(onValueChangeCancelled)
     val range = maximumValue.coerceAtLeast(0.0001f)
     val scope = rememberCoroutineScope()
     val inset = remember { Animatable(SliderRestInset) }
@@ -132,7 +135,7 @@ internal fun PlayerProgressSlider(
                     cornerRadius = CornerRadius(glowHeight / 2f),
                 )
             }
-            .pointerInput(enabled, range) {
+            .pointerInput(enabled, range, gestureKey) {
                 if (!enabled) return@pointerInput
                 awaitEachGesture {
                     val down = awaitFirstDown()
@@ -148,13 +151,18 @@ internal fun PlayerProgressSlider(
                     }
                     scope.launch { inset.animateTo(0f, tween(280, easing = EaseOut)) }
                     update(down.position.x)
-                    drag(down.id) { change ->
-                        change.consume()
-                        update(change.position.x)
+                    var completed = false
+                    try {
+                        completed = drag(down.id) { change ->
+                            change.consume()
+                            update(change.position.x)
+                        }
+                        if (completed) latestFinished()
+                    } finally {
+                        scope.launch { inset.animateTo(SliderRestInset, SliderCollapseSpring) }
+                        scope.launch { bounce.animateTo(0f, SliderBounceSpring) }
+                        if (!completed) latestCancelled()
                     }
-                    scope.launch { inset.animateTo(SliderRestInset, SliderCollapseSpring) }
-                    scope.launch { bounce.animateTo(0f, SliderBounceSpring) }
-                    latestFinished()
                 }
             },
     ) {

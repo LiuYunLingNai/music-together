@@ -6,6 +6,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 
 internal data class PlaybackRecoveryKey(
@@ -28,6 +30,8 @@ internal class PlaybackRecoveryCoordinator(
     private val context: () -> PlaybackRecoveryContext?,
     private val emit: (String, JSONObject) -> Boolean,
     private val onFailure: (String) -> Unit,
+    private val resolveLocal: suspend (PlaybackRecoveryContext, Boolean) -> Track?,
+    private val reloadLocal: (Track) -> Boolean,
     private val wait: suspend (Long) -> Unit = { delay(it) },
 ) {
     private enum class Stage { Idle, Refresh, Reload, Fallback, Retry, Exhausted }
@@ -37,8 +41,11 @@ internal class PlaybackRecoveryCoordinator(
     private var attempts = 0
     private var timer: Job? = null
     private var generation = 0L
+    private var resolver: Job? = null
 
     fun reset() {
+        resolver?.cancel()
+        resolver = null
         cancelTimer()
         key = null
         stage = Stage.Idle
@@ -46,6 +53,8 @@ internal class PlaybackRecoveryCoordinator(
     }
 
     fun cancelPending() {
+        resolver?.cancel()
+        resolver = null
         cancelTimer()
         stage = Stage.Idle
     }
@@ -58,9 +67,9 @@ internal class PlaybackRecoveryCoordinator(
         return when {
             stage == Stage.Exhausted -> true
             attempts == 0 -> refresh(current, degrade)
-            attempts == 1 -> fallback(current)
+            attempts == 1 -> refresh(current, true)
             else -> {
-                fail("刷新地址和替代音源仍无法播放，请稍后重试或手动切歌")
+                fail("本机刷新地址和降低音质后仍无法播放，请稍后重试")
                 true
             }
         }
@@ -88,14 +97,6 @@ internal class PlaybackRecoveryCoordinator(
         return fallback(current)
     }
 
-    fun onStreamRefreshed(track: Track): Boolean {
-        val current = context() ?: return false
-        if (key != current.key || stage != Stage.Refresh || !matches(track) || track.streamUrl.isNullOrBlank()) return false
-        stage = Stage.Reload
-        startTimer(current.key, 15_000L) { fallback(context() ?: return@startTimer) }
-        return true
-    }
-
     /** A source switch retains the queue id, but starts using a different source identity. */
     fun onSourceSwitched(current: PlaybackRecoveryContext) {
         val wasRecovering = key?.let {
@@ -118,11 +119,31 @@ internal class PlaybackRecoveryCoordinator(
     }
 
     private fun refresh(current: PlaybackRecoveryContext, degrade: Boolean): Boolean {
-        attempts = 1
+        cancelTimer()
+        resolver?.cancel()
+        attempts++
         stage = Stage.Refresh
-        return send(current, Events.PLAYER_REFRESH_STREAM, degrade, 8_000L) {
-            fallback(context() ?: return@send)
+        val token = generation
+        resolver = scope.launch {
+            try {
+                val track = withTimeout(8_000L) { resolveLocal(current, degrade) }
+                if (token != generation || context()?.key != current.key || stage != Stage.Refresh) return@launch
+                if (track == null || !matches(track) || track.streamUrl.isNullOrBlank()) {
+                    fail("本机音频地址解析失败，请重试；房间继续播放")
+                    return@launch
+                }
+                stage = Stage.Reload
+                startTimer(current.key, 15_000L) { fail("本机音频加载超时，请重试；房间继续播放") }
+                if (!reloadLocal(track)) fail("当前曲目已变化，本机恢复已取消")
+            } catch (error: kotlinx.coroutines.TimeoutCancellationException) {
+                if (token == generation && context()?.key == current.key) fail("本机音频解析超时，请重试")
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                if (token == generation && context()?.key == current.key) fail("本机音频解析失败，请检查网络后重试")
+            }
         }
+        return true
     }
 
     private fun fallback(current: PlaybackRecoveryContext): Boolean {

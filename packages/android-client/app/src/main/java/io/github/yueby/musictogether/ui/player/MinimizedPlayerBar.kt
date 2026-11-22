@@ -131,7 +131,7 @@ internal fun MinimizedPlayerBar(
         val at = (player.positionSeconds * 1000).toLong() - lyricOffsetMs
         lyrics.lines.lastOrNull { !it.isBackground && it.startTimeMs <= at }?.text?.trim()?.takeIf { it.isNotEmpty() }
     }
-    val subtitle = lyricLine ?: track?.artist?.joinToString(" / ") ?: "点击打开播放器"
+    val subtitle = player.localPlaybackStatus ?: lyricLine ?: track?.artist?.joinToString(" / ") ?: "点击打开播放器"
     val playbackProgress by animateFloatAsState(
         targetValue = if (player.durationSeconds > 0) {
             (player.positionSeconds / player.durationSeconds).toFloat().coerceIn(0f, 1f)
@@ -224,8 +224,8 @@ internal fun MinimizedPlayerBar(
             MiniPlayerIconButton(
                 onClick = viewModel::togglePlayback,
                 enabled = enabled,
-                icon = if (player.playing) Lucide.Pause else Lucide.Play,
-                contentDescription = if (player.playing) "暂停" else "播放",
+                icon = if (player.controlPlaying) Lucide.Pause else Lucide.Play,
+                contentDescription = player.controlDescription,
                 tint = if (enabled) contentColor else secondaryColor.copy(alpha = 0.38f),
                 modifier = Modifier
                     .graphicsLayer {

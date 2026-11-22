@@ -304,6 +304,7 @@ Folia 原始渲染源码保存在 `folia-stage/upstream-source.tar.gz`（最小�
 | `PlaybackRequestHeaders.kt` | 按播放域名添加必要请求头 |
 | `PlaybackCommandBridge.kt` | 将系统媒体按钮转回房间操作 |
 | `PlaybackRecoveryCoordinator.kt` | 按服务器、房间与曲目隔离的有限恢复流程和可取消超时 |
+| `LocalPlaybackGate.kt` | 本机中断原因、恢复轮次和房间进度换算 |
 
 B站音频始终通过服务器代理播放，播放所需 Cookie 只保留在服务端。服务器管理员通过受保护的 HTTP API 控制酷狗是否强制代理，策略通过 `server:audio_proxy_policy` 实时下发，默认行为为强制代理。
 
@@ -325,13 +326,17 @@ B站音频始终通过服务器代理播放，播放所需 Cookie 只保留在�
 
 自动变速和大偏差硬 Seek 默认关闭并分别持久化；升级到该设置架构时会执行一次迁移，之后保留用户选择。
 
-MediaSession 接收系统播放按钮。相关操作通过 `PlaybackCommandBridge` 返回 ViewModel，再根据房间角色直接发送控制事件或发起投票。
+MediaSession 的外部播放、暂停、上一首、下一首和 Seek 通过 `PlaybackCommandBridge` 返回 ViewModel，根据房间权限直接控制或发起已有投票；内部 MediaController 执行服务端动作时直接操作本机。播放和暂停保留系统请求的明确意图，避免缓冲时按本机状态反向切换房间。Seek 携带当前曲目 `trackId`；进度条切歌时取消旧手势，客户端和服务端共同拒绝过期目标。
+
+### 本机中断与恢复
+
+断开耳机、失去音频焦点和睡眠定时只暂停本机，并取消混音尾轨与漂移修正，不发送房间暂停、换源或切歌事件。中断状态跨房间切歌保留，房间恢复播放也不会自动解除。界面提示中断原因，播放按钮用于恢复本机；本地文件直接恢复，在线曲目通过只读 `player:sync_request` 获取新的房间时间线，按实际就绪时刻换算进度，先 Seek 再按房间意图播放。该恢复独立于自动变速和大偏差硬 Seek 开关，不通过加速追赶。取消、超时或旧恢复轮次的响应不能解除本机暂停；恢复期间发生房间暂停或 Seek 时，以最新动作更新待执行意图。
 
 ### 播放故障恢复
 
-网络音频在原有直连转代理回退后仍失败时，`NativePlayer` 将网络或解码错误交给 `PlaybackRecoveryCoordinator`。协调器先请求 `player:refresh_stream`，仅解码/格式错误附带 `degrade`；8 秒无响应或重新加载仍失败时，有控制权限的成员再请求一次 `player:request_source_fallback`，普通成员保留本机重试入口。15 秒无换源结果即结束恢复，不因单台设备故障替房间自动跳歌。旧服务端不认识新事件时同样有界结束。
+网络音频在原有直连转代理回退后仍失败时，`NativePlayer` 将网络或解码错误交给 `PlaybackRecoveryCoordinator`。自动恢复仅调用 `GET /api/music/url` 解析本机地址并重新加载，不修改房间曲目、音质或时间线。每个曲目身份最多尝试两次；解码/格式错误直接降至 128，首次重新加载仍失败时第二次降档。每次解析最多 8 秒，加载最多 15 秒；超时或解析失败结束本机恢复，保留手动入口。请求携带可选 `forceRefresh=true` 绕过服务端地址缓存，旧服忽略此字段时仍可解析，但不保证返回新地址。本机重载使用独立缓存键，避免反复读取同一份故障缓存。
 
-`player:stream_refreshed` 是房间广播，只有正在等待刷新结果的本机重新加载，其他设备只更新曲目元数据。`player:source_switched` 保持队列 ID，以新音源和服务端进度重建音频并重载歌词；换源后的失败不重启无限循环。切歌、暂停、离房、断线、切换服务器和释放会取消恢复超时；自然播完和手动下一首携带 `trackId`，避免过期请求跳过新曲。
+`player:stream_refreshed` 是房间广播，Android 只更新曲目元数据，不打断正常播放。只有用户主动选择换源时才发送 `player:request_source_fallback`，并继续校验房间控制权限。`player:source_switched` 保持队列 ID，以新音源和服务端进度重建音频并重载歌词；换源后的失败不重启无限循环。切歌、暂停、本机中断、离房、断线、切换服务器和释放会取消待解析任务及恢复超时；过期服务器、房间或音源的结果不能重载当前曲目。自然播完和手动下一首携带 `trackId`，避免过期请求跳过新曲。
 
 `player:playback_failure` 按失败原因展示 MIUIX 弹窗，支持重试、降音质、换源和下一首/投票；服务端停止的曲目由有权限用户通过 `player:retry_track` 重试。普通成员仅能刷新本机地址或发起已有切歌投票，服务端 `nextAction` 决定自动跳过。网络恢复不作用于离线文件。待同步能力与验证进度见 [main 同步清单](ANDROID_MAIN_SYNC.md)。
 

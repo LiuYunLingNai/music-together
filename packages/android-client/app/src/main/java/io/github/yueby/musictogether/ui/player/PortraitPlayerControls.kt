@@ -176,10 +176,15 @@ internal fun MobilePlayerControls(
             },
             onValueChangeFinished = {
                 seeking = false
-                viewModel.seek(seekPosition)
+                track?.id?.let { viewModel.seekTrack(seekPosition, it) }
             },
             modifier = Modifier.fillMaxWidth(),
             breath = breath,
+            gestureKey = track?.id,
+            onValueChangeCancelled = {
+                seeking = false
+                seekPosition = player.positionSeconds
+            },
         )
         Spacer(Modifier.height((4f * scale).dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -214,6 +219,10 @@ internal fun MobilePlayerControls(
                 )
             }
             Text(formatPlayerTime(reportedDuration), color = timeColor, fontSize = (12f * scale).sp)
+        }
+        player.localPlaybackStatus?.let { status ->
+            Text(status, color = timeColor, fontSize = (12f * scale).sp,
+                modifier = Modifier.padding(top = (6f * scale).dp))
         }
         ControlsSpectrum(
             visible = displaySettings.controlsSpectrum,
@@ -252,10 +261,10 @@ internal fun MobilePlayerControls(
                     modifier = Modifier.size((56f * scale).dp),
                 ) {
                     Icon(
-                        if (player.playing) StagePauseIcon else StagePlayIcon,
-                        contentDescription = if (player.playing) "暂停" else "播放",
+                        if (player.controlPlaying) StagePauseIcon else StagePlayIcon,
+                        contentDescription = player.controlDescription,
                         modifier = Modifier
-                            .offset(x = if (player.playing) 0.dp else (2f * scale).dp)
+                            .offset(x = if (player.controlPlaying) 0.dp else (2f * scale).dp)
                             .size((28f * scale).dp),
                         tint = Color.White,
                     )

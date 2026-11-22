@@ -110,6 +110,8 @@ import io.github.yueby.musictogether.player.PlaybackRecoveryKey
 import io.github.yueby.musictogether.player.isStalePlaybackAction
 import io.github.yueby.musictogether.player.canApplyPlaybackSync
 import io.github.yueby.musictogether.player.PlayerUiState
+import io.github.yueby.musictogether.player.PlaybackRequestAction
+import io.github.yueby.musictogether.player.playbackRequestAction
 import io.github.yueby.musictogether.queue.QueueActionTracker
 import io.github.yueby.musictogether.queue.loadCompletePlaylist
 import io.github.yueby.musictogether.queue.planPlaylistQueueBatches
@@ -242,6 +244,8 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         context = ::playbackRecoveryContext,
         emit = socket::emit,
         onFailure = ::showLocalPlaybackFailure,
+        resolveLocal = ::resolveLocalPlayback,
+        reloadLocal = ::reloadLocalPlayback,
     )
     private val nativePlayer: NativePlayer = NativePlayer(
         application,
@@ -252,6 +256,7 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         ::onTrackEnded,
         ::onNativePlaybackFailure,
         ::onNativePlaybackReady,
+        onLocalInterruption = ::onLocalPlaybackInterruption,
     )
     private val mediaCache = MediaCacheCoordinator(
         context = application,
@@ -345,6 +350,9 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     private var bilibiliMetadataSearchJob: Job? = null
     private var bilibiliCollectionJob: Job? = null
     private var syncJob: Job? = null
+    private var localResumeJob: Job? = null
+    private var localResumeRequestedAt = 0L
+    private var localRecoverySerial = 0L
     private var lyricJob: Job? = null
     private val lyricCache = linkedMapOf<String, Pair<Long, LyricsState>>()
     private var searchJob: Job? = null
@@ -376,6 +384,8 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             override fun onTogglePlayback() = this@MusicTogetherViewModel.togglePlayback()
             override fun onNext() = this@MusicTogetherViewModel.next()
             override fun onPrevious() = this@MusicTogetherViewModel.previous()
+            override fun onPlaybackRequested(playing: Boolean) = requestPlayback(playing)
+            override fun onSeek(trackId: String, seconds: Double) = seekTrack(seconds, trackId)
         }
         viewModelScope.launch {
             val tracks = withContext(Dispatchers.IO) {
@@ -590,7 +600,41 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     fun releaseSleepHold() {
         if (!_sleepTimer.value.held) return
         _sleepTimer.value = _sleepTimer.value.copy(held = false)
-        nativePlayer.releaseLocalHold(resume = _state.value.room?.playState?.isPlaying == true)
+        resumeLocalPlayback()
+    }
+
+    private fun onLocalPlaybackInterruption() {
+        localResumeJob?.cancel()
+        localResumeJob = null
+        playbackRecovery.cancelPending()
+        _state.value = _state.value.copy(playbackFailure = _state.value.playbackFailure?.copy(busy = false))
+    }
+
+    private fun resumeLocalPlayback() {
+        if (nativePlayer.state.value.resumingLocally) return
+        if (nativePlayer.state.value.localPlayback) {
+            _sleepTimer.value = _sleepTimer.value.copy(held = false)
+            nativePlayer.resumeLocalFile()
+            return
+        }
+        val identity = playbackRecoveryContext()?.key ?: run {
+            setNotice("暂时无法取得房间时间线，请连接后恢复本机播放", isError = true)
+            return
+        }
+        _sleepTimer.value = _sleepTimer.value.copy(held = false)
+        nativePlayer.beginLocalResume()
+        localResumeRequestedAt = if (clock.calibrated) clock.serverTime() else 0L
+        localResumeJob?.cancel()
+        localResumeJob = viewModelScope.launch {
+            repeat(16) {
+                if (playbackRecoveryContext()?.key != identity || !nativePlayer.state.value.resumingLocally) return@launch
+                if (!clock.calibrated) sendClockPing()
+                socket.emit(Events.PLAYER_SYNC_REQUEST)
+                delay(500)
+            }
+            nativePlayer.cancelLocalResume()
+            setNotice("本机恢复未完成，请稍后重试；房间播放不受影响", isError = true)
+        }
     }
 
     fun updateHapticFeedbackEnabled(enabled: Boolean) {
@@ -1717,8 +1761,9 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun togglePlayback() {
-        if (_sleepTimer.value.held) {
-            releaseSleepHold()
+        if (nativePlayer.state.value.resumingLocally) return
+        if (_sleepTimer.value.held || nativePlayer.state.value.interruption != null) {
+            resumeLocalPlayback()
             return
         }
         if (nativePlayer.state.value.localPlayback) {
@@ -1729,11 +1774,21 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
             _state.value = _state.value.copy(playbackFailure = it.copy(visible = true))
             return
         }
-        val action = if (nativePlayer.state.value.playing) "pause" else "resume"
+        val action = if (_state.value.room?.playState?.isPlaying == true) "pause" else "resume"
         if (canControl()) {
             socket.emit(if (action == "pause") Events.PLAYER_PAUSE else Events.PLAYER_PLAY)
         } else {
             startVote(action)
+        }
+    }
+
+    fun requestPlayback(playing: Boolean) {
+        when (playbackRequestAction(playing, nativePlayer.state.value,
+            _state.value.room?.playState?.isPlaying, _sleepTimer.value.held)) {
+            PlaybackRequestAction.Ignore -> Unit
+            PlaybackRequestAction.ResumeLocal -> resumeLocalPlayback()
+            PlaybackRequestAction.ToggleLocal -> nativePlayer.toggleLocalPlayback()
+            PlaybackRequestAction.ControlRoom -> togglePlayback()
         }
     }
 
@@ -1776,11 +1831,19 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun seek(seconds: Double) {
+        val trackId = nativePlayer.state.value.track?.id ?: return
+        seekTrack(seconds, trackId)
+    }
+
+    fun seekTrack(seconds: Double, expectedTrackId: String) {
+        if (!seconds.isFinite() || nativePlayer.state.value.track?.id != expectedTrackId) return
         if (nativePlayer.state.value.localPlayback) {
             nativePlayer.seekLocal(seconds)
             return
         }
-        if (canControl()) socket.emit(Events.PLAYER_SEEK, JSONObject().put("currentTime", seconds.coerceAtLeast(0.0)))
+        if (_state.value.room?.currentTrack?.id != expectedTrackId) return
+        if (canControl()) socket.emit(Events.PLAYER_SEEK, JSONObject()
+            .put("currentTime", seconds.coerceAtLeast(0.0)).put("trackId", expectedTrackId))
     }
 
     fun setLyricOffset(track: Track?, offsetMs: Int) {
@@ -2403,18 +2466,13 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                 val room = _state.value.room ?: return
                 if (room.currentTrack?.id != track.id || track.streamUrl.isNullOrBlank()) return
                 if (room.currentTrack.source != track.source || room.currentTrack.urlId != track.urlId) return
-                val wasRecovering = playbackRecovery.onStreamRefreshed(track)
                 updateRoom { current ->
                     current.copy(
                         currentTrack = track,
                         queue = current.queue.map { item -> if (item.id == track.id) track else item },
                     )
                 }
-                if (wasRecovering) {
-                    loadTrack(track, room.playState)
-                } else {
-                    nativePlayer.updateTrackMetadata(track)
-                }
+                nativePlayer.updateTrackMetadata(track)
             }
             Events.PLAYER_SOURCE_SWITCHED -> {
                 val value = data as? JSONObject ?: return
@@ -2463,8 +2521,18 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
                     value.has("trackId"), value.stringOrNull("trackId"), room.currentTrack?.id,
                     nativePlayer.state.value.track?.id, serverTimestamp, room.playState,
                 )) return
+                val snapshotPosition = value.optDouble("currentTime").takeIf { it.isFinite() && it >= 0 } ?: return
+                if (nativePlayer.state.value.resumingLocally && serverTimestamp >= localResumeRequestedAt) {
+                    nativePlayer.resumeFromRoomSnapshot(room.currentTrack?.id ?: return, PlayState(
+                        isPlaying = value.optBoolean("isPlaying"),
+                        currentTime = snapshotPosition,
+                        serverTimestamp = serverTimestamp,
+                        revision = room.playState.revision,
+                    ))
+                    return
+                }
                 val networkDelay = ((clock.serverTime() - serverTimestamp) / 1000.0).coerceIn(0.0, 5.0)
-                val expected = value.optDouble("currentTime") + if (value.optBoolean("isPlaying")) networkDelay else 0.0
+                val expected = snapshotPosition + if (value.optBoolean("isPlaying")) networkDelay else 0.0
                 nativePlayer.correctDrift(expected, value.optBoolean("isPlaying"), clock.medianRtt)?.let { drift ->
                     _state.value = _state.value.copy(syncDriftSeconds = drift)
                 }
@@ -2912,7 +2980,32 @@ class MusicTogetherViewModel(application: Application) : AndroidViewModel(applic
         _state.value = _state.value.copy(playbackFailure = PlaybackFailureState(failure))
     }
 
-    private fun clearPlaybackRecovery() = playbackRecovery.reset()
+    private fun clearPlaybackRecovery() {
+        playbackRecovery.reset()
+        localResumeJob?.cancel()
+        localResumeJob = null
+        nativePlayer.cancelLocalResume()
+    }
+
+    private suspend fun resolveLocalPlayback(context: PlaybackRecoveryContext, degrade: Boolean): Track? {
+        val server = activeServer?.takeIf { it.displayUrl == context.key.server } ?: return null
+        if (playbackRecoveryContext()?.key != context.key) return null
+        val quality = if (degrade) "128" else _state.value.room?.audioQuality ?: "320"
+        val url = api.streamUrl(server, context.track, quality, context.key.roomId, forceRefresh = true) ?: return null
+        if (playbackRecoveryContext()?.key != context.key) return null
+        return context.track.copy(streamUrl = url, audioQuality = quality)
+    }
+
+    private fun reloadLocalPlayback(track: Track): Boolean {
+        val room = _state.value.room ?: return false
+        val current = room.currentTrack ?: return false
+        if (current.id != track.id || current.source != track.source || current.urlId != track.urlId) return false
+        val target = playbackTarget(track) ?: return false
+        nativePlayer.load(track, room.playState, target.primaryUrl, target.fallbackUrl,
+            cacheKey = "${mediaCache.keyFor(track)}:local-retry:${++localRecoverySerial}")
+        mediaCache.onLocalTrack()
+        return true
+    }
 
     private fun playModeDescription(mode: String): String = when (mode) {
         "sequential" -> "顺序播放，播完队列后停止"

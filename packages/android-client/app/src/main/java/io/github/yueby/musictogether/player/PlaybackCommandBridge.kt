@@ -5,6 +5,8 @@ object PlaybackCommandBridge {
         fun onTogglePlayback()
         fun onNext()
         fun onPrevious()
+        fun onPlaybackRequested(playing: Boolean)
+        fun onSeek(trackId: String, seconds: Double)
     }
 
     @Volatile
