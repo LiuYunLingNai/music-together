@@ -175,7 +175,12 @@ test('adapter timeouts fail closed without retaining a finish session', async ()
       init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
     })
   })
-  assert.equal(await writer.start(startInput), false)
+  const keepEventLoopAlive = setTimeout(() => {}, 100)
+  try {
+    assert.equal(await writer.start(startInput), false)
+  } finally {
+    clearTimeout(keepEventLoopAlive)
+  }
   assert.equal(calls, 1)
   await writer.submit(finishInput)
   assert.equal(calls, 1)
