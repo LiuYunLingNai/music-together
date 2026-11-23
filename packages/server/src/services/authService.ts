@@ -1,6 +1,8 @@
 import type { MusicSource, PlatformAuthStatus, MyPlatformAuth } from '@music-together/shared'
 import { platformAuthRepo } from '../repositories/platformAuthRepository.js'
 import { logger } from '../utils/logger.js'
+import { getCookieValue } from '../utils/cookieUtils.js'
+import { kugouListening } from './kugouListeningSession.js'
 import { AUTH_PROVIDERS, type GetUserInfoResult } from './authProvider.js'
 
 /**
@@ -100,6 +102,7 @@ export function getAuthorizationVersion(userId: string, platform: MusicSource, r
 
 export function invalidateAuthorization(userId: string, platform: MusicSource, roomId?: string): void {
   authorizationVersions.set(authorizationKey(userId, platform, roomId), ++authorizationRevision)
+  if (platform === 'kugou') kugouListening.cancelOwner(userId, roomId)
 }
 
 /** Administrator revocation removes offline as well as online room contributions. */
@@ -135,6 +138,9 @@ export function addCookie(
   // 同账号（cookie）与同用户可能命中不同条目，两者都要替换，否则池里留下重复账号。
   const previousCookie =
     entries.find((e) => e.userId === userId)?.cookie ?? entries.find((e) => e.cookie === cookie)?.cookie ?? null
+  if (platform === 'kugou' && previousCookie && getCookieValue(previousCookie, 'userid') !== getCookieValue(cookie, 'userid')) {
+    invalidateAuthorization(userId, platform)
+  }
   for (let i = entries.length - 1; i >= 0; i--) {
     if (entries[i]!.cookie === cookie || entries[i]!.userId === userId) entries.splice(i, 1)
   }
@@ -266,12 +272,31 @@ export function isListeningReportEnabled(userId: string, platform: MusicSource):
   return platformAuthRepo.loadUser(userId).find((entry) => entry.platform === platform)?.reportListening === true
 }
 
+function hasKugouOrdinaryCredential(cookie: string): boolean {
+  const userid = getCookieValue(cookie, 'userid')
+  const token = getCookieValue(cookie, 'token')?.trim()
+  return Boolean(userid && /^[1-9]\d*$/.test(userid) && token && token.length <= 255)
+}
+
 /** 切换听歌打卡偏好；只对已持久化的凭据生效。 */
 export function setListeningReportEnabled(userId: string, platform: MusicSource, enabled: boolean): boolean {
+  if (platform !== 'netease' && (platform !== 'kugou' || (enabled && !kugouListening.available))) return false
   const persisted = platformAuthRepo.loadUser(userId).find((entry) => entry.platform === platform)
   if (!persisted) return false
+  if (platform === 'kugou' && enabled && !hasKugouOrdinaryCredential(persisted.cookie)) return false
+  if (platform === 'kugou' && !enabled) kugouListening.cancelOwner(userId)
   platformAuthRepo.save({ ...persisted, reportListening: enabled })
   return true
+}
+
+export function canReportKugouListen(owner: string, roomId: string, accountId: string, version: string): boolean {
+  if (getAuthorizationVersion(owner, 'kugou', roomId) !== version) return false
+  const saved = platformAuthRepo.loadUser(owner).find((entry) => entry.platform === 'kugou')
+  return saved?.reportListening === true && saved.shareWithRoom !== false &&
+    hasKugouOrdinaryCredential(saved.cookie) &&
+    getCookieValue(saved.cookie, 'userid') === accountId &&
+    roomCookiePool.get(roomId)?.get('kugou')?.some((entry) =>
+      entry.userId === owner && getCookieValue(entry.cookie, 'userid') === accountId) === true
 }
 
 /** 主动离开房间时撤回该用户贡献的所有账号；断线/刷新不触发。 */
@@ -616,6 +641,9 @@ export function getUserAuthStatus(userId: string, roomId: string): MyPlatformAut
       vipLevel: entry?.vipLevel ?? saved?.vipLevel,
       shareWithRoom: entry ? true : saved ? saved.shareWithRoom !== false : false,
       reportListening: saved?.reportListening === true,
+      ...(platform === 'kugou'
+        ? { listeningReportAvailable: kugouListening.available && Boolean(saved && hasKugouOrdinaryCredential(saved.cookie)) }
+        : {}),
     }
     const avatarUrl = entry?.avatarUrl ?? saved?.avatarUrl
     if (avatarUrl) {

@@ -1,5 +1,25 @@
 import type { AutomixPlanPayload, AutomixTransitionPayload } from '@music-together/shared'
 
+export class OutgoingFade<T> {
+  private pending?: { deck: T; timer: ReturnType<typeof setTimeout>; release: (deck: T) => void }
+
+  get deck(): T | null { return this.pending?.deck ?? null }
+
+  start(deck: T, ms: number, release: (deck: T) => void): void {
+    this.finish()
+    const timer = setTimeout(() => { if (this.pending?.timer === timer) this.finish() }, ms)
+    this.pending = { deck, timer, release }
+  }
+
+  finish(): void {
+    const old = this.pending
+    if (!old) return
+    this.pending = undefined
+    clearTimeout(old.timer)
+    old.release(old.deck)
+  }
+}
+
 /**
  * PLAYER_PLAY 随包下发的过渡参数。房间内所有成员收到同一个值，
  * 客户端设置里的淡入淡出只在这条消息缺席时兜底。

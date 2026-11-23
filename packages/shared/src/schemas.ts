@@ -209,6 +209,48 @@ export const playerSyncSchema = z.object({
   hostServerTime: z.number().finite().positive().optional(),
 })
 
+export const listeningEnvironmentSchema = z.object({
+  model: z.string().min(1).max(80),
+  os: z.string().min(1).max(80),
+  width: z.int().positive().max(20_000),
+  height: z.int().positive().max(20_000),
+  network: z.string().min(1).max(32),
+})
+
+export type ListeningEnvironment = z.infer<typeof listeningEnvironmentSchema>
+
+export const listeningSampleSchema = z
+  .object({
+    sessionId: z.string().uuid(),
+    segment: z.int().nonnegative().max(1_000_000),
+    positionMs: z.int().nonnegative().max(86_400_000),
+    durationMs: z.int().positive().max(86_400_000),
+    environment: listeningEnvironmentSchema.optional(),
+    final: z.literal(true).optional(),
+    naturallyEnded: z.literal(true).optional(),
+  })
+  .refine((sample) => sample.positionMs <= sample.durationMs)
+  .refine((sample) => !sample.naturallyEnded || sample.final === true)
+
+export type ListeningSample = z.infer<typeof listeningSampleSchema>
+
+export const soloProgressSchema = z
+  .discriminatedUnion('kind', [
+    z.object({ kind: z.literal('end'), sessionId: z.uuid() }).strict(),
+    z
+      .object({
+        kind: z.literal('sample'),
+        sessionId: z.uuid(),
+        segment: z.int().min(0).max(1_000_000),
+        positionMs: z.int().min(0).max(86_400_000),
+        durationMs: z.int().min(1).max(86_400_000),
+        environment: listeningEnvironmentSchema,
+      })
+      .strict(),
+  ])
+  .refine((s) => s.kind === 'end' || s.positionMs <= s.durationMs)
+export type SoloProgress = z.infer<typeof soloProgressSchema>
+
 export const playerSetModeSchema = z.object({
   mode: z.enum(['sequential', 'loop-all', 'loop-one', 'shuffle']),
 })
@@ -415,7 +457,8 @@ export const likedSetSchema = likedQuerySchema.extend({
   liked: z.boolean(),
 })
 
-export const urlQuerySchema = z.object({  source: musicSourceSchema,
+export const urlQuerySchema = z.object({
+  source: musicSourceSchema,
   urlId: z.string().min(1).max(2000),
   /** Optional room context: resolve with the room's best credential so preloads match playback. */
   roomId: z.string().min(1).max(100).optional(),
@@ -428,6 +471,10 @@ export const urlQuerySchema = z.object({  source: musicSourceSchema,
     .default(320),
   /** 预取请求可被平台级冷却单独挡住，不影响用户主动点歌。 */
   purpose: z.enum(['play', 'prefetch']).optional(),
+  forceRefresh: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((value) => value === 'true'),
 })
 
 export const downloadOptionsQuerySchema = z.object({

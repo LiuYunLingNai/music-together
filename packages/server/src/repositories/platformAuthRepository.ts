@@ -2,6 +2,7 @@ import type { MusicSource } from '@music-together/shared'
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from 'node:crypto'
 import { config } from '../config.js'
 import { logger } from '../utils/logger.js'
+import { getCookieValue } from '../utils/cookieUtils.js'
 import { db } from './database.js'
 
 export interface PersistedPlatformAuth {
@@ -15,7 +16,7 @@ export interface PersistedPlatformAuth {
   avatarUrl?: string
   /** 是否把该账号的权益共享给所在房间；缺省 true。 */
   shareWithRoom?: boolean
-  /** 是否允许房间把完整播放的网易云歌曲写入该账号的播放记录；缺省 false。 */
+  /** 账号主允许听歌上报；缺省 false。 */
   reportListening?: boolean
   credentialRefreshAttemptedAt?: number
 }
@@ -81,6 +82,9 @@ const listAllAuth = db.prepare<[], Pick<PlatformAuthRow, 'user_id' | 'platform' 
   'SELECT user_id, platform, cookie_encrypted, updated_at FROM platform_auth',
 )
 const deleteUserPlatformAuth = db.prepare('DELETE FROM platform_auth WHERE user_id = ? AND platform = ?')
+const enabledKugouAccount = db.prepare<[string], { cookie_encrypted: string }>(
+  "SELECT cookie_encrypted FROM platform_auth WHERE user_id = ? AND platform = 'kugou' AND report_listening = 1",
+)
 const markCredentialRefreshAttempt = db.prepare(
   'UPDATE platform_auth SET credential_refresh_attempted_at = ?, updated_at = ? WHERE user_id = ? AND platform = ?',
 )
@@ -148,6 +152,14 @@ function toEntry(row: PlatformAuthRow, cookie: string): PersistedPlatformAuth {
 export const platformAuthRepo = {
   save(entry: PersistedPlatformAuth, options?: { resetCredentialRefreshSchedule?: boolean }): void {
     const now = Date.now()
+    let reporting = entry.reportListening
+    if (entry.platform === 'kugou' && reporting !== false) {
+      const previous = enabledKugouAccount.get(entry.userId)
+      const accountId = getCookieValue(entry.cookie, 'userid')
+      if (!accountId || (previous && getCookieValue(decryptCookie(previous.cookie_encrypted) ?? '', 'userid') !== accountId)) {
+        reporting = false
+      }
+    }
     reportedUndecryptable.delete(authId(entry.userId, entry.platform))
     upsertAuth.run({
       id: authId(entry.userId, entry.platform),
@@ -160,7 +172,7 @@ export const platformAuthRepo = {
       vipLevel: entry.vipLevel ?? null,
       avatarUrl: entry.avatarUrl ?? null,
       shareWithRoom: entry.shareWithRoom === undefined ? null : entry.shareWithRoom ? 1 : 0,
-      reportListening: entry.reportListening === undefined ? null : entry.reportListening ? 1 : 0,
+      reportListening: reporting === undefined ? null : reporting ? 1 : 0,
       refreshAttemptedAt: options?.resetCredentialRefreshSchedule ? now : (entry.credentialRefreshAttemptedAt ?? null),
       now,
     })

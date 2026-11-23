@@ -28,6 +28,20 @@ Docker 容器 (:3001)
 
 生产镜像沿用旧版直接启动方式，不主动修改历史绑定目录的属主或权限；容器通过 `/api/health` 执行健康检查。
 
+## 酷狗普通版远程上报适配器
+
+主镜像不包含酷狗普通版的固定客户端身份、签名、flow/post 或 CSCC 请求构造，也不需要常驻额外本地服务。功能只在以下配置全部存在时启用：
+
+- `KUGOU_REPORT_ADAPTER_URL`：仅包含 origin 的 HTTPS 地址；
+- `KUGOU_REPORT_INSTANCE_ID`：当前部署独立实例 ID；
+- `KUGOU_REPORT_INSTANCE_SECRET`：不少于 32 字符的请求签名密钥；
+- `KUGOU_REPORT_ADAPTER_PUBLIC_KEY`：用于加密 Cookie 临时密钥的适配器 RSA 公钥，支持 PEM 或 PEM 的 Base64；
+- `KUGOU_REPORT_TIMEOUT_MS`：可选，默认 10 秒。
+
+任一必需项缺失时普通版上报保持关闭，主服务不会回退到内置协议。主服务只调用 `/v1/kugou/start` 和 `/v1/kugou/finish`，请求携带实例 HMAC、时间戳、一次性 nonce 和加密 Cookie，不携带任意上游 URL 或 Header。
+
+适配器是独立私有工作区，不连接 Music Together SQLite、Docker 数据卷或 Redis。生产实现需要可事务持久化的非敏感幂等状态；纯无状态函数不能可靠拒绝有效时钟窗口内的重放。
+
 ## 分析模型权重
 
 实验性功能（高精度拍点、真实分轨）的权重不进 git、不进镜像，也不在服务端保存。客户端第一次打开对应开关时按「加速镜像 → GitHub 官方」直连分块下载（4 MB Range），校验字节数与 sha256 后写入浏览器 Cache Storage；之后同一浏览器不再联网。服务端没有 `/models` 路由，也不占用数据卷。

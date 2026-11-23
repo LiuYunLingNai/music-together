@@ -1,14 +1,15 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Howl, Howler } from 'howler'
 import type { Track } from '@music-together/shared'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useRoomStore } from '@/stores/roomStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { CURRENT_TIME_THROTTLE_MS } from '@/lib/constants'
-import { getPendingAutomixPlan, takePendingAutomixTransition } from '@/lib/playbackTransition'
+import { getPendingAutomixPlan, OutgoingFade, takePendingAutomixTransition } from '@/lib/playbackTransition'
 import { toast } from 'sonner'
 import { getServerTime } from '@/lib/clockSync'
 import { playbackUrlFor } from '@/lib/playbackSource'
+import type { LocalOutput } from '@/lib/localListeningProgress'
 import {
   attachTimeStretch,
   prepareDirectStreamForTimeStretch,
@@ -135,7 +136,9 @@ export function useHowl(
   const scheduledStartRef = useRef<ScheduledStart | null>(null)
   const scheduledStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const outgoingHowlRef = useRef<Howl | null>(null)
-  const outgoingCleanupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [outgoingFade] = useState(() => new OutgoingFade<Howl>())
+  const playingDecks = useRef(new WeakMap<Howl, { track: Track; id: number }>())
+  const outputRevision = useRef(0)
   /** 本次接歌是否已由 scheduleAutomixBlend 排布曲线（避免 unmute 再用旧曲线覆盖）。 */
   const styledBlendRef = useRef(false)
   const preparedTrackRef = useRef<Track | null>(null)
@@ -146,6 +149,17 @@ export function useHowl(
   const stemCleanupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   /** 过渡开始后对元素位置做时钟拟合；偏离服务端时间线过多时补一次对齐。 */
   const deckFitTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const readLocalOutput = useCallback((): LocalOutput => {
+    const decks: LocalOutput['decks'] = []
+    for (const howl of new Set([howlRef.current, outgoingHowlRef.current, outgoingFade.deck])) {
+      if (!howl) continue
+      const deck = playingDecks.current.get(howl)
+      const sound = deck && (howl as { _sounds?: { _id: number; _node?: HTMLMediaElement }[] })._sounds?.find(s => s._id === deck.id)
+      if (deck && sound?._node) decks.push({ node: sound._node, track: deck.track, playing: howl.playing(deck.id), instance: howl })
+    }
+    return { revision: outputRevision.current, stems: Boolean(stemStopRef.current), decks }
+  }, [outgoingFade])
 
   // Use selectors for the one reactive value we need (volume sync effect)
   const volume = usePlayerStore((s) => s.volume)
@@ -215,6 +229,7 @@ export function useHowl(
 
   const disposeHowl = useCallback((howl: Howl | null) => {
     if (!howl) return
+    if (playingDecks.current.delete(howl)) outputRevision.current++
     // ★ 先撤回本图发布的分析节点（audioTap 单例），再 unload ——
     //   旧歌的死 tap 不再锁死视觉层的频谱来源（节拍丢失加固）
     const finalizeTimeStretchRelease = releaseTimeStretch(howl)
@@ -248,6 +263,13 @@ export function useHowl(
     revokeHowlBlobUrl(preloaded.howl)
   }, [])
 
+  const releaseFade = useCallback((fading: Howl) => {
+    diagMark('settle')
+    resetTempoBend(mediaElementOf(fading))
+    resetAutomixTone(fading)
+    disposeHowl(fading)
+  }, [disposeHowl])
+
   const pausePlayback = useCallback(
     (position: number) => {
       // 用户暂停后，未完成的 unlock 超时不应再自动跳下一首。
@@ -272,16 +294,13 @@ export function useHowl(
 
       // A pause received during a pending track transition also stops the
       // outgoing track at the shared pause instant.
-      if (outgoingCleanupTimerRef.current) {
-        clearTimeout(outgoingCleanupTimerRef.current)
-        outgoingCleanupTimerRef.current = null
-      }
+      outgoingFade.finish()
       resetTempoBend(mediaElementOf(outgoingHowlRef.current))
       resetAutomixTone(outgoingHowlRef.current)
       disposeHowl(outgoingHowlRef.current)
       outgoingHowlRef.current = null
     },
-    [cancelScheduledPlayback, disposeHowl],
+    [cancelScheduledPlayback, disposeHowl, outgoingFade],
   )
 
   const stopPlayback = useCallback(() => {
@@ -290,10 +309,7 @@ export function useHowl(
       clearTimeout(loadTimerRef.current)
       loadTimerRef.current = null
     }
-    if (outgoingCleanupTimerRef.current) {
-      clearTimeout(outgoingCleanupTimerRef.current)
-      outgoingCleanupTimerRef.current = null
-    }
+    outgoingFade.finish()
     if (stemCleanupTimerRef.current) {
       clearTimeout(stemCleanupTimerRef.current)
       stemCleanupTimerRef.current = null
@@ -321,7 +337,7 @@ export function useHowl(
     // 停播后不可能再有内容到达，雾环必须撤掉 —— 否则停止播放时画面会
     // 永远留着一层雾。
     hideLoading()
-  }, [cancelScheduledPlayback, disposeHowl, disposePreloaded, stopTimeUpdate])
+  }, [cancelScheduledPlayback, disposeHowl, disposePreloaded, outgoingFade, stopTimeUpdate])
 
   const schedulePlayback = useCallback(
     (targetTime: number, executeAt: number, onCommit?: () => void) => {
@@ -411,6 +427,8 @@ export function useHowl(
   const handleHowlPlay = useCallback(
     (howl: Howl, track: Track, soundId: number) => {
       if (howlRef.current !== howl) return
+      playingDecks.current.set(howl, { track, id: soundId })
+      outputRevision.current++
       // 服务端下发的自动混音过渡参数只作用于这一次接歌；没有则回落到设置值。
       const takenTransition = takePendingAutomixTransition()
       styledBlendRef.current = false
@@ -445,6 +463,7 @@ export function useHowl(
         const outgoing = outgoingHowlRef.current
         let stemActive = false
         if (outgoing && outgoing !== howl) {
+          outgoingFade.finish()
           outgoingHowlRef.current = null
           const crossfadeMs = transitionMs ?? trackCrossfadeMs()
           // 真正的混合才画换歌交接；硬切没有可展开的窗口。
@@ -644,15 +663,7 @@ export function useHowl(
           if (!curved && !styled && outgoing.volume() > 0 && crossfadeMs > 0) {
             outgoing.fade(outgoing.volume(), 0, crossfadeMs)
           }
-          if (outgoingCleanupTimerRef.current) clearTimeout(outgoingCleanupTimerRef.current)
-          outgoingCleanupTimerRef.current = setTimeout(() => {
-            outgoingCleanupTimerRef.current = null
-            diagMark('settle')
-            // 元素可能被 Howler 回收复用，离开过渡时必须恢复原速与音色。
-            resetTempoBend(mediaElementOf(outgoing))
-            resetAutomixTone(outgoing)
-            disposeHowl(outgoing)
-          }, planForPair?.echoThrow ? Math.max(crossfadeMs, 700) : crossfadeMs)
+          outgoingFade.start(outgoing, planForPair?.echoThrow ? Math.max(crossfadeMs, 700) : crossfadeMs, releaseFade)
         }
         if (unmuteTimerRef.current) clearTimeout(unmuteTimerRef.current)
         unmuteTimerRef.current = setTimeout(() => {
@@ -691,7 +702,7 @@ export function useHowl(
       }
       startTimeUpdate()
     },
-    [disposeHowl, startTimeUpdate],
+    [outgoingFade, releaseFade, startTimeUpdate],
   )
 
   const handleHowlPause = useCallback(
@@ -960,7 +971,6 @@ export function useHowl(
       handleHowlPlay,
       handleHowlPlayError,
       onTrackEnd,
-      startTimeUpdate,
       stopTimeUpdate,
     ],
   )
@@ -990,10 +1000,6 @@ export function useHowl(
       if (playErrorTimerRef.current) {
         clearTimeout(playErrorTimerRef.current)
         playErrorTimerRef.current = null
-      }
-      if (outgoingCleanupTimerRef.current) {
-        clearTimeout(outgoingCleanupTimerRef.current)
-        outgoingCleanupTimerRef.current = null
       }
       if (stemCleanupTimerRef.current) {
         clearTimeout(stemCleanupTimerRef.current)
@@ -1056,6 +1062,7 @@ export function useHowl(
   return {
     howlRef,
     soundIdRef,
+    readLocalOutput,
     loadTrack,
     preloadTrack,
     disposePreloaded,

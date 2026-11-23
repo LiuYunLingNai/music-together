@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   collectKugouV6Goods,
+  getKugouRecording,
+  kugouRecording,
   kugouProviderQualityToAudioQuality,
   selectKugouV6Good,
 } from '../src/services/kugouAudioQuality.js'
@@ -24,6 +26,38 @@ function good(quality: string, info: Record<string, unknown> = {}) {
     },
   }
 }
+
+test('binds the selected full rendition; never substitutes a file hash or quality tier for missing metadata', () => {
+  const hash = 'f'.repeat(32)
+  const device = { mid: '987654321', uuid: BigInt(987654321).toString(16).padStart(32, '0'), dfid: '-' }
+  const [selected] = collectKugouV6Goods({ data: [{ ...good('128', {
+    tracker_url: 'https://cdn.test/full.mp3', filesize: 2_345_678, bitrate: 128,
+  }), hash }] })
+  const recording = getKugouRecording('22', '17', selected, device)
+  assert.deepEqual(recording, {
+    accountId: '22',
+    albumAudioId: '17',
+    fileHash: hash,
+    fileSizeBytes: 2_345_678,
+    bitrateKbps: 128,
+    device,
+  })
+  assert.equal(JSON.stringify({ url: 'audio', [kugouRecording]: recording }), '{"url":"audio"}')
+  for (const id of [hash, '0', 0, '1e2', '1'.repeat(32), Number.MAX_SAFE_INTEGER + 1]) {
+    assert.equal(getKugouRecording('22', id, selected, device), undefined)
+  }
+  for (const patch of [{ hash: '' }, { bitrate: null }, { fileSize: undefined }, { plainUrl: undefined }]) {
+    assert.equal(getKugouRecording('22', 17, { ...selected, ...patch }, device), undefined)
+  }
+  assert.equal(getKugouRecording('22', 17, selected, { ...device, uuid: 'f'.repeat(32) }), undefined)
+  const [selected320] = collectKugouV6Goods({
+    data: [{
+      ...good('320', { tracker_url: 'https://cdn.test/full.mp3', filesize: 8_000_001, bitrate: 320 }),
+      hash,
+    }],
+  })
+  assert.equal(getKugouRecording('22', 17, selected320, device)?.bitrateKbps, 320)
+})
 
 test('keeps usable plain and encrypted v6 goods and filters unavailable trackers', () => {
   const goods = collectKugouV6Goods({

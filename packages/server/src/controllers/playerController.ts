@@ -8,6 +8,8 @@ import {
   playerSourceSwitchSchema,
   playerTrackProfileSchema,
   playerTrackLinesSchema,
+  listeningSampleSchema,
+  soloProgressSchema,
 } from '@music-together/shared'
 import type { TypedServer, TypedSocket } from '../middleware/types.js'
 import { createWithPermission, defineAbilityForRoomUser } from '../middleware/withControl.js'
@@ -15,10 +17,12 @@ import { createWithRoom } from '../middleware/withRoom.js'
 import { checkSocketRateLimit } from '../middleware/socketRateLimiter.js'
 import { roomRepo } from '../repositories/roomRepository.js'
 import * as playerService from '../services/playerService.js'
+import { kugouListening } from '../services/kugouListeningSession.js'
 import * as automixService from '../services/automixService.js'
 import * as roomService from '../services/roomService.js'
 import * as trackFallbackService from '../services/trackFallbackService.js'
 import * as authService from '../services/authService.js'
+import * as listeningReportService from '../services/listeningReportService.js'
 import { inferMediaFailure } from '../services/playbackFailure.js'
 import { estimateCurrentTimeAt } from '../services/syncService.js'
 import { logger } from '../utils/logger.js'
@@ -246,11 +250,46 @@ export function registerPlayerController(io: TypedServer, socket: TypedSocket) {
         serverTimestamp,
         trackId: room.currentTrack?.id ?? null,
       })
+      void listeningReportService
+        .reconnectKugouListeningReport(io, room, socket)
+        .catch(() => logger.warn('酷狗普通版上报会话恢复失败'))
     } catch (err) {
       logger.error('PLAYER_SYNC_REQUEST handler error', err, {
         socketId: socket.id,
       })
     }
+  })
+
+  socket.on(EVENTS.PLAYER_SOLO_PROGRESS, (raw) => {
+    const mapping = roomRepo.getSocketMapping(socket.id)
+    if (!mapping || mapping.userId !== socket.data.identityUserId || mapping.client?.kind !== 'web') return
+    const room = roomRepo.get(mapping.roomId)
+    const result = soloProgressSchema.safeParse(raw)
+    if (!room || !result.success || (result.data.kind === 'sample' && !room.playState.isPlaying)) return
+    kugouListening.solo.accept(room.id, mapping.userId, socket.id, result.data)
+  })
+
+  socket.on(EVENTS.PLAYER_LISTENING_SAMPLE, (raw) => {
+    if (!kugouListening.available) return
+    const mapping = roomRepo.getSocketMapping(socket.id)
+    if (!mapping || mapping.userId !== socket.data.identityUserId || mapping.client?.kind !== 'web') return
+    const result = listeningSampleSchema.safeParse(raw)
+    if (!result.success) return
+    if (result.data.final) {
+      void kugouListening
+        .finalSample(mapping.roomId, mapping.userId, socket.id, result.data)
+        .catch(() => logger.warn('酷狗听歌时长未能提交'))
+      return
+    }
+    const room = roomRepo.get(mapping.roomId)
+    if (
+      !room?.playState.isPlaying ||
+      room.automixEnabled ||
+      room.currentTrack?.source !== 'kugou' ||
+      Date.now() < room.playState.serverTimestamp
+    )
+      return
+    kugouListening.sample(room.id, mapping.userId, socket.id, room.currentTrack, result.data)
   })
 
   // 客户端离线分析完成后上报曲目画像；服务端只接受房间内已知曲目，

@@ -45,6 +45,52 @@ export interface SelectedKugouV6Good {
   raw: KugouV6Good
 }
 
+export interface KugouOrdinaryDevice {
+  mid: string
+  uuid: string
+  dfid: string
+  q36?: string
+  kgDevid?: string
+}
+
+export interface KugouRecording {
+  accountId: string
+  albumAudioId: string
+  fileHash: string
+  fileSizeBytes: number
+  bitrateKbps: number
+  device: KugouOrdinaryDevice
+}
+
+// Server-only provenance: JSON serialization of a stream must not expose the supplying account.
+export const kugouRecording = Symbol('kugouRecording')
+
+export function getKugouRecording(
+  accountId: string,
+  albumAudioId: unknown,
+  selected: SelectedKugouV6Good,
+  device: KugouOrdinaryDevice,
+): KugouRecording | undefined {
+  const id = typeof albumAudioId === 'number' && Number.isSafeInteger(albumAudioId)
+    ? String(albumAudioId) : typeof albumAudioId === 'string' ? albumAudioId : ''
+  if (!/^[1-9]\d{0,15}$/.test(accountId) || !Number.isSafeInteger(Number(accountId)) ||
+      !/^[1-9]\d{0,15}$/.test(id) || !Number.isSafeInteger(Number(id)) ||
+      !/^[1-9]\d{0,39}$/.test(device.mid) || !/^[a-f\d]{32}$/i.test(device.uuid) ||
+      BigInt(device.mid) !== BigInt(`0x${device.uuid}`) ||
+      (device.dfid !== '-' && !/^[0-9A-Za-z]{24}$/.test(device.dfid)) ||
+      !selected.plainUrl || !selected.bitrate || selected.bitrate <= 0 ||
+      !/^[a-f\d]{32}$/i.test(selected.hash) || !selected.fileSize ||
+      !Number.isSafeInteger(selected.fileSize) || selected.fileSize <= 0) return undefined
+  return {
+    accountId,
+    albumAudioId: id,
+    fileHash: selected.hash.toLowerCase(),
+    fileSizeBytes: selected.fileSize,
+    bitrateKbps: selected.bitrate,
+    device: { ...device, uuid: device.uuid.toLowerCase() },
+  }
+}
+
 const TECHNICAL_STEREO_QUALITIES = new Set<KugouProviderQuality>([
   '128',
   '320',

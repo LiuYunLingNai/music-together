@@ -1,4 +1,5 @@
 import type { EVENTS } from './events.js'
+import type { ListeningSample, SoloProgress } from './schemas.js'
 import type { KeyRelation, TransitionStyle } from './automix/transitionChooser.js'
 import type { TransitionMode } from './automix/transitionStrategy.js'
 import type {
@@ -29,6 +30,26 @@ import type {
   RoamingSource,
   SavedAccountSummary,
 } from './types.js'
+
+export interface ListeningObservation {
+  sessionId: string
+  trackId: string
+  streamUrl: string
+  final?: boolean
+}
+
+export interface LocalListeningSource {
+  roomId: string
+  trackId: string
+  streamUrl: string
+  soloSessionId?: string
+}
+
+export interface SoloSettlement {
+  sessionId: string
+  trackId: string
+  milliseconds: number
+}
 
 /** PLAYER_PLAY 携带的过渡执行参数；`inStartMs` 已由服务端写入 playState.currentTime。 */
 export interface AutomixTransitionPayload {
@@ -136,6 +157,9 @@ export interface ServerToClientEvents {
     automix?: AutomixTransitionPayload
   }) => void
   [EVENTS.PLAYER_AUTOMIX_PLAN]: (data: AutomixPlanPayload) => void
+  [EVENTS.PLAYER_LISTENING_OBSERVE]: (data: ListeningObservation | null) => void
+  [EVENTS.PLAYER_LOCAL_LISTENING_SOURCE]: (data: LocalListeningSource | null) => void
+  [EVENTS.PLAYER_SOLO_SETTLED]: (data: SoloSettlement) => void
   [EVENTS.PLAYER_PAUSE]: (data: { playState: ScheduledPlayState }) => void
   [EVENTS.PLAYER_RESUME]: (data: { playState: ScheduledPlayState }) => void
   [EVENTS.PLAYER_SEEK]: (data: { playState: ScheduledPlayState }) => void
@@ -248,16 +272,15 @@ export interface ClientToServerEvents {
   [EVENTS.PLAYER_PREV]: () => void
   [EVENTS.PLAYER_SYNC]: (data: { currentTime: number; hostServerTime?: number }) => void
   [EVENTS.PLAYER_SYNC_REQUEST]: () => void
+  [EVENTS.PLAYER_LISTENING_SAMPLE]: (data: ListeningSample) => void
+  [EVENTS.PLAYER_SOLO_PROGRESS]: (data: SoloProgress) => void
   [EVENTS.PLAYER_SET_MODE]: (data: { mode: PlayMode }) => void
   [EVENTS.PLAYER_REFRESH_STREAM]: (data?: { trackId?: string; degrade?: boolean }) => void
   [EVENTS.PLAYER_SOURCE_SWITCH]: (data: { trackId: string; track: Track }) => void
   [EVENTS.PLAYER_REQUEST_SOURCE_FALLBACK]: (data?: { trackId?: string }) => void
   [EVENTS.PLAYER_RETRY_TRACK]: (data?: { trackId?: string; degrade?: boolean }) => void
   [EVENTS.PLAYER_TRACK_PROFILE]: (data: { trackId: string; profile: AutomixTrackProfile }) => void
-  [EVENTS.PLAYER_TRACK_LINES]: (data: {
-    trackId: string
-    lines: AutomixLyricLinePayload[]
-  }) => void
+  [EVENTS.PLAYER_TRACK_LINES]: (data: { trackId: string; lines: AutomixLyricLinePayload[] }) => void
 
   [EVENTS.QUEUE_ADD]: (data: { track: Track }) => void
   [EVENTS.QUEUE_INSERT_AFTER_CURRENT]: (data: { track: Track }) => void

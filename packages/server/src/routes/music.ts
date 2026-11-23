@@ -321,7 +321,7 @@ router.get(
   '/url',
   musicMetadataRateLimit,
   validated(urlQuerySchema, 'Get stream URL', async (data, _req, res) => {
-    const { source, urlId, bitrate, roomId, purpose } = data
+    const { source, urlId, bitrate, roomId, purpose, forceRefresh } = data
     let cookie: string | undefined
     let vipType: 0 | 1 | 2 = 0
     let quality = bitrate
@@ -342,7 +342,7 @@ router.get(
         quality = getEffectiveQuality(source, bitrate, vipType)
       }
     }
-    const stream = await resolveStream(source, urlId, quality, { cookie, vipType, purpose })
+    const stream = await resolveStream(source, urlId, quality, { cookie, vipType, purpose, forceRefresh })
     res.json({ url: stream?.url ?? null })
   }),
 )

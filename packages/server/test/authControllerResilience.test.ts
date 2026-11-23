@@ -17,6 +17,7 @@ const { registerAuthController } = await import('../src/controllers/authControll
 const { roomRepo } = await import('../src/repositories/roomRepository.js')
 const { platformAuthRepo } = await import('../src/repositories/platformAuthRepository.js')
 const { db } = await import('../src/repositories/database.js')
+const { kugouListening } = await import('../src/services/kugouListeningSession.js')
 
 for (const [id, nickname] of [
   ['auth-user', '测试用户'],
@@ -55,6 +56,39 @@ function createHarness(socketId: string, userId = 'auth-user') {
   registerAuthController(io, socket)
   return { handlers, emitted, socket }
 }
+
+test('ordinary Kugou requires a complete writer credential and drops consent after an account change', async () => {
+  const owner = 'fresh-user'
+  const platform = 'kugou' as const
+  const { handlers, emitted } = createHarness('report-capability', owner)
+  try {
+    authService.saveUserCredential(owner, platform, 'userid=101', 'A', 0)
+    await handlers.get(EVENTS.AUTH_SET_REPORTING)!({ platform, reportListening: true })
+    assert.equal(emitted.at(-1)?.event, EVENTS.AUTH_REPORTING_RESULT)
+    assert.deepEqual(emitted.at(-1)?.data, { platform, reportListening: true, ok: false })
+    const status = authService.getUserAuthStatus(owner, '').find((entry) => entry.platform === platform)
+    assert.equal(status?.listeningReportAvailable, false)
+    assert.equal(status?.reportListening, false)
+    authService.saveUserCredential(owner, platform, 'userid=101;token=one', 'A', 0)
+    await handlers.get(EVENTS.AUTH_SET_REPORTING)!({ platform, reportListening: true })
+    assert.equal(authService.isListeningReportEnabled(owner, platform), false)
+    Object.defineProperty(kugouListening, 'available', { configurable: true, value: true })
+    try {
+      await handlers.get(EVENTS.AUTH_SET_REPORTING)!({ platform, reportListening: true })
+      assert.equal(authService.isListeningReportEnabled(owner, platform), true)
+      assert.equal(
+        authService.getUserAuthStatus(owner, '').find((entry) => entry.platform === platform)?.listeningReportAvailable,
+        true,
+      )
+      authService.saveUserCredential(owner, platform, 'userid=202;token=two', 'B', 0)
+      assert.equal(authService.isListeningReportEnabled(owner, platform), false)
+    } finally {
+      Reflect.deleteProperty(kugouListening, 'available')
+    }
+  } finally {
+    platformAuthRepo.remove(owner, platform)
+  }
+})
 
 test('a transient QR check failure does not tell the client the code expired', async () => {
   const { room } = roomService.createRoom('qr-transient', '测试用户', '扫码抖动', null, 'auth-user')

@@ -118,6 +118,11 @@ IDENTITY_SECRET=至少32个字符的随机字符串
 SERVER_ADMIN_IDS=你的账号ID
 QQ_MUSIC_API_KEY=填入key
 QQ_MUSIC_API_URL=填入url
+# 酷狗普通版远程时长适配器（四项齐全才启用）
+KUGOU_REPORT_ADAPTER_URL=
+KUGOU_REPORT_INSTANCE_ID=
+KUGOU_REPORT_INSTANCE_SECRET=
+KUGOU_REPORT_ADAPTER_PUBLIC_KEY=
 
 ```
 
@@ -216,6 +221,8 @@ docker run -d --name music-together --restart unless-stopped \
 > 将 `/srv/music-together` 替换为宿主机实际路径。`data/` 保存数据库、头像和背景图，`backups/` 保存自动备份；两个目录都需要挂载，否则容器替换后对应内容会丢失。
 
 > `QQ_MUSIC_API_URL` 为QQ音乐搜索功能的API，如果未填写则使用原生搜索方式(可能会存在风控可能)
+
+> 酷狗普通版时长上报只通过独立远程适配器运行。主服务不包含普通版 flow/post、CSCC、固定客户端身份或签名实现；所需环境变量与启用条件见[部署文档](docs/architecture/deployment.md)。
 
 > 如果宿主机 `3001` 端口已被占用，修改 `-p 宿主机端口:容器端口` 左侧端口即可，例如 `-p 8080:3001`。
 

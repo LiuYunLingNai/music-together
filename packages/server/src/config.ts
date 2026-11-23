@@ -31,6 +31,15 @@ const envSchema = z.object({
     .trim()
     .default('amlldb.bikonoo.com,api.beta.amllhub.bikonoo.com,raw.githubusercontent.com'),
   TTML_PROXY_TIMEOUT_MS: z.coerce.number().int().positive().max(30_000).default(6_000),
+  KUGOU_REPORT_ADAPTER_URL: z
+    .string()
+    .trim()
+    .refine((value) => !value || URL.canParse(value), 'KUGOU_REPORT_ADAPTER_URL must be a valid absolute URL')
+    .default(''),
+  KUGOU_REPORT_INSTANCE_ID: z.string().trim().max(128).default(''),
+  KUGOU_REPORT_INSTANCE_SECRET: z.string().trim().min(32).max(512).or(z.literal('')).default(''),
+  KUGOU_REPORT_ADAPTER_PUBLIC_KEY: z.string().trim().max(16_384).default(''),
+  KUGOU_REPORT_TIMEOUT_MS: z.coerce.number().int().positive().max(30_000).default(10_000),
   DATABASE_URL: z.string().default('file:./data/music-together.db'),
   SERVER_ADMIN_IDS: z.string().default(''),
 })
@@ -38,6 +47,17 @@ const envSchema = z.object({
 const env = envSchema.parse(process.env)
 const isProd = process.env.NODE_ENV === 'production'
 const explicitOrigins = [env.CLIENT_URL, ...env.CORS_ORIGINS.split(',')].map((origin) => origin.trim()).filter(Boolean)
+const kugouAdapterPublicKey = env.KUGOU_REPORT_ADAPTER_PUBLIC_KEY
+  ? env.KUGOU_REPORT_ADAPTER_PUBLIC_KEY.startsWith('-----BEGIN')
+    ? env.KUGOU_REPORT_ADAPTER_PUBLIC_KEY.replace(/\\n/g, '\n')
+    : Buffer.from(env.KUGOU_REPORT_ADAPTER_PUBLIC_KEY, 'base64').toString('utf8')
+  : ''
+const kugouReportAdapterEnabled = Boolean(
+  env.KUGOU_REPORT_ADAPTER_URL &&
+  env.KUGOU_REPORT_INSTANCE_ID &&
+  env.KUGOU_REPORT_INSTANCE_SECRET &&
+  kugouAdapterPublicKey,
+)
 
 export const config = {
   version: rootPkg.version as string,
@@ -75,6 +95,14 @@ export const config = {
         .filter(Boolean),
     ),
     timeoutMs: env.TTML_PROXY_TIMEOUT_MS,
+  },
+  kugouReportAdapter: {
+    enabled: kugouReportAdapterEnabled,
+    url: env.KUGOU_REPORT_ADAPTER_URL,
+    instanceId: env.KUGOU_REPORT_INSTANCE_ID,
+    instanceSecret: env.KUGOU_REPORT_INSTANCE_SECRET,
+    cookiePublicKey: kugouAdapterPublicKey,
+    timeoutMs: env.KUGOU_REPORT_TIMEOUT_MS,
   },
   database: {
     url: env.DATABASE_URL,

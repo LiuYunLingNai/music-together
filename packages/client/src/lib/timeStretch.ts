@@ -852,6 +852,21 @@ export function isPlaybackVolumeAtFloor(): boolean {
   return volumeAtFloor
 }
 
+export function hasListeningOutput(audio: HTMLMediaElement): boolean {
+  const graph = graphByAudio.get(audio)
+  return !graph || (!graph.cancelled && !graph.initializing && !graph.failed && graph.context.state === 'running' &&
+    (graph.muteGain?.gain.value ?? 1) > 0 && (graph.transitionGain?.gain.value ?? 1) > 0)
+}
+
+export function hasLocalListeningOutput(audio: HTMLMediaElement): boolean {
+  const graph = graphByAudio.get(audio)
+  if (!graph?.failed) return hasListeningOutput(audio)
+  return !graph.cancelled && !graph.initializing && graph.context.state === 'running' &&
+    !!graph.source && !!graph.volumeGain && graph.volumeGain.gain.value > 0 &&
+    (graph.replayGainNode?.gain.value ?? 1) > 0 && (graph.muteGain?.gain.value ?? 1) > 0 &&
+    (graph.transitionGain?.gain.value ?? 1) > 0
+}
+
 function registerProcessor(context: AudioContext): Promise<void> {
   const existing = registrationByContext.get(context)
   if (existing) return existing

@@ -32,6 +32,8 @@ import type { RoomData } from '../repositories/types.js'
 import type { TypedServer, TypedSocket } from '../middleware/types.js'
 import { degradeQuality, getEffectiveQuality, providerQualityRank, type MembershipTier } from './audioQualityPolicy.js'
 import * as listeningReportService from './listeningReportService.js'
+import { kugouRecording, type KugouRecording } from './kugouAudioQuality.js'
+import { kugouListening } from './kugouListeningSession.js'
 import { isRoamingTrack, roamingService, shouldPreferRoamingForNext } from './roamingService.js'
 import * as automixService from './automixService.js'
 import { shouldRemovePlayedTrackAfterAdvance } from './queueNavigation.js'
@@ -128,6 +130,7 @@ function scheduled(ps: PlayState, roomId: string, scheduleTime?: number): Schedu
 
 interface ResolvedStreamUrl {
   url: string
+  [kugouRecording]?: KugouRecording
   /** Quality tier attempted by our fallback chain. */
   attemptedBitrate: AudioQuality
   /** Bitrate actually reported/selected by the upstream provider. */
@@ -272,6 +275,7 @@ function publishPlaybackFailure(
   track: Track,
   failure: PlaybackFailure,
 ): void {
+  kugouListening.cancel(roomId)
   const action = decideFailureAction(failure, true)
   room.currentTrack = track
   room.playState = {
@@ -517,12 +521,16 @@ async function _playTrackInRoom(
   }
   let streamResolution: ResolvedStreamUrl | null = null
   let usedAuthenticatedAccount = false
+  let kugouOwner: { id: string; version: string } | undefined
   let streamFailure: import('./musicProvider.js').ProviderStreamFailure | null = null
 
   // Always resolve on the server so the URL is fresh and actual quality is known.
   if (!resolved.streamUrl) {
     try {
       const platformAuth = authService.getBestAuth(resolved.source, roomId)
+      if (kugouListening.available && resolved.source === 'kugou' && platformAuth) {
+        kugouOwner = { id: platformAuth.userId, version: authService.getAuthorizationVersion(platformAuth.userId, 'kugou', roomId) }
+      }
       const cookie = platformAuth?.cookie
       const resolution = await resolveStreamUrlDetailed(
         resolved.source,
@@ -590,6 +598,12 @@ async function _playTrackInRoom(
                   fallbackAuth?.vipType ?? 0,
                 )
                 if (url2) {
+                  if (kugouListening.available && best.track.source === 'kugou' && fallbackAuth) {
+                    kugouOwner = {
+                      id: fallbackAuth.userId,
+                      version: authService.getAuthorizationVersion(fallbackAuth.userId, 'kugou', roomId),
+                    }
+                  }
                   const replacement: Track = {
                     ...best.track,
                     id: resolved.id, // keep stable id so queue/current references remain consistent
@@ -734,6 +748,8 @@ async function _playTrackInRoom(
   }
   roomRepo.persist(roomId)
 
+  // Request the outgoing element's final position before PLAYER_PLAY replaces it on the owner's device.
+  listeningReportService.beginKugouListeningReport(io, room, streamResolution[kugouRecording], kugouOwner, Boolean(transition))
   io.to(roomId).emit(EVENTS.PLAYER_PLAY, {
     track: resolved,
     playState: scheduled(room.playState, roomId, scheduleTime),
@@ -884,6 +900,7 @@ export function updatePlayState(roomId: string, update: Partial<PlayState>): voi
 }
 
 export function setCurrentTrack(roomId: string, track: Track | null): void {
+  kugouListening.cancel(roomId)
   const room = roomRepo.get(roomId)
   if (room) {
     room.currentTrack = track
@@ -1260,6 +1277,7 @@ export function refreshStreamUrlForJoin(roomId: string): Promise<boolean> {
 
     // Record the attempt up front so failed upstream requests are also throttled.
     lastStreamUrlRefreshAt.set(roomId, now)
+    kugouListening.cancel(roomId)
     try {
       const platformAuth = authService.getBestAuth(track.source, roomId)
       const refreshed = await resolveStreamUrl(
@@ -1347,6 +1365,7 @@ export function refreshCurrentStreamUrl(
     return Promise.resolve(refreshedRecently ? (room.currentTrack ?? null) : null)
   }
   lastManualStreamRefreshAt.set(roomId, now)
+  kugouListening.cancel(roomId)
 
   const task = (async (): Promise<Track | null> => {
     try {
@@ -1406,6 +1425,8 @@ export function retryFailedTrack(
     const track = room?.currentTrack
     if (!room || !track) return false
     if (requestedTrackId && requestedTrackId !== track.id) return false
+
+    kugouListening.cancel(roomId)
 
     const auth = authService.getBestAuth(track.source, roomId)
     const quality = options?.degrade
@@ -1504,6 +1525,7 @@ export function switchCurrentTrackSource(
       requiresServerProxy: resolved.requiresServerProxy,
     }
 
+    kugouListening.cancel(roomId)
     room.currentTrack = replacement
     const queueIndex = room.queue.findIndex((track) => track.id === trackId)
     if (queueIndex >= 0) room.queue[queueIndex] = replacement

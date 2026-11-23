@@ -141,6 +141,8 @@ src/
 │   ├── useSocketEvent.ts       #   通用 Socket 事件订阅工具 Hook（自动 on/off，ref 稳定）
 │   ├── usePlayer.ts            #   播放器主 hook（组合 useHowl + useLyric + usePlayerSync）
 │   ├── useHowl.ts              #   Howler.js 音频实例管理
+│   ├── useKugouListeningObservation.ts # 读取正在出声的前台媒体元素，并在自然结束归零前提交终点证据
+│   ├── useLocalListeningProgress.ts # 供源者本机独播观察、受邀采样与站内回执
 │   ├── useLyric.ts             #   歌词预取、并行加载、缓存与多平台逐词候选置信度择优
 │   ├── usePlayerSync.ts        #   播放同步（Scheduled Execution + 服务端权威时间轴 + 自适应漂移校正）
 │   ├── useClockSync.ts         #   NTP 时钟同步 hook（校准客户端时钟与服务器对齐）
@@ -185,6 +187,8 @@ src/
     ├── clockSync.ts            #   NTP 时钟同步引擎（采样、offset 计算、getServerTime）
     ├── howlPosition.ts         #   HTML5 Howl 低延迟定位与安全回退
     ├── playbackSource.ts       #   播放/分析 URL 的唯一构造出口（代理规则、曲目稳定键）
+    ├── listeningEnvironment.ts #   实播事件所需的浏览器尺寸、系统与网络环境
+    ├── localListeningProgress.ts #   连续独播片段计时、受邀采样与当前网页读数
     ├── audioBytes.ts           #   会话内音频字节复用（并发合并 + 小容量 LRU + 缓存落盘复核）
     ├── mediaCache.ts           #   Cache Storage 媒体缓存（容量上限、LRU、写守卫、清空）
     ├── wholeSongCheck.ts       #   试听片段判定（50%/95% 两档）
@@ -228,7 +232,10 @@ src/
 │   ├── roomService.ts          #   房间 CRUD + 角色管理 + 加入校验（validateJoinRequest）+ 房主移出/本房封禁 + 管理员移出成员（kickUserFromRoom）与投票重协调（reconcileAndBroadcastVote）
 │   ├── roomLifecycleService.ts #   房间生命周期定时器（空置删除）+ 防抖广播
 │   ├── playerService.ts        #   播放状态管理 + 流 URL 解析 + 切歌防抖 + 加入播放同步
-│   ├── listeningReportService.ts # 网易云听歌打卡（服务端时间线累计；30s 门槛 + 5s/60 次每小时闸门；仅在线且开启的供源账号）
+│   ├── listeningReportService.ts # 网易云打卡与普通版酷狗供源者绑定；两种计时方式独立
+│   ├── kugouListeningSession.ts # 账号开关、首份有效网页证据、净实播计时、重连恢复与一次结算
+│   ├── soloListeningService.ts  # 同一供源账号的过渡独播核算，并向远程写入器提交可结算片段
+│   ├── remoteListeningWriter.ts # provider-neutral HTTPS 客户端、实例签名、Cookie 混合加密与回执映射
 │   ├── queueService.ts         #   队列操作（含删除当前曲目前的后继选择）
 │   ├── queueNavigation.ts      #   无仓储副作用的队列导航算法
 │   ├── chatService.ts          #   聊天消息处理 + HTML 转义（含系统消息）
@@ -283,6 +290,8 @@ src/
     └── roomUtils.ts            #   房间数据转换纯函数（toPublicRoomState / toPublicRoomStateForOwner，密码仅 owner 可见）
 ```
 
+酷狗普通版的固定客户端身份、请求签名、flow/post 与 CSCC 封包不在此仓库。服务端通过 `remoteListeningWriter.ts` 调用独立私有 HTTPS 适配器；适配器不连接本地 SQLite、Redis 或应用数据目录。
+
 ## packages/shared/src/ — 共享代码
 
 ```
@@ -293,6 +302,7 @@ src/
 ├── socket-types.ts    # WebSocket 事件类型：ServerToClientEvents, ClientToServerEvents
 ├── constants.ts       # 业务常量：LIMITS（长度/数量限制）, TIMING（同步间隔/宽限期）, NTP（时钟同步参数）, QR_STATUS（扫码状态码）, QR_TIMING（轮询间隔）
 ├── schemas.ts         # Zod 验证 schema
+├── soloPlaybackClock.ts # 独播连续片段计时，网页与服务端分别使用各自的单调时钟
 └── abilities.ts       # CASL 权限定义（Actions incl. set-mode, Subjects, defineAbilityFor）
 ```
 

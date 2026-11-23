@@ -465,8 +465,10 @@ export interface MyPlatformAuth {
   vipLevel?: number
   /** 是否把该账号权益共享给所在房间；关闭后仅本人可用。旧客户端忽略该字段。 */
   shareWithRoom?: boolean
-  /** 是否允许房间把完整播放的网易云歌曲写入该账号播放记录；默认关闭。 */
+  /** 账号主的听歌上报偏好；默认关闭。 */
   reportListening?: boolean
+  /** 普通版酷狗需要服务端实际支持写入；未下发时不可用。 */
+  listeningReportAvailable?: boolean
 }
 
 /** 歌单元数据（用于歌单列表展示） */

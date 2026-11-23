@@ -951,7 +951,7 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
   })
 
   // -------------------------------------------------------------------------
-  // 账号主切换“听歌打卡”（仅网易云）
+  // 账号主切换听歌上报
   // -------------------------------------------------------------------------
 
   socket.on(EVENTS.AUTH_SET_REPORTING, (data) => {
@@ -959,13 +959,9 @@ export function registerAuthController(io: TypedServer, socket: TypedSocket) {
       const platform = data?.platform as MusicSource | undefined
       const reportListening = data?.reportListening
       const mapping = getSocketMapping(socket.id)
-      if (
-        platform !== 'netease' ||
-        typeof reportListening !== 'boolean'
-      ) {
-        if (platform === 'netease') {
-          socket.emit(EVENTS.AUTH_REPORTING_RESULT, { platform, reportListening: false, ok: false })
-        }
+      if (platform !== 'netease' && platform !== 'kugou') return
+      if (typeof reportListening !== 'boolean') {
+        socket.emit(EVENTS.AUTH_REPORTING_RESULT, { platform, reportListening: false, ok: false })
         return
       }
       const ok = authService.setListeningReportEnabled(

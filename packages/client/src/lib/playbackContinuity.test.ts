@@ -6,6 +6,7 @@ import {
   disarmPlaybackReattach,
 } from './playbackContinuity'
 import { clearOfflineBuffer, hasOfflineBuffer, holdOfflineBuffer, takeOfflineBufferCopy } from './offlineTrackBuffer'
+import { OutgoingFade } from './playbackTransition'
 
 afterEach(() => {
   vi.useRealTimers()
@@ -57,4 +58,23 @@ describe('断网保护的整曲缓冲', () => {
     clearOfflineBuffer()
     expect(hasOfflineBuffer('b')).toBe(false)
   })
+})
+
+it('淡化中暂停或连续切歌时，旧音轨立即且仅释放一次；过期定时器不释放新音轨', () => {
+  vi.useFakeTimers()
+  const fade = new OutgoingFade<string>()
+  const release = vi.fn()
+  fade.start('A', 4_000, release)
+  vi.advanceTimersByTime(2_000)
+  fade.start('B', 4_000, release)
+  expect(release.mock.calls).toEqual([['A']])
+  vi.advanceTimersByTime(2_000)
+  expect(fade.deck).toBe('B')
+  fade.finish()
+  fade.finish()
+  expect(fade.deck).toBeNull()
+  vi.advanceTimersByTime(4_000)
+  fade.start('C', 80, release)
+  vi.advanceTimersByTime(80)
+  expect(release.mock.calls).toEqual([['A'], ['B'], ['C']])
 })

@@ -17,6 +17,7 @@ import { userRepo } from '../repositories/userRepository.js'
 import * as authService from './authService.js'
 import * as automixService from './automixService.js'
 import { pauseListeningReport } from './listeningReportService.js'
+import { kugouListening } from './kugouListeningSession.js'
 import {
   toPublicRoomState,
   toPublicRoomStateForModerator,
@@ -413,6 +414,7 @@ export function leaveRoom(
   // Race condition guard: if the user has another active socket in this room
   // (e.g. page refresh — new socket joined before old socket disconnected),
   // only clean up the stale mapping without removing the user from the room.
+  kugouListening.cancelSocket(roomId, socketId)
   if (roomRepo.hasOtherSocketForUser(roomId, userId, socketId)) {
     roomRepo.deleteSocketMapping(socketId)
     syncActiveClients(room, user)

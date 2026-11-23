@@ -135,6 +135,11 @@ export function getDeviceMid(): string {
   return MID
 }
 
+/** Return the UUID paired with the process-scoped MID used by Kugou requests. */
+export function getDeviceUuid(): string {
+  return BigInt(MID).toString(16).padStart(32, '0')
+}
+
 // ---------------------------------------------------------------------------
 // HTTP request helper
 // ---------------------------------------------------------------------------

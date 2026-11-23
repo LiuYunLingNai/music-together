@@ -27,7 +27,7 @@ import {
   parseBilibiliStreamId,
   resolveBilibiliVideoId,
 } from './bilibiliInput.js'
-import { collectKugouV6Goods, kugouProviderQualityToAudioQuality, selectKugouV6Good } from './kugouAudioQuality.js'
+import { collectKugouV6Goods, getKugouRecording, kugouRecording, kugouProviderQualityToAudioQuality, selectKugouV6Good, type KugouRecording } from './kugouAudioQuality.js'
 import { registerKugouEncryptedAudio, type KugouDecryptedFormat } from './kugouEncryptedAudio.js'
 import { registerIssuedKugouAudio, registerKugouProxyRequiredAudio } from './kugouAudioProxy.js'
 import { config } from '../config.js'
@@ -81,6 +81,7 @@ type MetingJson = Record<string, unknown>
 /** Stream metadata returned by the upstream provider. */
 export interface StreamUrlResult {
   url: string
+  [kugouRecording]?: KugouRecording
   /** Actual bitrate reported/selected by the provider, in kbps. */
   actualBitrate: number | null
   /** Exact provider quality selected when it can be determined. */
@@ -1810,7 +1811,30 @@ class MusicProvider {
       // KuGouMusicApi resolves album_audio_id and the quality-specific hash
       // before calling trackercdn. /play/songinfo rejects a raw hash with 30020.
       const songInfo = await this.getKugouSongInfo(hash)
-      const mid = cookieObj['mid'] || cookieObj['kg_mid'] || kugouAuth.getDeviceMid()
+      const cookieMid = cookieObj['mid'] || cookieObj['kg_mid'] || ''
+      const cookieUuid = cookieObj['uuid'] || cookieObj['kg_uuid'] || ''
+      let mid = cookieMid || kugouAuth.getDeviceMid()
+      let reportUuid = kugouAuth.getDeviceUuid()
+      if (/^[1-9]\d{0,39}$/.test(cookieMid)) {
+        try {
+          const pairedUuid = /^[a-f\d]{32}$/i.test(cookieUuid) ? cookieUuid.toLowerCase() : null
+          if (pairedUuid && BigInt(`0x${pairedUuid}`) === BigInt(cookieMid)) {
+            reportUuid = pairedUuid
+          } else {
+            const derivedUuid = BigInt(cookieMid).toString(16).padStart(32, '0')
+            if (derivedUuid.length === 32) reportUuid = derivedUuid
+            else {
+              mid = kugouAuth.getDeviceMid()
+              reportUuid = kugouAuth.getDeviceUuid()
+            }
+          }
+        } catch {
+          mid = kugouAuth.getDeviceMid()
+          reportUuid = kugouAuth.getDeviceUuid()
+        }
+      } else if (cookieMid) {
+        mid = kugouAuth.getDeviceMid()
+      }
       // A dfid must either be issued by Kugou's device-registration endpoint or
       // be the official anonymous sentinel. A locally generated random dfid is
       // rejected with error 20028 (device verification required).
@@ -1957,6 +1981,14 @@ class MusicProvider {
               })
               return {
                 url: playUrl,
+                [kugouRecording]: !concept && token && !encrypted
+                  ? getKugouRecording(userid, songInfo?.album_audio_id, selected, {
+                    mid,
+                    uuid: reportUuid,
+                    dfid,
+                    ...(cookieObj['q36'] ? { q36: cookieObj['q36'] } : {}),
+                    ...(cookieObj['kg_devid'] ? { kgDevid: cookieObj['kg_devid'] } : {}),
+                  }) : undefined,
                 actualBitrate: selected.bitrate,
                 actualQuality,
                 providerFormat: `${selected.quality}/${streamFormat}${encrypted ? ' (QMC2)' : ''}`,

@@ -22,6 +22,8 @@ import { useHowl } from './useHowl'
 import { useLyric } from './useLyric'
 import { useMediaSession } from './useMediaSession'
 import { usePlayerSync } from './usePlayerSync'
+import { useKugouListeningObservation } from './useKugouListeningObservation'
+import { useLocalListeningProgress } from './useLocalListeningProgress'
 import { useSleepTimer } from './useSleepTimer'
 import { useNextTrackPreload } from './useNextTrackPreload'
 import { useAutomixStemPrep } from './useAutomixStemPrep'
@@ -166,6 +168,7 @@ export function usePlayer() {
   const {
     howlRef,
     soundIdRef,
+    readLocalOutput,
     loadTrack,
     preloadTrack,
     disposePreloaded,
@@ -176,6 +179,8 @@ export function usePlayer() {
     stopPlayback,
     setPlaybackTempo,
   } = useHowl(autoNext, recoverFromLoadFailure)
+  useKugouListeningObservation(howlRef, soundIdRef)
+  useLocalListeningProgress(readLocalOutput)
   const { fetchLyric, prefetchLyric } = useLyric()
 
   useNextTrackPreload(preloadTrack, disposePreloaded)

@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { coverQuerySchema, playerPlaySchema, roomJoinSchema, voteStartSchema } from './schemas.js'
+import { coverQuerySchema, playerPlaySchema, roomJoinSchema, urlQuerySchema, voteStartSchema } from './schemas.js'
 
 describe('shared input schemas', () => {
+  it('allows explicit local stream refresh while preserving old requests', () => {
+    const query = { source: 'netease', urlId: '123' }
+    expect(urlQuerySchema.parse(query).forceRefresh).toBe(false)
+    expect(urlQuerySchema.parse({ ...query, forceRefresh: 'false' }).forceRefresh).toBe(false)
+    expect(urlQuerySchema.parse({ ...query, forceRefresh: 'true' }).forceRefresh).toBe(true)
+    for (const forceRefresh of ['1', 'TRUE', '', true, ['true']]) {
+      expect(urlQuerySchema.safeParse({ ...query, forceRefresh }).success).toBe(false)
+    }
+  })
+
   it('preserves full native playback payloads and rejects incomplete external tracks', () => {
     const track = {
       id: 'qq-1',
