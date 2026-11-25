@@ -6,6 +6,11 @@ import { parseNeteaseTrack } from './neteaseTrackParser.js'
 
 type MetingJson = Record<string, unknown>
 
+export function tencentDurationSeconds(interval: unknown): number {
+  const seconds = typeof interval === 'string' && /^\+?\d+$/.test(interval.trim()) ? Number(interval) : interval
+  return typeof seconds === 'number' && Number.isInteger(seconds) && seconds > 0 && seconds <= 0xffff_ffff ? seconds : 0
+}
+
 /** Navigate a dot-separated path in an object */
 export function navigatePath(data: MetingJson, path: string): unknown {
   let result: unknown = data
@@ -44,7 +49,7 @@ export function rawToTrack(song: Record<string, unknown>, source: MusicSource): 
         title: t.name || t.title || 'Unknown',
         artist: artists.length > 0 ? artists : ['Unknown'],
         album: String(t.album?.title || t.album?.name || '').trim(),
-        duration: t.interval || 0, // already in seconds
+        duration: tencentDurationSeconds(t.interval),
         cover: albumMid ? `https://y.gtimg.cn/music/photo_new/T002R300x300M000${albumMid}.jpg` : '',
         source,
         sourceId: mid,

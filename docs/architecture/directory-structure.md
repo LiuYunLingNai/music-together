@@ -244,6 +244,7 @@ src/
 │   ├── discoverService.ts      #   账号主页公共发现区块（雷达歌单、热门歌手、新碟，区块独立失败）
 │   ├── catalogUtils.ts         #   目录类服务共用：CatalogError、网易云实体映射、sharedCache、withDeadline
 │   ├── catalogSearch.ts        #   专辑/歌单/歌手搜索（从 musicProvider 拆出，musicProvider 保留同名委托方法）
+│   ├── tencentSongSearch.ts    #   QQ 单曲关键词搜索：直连 QQ、按页取数并映射为 Track
 │   ├── lyricFetch.ts           #   各平台歌词拉取（网易云 YRC、酷狗 KRC、QQ QRC 与译文），缓存仍由 musicProvider 负责
 │   ├── trackMapping.ts         #   各平台原始歌曲数据 → Track 映射（rawToTrack、kugouSongToTrack）
 │   ├── musicProvider.ts        #   音乐数据聚合（3 层引用式 LRU 缓存 + 外部 API 超时保护 + 歌单分页获取；Netease 歌单使用 ncmApi.playlist_track_all 分块请求突破 1000 首限制，Kugou 用户歌单使用原生 API (get_other_list_file_nofilt) + Meting fallback，Tencent 使用 Meting 原始模式保留 VIP/时长字段）

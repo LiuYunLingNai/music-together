@@ -30,13 +30,13 @@ import {
 import { collectKugouV6Goods, getKugouRecording, kugouRecording, kugouProviderQualityToAudioQuality, selectKugouV6Good, type KugouRecording } from './kugouAudioQuality.js'
 import { registerKugouEncryptedAudio, type KugouDecryptedFormat } from './kugouEncryptedAudio.js'
 import { registerIssuedKugouAudio, registerKugouProxyRequiredAudio } from './kugouAudioProxy.js'
-import { config } from '../config.js'
 import { parseCookieString } from '../utils/cookieUtils.js'
 import { logger } from '../utils/logger.js'
 import { parseNeteaseRecommendedPlaylistPage } from './recommendationParsers.js'
 import { getCoverArtwork, normalizeHighQualityCoverUrl } from './coverArtwork.js'
 import { getStreamUrlCacheTtl, isStreamUrlExpired } from './streamUrlLifetime.js'
 import { searchAlbums, searchArtists, searchPlaylists } from './catalogSearch.js'
+import { searchTencentSongs } from './tencentSongSearch.js'
 import { SearchError } from './catalogUtils.js'
 import { EMPTY_LYRIC, fetchLyric, type LyricResult } from './lyricFetch.js'
 import { kugouSongToTrack, navigatePath, rawToTrack } from './trackMapping.js'
@@ -131,55 +131,6 @@ interface NcmApiResponse {
     [key: string]: unknown
   }
   [key: string]: unknown
-}
-
-interface QQMusicApiSearchResponse {
-  code?: number
-  msg?: string
-  data?: unknown
-}
-
-interface QQMusicApiSearchSong {
-  mid?: unknown
-  name?: unknown
-  singer?: unknown
-  album?: unknown
-  pmid?: unknown
-  cover?: unknown
-}
-
-/** Tencent native desktop search API response. */
-interface TencentSearchResponse {
-  'music.search.SearchCgiService.DoSearchForQQMusicDesktop'?: {
-    code?: number
-    data?: {
-      body?: {
-        song?: {
-          list?: TencentSearchSong[]
-        }
-      }
-    }
-  }
-}
-
-interface TencentSearchSong {
-  mid?: string
-  name?: string
-  title?: string
-  interval?: number
-  singer?: Array<{ name?: string }>
-  album?: {
-    mid?: string
-    name?: string
-    pmid?: string
-  }
-  pay?: {
-    pay_down?: number
-    pay_month?: number
-  }
-  action?: {
-    msgpay?: number
-  }
 }
 
 interface TencentTrackInfo {
@@ -427,6 +378,11 @@ const EMPTY_LYRIC_TTL = 5 * MINUTE
 // ---------------------------------------------------------------------------
 type TrackMeta = Omit<Track, 'id' | 'requestedBy'>
 
+function credentialScopedKey(base: string, cookie?: string | null): string {
+  if (!cookie) return base
+  return `${base}:${crypto.createHash('sha256').update(cookie).digest('base64url').slice(0, 22)}`
+}
+
 /**
  * Playlist index key. Results fetched with a cookie can include private lists
  * (and QQ's "我喜欢" shares one id across accounts), so they are scoped to that
@@ -438,9 +394,7 @@ export function playlistIndexKey(
   playlistId: string,
   cookie?: string | null,
 ): string {
-  const base = `${source}:${type}:${playlistId}`
-  if (!cookie) return base
-  return `${base}:${crypto.createHash('sha256').update(cookie).digest('base64url').slice(0, 22)}`
+  return credentialScopedKey(`${source}:${type}:${playlistId}`, cookie)
 }
 
 class MusicProvider {
@@ -1187,176 +1141,6 @@ class MusicProvider {
     }
   }
 
-  /** Search QQ Music tracks through the configured API, or QQ's native API when unconfigured. */
-  private async searchTencent(keyword: string, limit = 20, page = 1, cookie?: string | null): Promise<Track[]> {
-    if (!keyword.trim()) return []
-
-    try {
-      if (!config.qqMusicApi.url || !config.qqMusicApi.key) {
-        logger.info('QQ 音乐搜索 API 未配置，使用 QQ 原生搜索接口')
-        return await this.searchTencentNative(keyword, limit, page, cookie)
-      }
-
-      const url = new URL(config.qqMusicApi.url)
-      if (url.pathname === '/' || url.pathname === '') {
-        url.pathname = '/api'
-      }
-      url.searchParams.set('action', 'search')
-      url.searchParams.set('keyword', keyword)
-      url.searchParams.set('page', String(page))
-      url.searchParams.set('limit', String(limit))
-
-      const response = await withTimeout(
-        fetch(url, {
-          headers: { 'X-API-Key': config.qqMusicApi.key },
-        }).then(async (res) => ({
-          ok: res.ok,
-          status: res.status,
-          body: (await res.json()) as QQMusicApiSearchResponse,
-        })),
-      )
-
-      if (!response) {
-        logger.warn(`QQ 音乐搜索 API 请求超时: "${keyword}"`)
-        throw new SearchError()
-      }
-
-      if (!response.ok || response.body.code !== 200 || !Array.isArray(response.body.data)) {
-        logger.warn('QQ 音乐搜索 API 返回失败', {
-          status: response.status,
-          code: response.body.code,
-          message: response.body.msg,
-        })
-        throw new SearchError()
-      }
-
-      const tracks: Track[] = response.body.data.flatMap((value) => {
-        if (!value || typeof value !== 'object') return []
-        const song = value as QQMusicApiSearchSong
-        const mid = typeof song.mid === 'string' ? song.mid.trim() : ''
-        if (!mid) return []
-
-        const pmid = typeof song.pmid === 'string' ? song.pmid.trim() : ''
-        const cover = typeof song.cover === 'string' ? song.cover.trim() : ''
-        return [
-          {
-            id: nanoid(),
-            source: 'tencent' as const,
-            sourceId: mid,
-            title: typeof song.name === 'string' && song.name.trim() ? song.name : 'Unknown',
-            artist: typeof song.singer === 'string' && song.singer.trim() ? [song.singer] : ['Unknown'],
-            album: typeof song.album === 'string' ? song.album : '',
-            duration: 0,
-            cover: cover || (pmid ? `https://y.gtimg.cn/music/photo_new/T002R300x300M000${pmid}.jpg` : ''),
-            urlId: mid,
-            lyricId: mid,
-            picId: pmid,
-            vip: false,
-          },
-        ]
-      })
-
-      // Register into track registry and search index
-      this.registerTracks(tracks)
-
-      logger.info(`在 QQ 音乐搜索“${keyword}”，找到 ${tracks.length} 条结果`, {
-        event: 'music.search_completed',
-        source: 'tencent',
-        keyword,
-        resultCount: tracks.length,
-      })
-      return tracks
-    } catch (error) {
-      if (error instanceof SearchError) throw error
-      logger.error('QQ 音乐搜索 API 请求失败:', error)
-      throw new SearchError()
-    }
-  }
-
-  /** Search QQ Music through the native desktop API when no external API is configured. */
-  private async searchTencentNative(
-    keyword: string,
-    limit: number,
-    page: number,
-    cookie?: string | null,
-  ): Promise<Track[]> {
-    const payload = {
-      comm: {
-        ct: '6',
-        cv: '80600',
-        tmeAppID: 'qqmusic',
-      },
-      'music.search.SearchCgiService.DoSearchForQQMusicDesktop': {
-        module: 'music.search.SearchCgiService',
-        method: 'DoSearchForQQMusicDesktop',
-        param: {
-          num_per_page: limit,
-          page_num: page,
-          search_type: 0,
-          query: keyword,
-          grp: 1,
-        },
-      },
-    }
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Referer: 'https://y.qq.com',
-      'User-Agent': 'QQ%E9%9F%B3%E4%B9%90/73222',
-    }
-    if (cookie) headers.Cookie = cookie
-
-    const response = await withTimeout(
-      fetch('https://u.y.qq.com/cgi-bin/musicu.fcg', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(payload),
-      }).then((res) => res.json() as Promise<TencentSearchResponse>),
-    )
-    const result = response?.['music.search.SearchCgiService.DoSearchForQQMusicDesktop']
-    const songList = result?.code === 0 ? result.data?.body?.song?.list : undefined
-    if (!songList) {
-      logger.warn(`QQ 原生搜索失败: code ${result?.code}`)
-      if (result?.code !== 0) throw new SearchError()
-      return []
-    }
-
-    const tracks: Track[] = songList.flatMap((song) => {
-      const mid = song.mid?.trim()
-      if (!mid) return []
-      // `name` 是原名、`title` 带括号译名或版本；显示用 `name`，另一个留给歌词搜索。
-      const otherTitle = song.name && song.title && song.name !== song.title ? song.title.trim() : ''
-      return [
-        {
-          id: nanoid(),
-          source: 'tencent' as const,
-          sourceId: mid,
-          title: song.name || song.title || 'Unknown',
-          artist: song.singer?.map((singer) => singer.name).filter((name): name is string => Boolean(name)) || [
-            'Unknown',
-          ],
-          album: song.album?.name || '',
-          duration: song.interval || 0,
-          cover: song.album?.pmid ? `https://y.gtimg.cn/music/photo_new/T002R300x300M000${song.album.pmid}.jpg` : '',
-          urlId: mid,
-          lyricId: mid,
-          picId: song.album?.mid || '',
-          vip: song.pay?.pay_month === 1 || song.pay?.pay_down === 1 || (song.action?.msgpay ?? 0) > 0,
-          ...(otherTitle ? { lyricAliases: { title: otherTitle } } : {}),
-        },
-      ]
-    })
-
-    this.registerTracks(tracks)
-    logger.info(`在 QQ 音乐搜索“${keyword}”，找到 ${tracks.length} 条结果`, {
-      event: 'music.search_completed',
-      source: 'tencent',
-      keyword,
-      resultCount: tracks.length,
-      provider: 'native',
-    })
-    return tracks
-  }
-
   /**
    * Search for tracks. Uses format(false) to get raw API data including duration,
    * then batch-resolves cover URLs.
@@ -1371,7 +1155,7 @@ class MusicProvider {
   }
 
   async search(source: MusicSource, keyword: string, limit = 20, page = 1, cookie?: string | null): Promise<Track[]> {
-    const cacheKey = `${source}:${keyword}:${limit}:${page}`
+    const cacheKey = credentialScopedKey(`${source}:${keyword}:${limit}:${page}`, source === 'tencent' ? cookie : null)
 
     // Check reference index
     const indexed = this.searchIndex.get(cacheKey)
@@ -1393,15 +1177,23 @@ class MusicProvider {
         return tracks
       }
 
-      // QQ 音乐单曲搜索使用配置的 API；专辑和歌单搜索走各自的独立方法。
       if (source === 'tencent') {
-        const tracks = await this.searchTencent(keyword, limit, page, cookie)
+        const tracks = await searchTencentSongs(keyword, limit, page, cookie)
         if (tracks.length > 0) {
+          this.ingest(tracks)
           this.searchIndex.set(cacheKey, {
             source,
             ids: tracks.map((t) => t.sourceId),
           })
         }
+        logger.info(`在 QQ 音乐搜索“${keyword}”，找到 ${tracks.length} 条结果`, {
+          event: 'music.search_completed',
+          source,
+          keyword,
+          page,
+          resultCount: tracks.length,
+          provider: 'native',
+        })
         return tracks
       }
 
